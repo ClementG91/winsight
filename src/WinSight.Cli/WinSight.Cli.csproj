@@ -7,5 +7,6 @@
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Persistence\WinSight.Persistence.csproj" />
     <ProjectReference Include="..\WinSight.AvMonitor\WinSight.AvMonitor.csproj" />
+    <ProjectReference Include="..\WinSight.NetMonitor\WinSight.NetMonitor.csproj" />
   </ItemGroup>
 </Project>

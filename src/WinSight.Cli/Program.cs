@@ -1,5 +1,6 @@
 using WinSight.AvMonitor;
 using WinSight.Core;
+using WinSight.NetMonitor;
 using WinSight.Persistence;
 
 // winsight — the unified suite entry point. One binary runs every WinSight tool, so
@@ -10,6 +11,7 @@ using WinSight.Persistence;
 //   winsight                 run all checks
 //   winsight persistence     autostart scan only
 //   winsight av              camera/mic monitor only
+//   winsight net             network connections only
 //   winsight --flagged       (with any of the above) show only noteworthy items
 
 var flaggedOnly = args.Contains("--flagged");
@@ -25,13 +27,19 @@ switch (command)
     case "avmonitor":
         flagged += RunAv(flaggedOnly);
         break;
+    case "net":
+    case "netmonitor":
+        flagged += RunNet(flaggedOnly);
+        break;
     case "all":
         flagged += RunPersistence(flaggedOnly);
         Console.WriteLine();
         flagged += RunAv(flaggedOnly);
+        Console.WriteLine();
+        flagged += RunNet(flaggedOnly);
         break;
     default:
-        Console.Error.WriteLine($"unknown command '{command}' (persistence | av | all)");
+        Console.Error.WriteLine($"unknown command '{command}' (persistence | av | net | all)");
         return 2;
 }
 
@@ -69,4 +77,17 @@ static int RunAv(bool flaggedOnly)
         Console.WriteLine($"  {(u.Active ? "[LIVE]" : "[ ]   ")} {device}/{u.App}");
     }
     return live;
+}
+
+static int RunNet(bool flaggedOnly)
+{
+    var connections = new ConnectionMonitor().Snapshot();
+    var noteworthy = connections.Count(c => c.Noteworthy);
+    Console.WriteLine($"== connections == {connections.Count} total, {noteworthy} noteworthy");
+    foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)
+                 .OrderByDescending(c => c.Noteworthy).ThenByDescending(c => c.External))
+    {
+        Console.WriteLine($"  {(c.Noteworthy ? "[!]" : "[ ]")} {c.Protocol} {c.Remote} — {c.Process} (pid {c.Pid})");
+    }
+    return noteworthy;
 }
