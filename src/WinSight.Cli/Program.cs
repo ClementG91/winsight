@@ -1,6 +1,4 @@
-using WinSight.AvMonitor;
-using WinSight.NetMonitor;
-using WinSight.Persistence;
+using WinSight.Cli;
 using WinSight.Reporting;
 
 // winsight — the unified suite entry point. One signed binary runs every WinSight
