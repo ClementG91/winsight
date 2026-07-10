@@ -1,4 +1,5 @@
 using WinSight.AvMonitor;
+using WinSight.Firewall;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
 using WinSight.Reporting;
@@ -80,6 +81,29 @@ internal static class Adapters
                 });
         }
         return b.Build($"{usages.Count} recorded use(s), {usages.Count(u => u.Active)} live now");
+    }
+
+    public static ToolReport Firewall(bool flaggedOnly)
+    {
+        var rules = new FirewallRuleReader().Read();
+        var enabled = rules.Where(r => r.Enabled).ToList();
+        var b = new ToolReport.Builder("firewall");
+        // Read-only rule listing (informational); --flagged shows the summary only.
+        if (!flaggedOnly)
+        {
+            foreach (var r in enabled.OrderBy(r => r.Direction).ThenBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
+            {
+                b.Add(Severity.Info, $"{r.Direction}/{r.Action} — {r.DisplayName}", string.Empty,
+                    new Dictionary<string, string?>
+                    {
+                        ["name"] = r.DisplayName,
+                        ["direction"] = r.Direction.ToString(),
+                        ["action"] = r.Action.ToString(),
+                        ["enabled"] = "True",
+                    });
+            }
+        }
+        return b.Build($"{rules.Count} rule(s), {enabled.Count} enabled");
     }
 
     public static ToolReport Dns(bool flaggedOnly)

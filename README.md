@@ -108,6 +108,8 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
   signature; flags external, established, unsigned owners.
 - **DNS** (DNSMonitor-class) — recently resolved domains + answers from the resolver
   cache (MSFT_DNSClientCache).
+- **Firewall** (LuLu-class, read-only) — lists Windows Defender Firewall rules
+  (`winsight firewall`). An enforcing per-app firewall is a later phase.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises

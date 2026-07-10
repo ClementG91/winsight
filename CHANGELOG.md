@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Firewall — rule viewer (LuLu-class, read-only phase 1)
+- `FirewallRuleReader` lists Windows Defender Firewall rules (MSFT_NetFirewallRule
+  via System.Management) — see what your firewall allows/blocks. New `winsight
+  firewall` subcommand. Per-rule program/port enrichment and an enforcing,
+  prompt-on-connection firewall are later phases.
+
 ### Connections — IPv6 support (audit fix)
 - `NativeConnectionReader` now reads the IPv6 TCP/UDP tables (AF_INET6,
   MIB_*6ROW_OWNER_PID) alongside IPv4, and `IsExternal` treats IPv6 ULA (fc00::/7)
