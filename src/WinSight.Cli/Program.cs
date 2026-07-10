@@ -1,3 +1,4 @@
+using System.Reflection;
 using WinSight.Cli;
 using WinSight.Reporting;
 
@@ -10,6 +11,29 @@ using WinSight.Reporting;
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight ... --flagged              only noteworthy items
 //   winsight ... --json                 machine-readable output (GUI/automation)
+
+if (args.Contains("--version"))
+{
+    Console.WriteLine($"winsight {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0"}");
+    return 0;
+}
+if (args.Contains("--help") || args.Contains("-h"))
+{
+    Console.WriteLine("""
+        winsight — free, open-source security tools for Windows.
+
+        Usage:
+          winsight [persistence|av|net|all]   run checks (default: all)
+          winsight av --watch                 live camera/mic alerts (Ctrl+C to stop)
+
+        Options:
+          --flagged     only noteworthy items
+          --json        machine-readable output
+          --version     print version
+          --help, -h    show this help
+        """);
+    return 0;
+}
 
 var json = args.Contains("--json");
 var flaggedOnly = args.Contains("--flagged");
