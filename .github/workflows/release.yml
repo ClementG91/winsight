@@ -1,0 +1,36 @@
+name: release
+
+# Builds a self-contained winsight.exe and attaches it to a GitHub Release when a
+# v* tag is pushed.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish (win-x64, self-contained single file)
+        run: >
+          dotnet publish src/WinSight.Cli/WinSight.Cli.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+          -o publish
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path publish/winsight.exe -DestinationPath winsight-${{ github.ref_name }}-win-x64.zip
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: winsight-*-win-x64.zip
+          generate_release_notes: true

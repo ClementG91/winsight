@@ -2,6 +2,13 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## Repo — collaboration & release readiness
+- Full GPL-3.0 `LICENSE` text; `CODE_OF_CONDUCT` (Contributor Covenant 2.1),
+  `CONTRIBUTING`, `SECURITY` (private vulnerability reporting); issue templates
+  (bug/feature) + config, PR template, `CODEOWNERS`, Dependabot (NuGet + Actions),
+  `.gitattributes`, README badges. A `release` workflow publishes a self-contained
+  `winsight.exe` to a GitHub Release on `v*` tags.
+
 ## Phase 1 — user-mode tools
 
 ### Connections — native IP Helper tables

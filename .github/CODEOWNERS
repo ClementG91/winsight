@@ -1,0 +1,7 @@
+# Default owners for everything in the repo.
+* @ClementG91
+
+# Security-sensitive areas.
+/src/WinSight.Core/           @ClementG91
+/SECURITY.md                  @ClementG91
+/.github/                     @ClementG91

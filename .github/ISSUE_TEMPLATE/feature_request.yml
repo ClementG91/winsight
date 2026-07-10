@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a tool, autostart vector, or capability
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem or gap?
+      description: What can't you see/do today with WinSight?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+      description: |
+        What should it do? If it's a new detection (e.g. a persistence vector, a
+        signal), name the Windows mechanism it observes.
+    validations:
+      required: true
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Alignment
+      options:
+        - label: Read-only (observes/reports; no silent modification)
+        - label: Local-only (no telemetry; any network use is opt-in)

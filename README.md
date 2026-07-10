@@ -1,8 +1,12 @@
 # WinSight
 
+[![CI](https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg)](https://github.com/ClementG91/winsight/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-informational)
+![.NET 8](https://img.shields.io/badge/.NET-8.0-512bd4)
+
 > Free, open-source, transparent security tools for Windows — in the spirit of
 > [Objective-See](https://objective-see.org/tools.html) for macOS.
-> _Name is a placeholder — see "Naming"._
 
 **Goal:** let a normal Windows user *see and control* what is actually happening on
 their machine — what persists, what watches the camera/mic, what phones home — with

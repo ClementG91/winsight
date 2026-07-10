@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ClementG91/winsight/security/advisories/new
+    about: Report security issues privately — do not open a public issue.
+  - name: Question / discussion
+    url: https://github.com/ClementG91/winsight/discussions
+    about: Ask questions and discuss ideas.
