@@ -101,9 +101,11 @@ signed `winsight` binary (subcommands `persistence | av | net | all`, `--flagged
   Shell/Userinit, Scheduled Tasks (Tasks XML), AppInit_DLLs, IFEO debuggers, Active
   Setup, BootExecute — each signature-checked, resilient per-surface scan.
 - **Camera/Mic** (OverSight-class) — which apps used the webcam/mic and what is live
-  now, from the CapabilityAccessManager ConsentStore.
-- **Connections** (Netiquette-class) — active TCP/UDP attributed to the owning
-  process + its signature; flags external, established, unsigned owners.
+  now (CapabilityAccessManager ConsentStore), plus real-time `av --watch` alerts the
+  instant a device turns on/off.
+- **Connections** (Netiquette-class) — active TCP/UDP via native IP Helper tables
+  (GetExtendedTcpTable/Udp), attributed to the owning process + its signature; flags
+  external, established, unsigned owners.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
@@ -115,11 +117,11 @@ Central Package Management + `.editorconfig`.
 
 See [CHANGELOG.md](CHANGELOG.md) for step-by-step progress.
 
-Next: native `GetExtendedTcpTable` for live connections (replaces the netstat
-snapshot), ETW DNS monitoring, the WFP firewall (LuLu-class), and a GUI/tray shell
-over the `--json` contract. A native `WTGetSignatureInfo` verifier is the eventual
-signature-perf swap behind `ISignatureVerifier`. Driver-backed tools
-(BlockBlock/RansomWhere) are a later phase (needs an EV certificate).
+Next: ETW DNS monitoring, the WFP firewall (LuLu-class), a GUI/tray shell over the
+`--json` contract, and more persistence vectors (WMI subscriptions, startup folders).
+A native `WTGetSignatureInfo` verifier is the eventual signature-perf swap behind
+`ISignatureVerifier`. Driver-backed tools (BlockBlock/RansomWhere) are a later phase
+(needs an EV certificate).
 
 ## License
 
