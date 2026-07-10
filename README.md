@@ -88,24 +88,28 @@ per-tool names here can follow that or stay descriptive. Rename freely before co
 
 ## Status
 
-Phase 1 underway — CI green on `windows-latest`. Two tools plus a unified entry
-point are working today:
+Phase 1 underway — CI green on `windows-latest`. Modular tool libraries behind one
+signed `winsight` binary (subcommands `persistence | av | net | all`, `--flagged`,
+`--json`):
 
-- **Persistence Scanner** (`winsight-persistence`, KnockKnock-class) — 8 autostart
-  surfaces: Run/RunOnce/RunServices/Policies\Explorer\Run (HKLM+HKCU × 64/32-bit),
-  Services & drivers, Winlogon Shell/Userinit, Scheduled Tasks (Tasks XML),
-  AppInit_DLLs, IFEO debuggers, Active Setup, BootExecute — each with managed
-  Authenticode triage and a resilient per-surface scan.
-- **Camera/Mic Monitor** (`winsight-avmonitor`, OverSight-class) — which apps used
-  the webcam/mic and what is live right now, from the CapabilityAccessManager
-  ConsentStore.
-- **Unified CLI** (`winsight`) — one binary runs the whole suite.
+- **Persistence** (KnockKnock-class) — 8 autostart surfaces: Run/RunOnce/RunServices/
+  Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers, Winlogon
+  Shell/Userinit, Scheduled Tasks (Tasks XML), AppInit_DLLs, IFEO debuggers, Active
+  Setup, BootExecute — each with Authenticode triage and a resilient per-surface scan.
+- **Camera/Mic** (OverSight-class) — which apps used the webcam/mic and what is live
+  now, from the CapabilityAccessManager ConsentStore.
+- **Connections** (Netiquette-class) — active TCP/UDP attributed to the owning
+  process + its signature; flags external, established, unsigned owners.
 
-Authored on a Linux box; CI on `windows-latest` is the compiler of record.
+All tools emit a shared report shape (`WinSight.Reporting`) as human text or a stable
+`--json` contract for a future GUI/automation. Authored on Linux; CI on
+`windows-latest` is the compiler of record. Central Package Management + `.editorconfig`.
 
-Next: Net + DNS monitor (Netiquette/DNSMonitor-class, introduces the CsWin32 interop
-layer), then WinVerifyTrust signature hardening, more persistence vectors (startup
-folders via .lnk resolution, WMI subscriptions), and the WFP firewall.
+Next (interop layer via CsWin32): **WinVerifyTrust** signature hardening (PE hash /
+catalog / revocation — the current managed check is triage only), then
+GetExtendedTcpTable for live connections + ETW DNS, then the WFP firewall
+(LuLu-class). Driver-backed tools (BlockBlock/RansomWhere) are a later phase (needs
+an EV certificate).
 
 ## License
 
