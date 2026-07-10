@@ -95,21 +95,27 @@ signed `winsight` binary (subcommands `persistence | av | net | all`, `--flagged
 - **Persistence** (KnockKnock-class) — 8 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers, Winlogon
   Shell/Userinit, Scheduled Tasks (Tasks XML), AppInit_DLLs, IFEO debuggers, Active
-  Setup, BootExecute — each with Authenticode triage and a resilient per-surface scan.
+  Setup, BootExecute — each signature-checked, resilient per-surface scan.
 - **Camera/Mic** (OverSight-class) — which apps used the webcam/mic and what is live
   now, from the CapabilityAccessManager ConsentStore.
 - **Connections** (Netiquette-class) — active TCP/UDP attributed to the owning
   process + its signature; flags external, established, unsigned owners.
 
-All tools emit a shared report shape (`WinSight.Reporting`) as human text or a stable
-`--json` contract for a future GUI/automation. Authored on Linux; CI on
-`windows-latest` is the compiler of record. Central Package Management + `.editorconfig`.
+**Signatures** are verified catalog-aware (`ISignatureVerifier` /
+`AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
+catalog-signed Windows binaries and flags tampering (HashMismatch), with a managed
+fallback that never throws. All tools emit a shared report shape
+(`WinSight.Reporting`) as human text or a stable `--json` contract for a future
+GUI/automation. Authored on Linux; CI on `windows-latest` is the compiler of record.
+Central Package Management + `.editorconfig`.
 
-Next (interop layer via CsWin32): **WinVerifyTrust** signature hardening (PE hash /
-catalog / revocation — the current managed check is triage only), then
-GetExtendedTcpTable for live connections + ETW DNS, then the WFP firewall
-(LuLu-class). Driver-backed tools (BlockBlock/RansomWhere) are a later phase (needs
-an EV certificate).
+See [CHANGELOG.md](CHANGELOG.md) for step-by-step progress.
+
+Next: native `GetExtendedTcpTable` for live connections (replaces the netstat
+snapshot), ETW DNS monitoring, the WFP firewall (LuLu-class), and a GUI/tray shell
+over the `--json` contract. A native `WTGetSignatureInfo` verifier is the eventual
+signature-perf swap behind `ISignatureVerifier`. Driver-backed tools
+(BlockBlock/RansomWhere) are a later phase (needs an EV certificate).
 
 ## License
 
