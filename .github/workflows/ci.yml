@@ -1,0 +1,26 @@
+name: ci
+
+# WinSight is net8.0-windows (Win32/registry/Authenticode), so CI runs on Windows.
+# This is the compiler of record — the project is authored on Linux but built/tested
+# here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore & build (CLI graph)
+        run: dotnet build src/WinSight.Persistence.Cli/WinSight.Persistence.Cli.csproj -c Release
+
+      - name: Test
+        run: dotnet test tests/WinSight.Persistence.Tests/WinSight.Persistence.Tests.csproj -c Release --logger "console;verbosity=normal"

@@ -65,7 +65,7 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
 - **Phase 4 — Ransomware canary** (RansomWhere-class): canary files + entropy/rename
   heuristics; minifilter for true interception (cert required).
 
-## Proposed stack (to confirm — see `docs/ARCHITECTURE.md`)
+## Stack (locked — see `docs/ARCHITECTURE.md`)
 
 - **App + user-mode tools:** C# / **.NET 8**, `CsWin32` for P/Invoke, `TraceEvent`
   for ETW, WinUI 3 (or WPF) tray/dashboard. Fastest path with the broadest Win32
@@ -86,7 +86,15 @@ compiled here yet — this commit is the foundation + plan.
 analog). Objective-See's tools use doubled names (KnockKnock, BlockBlock); the
 per-tool names here can follow that or stay descriptive. Rename freely before code.
 
+## Status
+
+Phase 1 in progress. **Persistence Scanner** (module 1) is scaffolded with a working
+Run-keys + Services/drivers sweep, managed Authenticode triage, and a console runner
+(`winsight-persistence`). Built/tested on Windows via CI (this repo is authored on a
+Linux box; CI on `windows-latest` is the compiler of record).
+
 ## License
 
-Intended: **GPLv3** (Objective-See's tools are open; a copyleft license keeps a
-security tool auditable and forkable). To confirm.
+**GPL-3.0-or-later** — Objective-See's tools are open; copyleft keeps a security tool
+auditable and forkable. (Full GPLv3 text to be vendored into `LICENSE` before first
+release.)
