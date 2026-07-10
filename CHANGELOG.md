@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — WMI event subscriptions
+- `WmiSubscriptionEnumerator` surfaces permanent WMI subscription consumers
+  (CommandLine + ActiveScript) from root\subscription — a stealthy, fileless
+  persistence technique. Adds the `System.Management` dependency; access-denied /
+  missing-namespace degrade to empty (never throws). 9 autostart surfaces now.
+
 ### CLI polish
 - `winsight --version` and `winsight --help` / `-h`.
 

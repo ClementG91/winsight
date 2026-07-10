@@ -32,6 +32,7 @@ public sealed class PersistenceScanner
             new ImageHijackEnumerator(),
             new ActiveSetupEnumerator(),
             new BootExecuteEnumerator(),
+            new WmiSubscriptionEnumerator(),
         };
 
     /// <summary>
