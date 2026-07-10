@@ -54,9 +54,7 @@ public sealed class ConnectionMonitor
         {
             return NativeConnectionReader.Read();
         }
-        catch (Exception ex) when (ex is DllNotFoundException
-                                     or EntryPointNotFoundException
-                                     or MarshalDirectiveException)
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
             return NetstatParser.Parse(RunNetstat());
         }
