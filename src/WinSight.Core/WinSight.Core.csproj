@@ -4,6 +4,6 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Registry access on net8.0-windows. -->
-    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Win32.Registry" />
   </ItemGroup>
 </Project>

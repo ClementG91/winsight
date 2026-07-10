@@ -3,7 +3,7 @@
     <RootNamespace>WinSight.Persistence</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <PackageReference Include="Microsoft.Win32.Registry" />
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
 </Project>
