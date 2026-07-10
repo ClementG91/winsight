@@ -114,6 +114,21 @@ public sealed class AuthenticodeVerifierIntegrationTests
     }
 }
 
+public sealed class WmiSubscriptionEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new WmiSubscriptionEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.WmiSubscription, e.Vector);
+            Assert.False(string.IsNullOrEmpty(e.Name));
+        });
+    }
+}
+
 public sealed class PersistenceScannerIntegrationTests
 {
     [Fact]

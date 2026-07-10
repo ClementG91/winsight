@@ -13,8 +13,9 @@ public enum AutostartVector
     ImageHijack,
     ActiveSetup,
     BootExecute,
-    // Phase 1.2+: StartupFolder (needs .lnk target resolution), WmiSubscription,
-    // print monitors, LSA/SSP packages, ...
+    WmiSubscription,
+    // Phase 1.2+: StartupFolder (needs .lnk target resolution), print monitors,
+    // LSA/SSP packages, ...
 }
 
 /// <summary>
