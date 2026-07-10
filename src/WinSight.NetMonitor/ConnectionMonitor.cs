@@ -19,7 +19,7 @@ public sealed class ConnectionMonitor
 
     public IReadOnlyList<Connection> Snapshot()
     {
-        var rows = NetstatParser.Parse(RunNetstat());
+        var rows = ReadTable();
 
         // Resolve each owning process once, then verify every distinct image in one batch.
         var byPid = new Dictionary<int, (string Name, string? Path)>();
@@ -44,6 +44,22 @@ public sealed class ConnectionMonitor
                 r.Protocol, r.Local, r.Remote, r.State, r.Pid, proc.Name, proc.Path, signature));
         }
         return connections;
+    }
+
+    // Native IP Helper tables, falling back to netstat parsing only if those entry
+    // points are unavailable (very old/locked-down Windows).
+    private static IReadOnlyList<NetstatRow> ReadTable()
+    {
+        try
+        {
+            return NativeConnectionReader.Read();
+        }
+        catch (Exception ex) when (ex is DllNotFoundException
+                                     or EntryPointNotFoundException
+                                     or MarshalDirectiveException)
+        {
+            return NetstatParser.Parse(RunNetstat());
+        }
     }
 
     private static string RunNetstat()

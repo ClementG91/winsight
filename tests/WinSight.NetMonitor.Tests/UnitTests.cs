@@ -3,6 +3,33 @@ using Xunit;
 
 namespace WinSight.NetMonitor.Tests;
 
+public sealed class NativeConnectionReaderTests
+{
+    [Theory]
+    [InlineData(0xBB01u, 443)] // 0x01BB in network byte order
+    [InlineData(0x5000u, 80)]  // 0x0050 in network byte order
+    public void NetworkToHostPort_SwapsBytes(uint raw, int expected)
+    {
+        Assert.Equal(expected, NativeConnectionReader.NetworkToHostPort(raw));
+    }
+
+    [Fact]
+    public void FormatEndpoint_RendersIpAndPort()
+    {
+        // 0x0100007F = 127.0.0.1 in network byte order; 0x5000 = port 80.
+        Assert.Equal("127.0.0.1:80", NativeConnectionReader.FormatEndpoint(0x0100007Fu, 0x5000u));
+    }
+
+    [Theory]
+    [InlineData(5u, "ESTABLISHED")]
+    [InlineData(2u, "LISTENING")]
+    [InlineData(99u, "UNKNOWN")]
+    public void TcpStateName_MapsStates(uint state, string expected)
+    {
+        Assert.Equal(expected, NativeConnectionReader.TcpStateName(state));
+    }
+}
+
 // Integration test — runs the real netstat snapshot + process resolution +
 // signature batch on the Windows CI runner (validates the whole net pipeline).
 public sealed class ConnectionMonitorIntegrationTests

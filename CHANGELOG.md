@@ -4,6 +4,13 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Connections — native IP Helper tables
+- `NativeConnectionReader` reads the TCP/UDP tables via GetExtendedTcpTable /
+  GetExtendedUdpTable (structured, fast, locale-independent) with owning PIDs,
+  replacing the netstat text spawn (kept as a fallback). Endianness/state mapping is
+  pure + unit-tested; the real native call is exercised by the connections
+  integration test on Windows CI.
+
 ### Camera/Mic — real-time monitor (OverSight-class)
 - `CameraMicMonitor` raises Activated/Deactivated events the moment an app turns the
   webcam/mic on or off, via a pure unit-tested snapshot Diff over a polling loop
