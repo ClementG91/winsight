@@ -19,8 +19,27 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Restore & build (CLI graph)
-        run: dotnet build src/WinSight.Persistence.Cli/WinSight.Persistence.Cli.csproj -c Release
+      # Auto-discover every project/test project so new modules need no CI change.
+      - name: Build all projects
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object {
+            Write-Host "::group::build $($_.Name)"
+            dotnet build $_.FullName -c Release
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            Write-Host "::endgroup::"
+          }
+          if ($failed) { exit 1 }
 
-      - name: Test
-        run: dotnet test tests/WinSight.Persistence.Tests/WinSight.Persistence.Tests.csproj -c Release --logger "console;verbosity=normal"
+      - name: Test all test projects
+        shell: pwsh
+        run: |
+          $failed = $false
+          Get-ChildItem -Recurse -Filter *Tests.csproj | ForEach-Object {
+            Write-Host "::group::test $($_.Name)"
+            dotnet test $_.FullName -c Release --logger "console;verbosity=minimal"
+            if ($LASTEXITCODE -ne 0) { $failed = $true }
+            Write-Host "::endgroup::"
+          }
+          if ($failed) { exit 1 }
