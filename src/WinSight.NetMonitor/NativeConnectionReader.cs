@@ -16,6 +16,10 @@ public static class NativeConnectionReader
     private const int TcpTableOwnerPidAll = 5;    // TCP_TABLE_OWNER_PID_ALL
     private const int UdpTableOwnerPid = 1;       // UDP_TABLE_OWNER_PID
 
+    // Custom delegate (not Func<>) because the size parameter is `ref`.
+    private delegate uint ExtendedTableFn(
+        IntPtr table, ref int size, bool sort, int ipVersion, int tableClass, int reserved);
+
     [DllImport("iphlpapi.dll", SetLastError = true)]
     private static extern uint GetExtendedTcpTable(
         IntPtr pTcpTable, ref int dwOutBufLen, bool sort, int ipVersion, int tblClass, int reserved);
@@ -69,8 +73,7 @@ public static class NativeConnectionReader
 
     // Shared two-call (size, then fill) buffer walk. The table is a leading DWORD
     // count followed by a packed array of T rows.
-    private static IEnumerable<T> Enumerate<T>(
-        Func<IntPtr, int, bool, int, int, int, uint> api, int tableClass) where T : struct
+    private static IEnumerable<T> Enumerate<T>(ExtendedTableFn api, int tableClass) where T : struct
     {
         var size = 0;
         api(IntPtr.Zero, ref size, false, AfInet, tableClass, 0);
@@ -81,9 +84,7 @@ public static class NativeConnectionReader
         var buffer = Marshal.AllocHGlobal(size);
         try
         {
-            static uint Call(Func<IntPtr, int, bool, int, int, int, uint> a, IntPtr b, ref int s, int c) =>
-                a(b, ref s, false, AfInet, c, 0);
-            if (Call(api, buffer, ref size, tableClass) != 0)
+            if (api(buffer, ref size, false, AfInet, tableClass, 0) != 0)
             {
                 yield break;
             }
