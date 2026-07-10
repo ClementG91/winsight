@@ -22,7 +22,12 @@ public sealed class PersistenceScanner
 
     /// <summary>The autostart surfaces covered by a default scan (Phase 1).</summary>
     public static IReadOnlyList<IAutostartEnumerator> DefaultEnumerators() =>
-        new IAutostartEnumerator[] { new RunKeyEnumerator(), new ServiceEnumerator() };
+        new IAutostartEnumerator[]
+        {
+            new RunKeyEnumerator(),
+            new ServiceEnumerator(),
+            new WinlogonEnumerator(),
+        };
 
     /// <summary>
     /// Enumerates every autostart item across all surfaces, newest-surface-first in
@@ -33,7 +38,19 @@ public sealed class PersistenceScanner
         var results = new List<AutostartEntry>();
         foreach (var enumerator in _enumerators)
         {
-            foreach (var raw in enumerator.Enumerate())
+            IReadOnlyList<RawAutostart> raws;
+            try
+            {
+                raws = enumerator.Enumerate().ToList();
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException
+                                         or System.Security.SecurityException
+                                         or IOException)
+            {
+                continue; // isolate a failing surface — the rest of the scan proceeds
+            }
+
+            foreach (var raw in raws)
             {
                 var image = CommandLine.ExtractExecutable(raw.Command);
                 var verdict = image is null ? SignatureVerdict.Missing : _verifier.Verify(image);

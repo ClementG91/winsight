@@ -7,7 +7,8 @@ public enum AutostartVector
 {
     RunKey,
     Service,
-    // Phase 1.1+: ScheduledTask, StartupFolder, WmiSubscription, Winlogon, Driver, ...
+    Winlogon,
+    // Phase 1.1+: ScheduledTask, StartupFolder, WmiSubscription, Driver, ...
 }
 
 /// <summary>

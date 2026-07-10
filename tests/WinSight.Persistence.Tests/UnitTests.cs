@@ -36,6 +36,23 @@ public sealed class CommandLineTests
     }
 }
 
+public sealed class WinlogonTests
+{
+    [Fact]
+    public void SplitCommands_DropsEmptiesFromTrailingComma()
+    {
+        Assert.Equal(new[] { "userinit.exe" }, WinlogonEnumerator.SplitCommands("userinit.exe,"));
+    }
+
+    [Fact]
+    public void SplitCommands_SplitsAppendedPayload()
+    {
+        Assert.Equal(
+            new[] { "explorer.exe", "C:\\evil.exe" },
+            WinlogonEnumerator.SplitCommands("explorer.exe, C:\\evil.exe"));
+    }
+}
+
 public sealed class SignatureVerifierTests
 {
     [Fact]

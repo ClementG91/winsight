@@ -26,6 +26,9 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
     {
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnce",
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunServices",
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunServicesOnce",
+        @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\Explorer\Run",
     };
 
     public string Surface => "Run keys";
@@ -126,4 +129,48 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
             }
         }
     }
+}
+
+/// <summary>
+/// The Winlogon Shell/Userinit hooks — the processes the OS launches at logon.
+/// Defaults are explorer.exe and userinit.exe; malware appends its own comma-
+/// separated payload here, so any EXTRA command beyond the default is notable.
+/// </summary>
+public sealed class WinlogonEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
+    private static readonly string[] Values = { "Shell", "Userinit" };
+
+    public string Surface => "Winlogon Shell/Userinit";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var key = baseKey.OpenSubKey(Path);
+        if (key is null)
+        {
+            yield break;
+        }
+
+        foreach (var value in Values)
+        {
+            if (key.GetValue(value) is not string raw)
+            {
+                continue;
+            }
+            foreach (var command in SplitCommands(raw))
+            {
+                yield return new RawAutostart(
+                    AutostartVector.Winlogon, value, $"HKLM\\{Path} [{value}]", command);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Splits a Winlogon Shell/Userinit value into its individual commands. The value
+    /// is a comma-separated list (e.g. "userinit.exe," or "explorer.exe,malware.exe");
+    /// empties from trailing commas are dropped.
+    /// </summary>
+    public static IEnumerable<string> SplitCommands(string raw) =>
+        raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
