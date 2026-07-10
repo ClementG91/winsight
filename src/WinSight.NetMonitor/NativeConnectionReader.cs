@@ -28,6 +28,9 @@ public static class NativeConnectionReader
     private static extern uint GetExtendedUdpTable(
         IntPtr pUdpTable, ref int dwOutBufLen, bool sort, int ipVersion, int tblClass, int reserved);
 
+    // Fields are populated by Marshal at runtime, so the compiler sees them as never
+    // assigned (CS0649) — expected for interop structs.
+#pragma warning disable CS0649
     [StructLayout(LayoutKind.Sequential)]
     private struct MibTcpRowOwnerPid
     {
@@ -39,6 +42,7 @@ public static class NativeConnectionReader
     {
         public uint LocalAddr, LocalPort, OwningPid;
     }
+#pragma warning restore CS0649
 
     /// <summary>Snapshots the current IPv4 TCP + UDP tables with owning PIDs.</summary>
     public static IReadOnlyList<NetstatRow> Read()
