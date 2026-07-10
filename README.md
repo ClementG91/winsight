@@ -88,10 +88,24 @@ per-tool names here can follow that or stay descriptive. Rename freely before co
 
 ## Status
 
-Phase 1 in progress. **Persistence Scanner** (module 1) is scaffolded with a working
-Run-keys + Services/drivers sweep, managed Authenticode triage, and a console runner
-(`winsight-persistence`). Built/tested on Windows via CI (this repo is authored on a
-Linux box; CI on `windows-latest` is the compiler of record).
+Phase 1 underway — CI green on `windows-latest`. Two tools plus a unified entry
+point are working today:
+
+- **Persistence Scanner** (`winsight-persistence`, KnockKnock-class) — 8 autostart
+  surfaces: Run/RunOnce/RunServices/Policies\Explorer\Run (HKLM+HKCU × 64/32-bit),
+  Services & drivers, Winlogon Shell/Userinit, Scheduled Tasks (Tasks XML),
+  AppInit_DLLs, IFEO debuggers, Active Setup, BootExecute — each with managed
+  Authenticode triage and a resilient per-surface scan.
+- **Camera/Mic Monitor** (`winsight-avmonitor`, OverSight-class) — which apps used
+  the webcam/mic and what is live right now, from the CapabilityAccessManager
+  ConsentStore.
+- **Unified CLI** (`winsight`) — one binary runs the whole suite.
+
+Authored on a Linux box; CI on `windows-latest` is the compiler of record.
+
+Next: Net + DNS monitor (Netiquette/DNSMonitor-class, introduces the CsWin32 interop
+layer), then WinVerifyTrust signature hardening, more persistence vectors (startup
+folders via .lnk resolution, WMI subscriptions), and the WFP firewall.
 
 ## License
 
