@@ -70,7 +70,9 @@ public static class NetstatParser
         if (a.StartsWith("10.", StringComparison.Ordinal) ||
             a.StartsWith("192.168.", StringComparison.Ordinal) ||
             a.StartsWith("169.254.", StringComparison.Ordinal) ||
-            a.StartsWith("fe80", StringComparison.OrdinalIgnoreCase))
+            a.StartsWith("fe80", StringComparison.OrdinalIgnoreCase) ||       // IPv6 link-local
+            a.StartsWith("fc", StringComparison.OrdinalIgnoreCase) ||         // IPv6 ULA (fc00::/7)
+            a.StartsWith("fd", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }

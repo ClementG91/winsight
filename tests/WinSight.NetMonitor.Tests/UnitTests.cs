@@ -20,6 +20,14 @@ public sealed class NativeConnectionReaderTests
         Assert.Equal("127.0.0.1:80", NativeConnectionReader.FormatEndpoint(0x0100007Fu, 0x5000u));
     }
 
+    [Fact]
+    public void FormatEndpoint6_RendersBracketedIpv6()
+    {
+        var loopback = new byte[16];
+        loopback[15] = 1; // ::1
+        Assert.Equal("[::1]:80", NativeConnectionReader.FormatEndpoint6(loopback, 0, 0x5000u));
+    }
+
     [Theory]
     [InlineData(5u, "ESTABLISHED")]
     [InlineData(2u, "LISTENING")]
@@ -127,6 +135,10 @@ public sealed class NetstatParserTests
     [InlineData("172.16.5.5", false)]    // private
     [InlineData("172.32.5.5", true)]     // outside 172.16-31 -> public
     [InlineData("0.0.0.0", false)]       // wildcard
+    [InlineData("2606:4700:4700::1111", true)] // public IPv6
+    [InlineData("::1", false)]           // IPv6 loopback
+    [InlineData("fe80::1", false)]       // IPv6 link-local
+    [InlineData("fc00::1", false)]       // IPv6 ULA
     public void IsExternal_ClassifiesAddresses(string address, bool expected)
     {
         Assert.Equal(expected, NetstatParser.IsExternal(address));

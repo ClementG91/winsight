@@ -13,6 +13,7 @@ namespace WinSight.NetMonitor;
 public static class NativeConnectionReader
 {
     private const int AfInet = 2;                 // IPv4
+    private const int AfInet6 = 23;               // IPv6
     private const int TcpTableOwnerPidAll = 5;    // TCP_TABLE_OWNER_PID_ALL
     private const int UdpTableOwnerPid = 1;       // UDP_TABLE_OWNER_PID
 
@@ -42,20 +43,38 @@ public static class NativeConnectionReader
     {
         public uint LocalAddr, LocalPort, OwningPid;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibTcp6RowOwnerPid
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public byte[] LocalAddr;
+        public uint LocalScopeId, LocalPort;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public byte[] RemoteAddr;
+        public uint RemoteScopeId, RemotePort, State, OwningPid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MibUdp6RowOwnerPid
+    {
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 16)] public byte[] LocalAddr;
+        public uint LocalScopeId, LocalPort, OwningPid;
+    }
 #pragma warning restore CS0649
 
-    /// <summary>Snapshots the current IPv4 TCP + UDP tables with owning PIDs.</summary>
+    /// <summary>Snapshots the current TCP + UDP tables (IPv4 and IPv6) with owning PIDs.</summary>
     public static IReadOnlyList<NetstatRow> Read()
     {
         var rows = new List<NetstatRow>();
         ReadTcp(rows);
+        ReadTcp6(rows);
         ReadUdp(rows);
+        ReadUdp6(rows);
         return rows;
     }
 
     private static void ReadTcp(List<NetstatRow> rows)
     {
-        foreach (var r in Enumerate<MibTcpRowOwnerPid>(GetExtendedTcpTable, TcpTableOwnerPidAll))
+        foreach (var r in Enumerate<MibTcpRowOwnerPid>(GetExtendedTcpTable, AfInet, TcpTableOwnerPidAll))
         {
             rows.Add(new NetstatRow(
                 "TCP",
@@ -66,21 +85,43 @@ public static class NativeConnectionReader
         }
     }
 
+    private static void ReadTcp6(List<NetstatRow> rows)
+    {
+        foreach (var r in Enumerate<MibTcp6RowOwnerPid>(GetExtendedTcpTable, AfInet6, TcpTableOwnerPidAll))
+        {
+            rows.Add(new NetstatRow(
+                "TCP",
+                FormatEndpoint6(r.LocalAddr, r.LocalScopeId, r.LocalPort),
+                FormatEndpoint6(r.RemoteAddr, r.RemoteScopeId, r.RemotePort),
+                TcpStateName(r.State),
+                (int)r.OwningPid));
+        }
+    }
+
     private static void ReadUdp(List<NetstatRow> rows)
     {
-        foreach (var r in Enumerate<MibUdpRowOwnerPid>(GetExtendedUdpTable, UdpTableOwnerPid))
+        foreach (var r in Enumerate<MibUdpRowOwnerPid>(GetExtendedUdpTable, AfInet, UdpTableOwnerPid))
         {
             rows.Add(new NetstatRow(
                 "UDP", FormatEndpoint(r.LocalAddr, r.LocalPort), "*:*", string.Empty, (int)r.OwningPid));
         }
     }
 
+    private static void ReadUdp6(List<NetstatRow> rows)
+    {
+        foreach (var r in Enumerate<MibUdp6RowOwnerPid>(GetExtendedUdpTable, AfInet6, UdpTableOwnerPid))
+        {
+            rows.Add(new NetstatRow(
+                "UDP", FormatEndpoint6(r.LocalAddr, r.LocalScopeId, r.LocalPort), "*:*", string.Empty, (int)r.OwningPid));
+        }
+    }
+
     // Shared two-call (size, then fill) buffer walk. The table is a leading DWORD
     // count followed by a packed array of T rows.
-    private static IEnumerable<T> Enumerate<T>(ExtendedTableFn api, int tableClass) where T : struct
+    private static IEnumerable<T> Enumerate<T>(ExtendedTableFn api, int addressFamily, int tableClass) where T : struct
     {
         var size = 0;
-        api(IntPtr.Zero, ref size, false, AfInet, tableClass, 0);
+        api(IntPtr.Zero, ref size, false, addressFamily, tableClass, 0);
         if (size <= 0)
         {
             yield break;
@@ -88,7 +129,7 @@ public static class NativeConnectionReader
         var buffer = Marshal.AllocHGlobal(size);
         try
         {
-            if (api(buffer, ref size, false, AfInet, tableClass, 0) != 0)
+            if (api(buffer, ref size, false, addressFamily, tableClass, 0) != 0)
             {
                 yield break;
             }
@@ -109,6 +150,10 @@ public static class NativeConnectionReader
     /// <summary>Formats a network-byte-order IPv4 address + port DWORD as "ip:port".</summary>
     public static string FormatEndpoint(uint address, uint port) =>
         $"{new IPAddress(address)}:{NetworkToHostPort(port)}";
+
+    /// <summary>Formats an IPv6 address (16 bytes) + scope id + port DWORD as "[ip]:port".</summary>
+    public static string FormatEndpoint6(byte[] address, uint scopeId, uint port) =>
+        $"[{new IPAddress(address, scopeId)}]:{NetworkToHostPort(port)}";
 
     /// <summary>Host-order port from the low 16 bits (network byte order) of a DWORD.</summary>
     public static int NetworkToHostPort(uint port) =>

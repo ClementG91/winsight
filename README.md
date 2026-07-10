@@ -103,9 +103,9 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 - **Camera/Mic** (OverSight-class) — which apps used the webcam/mic and what is live
   now (CapabilityAccessManager ConsentStore), plus real-time `av --watch` alerts the
   instant a device turns on/off.
-- **Connections** (Netiquette-class) — active TCP/UDP via native IP Helper tables
-  (GetExtendedTcpTable/Udp), attributed to the owning process + its signature; flags
-  external, established, unsigned owners.
+- **Connections** (Netiquette-class) — active TCP/UDP (IPv4 + IPv6) via native IP
+  Helper tables (GetExtendedTcpTable/Udp), attributed to the owning process + its
+  signature; flags external, established, unsigned owners.
 - **DNS** (DNSMonitor-class) — recently resolved domains + answers from the resolver
   cache (MSFT_DNSClientCache).
 
