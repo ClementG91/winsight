@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>WinSight.Cli</RootNamespace>
+    <AssemblyName>winsight</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Persistence\WinSight.Persistence.csproj" />
+    <ProjectReference Include="..\WinSight.AvMonitor\WinSight.AvMonitor.csproj" />
+  </ItemGroup>
+</Project>
