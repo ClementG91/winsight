@@ -12,25 +12,34 @@ namespace WinSight.NetMonitor;
 /// </summary>
 public sealed class ConnectionMonitor
 {
-    private readonly SignatureVerifier _verifier;
+    private readonly ISignatureVerifier _verifier;
 
-    public ConnectionMonitor(SignatureVerifier? verifier = null) =>
-        _verifier = verifier ?? new SignatureVerifier();
+    public ConnectionMonitor(ISignatureVerifier? verifier = null) =>
+        _verifier = verifier ?? new AuthenticodeVerifier();
 
     public IReadOnlyList<Connection> Snapshot()
     {
         var rows = NetstatParser.Parse(RunNetstat());
-        var byPid = new Dictionary<int, (string Name, string? Path)>();
-        var connections = new List<Connection>(rows.Count);
 
+        // Resolve each owning process once, then verify every distinct image in one batch.
+        var byPid = new Dictionary<int, (string Name, string? Path)>();
         foreach (var r in rows)
         {
-            if (!byPid.TryGetValue(r.Pid, out var proc))
+            if (!byPid.ContainsKey(r.Pid))
             {
-                proc = ResolveProcess(r.Pid);
-                byPid[r.Pid] = proc;
+                byPid[r.Pid] = ResolveProcess(r.Pid);
             }
-            var signature = proc.Path is null ? SignatureVerdict.Missing : _verifier.Verify(proc.Path);
+        }
+        var verdicts = _verifier.VerifyMany(
+            byPid.Values.Where(p => p.Path is not null).Select(p => p.Path!).ToList());
+
+        var connections = new List<Connection>(rows.Count);
+        foreach (var r in rows)
+        {
+            var proc = byPid[r.Pid];
+            var signature = proc.Path is not null && verdicts.TryGetValue(proc.Path, out var v)
+                ? v
+                : SignatureVerdict.Missing;
             connections.Add(new Connection(
                 r.Protocol, r.Local, r.Remote, r.State, r.Pid, proc.Name, proc.Path, signature));
         }

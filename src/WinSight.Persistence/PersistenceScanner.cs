@@ -10,14 +10,14 @@ namespace WinSight.Persistence;
 public sealed class PersistenceScanner
 {
     private readonly IReadOnlyList<IAutostartEnumerator> _enumerators;
-    private readonly SignatureVerifier _verifier;
+    private readonly ISignatureVerifier _verifier;
 
     public PersistenceScanner(
         IReadOnlyList<IAutostartEnumerator>? enumerators = null,
-        SignatureVerifier? verifier = null)
+        ISignatureVerifier? verifier = null)
     {
         _enumerators = enumerators ?? DefaultEnumerators();
-        _verifier = verifier ?? new SignatureVerifier();
+        _verifier = verifier ?? new AuthenticodeVerifier();
     }
 
     /// <summary>The autostart surfaces covered by a default scan (Phase 1).</summary>
@@ -40,28 +40,38 @@ public sealed class PersistenceScanner
     /// </summary>
     public IReadOnlyList<AutostartEntry> Scan()
     {
-        var results = new List<AutostartEntry>();
+        // 1. Collect raw autostart records, isolating a failing surface.
+        var raws = new List<RawAutostart>();
         foreach (var enumerator in _enumerators)
         {
-            IReadOnlyList<RawAutostart> raws;
             try
             {
-                raws = enumerator.Enumerate().ToList();
+                raws.AddRange(enumerator.Enumerate());
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException
                                          or System.Security.SecurityException
                                          or IOException)
             {
-                continue; // isolate a failing surface — the rest of the scan proceeds
+                // isolate a failing surface — the rest of the scan proceeds
             }
+        }
 
-            foreach (var raw in raws)
-            {
-                var image = CommandLine.ExtractExecutable(raw.Command);
-                var verdict = image is null ? SignatureVerdict.Missing : _verifier.Verify(image);
-                results.Add(new AutostartEntry(
-                    raw.Vector, raw.Name, raw.Location, raw.Command, image, verdict));
-            }
+        // 2. Resolve each record's executable, then verify EVERY signature in one
+        //    batch (a single Get-AuthenticodeSignature call, not one process per item).
+        var resolved = raws
+            .Select(r => (Raw: r, Image: CommandLine.ExtractExecutable(r.Command)))
+            .ToList();
+        var verdicts = _verifier.VerifyMany(
+            resolved.Where(x => x.Image is not null).Select(x => x.Image!).ToList());
+
+        // 3. Assemble.
+        var results = new List<AutostartEntry>(resolved.Count);
+        foreach (var (raw, image) in resolved)
+        {
+            var verdict = image is not null && verdicts.TryGetValue(image, out var v)
+                ? v
+                : SignatureVerdict.Missing;
+            results.Add(new AutostartEntry(raw.Vector, raw.Name, raw.Location, raw.Command, image, verdict));
         }
         return results;
     }

@@ -81,6 +81,32 @@ public sealed class ScheduledTaskTests
     }
 }
 
+public sealed class AuthenticodeMapStatusTests
+{
+    [Theory]
+    [InlineData("Valid", SignatureState.SignedTrusted)]
+    [InlineData("NotSigned", SignatureState.Unsigned)]
+    [InlineData("HashMismatch", SignatureState.SignedUntrusted)] // signed then tampered
+    [InlineData("NotTrusted", SignatureState.SignedUntrusted)]
+    [InlineData(null, SignatureState.Unsigned)]
+    public void MapStatus_MapsSignatureStatus(string? status, SignatureState expected)
+    {
+        Assert.Equal(expected, AuthenticodeVerifier.MapStatus(status, "CN=Acme").State);
+    }
+
+    [Fact]
+    public void MapStatus_UnknownStatusWithoutSigner_IsUnsigned()
+    {
+        Assert.Equal(SignatureState.Unsigned, AuthenticodeVerifier.MapStatus("UnknownError", null).State);
+    }
+
+    [Fact]
+    public void MapStatus_ValidCarriesSigner()
+    {
+        Assert.Equal("CN=Acme", AuthenticodeVerifier.MapStatus("Valid", "CN=Acme").Signer);
+    }
+}
+
 public sealed class SignatureVerifierTests
 {
     [Fact]

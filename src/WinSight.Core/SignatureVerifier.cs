@@ -15,7 +15,7 @@ namespace WinSight.Core;
 /// blocking decision relies on it. Good enough for the read-only scanner's
 /// signed/unsigned triage; not a trust boundary yet.
 /// </summary>
-public sealed class SignatureVerifier
+public sealed class SignatureVerifier : ISignatureVerifier
 {
     private readonly bool _checkRevocation;
 
@@ -52,5 +52,15 @@ public sealed class SignatureVerifier
         {
             return SignatureVerdict.Unsigned;
         }
+    }
+
+    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+    {
+        var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in paths)
+        {
+            results[path] = Verify(path);
+        }
+        return results;
     }
 }
