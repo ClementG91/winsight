@@ -7,7 +7,7 @@ using WinSight.Reporting;
 // Read-only.
 //
 // Usage:
-//   winsight [persistence|av|net|all]   (default: all)
+//   winsight [persistence|av|net|dns|all]   (default: all)
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight ... --flagged              only noteworthy items
 //   winsight ... --json                 machine-readable output (GUI/automation)
@@ -23,7 +23,7 @@ if (args.Contains("--help") || args.Contains("-h"))
         winsight — free, open-source security tools for Windows.
 
         Usage:
-          winsight [persistence|av|net|all]   run checks (default: all)
+          winsight [persistence|av|net|dns|all]   run checks (default: all)
           winsight av --watch                 live camera/mic alerts (Ctrl+C to stop)
 
         Options:
@@ -59,13 +59,17 @@ switch (command)
     case "netmonitor":
         reports.Add(Adapters.Connections(flaggedOnly));
         break;
+    case "dns":
+        reports.Add(Adapters.Dns(flaggedOnly));
+        break;
     case "all":
         reports.Add(Adapters.Persistence(flaggedOnly));
         reports.Add(Adapters.CameraMic(flaggedOnly));
         reports.Add(Adapters.Connections(flaggedOnly));
+        reports.Add(Adapters.Dns(flaggedOnly));
         break;
     default:
-        Console.Error.WriteLine($"unknown command '{command}' (persistence | av | net | all)");
+        Console.Error.WriteLine($"unknown command '{command}' (persistence | av | net | dns | all)");
         return 2;
 }
 

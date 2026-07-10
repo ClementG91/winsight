@@ -30,6 +30,35 @@ public sealed class NativeConnectionReaderTests
     }
 }
 
+public sealed class DnsRecordTypeTests
+{
+    [Theory]
+    [InlineData(1, "A")]
+    [InlineData(28, "AAAA")]
+    [InlineData(5, "CNAME")]
+    [InlineData(999, "TYPE999")]
+    public void Name_MapsRecordTypes(int type, string expected)
+    {
+        Assert.Equal(expected, DnsRecordType.Name(type));
+    }
+}
+
+// Integration test — reads the real DNS resolver cache on the Windows CI runner.
+public sealed class DnsCacheReaderIntegrationTests
+{
+    [Fact]
+    public void Read_DoesNotThrow_AndRecordsAreSane()
+    {
+        var records = new DnsCacheReader().Read();
+        Assert.NotNull(records);
+        Assert.All(records, r =>
+        {
+            Assert.False(string.IsNullOrEmpty(r.Name));
+            Assert.False(string.IsNullOrEmpty(r.Type));
+        });
+    }
+}
+
 // Integration test — runs the real netstat snapshot + process resolution +
 // signature batch on the Windows CI runner (validates the whole net pipeline).
 public sealed class ConnectionMonitorIntegrationTests

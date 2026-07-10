@@ -3,6 +3,7 @@
     <RootNamespace>WinSight.NetMonitor</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="System.Management" />
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
 </Project>

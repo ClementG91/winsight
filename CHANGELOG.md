@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### DNS — resolver-cache visibility (DNSMonitor-class)
+- `DnsCacheReader` surfaces recently resolved domains + answers from the resolver
+  cache (MSFT_DNSClientCache via System.Management — managed, no admin, no process
+  spawn). New `winsight dns` subcommand, included in `all`. Real-time ETW
+  (Microsoft-Windows-DNS-Client) is the future enhancement.
+
 ### Persistence — WMI event subscriptions
 - `WmiSubscriptionEnumerator` surfaces permanent WMI subscription consumers
   (CommandLine + ActiveScript) from root\subscription — a stealthy, fileless
