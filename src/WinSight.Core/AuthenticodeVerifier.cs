@@ -25,7 +25,10 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
 
     public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
     {
-        var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
+        // PowerShell verdicts are keyed by NORMALISED full path, because the Path it
+        // echoes may differ in form from the input string. Inputs are matched back the
+        // same way, so casing/relative differences never cause a spurious fallback.
+        var byFullPath = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
 
         var existing = paths
             .Where(p => !string.IsNullOrWhiteSpace(p) && File.Exists(p))
@@ -36,23 +39,35 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         {
             try
             {
-                ParseInto(RunPowerShell(existing), results);
+                ParseInto(RunPowerShell(existing), byFullPath);
             }
             catch (Exception ex) when (ex is Win32Exception or InvalidOperationException
                                          or IOException or JsonException)
             {
-                // Fall through — missing paths get the managed fallback below.
+                // Fall through — every input gets the managed fallback below.
             }
         }
 
+        var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in paths)
         {
-            if (!results.ContainsKey(path))
-            {
-                results[path] = _fallback.Verify(path);
-            }
+            results[path] = TryFull(path) is { } full && byFullPath.TryGetValue(full, out var v)
+                ? v
+                : _fallback.Verify(path);
         }
         return results;
+    }
+
+    private static string? TryFull(string path)
+    {
+        try
+        {
+            return File.Exists(path) ? Path.GetFullPath(path) : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException or NotSupportedException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -121,7 +136,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         }
     }
 
-    private static void AddOne(JsonElement element, Dictionary<string, SignatureVerdict> results)
+    private static void AddOne(JsonElement element, Dictionary<string, SignatureVerdict> byFullPath)
     {
         if (!element.TryGetProperty("Path", out var pathEl) || pathEl.GetString() is not { } path)
         {
@@ -131,6 +146,6 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         var signer = element.TryGetProperty("Signer", out var g) && g.ValueKind == JsonValueKind.String
             ? g.GetString()
             : null;
-        results[path] = MapStatus(status, signer);
+        byFullPath[TryFull(path) ?? path] = MapStatus(status, signer);
     }
 }

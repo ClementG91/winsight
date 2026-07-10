@@ -3,6 +3,26 @@ using Xunit;
 
 namespace WinSight.AvMonitor.Tests;
 
+// Integration test — runs the real ConsentStore read on the Windows CI runner.
+public sealed class CapabilityAccessReaderIntegrationTests
+{
+    [Fact]
+    public void Read_DoesNotThrow_AndUsagesAreConsistent()
+    {
+        var usages = new CapabilityAccessReader().Read();
+        Assert.NotNull(usages);
+        Assert.All(usages, u =>
+        {
+            Assert.False(string.IsNullOrEmpty(u.App));
+            if (u.Active)
+            {
+                Assert.NotNull(u.LastStart);
+                Assert.Null(u.LastStop);
+            }
+        });
+    }
+}
+
 public sealed class CapabilityAccessReaderTests
 {
     [Fact]

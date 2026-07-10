@@ -4,6 +4,13 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Integration tests — proving each part functions on real Windows
+- Integration tests execute the real pipeline on the CI Windows runner: persistence
+  scan (registry + signature batch), ConsentStore read, connection snapshot, and
+  catalog-signed-binary verification. First proof the blind-authored code FUNCTIONS,
+  not just compiles. `AuthenticodeVerifier` now matches PowerShell output back to
+  inputs by normalised full path (robust to path-string form differences).
+
 ### Signature hardening — catalog-aware Authenticode
 - `ISignatureVerifier` abstraction + `AuthenticodeVerifier`: one batched
   `Get-AuthenticodeSignature` per scan, catalog + embedded aware, detects tampering

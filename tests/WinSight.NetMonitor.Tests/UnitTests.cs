@@ -3,6 +3,24 @@ using Xunit;
 
 namespace WinSight.NetMonitor.Tests;
 
+// Integration test — runs the real netstat snapshot + process resolution +
+// signature batch on the Windows CI runner (validates the whole net pipeline).
+public sealed class ConnectionMonitorIntegrationTests
+{
+    [Fact]
+    public void Snapshot_ReturnsConnections_WithValidShape()
+    {
+        var connections = new ConnectionMonitor().Snapshot();
+        Assert.NotNull(connections);
+        Assert.All(connections, c =>
+        {
+            Assert.True(c.Protocol is "TCP" or "UDP");
+            Assert.True(c.Pid >= 0);
+            Assert.False(string.IsNullOrEmpty(c.Process));
+        });
+    }
+}
+
 public sealed class NetstatParserTests
 {
     private const string Sample = """

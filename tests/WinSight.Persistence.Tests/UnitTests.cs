@@ -81,6 +81,54 @@ public sealed class ScheduledTaskTests
     }
 }
 
+// Integration tests — run the real pipeline on the Windows CI runner (registry,
+// PowerShell signature batch). They are the first proof the blind-authored code
+// actually FUNCTIONS on Windows, not just compiles.
+public sealed class AuthenticodeVerifierIntegrationTests
+{
+    private static string OsBinary => Path.Combine(Environment.SystemDirectory, "kernel32.dll");
+
+    [Fact]
+    public void Verify_CatalogSignedOsBinary_IsTrusted()
+    {
+        // kernel32.dll is catalog-signed — the managed check would miss it; this proves
+        // the catalog-aware PowerShell path works end-to-end.
+        Assert.Equal(SignatureState.SignedTrusted, new AuthenticodeVerifier().Verify(OsBinary).State);
+    }
+
+    [Fact]
+    public void VerifyMany_BatchesSignedAndUnsigned()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.txt");
+        File.WriteAllText(tmp, "not a signed PE");
+        try
+        {
+            var r = new AuthenticodeVerifier().VerifyMany(new[] { OsBinary, tmp });
+            Assert.Equal(SignatureState.SignedTrusted, r[OsBinary].State);
+            Assert.Equal(SignatureState.Unsigned, r[tmp].State);
+        }
+        finally
+        {
+            File.Delete(tmp);
+        }
+    }
+}
+
+public sealed class PersistenceScannerIntegrationTests
+{
+    [Fact]
+    public void Scan_ReturnsSaneAutostartEntries()
+    {
+        var entries = new PersistenceScanner().Scan();
+        Assert.NotEmpty(entries); // a real Windows box always has auto-start services
+        Assert.All(entries, e =>
+        {
+            Assert.False(string.IsNullOrEmpty(e.Name));
+            Assert.False(string.IsNullOrEmpty(e.Location));
+        });
+    }
+}
+
 public sealed class AuthenticodeMapStatusTests
 {
     [Theory]
