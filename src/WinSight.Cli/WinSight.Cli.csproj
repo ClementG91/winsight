@@ -5,6 +5,8 @@
     <AssemblyName>winsight</AssemblyName>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+    <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
     <ProjectReference Include="..\WinSight.Persistence\WinSight.Persistence.csproj" />
     <ProjectReference Include="..\WinSight.AvMonitor\WinSight.AvMonitor.csproj" />
     <ProjectReference Include="..\WinSight.NetMonitor\WinSight.NetMonitor.csproj" />
