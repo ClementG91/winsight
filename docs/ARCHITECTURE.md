@@ -1,0 +1,79 @@
+# WinSight — architecture
+
+Status: proposed. This is the decision record; code follows once the stack is
+confirmed.
+
+## Shape
+
+A shared **core** + independent **tool modules** + one **dashboard/tray** shell.
+Each tool is usable standalone (like Objective-See's), but they share the core so
+signatures, process attribution and reputation are computed once.
+
+```
+winsight/
+  core/            # shared: process attribution, Authenticode, ETW session mgmt,
+                   # reputation (opt-in VirusTotal), models, IPC
+  tools/
+    persistence/   # KnockKnock-class: autostart enumeration + signing verdicts
+    avmonitor/     # OverSight-class: camera/mic activation alerts
+    netmonitor/    # Netiquette + DNSMonitor-class: connections + DNS
+    firewall/      # (Phase 2) LuLu-class: WFP per-app outbound control
+    guardian/      # (Phase 3/4) BlockBlock + RansomWhere-class: live watch/block
+  shell/           # WinUI 3 / WPF dashboard + system tray + notifications
+  drivers/         # (Phase 3/4) minifilter / WFP callout (needs EV cert)
+  docs/
+```
+
+## Windows primitives per tool (the real engineering)
+
+- **Persistence** — read the full autostart surface: `HKLM/HKCU ...\Run`,
+  `RunOnce`, Scheduled Tasks (Task Scheduler COM / `\Windows\System32\Tasks`),
+  Services (`HKLM\SYSTEM\CurrentControlSet\Services`), WMI `__EventFilter` /
+  `CommandLineEventConsumer`, startup folders, `Winlogon` (Shell/Userinit),
+  `AppInit_DLLs`, print monitors, drivers. Verdict each via **WinVerifyTrust**
+  (Authenticode). This is the same surface Autoruns covers — but OSS and scriptable.
+- **Camera/Mic** — activation signal from ETW providers and the
+  `CapabilityAccessManager\ConsentStore\{webcam,microphone}` registry (per-app
+  `LastUsedTimeStart/Stop`), cross-checked with `MMDevice`/audio session state.
+  Attribute to the owning process; alert on transition to active.
+- **Net + DNS** — connection table via **IPHelper** (`GetExtendedTcpTable`/Udp),
+  live events + DNS via ETW (`Microsoft-Windows-DNS-Client`,
+  `Microsoft-Windows-Kernel-Network`). Map socket → PID → signed binary.
+- **Firewall (Phase 2)** — **WFP** (Windows Filtering Platform) user-mode filters
+  keyed by app id; a prompt-on-new-connection UX. WFP alone (no driver) covers
+  most of LuLu's outbound-control use case.
+- **Guardian (Phase 3/4)** — real-time persistence + ransomware. Monitoring is
+  ETW/user-mode; *blocking* needs a **minifilter** (`FltRegisterFilter`) or WFP
+  callout **driver** → EV cert + attestation signing. Explicitly deferred.
+
+## Why .NET for user-mode (recommended)
+
+- Broadest, best-documented Win32 surface via **CsWin32** (source-generated
+  P/Invoke) — persistence, IPHelper, WinVerifyTrust are all a struct away.
+- **TraceEvent** (Microsoft) is the mature ETW consumer library — the backbone of
+  the av/net/dns monitors — with no hand-rolled ETW plumbing.
+- Tray apps, notifications, WinUI 3 dashboard are first-class.
+- Fast to an installable MVP. Perf-critical bits can drop to Rust/C++ later without
+  reworking the shell.
+
+Alternatives considered: **Rust** (`windows-rs`) — great for a small, dependency-light
+signed agent and the eventual driver, steeper ETW ergonomics; **C++/WDF** — mandatory
+for the kernel driver, overkill for the user-mode MVP. Recommendation: **.NET 8 for
+the MVP, Rust/C++ reserved for the driver and any perf agent.**
+
+## Non-negotiables
+
+- **Local-only, no telemetry.** A security tool that phones home is a contradiction.
+- **Every network/VT lookup is opt-in and user-keyed.**
+- **Reproducible, signed releases**; SBOM; the whole thing auditable.
+- **Least privilege**: run tools with the minimum rights; elevate only the specific
+  operation that needs it.
+
+## Open decisions (blocking code start)
+
+1. **Language/stack** for the MVP — recommended **.NET 8** (vs Rust vs C++).
+2. **Ambition** — confirm **user-mode MVP first** (yes) vs pushing straight to the
+   kernel driver (not recommended; cert + time).
+3. **License** — proposed **GPLv3**.
+4. **Windows build target** — Windows CI runner (GitHub Actions `windows-latest`)
+   and/or a Windows VM, since this dev box is Linux.

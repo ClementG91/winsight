@@ -1,0 +1,11 @@
+# Build artifacts
+bin/
+obj/
+*.user
+.vs/
+out/
+# Rust
+target/
+# Secrets / local
+*.local
+.env
