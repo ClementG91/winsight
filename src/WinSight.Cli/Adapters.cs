@@ -82,6 +82,29 @@ internal static class Adapters
         return b.Build($"{usages.Count} recorded use(s), {usages.Count(u => u.Active)} live now");
     }
 
+    public static ToolReport Dns(bool flaggedOnly)
+    {
+        var records = new DnsCacheReader().Read();
+        var b = new ToolReport.Builder("dns");
+        // DNS-cache entries are visibility, not verdicts — all informational, so
+        // --flagged shows the summary only.
+        if (!flaggedOnly)
+        {
+            foreach (var r in records.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                b.Add(Severity.Info, $"{r.Type} {r.Name}", r.Data,
+                    new Dictionary<string, string?>
+                    {
+                        ["name"] = r.Name,
+                        ["type"] = r.Type,
+                        ["data"] = r.Data,
+                        ["ttl"] = r.Ttl.ToString(),
+                    });
+            }
+        }
+        return b.Build($"{records.Count} cached DNS record(s)");
+    }
+
     public static ToolReport Connections(bool flaggedOnly)
     {
         var connections = new ConnectionMonitor().Snapshot();

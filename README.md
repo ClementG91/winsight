@@ -93,8 +93,8 @@ per-tool names here can follow that or stay descriptive. Rename freely before co
 ## Status
 
 Phase 1 underway — CI green on `windows-latest`. Modular tool libraries behind one
-signed `winsight` binary (subcommands `persistence | av | net | all`, `--flagged`,
-`--json`):
+signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
+`--flagged`, `--json`, `--version`, `--help`):
 
 - **Persistence** (KnockKnock-class) — 8 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers, Winlogon
@@ -106,6 +106,8 @@ signed `winsight` binary (subcommands `persistence | av | net | all`, `--flagged
 - **Connections** (Netiquette-class) — active TCP/UDP via native IP Helper tables
   (GetExtendedTcpTable/Udp), attributed to the owning process + its signature; flags
   external, established, unsigned owners.
+- **DNS** (DNSMonitor-class) — recently resolved domains + answers from the resolver
+  cache (MSFT_DNSClientCache).
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
