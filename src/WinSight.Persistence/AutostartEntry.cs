@@ -11,8 +11,10 @@ public enum AutostartVector
     ScheduledTask,
     AppInitDll,
     ImageHijack,
+    ActiveSetup,
+    BootExecute,
     // Phase 1.2+: StartupFolder (needs .lnk target resolution), WmiSubscription,
-    // ActiveSetup, BootExecute, print monitors, ...
+    // print monitors, LSA/SSP packages, ...
 }
 
 /// <summary>

@@ -282,6 +282,71 @@ public sealed class AppInitDllsEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
+/// Active Setup StubPath commands — run once per user at first logon (and again when
+/// a component's version bumps). A quiet, per-user persistence spot. Covers both
+/// registry views.
+/// </summary>
+public sealed class ActiveSetupEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Microsoft\Active Setup\Installed Components";
+
+    public string Surface => "Active Setup";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            using var root = baseKey.OpenSubKey(Path);
+            if (root is null)
+            {
+                continue;
+            }
+            foreach (var component in root.GetSubKeyNames())
+            {
+                using var sub = root.OpenSubKey(component);
+                if (sub?.GetValue("StubPath") is string stub && stub.Trim().Length > 0)
+                {
+                    yield return new RawAutostart(
+                        AutostartVector.ActiveSetup, component,
+                        $"HKLM\\{Path}\\{component} [StubPath, {view}]", stub);
+                }
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Session Manager BootExecute — native-mode commands run by smss.exe at boot,
+/// before Win32 starts (default: "autocheck autochk *"). Anything appended here is a
+/// very early, stealthy persistence vector.
+/// </summary>
+public sealed class BootExecuteEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SYSTEM\CurrentControlSet\Control\Session Manager";
+
+    public string Surface => "BootExecute";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var key = baseKey.OpenSubKey(Path);
+        if (key?.GetValue("BootExecute") is not string[] commands)
+        {
+            yield break;
+        }
+        foreach (var command in commands)
+        {
+            if (command.Trim().Length > 0)
+            {
+                yield return new RawAutostart(
+                    AutostartVector.BootExecute, "BootExecute", $"HKLM\\{Path} [BootExecute]", command);
+            }
+        }
+    }
+}
+
+/// <summary>
 /// Image File Execution Options "Debugger" hijacks: a Debugger value on a target
 /// executable makes Windows launch the debugger INSTEAD of the target — a classic
 /// persistence/hijack (e.g. hijacking sethc.exe). Each Debugger entry is reported.

@@ -30,6 +30,8 @@ public sealed class PersistenceScanner
             new ScheduledTaskEnumerator(),
             new AppInitDllsEnumerator(),
             new ImageHijackEnumerator(),
+            new ActiveSetupEnumerator(),
+            new BootExecuteEnumerator(),
         };
 
     /// <summary>
