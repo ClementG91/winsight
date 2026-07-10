@@ -1,3 +1,5 @@
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.Win32;
 
 namespace WinSight.Persistence;
@@ -173,4 +175,140 @@ public sealed class WinlogonEnumerator : IAutostartEnumerator
     /// </summary>
     public static IEnumerable<string> SplitCommands(string raw) =>
         raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+}
+
+/// <summary>
+/// Scheduled Tasks, read by parsing the task definition XML files under
+/// %SystemRoot%\System32\Tasks (no Task Scheduler COM dependency). Each task's
+/// Exec action Command is an autostart command. A favourite modern persistence spot.
+/// </summary>
+public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
+{
+    private static readonly string TasksRoot =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
+
+    public string Surface => "Scheduled Tasks";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        foreach (var file in SafeFiles(TasksRoot))
+        {
+            string xml;
+            try
+            {
+                xml = File.ReadAllText(file);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            var name = Path.GetRelativePath(TasksRoot, file);
+            foreach (var command in ParseTaskCommands(xml))
+            {
+                yield return new RawAutostart(AutostartVector.ScheduledTask, name, file, command);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Extracts the Exec-action commands from a Task Scheduler XML definition. The
+    /// schema uses a default namespace, so matching is by local element name. Invalid
+    /// XML yields nothing (isolated, never throws).
+    /// </summary>
+    public static IReadOnlyList<string> ParseTaskCommands(string xml)
+    {
+        XDocument doc;
+        try
+        {
+            doc = XDocument.Parse(xml);
+        }
+        catch (XmlException)
+        {
+            return Array.Empty<string>();
+        }
+        return doc.Descendants()
+            .Where(e => e.Name.LocalName == "Command")
+            .Select(e => e.Value.Trim())
+            .Where(c => c.Length > 0)
+            .ToList();
+    }
+
+    private static IReadOnlyList<string> SafeFiles(string root)
+    {
+        try
+        {
+            return Directory.Exists(root)
+                ? Directory.GetFiles(root, "*", SearchOption.AllDirectories)
+                : Array.Empty<string>();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return Array.Empty<string>();
+        }
+    }
+}
+
+/// <summary>
+/// AppInit_DLLs — DLLs that (when LoadAppInit_DLLs is enabled) are injected into
+/// every user-mode process that loads user32.dll. A powerful, oft-abused vector;
+/// any entry here is worth surfacing. Covers the 64- and 32-bit views.
+/// </summary>
+public sealed class AppInitDllsEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
+
+    public string Surface => "AppInit_DLLs";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            using var key = baseKey.OpenSubKey(Path);
+            if (key?.GetValue("AppInit_DLLs") is not string raw || raw.Trim().Length == 0)
+            {
+                continue;
+            }
+            foreach (var dll in raw.Split(
+                         new[] { ',', ' ' },
+                         StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                yield return new RawAutostart(
+                    AutostartVector.AppInitDll, "AppInit_DLLs", $"HKLM\\{Path} [{view}]", dll);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Image File Execution Options "Debugger" hijacks: a Debugger value on a target
+/// executable makes Windows launch the debugger INSTEAD of the target — a classic
+/// persistence/hijack (e.g. hijacking sethc.exe). Each Debugger entry is reported.
+/// </summary>
+public sealed class ImageHijackEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
+
+    public string Surface => "IFEO debuggers";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var root = baseKey.OpenSubKey(Path);
+        if (root is null)
+        {
+            yield break;
+        }
+        foreach (var target in root.GetSubKeyNames())
+        {
+            using var sub = root.OpenSubKey(target);
+            if (sub?.GetValue("Debugger") is string debugger && debugger.Trim().Length > 0)
+            {
+                yield return new RawAutostart(
+                    AutostartVector.ImageHijack, target,
+                    $"HKLM\\{Path}\\{target} [Debugger]", debugger);
+            }
+        }
+    }
 }

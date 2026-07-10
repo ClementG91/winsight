@@ -53,6 +53,34 @@ public sealed class WinlogonTests
     }
 }
 
+public sealed class ScheduledTaskTests
+{
+    private const string TaskXml = """
+        <?xml version="1.0" encoding="UTF-16"?>
+        <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+          <Actions Context="Author">
+            <Exec>
+              <Command>C:\Windows\System32\notepad.exe</Command>
+              <Arguments>/A</Arguments>
+            </Exec>
+          </Actions>
+        </Task>
+        """;
+
+    [Fact]
+    public void ParseTaskCommands_ExtractsExecCommand_NamespaceAgnostic()
+    {
+        Assert.Equal(new[] { @"C:\Windows\System32\notepad.exe" },
+            ScheduledTaskEnumerator.ParseTaskCommands(TaskXml));
+    }
+
+    [Fact]
+    public void ParseTaskCommands_InvalidXml_IsEmpty()
+    {
+        Assert.Empty(ScheduledTaskEnumerator.ParseTaskCommands("<not xml"));
+    }
+}
+
 public sealed class SignatureVerifierTests
 {
     [Fact]

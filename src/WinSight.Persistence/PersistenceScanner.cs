@@ -27,6 +27,9 @@ public sealed class PersistenceScanner
             new RunKeyEnumerator(),
             new ServiceEnumerator(),
             new WinlogonEnumerator(),
+            new ScheduledTaskEnumerator(),
+            new AppInitDllsEnumerator(),
+            new ImageHijackEnumerator(),
         };
 
     /// <summary>

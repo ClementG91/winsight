@@ -8,7 +8,11 @@ public enum AutostartVector
     RunKey,
     Service,
     Winlogon,
-    // Phase 1.1+: ScheduledTask, StartupFolder, WmiSubscription, Driver, ...
+    ScheduledTask,
+    AppInitDll,
+    ImageHijack,
+    // Phase 1.2+: StartupFolder (needs .lnk target resolution), WmiSubscription,
+    // ActiveSetup, BootExecute, print monitors, ...
 }
 
 /// <summary>
