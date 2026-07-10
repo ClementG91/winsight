@@ -2,6 +2,11 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## Phase 1 — user-mode tools
+
+### CLI polish
+- `winsight --version` and `winsight --help` / `-h`.
+
 ## Repo — collaboration & release readiness
 - Full GPL-3.0 `LICENSE` text; `CODE_OF_CONDUCT` (Contributor Covenant 2.1),
   `CONTRIBUTING`, `SECURITY` (private vulnerability reporting); issue templates
