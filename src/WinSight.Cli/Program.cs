@@ -7,12 +7,19 @@ using WinSight.Reporting;
 //
 // Usage:
 //   winsight [persistence|av|net|all]   (default: all)
+//   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight ... --flagged              only noteworthy items
 //   winsight ... --json                 machine-readable output (GUI/automation)
 
 var json = args.Contains("--json");
 var flaggedOnly = args.Contains("--flagged");
 var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?? "all";
+
+// Live camera/mic monitor (OverSight-style) — long-running, prints transitions.
+if ((command is "av" or "avmonitor") && args.Contains("--watch"))
+{
+    return Adapters.WatchCameraMic();
+}
 
 var reports = new List<ToolReport>();
 switch (command)

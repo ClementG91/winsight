@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Camera/Mic — real-time monitor (OverSight-class)
+- `CameraMicMonitor` raises Activated/Deactivated events the moment an app turns the
+  webcam/mic on or off, via a pure unit-tested snapshot Diff over a polling loop
+  (driver-free; RegNotifyChangeKeyValue is the future event-driven optimization).
+  `winsight av --watch` prints live alerts until Ctrl+C.
+
 ### Integration tests — proving each part functions on real Windows
 - Integration tests execute the real pipeline on the CI Windows runner: persistence
   scan (registry + signature batch), ConsentStore read, connection snapshot, and

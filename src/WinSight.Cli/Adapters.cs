@@ -37,6 +37,27 @@ internal static class Adapters
         return b.Build($"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged");
     }
 
+    /// <summary>Runs the live camera/mic monitor, printing transitions until Ctrl+C.</summary>
+    public static int WatchCameraMic()
+    {
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+        Console.WriteLine("Watching camera/mic — Ctrl+C to stop.");
+        new CameraMicMonitor().Watch(OnEvent, cts.Token);
+        return 0;
+
+        static void OnEvent(DeviceEvent e)
+        {
+            var device = e.Usage.Kind == DeviceKind.Webcam ? "webcam" : "mic";
+            var verb = e.Kind == AvEventKind.Activated ? "ON " : "OFF";
+            Console.WriteLine($"  [{verb}] {device} — {e.Usage.App}");
+        }
+    }
+
     public static ToolReport CameraMic(bool flaggedOnly)
     {
         var usages = new CapabilityAccessReader().Read();
