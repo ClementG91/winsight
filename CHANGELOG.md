@@ -4,6 +4,11 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Connections — IPv6 support (audit fix)
+- `NativeConnectionReader` now reads the IPv6 TCP/UDP tables (AF_INET6,
+  MIB_*6ROW_OWNER_PID) alongside IPv4, and `IsExternal` treats IPv6 ULA (fc00::/7)
+  as private. A connection monitor that ignored IPv6 would miss modern C2/exfil.
+
 ### DNS — resolver-cache visibility (DNSMonitor-class)
 - `DnsCacheReader` surfaces recently resolved domains + answers from the resolver
   cache (MSFT_DNSClientCache via System.Management — managed, no admin, no process
