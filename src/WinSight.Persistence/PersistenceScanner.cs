@@ -38,6 +38,8 @@ public sealed class PersistenceScanner
             new PrintMonitorEnumerator(),
             new NetshHelperEnumerator(),
             new ComHijackEnumerator(),
+            new AppCertDllsEnumerator(),
+            new TimeProviderEnumerator(),
         };
 
     /// <summary>
