@@ -174,14 +174,22 @@ internal static class Adapters
     public static ToolReport Connections(bool flaggedOnly)
     {
         var connections = new ConnectionMonitor(SharedVerifier).Snapshot();
+
+        // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections.
+        var vt = VtLookups(connections.Where(c => c.Noteworthy && c.ImagePath is not null)
+            .Select(c => c.ImagePath!));
+
         var b = new ToolReport.Builder("connections");
         foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)
                      .OrderByDescending(c => c.Noteworthy).ThenByDescending(c => c.External))
         {
+            var report = c.ImagePath is not null && vt.TryGetValue(c.ImagePath, out var v) ? v : null;
             b.Add(
                 c.Noteworthy ? Severity.Notable : Severity.Info,
                 $"{c.Protocol} {c.Remote}",
-                $"{c.Process} (pid {c.Pid}) — {c.State}",
+                report is not null
+                    ? $"{c.Process} (pid {c.Pid}) — {c.State}  [VT {report.Malicious}/{report.Total}]"
+                    : $"{c.Process} (pid {c.Pid}) — {c.State}",
                 new Dictionary<string, string?>
                 {
                     ["protocol"] = c.Protocol,
@@ -193,6 +201,9 @@ internal static class Adapters
                     ["image"] = c.ImagePath,
                     ["signature"] = c.Signature.State.ToString(),
                     ["external"] = c.External.ToString(),
+                    ["vtMalicious"] = report?.Malicious.ToString(),
+                    ["vtTotal"] = report?.Total.ToString(),
+                    ["vtLink"] = report?.Permalink,
                 });
         }
         return b.Build($"{connections.Count} connection(s), {connections.Count(c => c.Noteworthy)} noteworthy");
