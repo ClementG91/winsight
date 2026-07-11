@@ -1,6 +1,7 @@
 using WinSight.AvMonitor;
 using WinSight.Core;
 using WinSight.Firewall;
+using WinSight.Modules;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
 using WinSight.Processes;
@@ -171,6 +172,39 @@ internal static class Adapters
                 });
         }
         return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
+    }
+
+    public static ToolReport Modules(bool flaggedOnly)
+    {
+        var modules = new ModuleLister(SharedVerifier).Snapshot();
+        var flagged = modules.Where(m => m.Unsigned).ToList();
+        var b = new ToolReport.Builder("modules");
+        // The security signal is an unsigned/untrusted DLL loaded into a running
+        // process (injection / search-order hijack). Listing every loaded module would
+        // be pure noise, so items are the flagged modules; the summary carries totals.
+        // (`--flagged` is implied here — the tool only ever reports notable modules.)
+        _ = flaggedOnly;
+        foreach (var m in flagged
+                     .OrderBy(m => m.ProcessName, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(m => m.ModuleName, StringComparer.OrdinalIgnoreCase))
+        {
+            b.Add(
+                Severity.Notable,
+                $"{m.ProcessName} (pid {m.Pid}) ← {m.ModuleName}",
+                m.Path ?? "<unknown>",
+                new Dictionary<string, string?>
+                {
+                    ["pid"] = m.Pid.ToString(),
+                    ["process"] = m.ProcessName,
+                    ["module"] = m.ModuleName,
+                    ["path"] = m.Path,
+                    ["signature"] = m.Signature.State.ToString(),
+                    ["signer"] = m.Signature.Signer,
+                });
+        }
+        var processCount = modules.Select(m => m.Pid).Distinct().Count();
+        return b.Build(
+            $"{modules.Count} loaded module(s) across {processCount} process(es), {flagged.Count} unsigned");
     }
 
     public static ToolReport Firewall(bool flaggedOnly)
