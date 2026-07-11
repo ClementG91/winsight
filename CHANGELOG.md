@@ -4,6 +4,15 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Modules — loaded-DLL audit (injection / side-load detection)
+- `ModuleLister` enumerates the DLLs loaded into every accessible running process
+  (System.Diagnostics) and batch-verifies each distinct module's Authenticode
+  signature through the shared verifier. Unsigned or untrusted DLLs loaded into a
+  running process — the classic injection / search-order-hijack signal — are reported
+  as notable; the summary carries the totals (loaded modules across N processes, M
+  unsigned). New `winsight modules` (alias `dll`) subcommand. Processes that can't be
+  opened (protected, cross-bitness, exited) are skipped, never guessed. Read-only.
+
 ### Processes — running-process viewer (TaskExplorer-class)
 - `ProcessLister` snapshots every running process via `Win32_Process` (System.Management):
   pid, name, full image path, parent pid and command line, then batch-verifies each

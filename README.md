@@ -113,6 +113,9 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 - **Processes** (TaskExplorer-class) — every running process with its image path,
   parent, command line and Authenticode signature (`winsight processes` / `ps`);
   flags unsigned or untrusted running images. Read-only.
+- **Modules** (DLL-injection audit) — the DLLs loaded into every accessible process,
+  signature-checked (`winsight modules` / `dll`); flags unsigned/untrusted DLLs
+  side-loaded or injected into running processes. Read-only.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
