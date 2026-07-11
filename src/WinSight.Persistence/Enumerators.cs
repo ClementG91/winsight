@@ -347,6 +347,65 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
+/// AppCertDLLs — DLLs loaded into every process that calls CreateProcess/WinExec and
+/// related APIs. A powerful, oft-abused injection/persistence vector (MITRE
+/// T1546.009). Values are DLL paths.
+/// </summary>
+public sealed class AppCertDllsEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SYSTEM\CurrentControlSet\Control\Session Manager\AppCertDlls";
+
+    public string Surface => "AppCertDLLs";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var key = baseKey.OpenSubKey(Path);
+        if (key is null)
+        {
+            yield break;
+        }
+        foreach (var name in key.GetValueNames())
+        {
+            if (key.GetValue(name) is string dll && dll.Trim().Length > 0)
+            {
+                yield return new RawAutostart(AutostartVector.AppCertDll, name, $"HKLM\\{Path}", dll);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// W32Time time providers — DLLs loaded by the Windows Time service. A rogue provider
+/// DllName runs inside the time service; a documented, low-noise persistence spot.
+/// </summary>
+public sealed class TimeProviderEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders";
+
+    public string Surface => "Time providers";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var root = baseKey.OpenSubKey(Path);
+        if (root is null)
+        {
+            yield break;
+        }
+        foreach (var provider in root.GetSubKeyNames())
+        {
+            using var sub = root.OpenSubKey(provider);
+            if (sub?.GetValue("DllName") is string dll && dll.Trim().Length > 0)
+            {
+                yield return new RawAutostart(
+                    AutostartVector.TimeProvider, provider, $"HKLM\\{Path}\\{provider} [DllName]", dll);
+            }
+        }
+    }
+}
+
+/// <summary>
 /// Per-user COM server registrations (HKCU\Software\Classes\CLSID\{clsid}\
 /// InprocServer32). A user-level CLSID that shadows a system one lets malware load
 /// its DLL whenever that COM object is instantiated — COM hijacking (MITRE

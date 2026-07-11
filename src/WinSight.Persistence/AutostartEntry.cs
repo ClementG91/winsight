@@ -19,7 +19,9 @@ public enum AutostartVector
     PrintMonitor,
     NetshHelper,
     ComHijack,
-    // Phase 1.2+: screensaver, time providers, AppCert/AppInit shims, ...
+    AppCertDll,
+    TimeProvider,
+    // Phase 1.2+: screensaver, LSA extensions, shims, ...
 }
 
 /// <summary>

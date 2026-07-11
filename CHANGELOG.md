@@ -4,6 +4,11 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — AppCertDLLs + time providers
+- `AppCertDllsEnumerator` (DLLs injected into processes that call CreateProcess/etc.,
+  MITRE T1546.009) and `TimeProviderEnumerator` (W32Time provider DllNames). 16
+  autostart surfaces now.
+
 ### Persistence — COM hijacking (HKCU CLSID)
 - `ComHijackEnumerator` surfaces per-user COM server registrations
   (HKCU\Software\Classes\CLSID\{clsid}\InprocServer32) — COM hijacking (MITRE
