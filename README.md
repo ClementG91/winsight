@@ -116,6 +116,9 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 - **Modules** (DLL-injection audit) — the DLLs loaded into every accessible process,
   signature-checked (`winsight modules` / `dll`); flags unsigned/untrusted DLLs
   side-loaded or injected into running processes. Read-only.
+- **Extensions** (browser supply-chain) — installed extensions across the
+  Chromium-family browsers with their declared permissions (`winsight extensions` /
+  `ext`); flags extensions holding broad-reach permissions. Read-only.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
