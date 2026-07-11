@@ -4,6 +4,14 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Certificates — trusted-root store audit (rogue-CA detection)
+- `CertStoreAuditor` reads the machine + user trusted-root stores (`X509Store`,
+  read-only) and flags rogue-CA signals: a trusted root that holds a **private key**
+  (arbitrary trusted certs can be minted locally — Superfish/eDellRoot class), a
+  **weak signature** (SHA-1/MD5/MD2) or an **undersized RSA key** (<2048-bit). New
+  `winsight certs` subcommand. Risk classification is pure and unit-tested; a Windows
+  integration test asserts the real store read returns well-formed roots. Read-only.
+
 ### Extensions — browser extension audit (supply-chain)
 - `ExtensionScanner` reads the Chromium-family profiles (Chrome, Edge, Brave, Vivaldi,
   Opera) for installed extensions and parses each manifest — name (with `__MSG_`

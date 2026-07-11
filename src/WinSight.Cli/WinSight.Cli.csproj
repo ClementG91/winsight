@@ -15,5 +15,6 @@
     <ProjectReference Include="..\WinSight.Processes\WinSight.Processes.csproj" />
     <ProjectReference Include="..\WinSight.Modules\WinSight.Modules.csproj" />
     <ProjectReference Include="..\WinSight.Browser\WinSight.Browser.csproj" />
+    <ProjectReference Include="..\WinSight.Certificates\WinSight.Certificates.csproj" />
   </ItemGroup>
 </Project>
