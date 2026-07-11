@@ -4,6 +4,14 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Hosts — hosts-file hijack / AV-block detection
+- `HostsReader` parses the Windows hosts file and flags the two malware patterns: an
+  entry redirecting a hostname to a non-sink external address (phishing/MITM hijack),
+  or one blackholing a security/update domain (AV / Windows Update block). Benign
+  ad/tracker sink entries (`0.0.0.0`/`127.0.0.1`) are left unflagged. New `winsight
+  hosts` subcommand, included in `all`. Parsing is a pure static, unit-tested; the
+  real-file read is smoke-tested. Read-only.
+
 ### Persistence — screensaver hijack (SCRNSAVE.EXE)
 - `ScreensaverEnumerator` surfaces the per-user screensaver executable (a `.scr` is
   just a PE Windows runs on idle — MITRE T1546.002). Reads `SCRNSAVE.EXE` from
