@@ -138,6 +138,22 @@ public sealed class WmiSubscriptionEnumeratorIntegrationTests
     }
 }
 
+public sealed class ScreensaverEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new ScreensaverEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.Screensaver, e.Vector);
+            Assert.Equal("SCRNSAVE.EXE", e.Name);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+        });
+    }
+}
+
 public sealed class PersistenceScannerIntegrationTests
 {
     [Fact]

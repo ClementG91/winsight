@@ -21,7 +21,8 @@ public enum AutostartVector
     ComHijack,
     AppCertDll,
     TimeProvider,
-    // Phase 1.2+: screensaver, LSA extensions, shims, ...
+    Screensaver,
+    // Phase 1.2+: LSA extensions, shims, ...
 }
 
 /// <summary>

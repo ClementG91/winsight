@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — screensaver hijack (SCRNSAVE.EXE)
+- `ScreensaverEnumerator` surfaces the per-user screensaver executable (a `.scr` is
+  just a PE Windows runs on idle — MITRE T1546.002). Reads `SCRNSAVE.EXE` from
+  `HKCU\Control Panel\Desktop` and its Group Policy twin, each signature-checked. 17
+  autostart surfaces now.
+
 ### Certificates — trusted-root store audit (rogue-CA detection)
 - `CertStoreAuditor` reads the machine + user trusted-root stores (`X509Store`,
   read-only) and flags rogue-CA signals: a trusted root that holds a **private key**
