@@ -12,5 +12,6 @@
     <ProjectReference Include="..\WinSight.AvMonitor\WinSight.AvMonitor.csproj" />
     <ProjectReference Include="..\WinSight.NetMonitor\WinSight.NetMonitor.csproj" />
     <ProjectReference Include="..\WinSight.Firewall\WinSight.Firewall.csproj" />
+    <ProjectReference Include="..\WinSight.Processes\WinSight.Processes.csproj" />
   </ItemGroup>
 </Project>

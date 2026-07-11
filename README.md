@@ -110,6 +110,9 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
   real-time `dns --watch` (live ETW queries, Administrator).
 - **Firewall** (LuLu-class, read-only) — lists Windows Defender Firewall rules
   (`winsight firewall`). An enforcing per-app firewall is a later phase.
+- **Processes** (TaskExplorer-class) — every running process with its image path,
+  parent, command line and Authenticode signature (`winsight processes` / `ps`);
+  flags unsigned or untrusted running images. Read-only.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
