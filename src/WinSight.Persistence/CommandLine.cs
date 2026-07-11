@@ -29,7 +29,25 @@ public static class CommandLine
             return null;
         }
 
-        return File.Exists(exe) ? Path.GetFullPath(exe) : null;
+        if (File.Exists(exe))
+        {
+            return Path.GetFullPath(exe);
+        }
+
+        // Bare module name (LSA/print/driver DLLs, some system commands) — resolve
+        // against System32, trying a .dll suffix when there's no extension.
+        if (!exe.Contains('\\') && !exe.Contains('/'))
+        {
+            var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+            foreach (var candidate in new[] { Path.Combine(system32, exe), Path.Combine(system32, exe + ".dll") })
+            {
+                if (File.Exists(candidate))
+                {
+                    return candidate;
+                }
+            }
+        }
+        return null;
     }
 
     private static string FirstQuoted(string s)

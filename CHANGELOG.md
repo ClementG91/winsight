@@ -4,6 +4,13 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — LSA packages + System32 module resolution
+- `LsaPackagesEnumerator` surfaces LSA Security/Authentication/Notification packages
+  (DLLs loaded into LSASS — a classic SSP / password-filter persistence + credential
+  theft vector). `CommandLine.ExtractExecutable` now resolves bare module names
+  against System32 (adding `.dll`), so LSA/AppInit/driver DLLs signature-check
+  properly. 11 autostart surfaces now.
+
 ### Persistence — Startup folders
 - `StartupFolderEnumerator` surfaces items in the per-user and all-users Startup
   folders, resolving `.lnk` targets via WScript.Shell (COM, best-effort) so the

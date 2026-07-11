@@ -34,6 +34,7 @@ public sealed class PersistenceScanner
             new BootExecuteEnumerator(),
             new WmiSubscriptionEnumerator(),
             new StartupFolderEnumerator(),
+            new LsaPackagesEnumerator(),
         };
 
     /// <summary>

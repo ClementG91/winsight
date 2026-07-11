@@ -15,7 +15,8 @@ public enum AutostartVector
     BootExecute,
     WmiSubscription,
     StartupFolder,
-    // Phase 1.2+: print monitors, LSA/SSP packages, ...
+    LsaPackage,
+    // Phase 1.2+: print monitors, netsh helpers, COM hijacks, ...
 }
 
 /// <summary>
