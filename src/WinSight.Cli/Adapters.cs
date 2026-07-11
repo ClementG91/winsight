@@ -16,8 +16,10 @@ internal static class Adapters
 {
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
+    // Native WinVerifyTrust first (fast, tamper-checking), catalog-aware PS fallback
+    // for catalog-signed binaries, managed fallback below that — all cached.
     private static readonly ISignatureVerifier SharedVerifier =
-        new CachingSignatureVerifier(new AuthenticodeVerifier());
+        new CachingSignatureVerifier(new NativeSignatureVerifier());
 
     public static ToolReport Persistence(bool flaggedOnly)
     {
