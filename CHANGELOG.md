@@ -4,6 +4,15 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Extensions — browser extension audit (supply-chain)
+- `ExtensionScanner` reads the Chromium-family profiles (Chrome, Edge, Brave, Vivaldi,
+  Opera) for installed extensions and parses each manifest — name (with `__MSG_`
+  locale resolution), version and declared permissions/host_permissions. Extensions
+  declaring broad-reach permissions (`<all_urls>`, `tabs`, `webRequest`, `cookies`,
+  `nativeMessaging`, `debugger`, `scripting`, wildcard hosts, …) are flagged high-risk.
+  New `winsight extensions` (alias `ext`) subcommand, included in `all`. Read-only,
+  roots injectable so parsing is unit-tested against a fixture (no browser needed).
+
 ### Modules — loaded-DLL audit (injection / side-load detection)
 - `ModuleLister` enumerates the DLLs loaded into every accessible running process
   (System.Diagnostics) and batch-verifies each distinct module's Authenticode

@@ -1,4 +1,5 @@
 using WinSight.AvMonitor;
+using WinSight.Browser;
 using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.Modules;
@@ -172,6 +173,35 @@ internal static class Adapters
                 });
         }
         return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
+    }
+
+    public static ToolReport Extensions(bool flaggedOnly)
+    {
+        var extensions = new ExtensionScanner().Snapshot();
+        var b = new ToolReport.Builder("extensions");
+        foreach (var e in extensions.Where(e => !flaggedOnly || e.HighRisk)
+                     .OrderByDescending(e => e.HighRisk)
+                     .ThenBy(e => e.Browser, StringComparer.OrdinalIgnoreCase)
+                     .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var perms = string.Join(", ", e.Permissions.Concat(e.HostPermissions));
+            b.Add(
+                e.HighRisk ? Severity.Notable : Severity.Info,
+                $"{e.Browser}/{e.Name}",
+                perms.Length > 0 ? perms : "(no declared permissions)",
+                new Dictionary<string, string?>
+                {
+                    ["browser"] = e.Browser,
+                    ["id"] = e.Id,
+                    ["name"] = e.Name,
+                    ["version"] = e.Version,
+                    ["permissions"] = string.Join(" ", e.Permissions),
+                    ["hostPermissions"] = string.Join(" ", e.HostPermissions),
+                    ["highRisk"] = e.HighRisk.ToString(),
+                    ["path"] = e.Path,
+                });
+        }
+        return b.Build($"{extensions.Count} extension(s), {extensions.Count(e => e.HighRisk)} high-risk");
     }
 
     public static ToolReport Modules(bool flaggedOnly)

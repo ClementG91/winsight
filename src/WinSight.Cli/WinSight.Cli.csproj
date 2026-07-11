@@ -14,5 +14,6 @@
     <ProjectReference Include="..\WinSight.Firewall\WinSight.Firewall.csproj" />
     <ProjectReference Include="..\WinSight.Processes\WinSight.Processes.csproj" />
     <ProjectReference Include="..\WinSight.Modules\WinSight.Modules.csproj" />
+    <ProjectReference Include="..\WinSight.Browser\WinSight.Browser.csproj" />
   </ItemGroup>
 </Project>
