@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — COM hijacking (HKCU CLSID)
+- `ComHijackEnumerator` surfaces per-user COM server registrations
+  (HKCU\Software\Classes\CLSID\{clsid}\InprocServer32) — COM hijacking (MITRE
+  T1546.015). HKCU-scoped for high signal (vs the thousands of legit HKLM system
+  CLSIDs). 14 autostart surfaces now.
+
 ### Persistence — print monitors + netsh helpers
 - `PrintMonitorEnumerator` (spooler-loaded Driver DLLs, run as SYSTEM) and
   `NetshHelperEnumerator` (DLLs loaded when netsh runs) — two more classic ASEPs.

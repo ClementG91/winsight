@@ -347,6 +347,52 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
+/// Per-user COM server registrations (HKCU\Software\Classes\CLSID\{clsid}\
+/// InprocServer32). A user-level CLSID that shadows a system one lets malware load
+/// its DLL whenever that COM object is instantiated — COM hijacking (MITRE
+/// T1546.015). HKCU is scanned (not the thousands of legitimate HKLM system CLSIDs),
+/// which is where the high-signal per-user hijacks live.
+/// </summary>
+public sealed class ComHijackEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Classes\CLSID";
+
+    public string Surface => "COM (HKCU CLSID)";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
+        using var root = baseKey.OpenSubKey(Path);
+        if (root is null)
+        {
+            yield break;
+        }
+        foreach (var clsid in root.GetSubKeyNames())
+        {
+            RawAutostart? entry = null;
+            try
+            {
+                using var server = root.OpenSubKey($@"{clsid}\InprocServer32");
+                if (server?.GetValue(null) is string dll && dll.Trim().Length > 0)
+                {
+                    entry = new RawAutostart(
+                        AutostartVector.ComHijack, clsid,
+                        $"HKCU\\{Path}\\{clsid}\\InprocServer32", dll);
+                }
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Unreadable CLSID key — skip.
+            }
+            if (entry is { } e)
+            {
+                yield return e;
+            }
+        }
+    }
+}
+
+/// <summary>
 /// Print monitors — DLLs loaded by the print spooler service (spoolsv). A rogue
 /// monitor Driver DLL runs as SYSTEM at boot; a documented persistence vector.
 /// </summary>

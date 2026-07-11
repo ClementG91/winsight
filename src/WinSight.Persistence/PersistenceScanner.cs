@@ -37,6 +37,7 @@ public sealed class PersistenceScanner
             new LsaPackagesEnumerator(),
             new PrintMonitorEnumerator(),
             new NetshHelperEnumerator(),
+            new ComHijackEnumerator(),
         };
 
     /// <summary>

@@ -18,7 +18,8 @@ public enum AutostartVector
     LsaPackage,
     PrintMonitor,
     NetshHelper,
-    // Phase 1.2+: COM hijacks, screensaver, time providers, ...
+    ComHijack,
+    // Phase 1.2+: screensaver, time providers, AppCert/AppInit shims, ...
 }
 
 /// <summary>
