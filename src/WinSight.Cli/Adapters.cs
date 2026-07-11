@@ -100,6 +100,29 @@ internal static class Adapters
         }
     }
 
+    /// <summary>Runs the live DNS (ETW) watcher, printing queries until Ctrl+C.</summary>
+    public static int WatchDns()
+    {
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+        Console.WriteLine("Watching DNS queries (ETW) — Ctrl+C to stop.");
+        try
+        {
+            new DnsEtwWatcher().Watch(
+                e => Console.WriteLine($"  {e.Type,-5} {e.Name}  (pid {e.ProcessId})"), cts.Token);
+            return 0;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine("Live DNS (ETW) requires Administrator privileges.");
+            return 1;
+        }
+    }
+
     public static ToolReport CameraMic(bool flaggedOnly)
     {
         var usages = new CapabilityAccessReader().Read();

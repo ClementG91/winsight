@@ -4,6 +4,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Management" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
 </Project>

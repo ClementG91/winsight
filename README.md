@@ -106,8 +106,8 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 - **Connections** (Netiquette-class) — active TCP/UDP (IPv4 + IPv6) via native IP
   Helper tables (GetExtendedTcpTable/Udp), attributed to the owning process + its
   signature; flags external, established, unsigned owners.
-- **DNS** (DNSMonitor-class) — recently resolved domains + answers from the resolver
-  cache (MSFT_DNSClientCache).
+- **DNS** (DNSMonitor-class) — recently resolved domains from the resolver cache, plus
+  real-time `dns --watch` (live ETW queries, Administrator).
 - **Firewall** (LuLu-class, read-only) — lists Windows Defender Firewall rules
   (`winsight firewall`). An enforcing per-app firewall is a later phase.
 
