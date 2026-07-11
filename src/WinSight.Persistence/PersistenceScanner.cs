@@ -40,6 +40,7 @@ public sealed class PersistenceScanner
             new ComHijackEnumerator(),
             new AppCertDllsEnumerator(),
             new TimeProviderEnumerator(),
+            new ScreensaverEnumerator(),
         };
 
     /// <summary>
