@@ -153,6 +153,54 @@ public sealed class PersistenceScannerIntegrationTests
     }
 }
 
+public sealed class HashUtilTests
+{
+    [Fact]
+    public void Sha256File_HashesContent()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.txt");
+        File.WriteAllText(file, "abc");
+        try
+        {
+            Assert.Equal(
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                HashUtil.Sha256File(file));
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void Sha256File_Missing_ReturnsNull()
+    {
+        Assert.Null(HashUtil.Sha256File(@"C:\nope\ghost.bin"));
+    }
+}
+
+public sealed class VirusTotalParseTests
+{
+    [Fact]
+    public void ParseStats_ReadsAnalysisStats()
+    {
+        const string json =
+            """{"data":{"attributes":{"last_analysis_stats":{"malicious":3,"suspicious":1,"undetected":60,"harmless":0,"timeout":0}}}}""";
+        var v = VirusTotalClient.ParseStats(json, "abcd");
+        Assert.NotNull(v);
+        Assert.Equal(3, v.Malicious);
+        Assert.Equal(1, v.Suspicious);
+        Assert.Equal(64, v.Total);
+        Assert.Contains("abcd", v.Permalink);
+    }
+
+    [Fact]
+    public void ParseStats_Malformed_ReturnsNull()
+    {
+        Assert.Null(VirusTotalClient.ParseStats("{}", "x"));
+    }
+}
+
 public sealed class CachingSignatureVerifierTests
 {
     private sealed class CountingVerifier : ISignatureVerifier

@@ -119,6 +119,10 @@ fallback that never throws. All tools emit a shared report shape
 GUI/automation. Authored on Linux; CI on `windows-latest` is the compiler of record.
 Central Package Management + `.editorconfig`.
 
+**Reputation is opt-in.** WinSight is local-only by default; the *only* network call
+is an optional VirusTotal lookup for flagged items, enabled solely by setting your own
+`WINSIGHT_VT_KEY`. No key → no network, no telemetry.
+
 See [CHANGELOG.md](CHANGELOG.md) for step-by-step progress.
 
 Next: ETW DNS monitoring, the WFP firewall (LuLu-class), a GUI/tray shell over the
