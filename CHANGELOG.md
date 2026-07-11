@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Firewall — program + ports per rule
+- `FirewallRuleReader` now enriches each rule with its bound program
+  (MSFT_NetFirewallApplicationFilter) and protocol/ports (MSFT_NetFirewallPortFilter),
+  joined by InstanceID — the LuLu-relevant "which app, which ports". Best-effort:
+  degrades to name-only if the filters aren't present.
+
 ### Firewall — rule viewer (LuLu-class, read-only phase 1)
 - `FirewallRuleReader` lists Windows Defender Firewall rules (MSFT_NetFirewallRule
   via System.Management) — see what your firewall allows/blocks. New `winsight

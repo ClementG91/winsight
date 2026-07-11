@@ -93,13 +93,16 @@ internal static class Adapters
         {
             foreach (var r in enabled.OrderBy(r => r.Direction).ThenBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
             {
-                b.Add(Severity.Info, $"{r.Direction}/{r.Action} — {r.DisplayName}", string.Empty,
+                var detail = string.Join("  ", new[] { r.Program, r.Ports }.Where(s => !string.IsNullOrEmpty(s)));
+                b.Add(Severity.Info, $"{r.Direction}/{r.Action} — {r.DisplayName}", detail,
                     new Dictionary<string, string?>
                     {
                         ["name"] = r.DisplayName,
                         ["direction"] = r.Direction.ToString(),
                         ["action"] = r.Action.ToString(),
                         ["enabled"] = "True",
+                        ["program"] = r.Program,
+                        ["ports"] = r.Ports,
                     });
             }
         }

@@ -21,8 +21,15 @@ public enum FirewallAction
 /// <param name="Direction">Inbound or outbound.</param>
 /// <param name="Action">Allow or block.</param>
 /// <param name="Enabled">Whether the rule is currently active.</param>
+/// <param name="Program">The bound executable, when the rule targets one.</param>
+/// <param name="Ports">A "protocol:ports" summary, when the rule specifies one.</param>
 public sealed record FirewallRule(
-    string DisplayName, FirewallDirection Direction, FirewallAction Action, bool Enabled);
+    string DisplayName,
+    FirewallDirection Direction,
+    FirewallAction Action,
+    bool Enabled,
+    string? Program,
+    string? Ports);
 
 /// <summary>Maps the MSFT_NetFirewallRule numeric enums to WinSight's.</summary>
 public static class FirewallEnum
