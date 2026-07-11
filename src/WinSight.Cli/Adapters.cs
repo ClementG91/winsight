@@ -3,6 +3,7 @@ using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
+using WinSight.Processes;
 using WinSight.Reporting;
 
 namespace WinSight.Cli;
@@ -145,6 +146,31 @@ internal static class Adapters
                 });
         }
         return b.Build($"{usages.Count} recorded use(s), {usages.Count(u => u.Active)} live now");
+    }
+
+    public static ToolReport Processes(bool flaggedOnly)
+    {
+        var procs = new ProcessLister(SharedVerifier).Snapshot();
+        var b = new ToolReport.Builder("processes");
+        foreach (var p in procs.Where(p => !flaggedOnly || p.Unsigned)
+                     .OrderByDescending(p => p.Unsigned).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            b.Add(
+                p.Unsigned ? Severity.Notable : Severity.Info,
+                $"{p.Name} (pid {p.Pid})",
+                p.Path ?? "<no image>",
+                new Dictionary<string, string?>
+                {
+                    ["pid"] = p.Pid.ToString(),
+                    ["name"] = p.Name,
+                    ["path"] = p.Path,
+                    ["parentPid"] = p.ParentPid.ToString(),
+                    ["commandLine"] = p.CommandLine,
+                    ["signature"] = p.Signature.State.ToString(),
+                    ["signer"] = p.Signature.Signer,
+                });
+        }
+        return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
     }
 
     public static ToolReport Firewall(bool flaggedOnly)

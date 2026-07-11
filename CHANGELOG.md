@@ -4,6 +4,15 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Processes — running-process viewer (TaskExplorer-class)
+- `ProcessLister` snapshots every running process via `Win32_Process` (System.Management):
+  pid, name, full image path, parent pid and command line, then batch-verifies each
+  distinct image's Authenticode signature through the shared verifier — so unsigned or
+  untrusted running code surfaces as notable. New `winsight processes` (alias `ps`)
+  subcommand; `--flagged` shows only unsigned/untrusted images, `--json` for the GUI.
+  Read-only, no admin needed for the basics. Integration test asserts a non-empty,
+  well-formed snapshot (incl. the test process) and honours the injected verifier.
+
 ### DNS — real-time ETW watch
 - `DnsEtwWatcher` opens an ETW session on Microsoft-Windows-DNS-Client for live DNS
   visibility: `winsight dns --watch` prints every name a process resolves as it

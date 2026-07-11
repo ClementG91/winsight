@@ -9,6 +9,7 @@ using WinSight.Reporting;
 // Usage:
 //   winsight [persistence|av|net|dns|all]   (default: all)
 //   winsight firewall                   list Windows Firewall rules
+//   winsight processes                  running processes + signatures
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight dns --watch                live DNS queries via ETW (Administrator)
 //   winsight ... --flagged              only noteworthy items
@@ -27,6 +28,7 @@ if (args.Contains("--help") || args.Contains("-h"))
         Usage:
           winsight [persistence|av|net|dns|all]   run checks (default: all)
           winsight firewall                       list Windows Firewall rules
+          winsight processes                      running processes + signatures
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
 
         Options:
@@ -73,6 +75,10 @@ switch (command)
     case "fw":
         reports.Add(Adapters.Firewall(flaggedOnly));
         break;
+    case "processes":
+    case "ps":
+        reports.Add(Adapters.Processes(flaggedOnly));
+        break;
     case "all":
         reports.Add(Adapters.Persistence(flaggedOnly));
         reports.Add(Adapters.CameraMic(flaggedOnly));
@@ -80,7 +86,8 @@ switch (command)
         reports.Add(Adapters.Dns(flaggedOnly));
         break;
     default:
-        Console.Error.WriteLine($"unknown command '{command}' (persistence | av | net | dns | firewall | all)");
+        Console.Error.WriteLine(
+            $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | all)");
         return 2;
 }
 
