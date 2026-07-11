@@ -16,7 +16,9 @@ public enum AutostartVector
     WmiSubscription,
     StartupFolder,
     LsaPackage,
-    // Phase 1.2+: print monitors, netsh helpers, COM hijacks, ...
+    PrintMonitor,
+    NetshHelper,
+    // Phase 1.2+: COM hijacks, screensaver, time providers, ...
 }
 
 /// <summary>

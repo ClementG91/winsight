@@ -4,6 +4,11 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — print monitors + netsh helpers
+- `PrintMonitorEnumerator` (spooler-loaded Driver DLLs, run as SYSTEM) and
+  `NetshHelperEnumerator` (DLLs loaded when netsh runs) — two more classic ASEPs.
+  13 autostart surfaces now.
+
 ### Persistence — LSA packages + System32 module resolution
 - `LsaPackagesEnumerator` surfaces LSA Security/Authentication/Notification packages
   (DLLs loaded into LSASS — a classic SSP / password-filter persistence + credential

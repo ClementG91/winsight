@@ -347,6 +347,68 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
+/// Print monitors — DLLs loaded by the print spooler service (spoolsv). A rogue
+/// monitor Driver DLL runs as SYSTEM at boot; a documented persistence vector.
+/// </summary>
+public sealed class PrintMonitorEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SYSTEM\CurrentControlSet\Control\Print\Monitors";
+
+    public string Surface => "Print monitors";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var root = baseKey.OpenSubKey(Path);
+        if (root is null)
+        {
+            yield break;
+        }
+        foreach (var monitor in root.GetSubKeyNames())
+        {
+            using var sub = root.OpenSubKey(monitor);
+            if (sub?.GetValue("Driver") is string driver && driver.Trim().Length > 0)
+            {
+                yield return new RawAutostart(
+                    AutostartVector.PrintMonitor, monitor, $"HKLM\\{Path}\\{monitor} [Driver]", driver);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// Netsh helper DLLs — loaded when netsh.exe runs. A malicious helper registered
+/// here executes whenever netsh is invoked; a stealthy persistence spot.
+/// </summary>
+public sealed class NetshHelperEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Microsoft\NetSh";
+
+    public string Surface => "Netsh helpers";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            using var key = baseKey.OpenSubKey(Path);
+            if (key is null)
+            {
+                continue;
+            }
+            foreach (var name in key.GetValueNames())
+            {
+                if (key.GetValue(name) is string dll && dll.Trim().Length > 0)
+                {
+                    yield return new RawAutostart(
+                        AutostartVector.NetshHelper, name, $"HKLM\\{Path} [{view}]", dll);
+                }
+            }
+        }
+    }
+}
+
+/// <summary>
 /// LSA Security/Authentication/Notification packages — DLLs loaded into the highly
 /// privileged LSASS process. A malicious Security Support Provider or password-filter
 /// DLL registered here is a classic, powerful persistence + credential-theft vector.
