@@ -4,6 +4,13 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### DNS — real-time ETW watch
+- `DnsEtwWatcher` opens an ETW session on Microsoft-Windows-DNS-Client for live DNS
+  visibility: `winsight dns --watch` prints every name a process resolves as it
+  happens, complementing the one-shot cache reader. Requires Administrator (ETW
+  session); the session stops cleanly on Ctrl+C and a clear message is shown when not
+  elevated. Adds the `Microsoft.Diagnostics.Tracing.TraceEvent` dependency.
+
 ### Signatures — native WinVerifyTrust (perf, tamper)
 - `NativeSignatureVerifier` verifies the embedded Authenticode signature via
   WinVerifyTrust (native, no process spawn) — fast, and detects tampering directly.

@@ -10,6 +10,7 @@ using WinSight.Reporting;
 //   winsight [persistence|av|net|dns|all]   (default: all)
 //   winsight firewall                   list Windows Firewall rules
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
+//   winsight dns --watch                live DNS queries via ETW (Administrator)
 //   winsight ... --flagged              only noteworthy items
 //   winsight ... --json                 machine-readable output (GUI/automation)
 
@@ -45,6 +46,10 @@ var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?
 if ((command is "av" or "avmonitor") && args.Contains("--watch"))
 {
     return Adapters.WatchCameraMic();
+}
+if (command == "dns" && args.Contains("--watch"))
+{
+    return Adapters.WatchDns();
 }
 
 var reports = new List<ToolReport>();
