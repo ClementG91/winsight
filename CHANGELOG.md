@@ -4,6 +4,14 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Hosts — hosts-file hijack / AV-block detection
+- `HostsReader` parses the Windows hosts file and flags the two malware patterns: an
+  entry redirecting a hostname to a non-sink external address (phishing/MITM hijack),
+  or one blackholing a security/update domain (AV / Windows Update block). Benign
+  ad/tracker sink entries (`0.0.0.0`/`127.0.0.1`) are left unflagged. New `winsight
+  hosts` subcommand, included in `all`. Parsing is a pure static, unit-tested; the
+  real-file read is smoke-tested. Read-only.
+
 ### Certificates — trusted-root store audit (rogue-CA detection)
 - `CertStoreAuditor` reads the machine + user trusted-root stores (`X509Store`,
   read-only) and flags rogue-CA signals: a trusted root that holds a **private key**
