@@ -153,6 +153,50 @@ public sealed class PersistenceScannerIntegrationTests
     }
 }
 
+public sealed class NativeSignatureVerifierTests
+{
+    [Theory]
+    [InlineData(0x00000000u, SignatureState.SignedTrusted)]
+    [InlineData(0x80096010u, SignatureState.SignedUntrusted)] // TRUST_E_BAD_DIGEST
+    [InlineData(0x800B0004u, SignatureState.SignedUntrusted)] // subject not trusted
+    public void MapResult_DefiniteStates(uint hr, SignatureState expected)
+    {
+        Assert.Equal(expected, NativeSignatureVerifier.MapResult(hr));
+    }
+
+    [Theory]
+    [InlineData(0x800B0100u)] // TRUST_E_NOSIGNATURE -> defer to catalog
+    [InlineData(0x11111111u)] // unknown -> defer
+    public void MapResult_DefersToCatalog(uint hr)
+    {
+        Assert.Null(NativeSignatureVerifier.MapResult(hr));
+    }
+
+    [Fact]
+    public void Verify_CatalogSignedOsBinary_IsTrusted_ViaFallback()
+    {
+        // kernel32 is catalog-signed: WinVerifyTrust reports NOSIGNATURE, the catalog
+        // fallback resolves it — validating the full native->catalog chain.
+        var path = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
+        Assert.Equal(SignatureState.SignedTrusted, new NativeSignatureVerifier().Verify(path).State);
+    }
+
+    [Fact]
+    public void Verify_UnsignedFile_IsUnsigned()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
+        File.WriteAllText(file, "not a signed PE");
+        try
+        {
+            Assert.Equal(SignatureState.Unsigned, new NativeSignatureVerifier().Verify(file).State);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+}
+
 public sealed class HashUtilTests
 {
     [Fact]

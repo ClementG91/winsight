@@ -4,6 +4,15 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Signatures — native WinVerifyTrust (perf, tamper)
+- `NativeSignatureVerifier` verifies the embedded Authenticode signature via
+  WinVerifyTrust (native, no process spawn) — fast, and detects tampering directly.
+  Files with no embedded signature (catalog-signed OS binaries) defer to the
+  catalog-aware `AuthenticodeVerifier`; any native failure defers too, so a verdict is
+  never fabricated. Wired as the default (behind the cache). Uses only the stable
+  WINTRUST struct layouts; `MapResult` unit-tested + the native->catalog chain covered
+  by a Windows integration test.
+
 ### Reputation — opt-in VirusTotal
 - Optional VirusTotal file-reputation for flagged persistence items: set
   `WINSIGHT_VT_KEY` (your own API key) and each flagged, resolvable binary is SHA-256
