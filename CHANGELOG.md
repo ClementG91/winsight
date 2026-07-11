@@ -4,6 +4,12 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Performance — shared signature-verdict cache
+- `CachingSignatureVerifier` (decorator) caches verdicts by path + last-write time and
+  is shared across tools, so the same system binaries checked by persistence and
+  connections in one `winsight all` run are verified once; cache auto-invalidates on
+  file change.
+
 ### Persistence — AppCertDLLs + time providers
 - `AppCertDllsEnumerator` (DLLs injected into processes that call CreateProcess/etc.,
   MITRE T1546.009) and `TimeProviderEnumerator` (W32Time provider DllNames). 16

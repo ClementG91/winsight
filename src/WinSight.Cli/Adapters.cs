@@ -1,4 +1,5 @@
 using WinSight.AvMonitor;
+using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
@@ -13,9 +14,14 @@ namespace WinSight.Cli;
 /// </summary>
 internal static class Adapters
 {
+    // One caching verifier shared across tools, so the same system binaries checked
+    // by both persistence and connections in a single `all` run are verified once.
+    private static readonly ISignatureVerifier SharedVerifier =
+        new CachingSignatureVerifier(new AuthenticodeVerifier());
+
     public static ToolReport Persistence(bool flaggedOnly)
     {
-        var entries = new PersistenceScanner().Scan();
+        var entries = new PersistenceScanner(verifier: SharedVerifier).Scan();
         var b = new ToolReport.Builder("persistence");
         foreach (var e in entries.Where(e => !flaggedOnly || e.IsSuspicious)
                      .OrderByDescending(e => e.IsSuspicious).ThenBy(e => e.Vector))
@@ -134,7 +140,7 @@ internal static class Adapters
 
     public static ToolReport Connections(bool flaggedOnly)
     {
-        var connections = new ConnectionMonitor().Snapshot();
+        var connections = new ConnectionMonitor(SharedVerifier).Snapshot();
         var b = new ToolReport.Builder("connections");
         foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)
                      .OrderByDescending(c => c.Noteworthy).ThenByDescending(c => c.External))

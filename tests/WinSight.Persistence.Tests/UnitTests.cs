@@ -153,6 +153,61 @@ public sealed class PersistenceScannerIntegrationTests
     }
 }
 
+public sealed class CachingSignatureVerifierTests
+{
+    private sealed class CountingVerifier : ISignatureVerifier
+    {
+        public int Calls;
+
+        public SignatureVerdict Verify(string path) => VerifyMany(new[] { path })[path];
+
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+        {
+            Calls += paths.Count;
+            return paths.ToDictionary(p => p, _ => SignatureVerdict.Unsigned, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void Verify_CachesByPathAndMtime()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
+        File.WriteAllText(file, "x");
+        try
+        {
+            var inner = new CountingVerifier();
+            var caching = new CachingSignatureVerifier(inner);
+            Assert.Equal(SignatureState.Unsigned, caching.Verify(file).State);
+            Assert.Equal(SignatureState.Unsigned, caching.Verify(file).State); // cache hit
+            Assert.Equal(1, inner.Calls);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+
+    [Fact]
+    public void Verify_RevalidatesAfterMtimeChange()
+    {
+        var file = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
+        File.WriteAllText(file, "x");
+        try
+        {
+            var inner = new CountingVerifier();
+            var caching = new CachingSignatureVerifier(inner);
+            caching.Verify(file);
+            File.SetLastWriteTimeUtc(file, DateTime.UtcNow.AddMinutes(5));
+            caching.Verify(file);
+            Assert.Equal(2, inner.Calls); // re-verified after the file changed
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
+}
+
 public sealed class AuthenticodeMapStatusTests
 {
     [Theory]
