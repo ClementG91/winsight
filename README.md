@@ -119,6 +119,9 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 - **Extensions** (browser supply-chain) — installed extensions across the
   Chromium-family browsers with their declared permissions (`winsight extensions` /
   `ext`); flags extensions holding broad-reach permissions. Read-only.
+- **Certificates** (rogue-CA detection) — audits the trusted-root stores
+  (`winsight certs`); flags roots holding a private key, weak signatures (SHA-1/MD5)
+  or undersized RSA keys — the silent-TLS-interception signal. Read-only.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises

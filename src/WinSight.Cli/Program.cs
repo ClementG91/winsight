@@ -12,6 +12,7 @@ using WinSight.Reporting;
 //   winsight processes                  running processes + signatures
 //   winsight modules                    unsigned DLLs loaded into processes
 //   winsight extensions                 browser extensions + risky permissions
+//   winsight certs                      trusted root CAs + rogue-root signals
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight dns --watch                live DNS queries via ETW (Administrator)
 //   winsight ... --flagged              only noteworthy items
@@ -33,6 +34,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight processes                      running processes + signatures
           winsight modules                        unsigned DLLs loaded into processes
           winsight extensions                     browser extensions + risky permissions
+          winsight certs                          trusted root CAs + rogue-root signals
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
 
         Options:
@@ -91,6 +93,10 @@ switch (command)
     case "ext":
         reports.Add(Adapters.Extensions(flaggedOnly));
         break;
+    case "certificates":
+    case "certs":
+        reports.Add(Adapters.Certificates(flaggedOnly));
+        break;
     case "all":
         reports.Add(Adapters.Persistence(flaggedOnly));
         reports.Add(Adapters.CameraMic(flaggedOnly));
@@ -100,7 +106,7 @@ switch (command)
         break;
     default:
         Console.Error.WriteLine(
-            $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | all)");
+            $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | all)");
         return 2;
 }
 

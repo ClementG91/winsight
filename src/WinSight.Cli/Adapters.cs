@@ -1,5 +1,6 @@
 using WinSight.AvMonitor;
 using WinSight.Browser;
+using WinSight.Certificates;
 using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.Modules;
@@ -173,6 +174,34 @@ internal static class Adapters
                 });
         }
         return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
+    }
+
+    public static ToolReport Certificates(bool flaggedOnly)
+    {
+        var certs = new CertStoreAuditor().Snapshot();
+        var b = new ToolReport.Builder("certificates");
+        foreach (var c in certs.Where(c => !flaggedOnly || c.Notable)
+                     .OrderByDescending(c => c.Notable)
+                     .ThenBy(c => c.Subject, StringComparer.OrdinalIgnoreCase))
+        {
+            b.Add(
+                c.Notable ? Severity.Notable : Severity.Info,
+                $"{c.Store} — {c.Subject}",
+                c.Notable ? string.Join("; ", c.Risks) : $"{c.SignatureAlgorithm}, {c.KeyBits}-bit",
+                new Dictionary<string, string?>
+                {
+                    ["store"] = c.Store,
+                    ["subject"] = c.Subject,
+                    ["issuer"] = c.Issuer,
+                    ["thumbprint"] = c.Thumbprint,
+                    ["signatureAlgorithm"] = c.SignatureAlgorithm,
+                    ["keyBits"] = c.KeyBits.ToString(),
+                    ["hasPrivateKey"] = c.HasPrivateKey.ToString(),
+                    ["notAfter"] = c.NotAfter.ToString("o"),
+                    ["risks"] = c.Risks.Count > 0 ? string.Join("; ", c.Risks) : null,
+                });
+        }
+        return b.Build($"{certs.Count} trusted root(s), {certs.Count(c => c.Notable)} flagged");
     }
 
     public static ToolReport Extensions(bool flaggedOnly)
