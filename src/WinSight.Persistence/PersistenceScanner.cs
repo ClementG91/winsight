@@ -33,6 +33,7 @@ public sealed class PersistenceScanner
             new ActiveSetupEnumerator(),
             new BootExecuteEnumerator(),
             new WmiSubscriptionEnumerator(),
+            new StartupFolderEnumerator(),
         };
 
     /// <summary>

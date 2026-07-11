@@ -14,8 +14,8 @@ public enum AutostartVector
     ActiveSetup,
     BootExecute,
     WmiSubscription,
-    // Phase 1.2+: StartupFolder (needs .lnk target resolution), print monitors,
-    // LSA/SSP packages, ...
+    StartupFolder,
+    // Phase 1.2+: print monitors, LSA/SSP packages, ...
 }
 
 /// <summary>
