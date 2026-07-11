@@ -35,6 +35,8 @@ public sealed class PersistenceScanner
             new WmiSubscriptionEnumerator(),
             new StartupFolderEnumerator(),
             new LsaPackagesEnumerator(),
+            new PrintMonitorEnumerator(),
+            new NetshHelperEnumerator(),
         };
 
     /// <summary>
