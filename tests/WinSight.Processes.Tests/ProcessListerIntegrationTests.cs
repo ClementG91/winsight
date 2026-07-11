@@ -1,4 +1,5 @@
 using WinSight.Core;
+using Xunit;
 
 namespace WinSight.Processes.Tests;
 
