@@ -4,6 +4,11 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — Startup folders
+- `StartupFolderEnumerator` surfaces items in the per-user and all-users Startup
+  folders, resolving `.lnk` targets via WScript.Shell (COM, best-effort) so the
+  signature check sees the real binary. 10 autostart surfaces now.
+
 ### Firewall — program + ports per rule
 - `FirewallRuleReader` now enriches each rule with its bound program
   (MSFT_NetFirewallApplicationFilter) and protocol/ports (MSFT_NetFirewallPortFilter),
