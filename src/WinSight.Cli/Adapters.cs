@@ -22,14 +22,20 @@ internal static class Adapters
     public static ToolReport Persistence(bool flaggedOnly)
     {
         var entries = new PersistenceScanner(verifier: SharedVerifier).Scan();
+
+        // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
+        var vt = VtLookups(entries.Where(e => e.IsSuspicious && e.ImagePath is not null)
+            .Select(e => e.ImagePath!));
+
         var b = new ToolReport.Builder("persistence");
         foreach (var e in entries.Where(e => !flaggedOnly || e.IsSuspicious)
                      .OrderByDescending(e => e.IsSuspicious).ThenBy(e => e.Vector))
         {
+            var report = e.ImagePath is not null && vt.TryGetValue(e.ImagePath, out var v) ? v : null;
             b.Add(
                 e.IsSuspicious ? Severity.Notable : Severity.Info,
                 $"{e.Vector}/{e.Name}",
-                e.ImagePath ?? e.Command,
+                report is not null ? $"{e.ImagePath}  [VT {report.Malicious}/{report.Total}]" : e.ImagePath ?? e.Command,
                 new Dictionary<string, string?>
                 {
                     ["vector"] = e.Vector.ToString(),
@@ -39,9 +45,36 @@ internal static class Adapters
                     ["image"] = e.ImagePath,
                     ["signature"] = e.Signature.State.ToString(),
                     ["signer"] = e.Signature.Signer,
+                    ["vtMalicious"] = report?.Malicious.ToString(),
+                    ["vtTotal"] = report?.Total.ToString(),
+                    ["vtLink"] = report?.Permalink,
                 });
         }
         return b.Build($"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged");
+    }
+
+    // VirusTotal lookups for the given image paths — opt-in (WINSIGHT_VT_KEY) and
+    // capped to stay within the free-tier rate limit. Empty when no key is set (the
+    // tool stays local-only unless the user provides their own key).
+    private static IReadOnlyDictionary<string, VtVerdict> VtLookups(IEnumerable<string> imagePaths)
+    {
+        var results = new Dictionary<string, VtVerdict>(StringComparer.OrdinalIgnoreCase);
+        var apiKey = Environment.GetEnvironmentVariable("WINSIGHT_VT_KEY");
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            return results;
+        }
+        var client = new VirusTotalClient(apiKey);
+        const int cap = 8;
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var path in imagePaths.Where(p => seen.Add(p)).Take(cap))
+        {
+            if (HashUtil.Sha256File(path) is { } sha && client.Lookup(sha) is { } verdict)
+            {
+                results[path] = verdict;
+            }
+        }
+        return results;
     }
 
     /// <summary>Runs the live camera/mic monitor, printing transitions until Ctrl+C.</summary>

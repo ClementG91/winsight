@@ -4,6 +4,13 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Reputation — opt-in VirusTotal
+- Optional VirusTotal file-reputation for flagged persistence items: set
+  `WINSIGHT_VT_KEY` (your own API key) and each flagged, resolvable binary is SHA-256
+  hashed and looked up (capped for rate limits) — malicious/total counts + a report
+  link in text and `--json`. STRICTLY opt-in and the ONLY network call; without a key
+  WinSight stays 100% local. `HashUtil` + `VirusTotalClient` (ParseStats unit-tested).
+
 ### Performance — shared signature-verdict cache
 - `CachingSignatureVerifier` (decorator) caches verdicts by path + last-write time and
   is shared across tools, so the same system binaries checked by persistence and
