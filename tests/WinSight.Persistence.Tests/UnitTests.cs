@@ -29,6 +29,15 @@ public sealed class CommandLineTests
     }
 
     [Fact]
+    public void ExtractExecutable_BareModuleName_ResolvesInSystem32()
+    {
+        // kernel32 -> C:\Windows\System32\kernel32.dll (uses the real System32).
+        var resolved = CommandLine.ExtractExecutable("kernel32");
+        Assert.NotNull(resolved);
+        Assert.EndsWith("kernel32.dll", resolved, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ExtractExecutable_Empty_ReturnsNull()
     {
         Assert.Null(CommandLine.ExtractExecutable("   "));
