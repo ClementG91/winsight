@@ -51,7 +51,7 @@ public sealed class ModuleListerIntegrationTests
             var map = new Dictionary<string, SignatureVerdict>(System.StringComparer.OrdinalIgnoreCase);
             foreach (var p in paths)
             {
-                map[p] = SignatureVerdict.SignedTrusted;
+                map[p] = new SignatureVerdict(SignatureState.SignedTrusted, "CN=Test");
             }
             return map;
         }
