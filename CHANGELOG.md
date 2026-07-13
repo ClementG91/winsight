@@ -4,6 +4,36 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Core — catalog signatures actually work now (major false-positive fix)
+Running the tools against a real Windows box exposed a signal-destroying bug and
+several large false-positive sources. A security tool that cries wolf is worse than
+none, so this pass makes the verdicts trustworthy:
+- **Catalog verification was silently failing.** The catalog-aware fallback fed its
+  script to `powershell -Command -` over stdin, which produced NO output from a
+  non-interactive child process — so every catalog-signed system binary (cmd.exe,
+  DWrite.dll, every driver…) read as *Unsigned*. Switched to `-EncodedCommand`
+  (base64 UTF-16LE). Result on a clean machine: modules unsigned **3097 → ~750**,
+  processes **73 → ~32**, persistence flagged **258 → 4**.
+- **New `Unknown` signature state.** A file whose signature *cannot be checked* (the
+  catalog probe failed, e.g. under heavy load) is now reported `Unknown` — never a
+  fabricated `Unsigned`. Only a definitive check yields `Unsigned`, so the tool
+  fails safe (silent) instead of failing loud (false alarms). `Unknown` is never a
+  flag-worthy signal.
+- **Chunking + retry.** Signature batches are split by script length (so the encoded
+  command never overflows the OS arg limit) and each chunk retries until every path
+  is covered, so a transient PowerShell hiccup no longer downgrades a whole chunk to
+  false "unsigned". The progress/error streams are silenced and drained so nothing
+  leaks to the terminal mid-scan.
+- **Certificates: no more SHA-1-self-signed false positives.** A root is *self-signed*,
+  so its own SHA-1 signature is not a trust input — nearly every established public
+  root (DigiCert, Baltimore, Comodo…) is SHA-1 self-signed. Weak-signature is now
+  flagged only on a NON-self-signed cert in the root store. Flagged roots **40 → 10**
+  (the remainder are genuine 1024-bit legacy roots).
+- **Persistence: driver ImagePaths resolve.** `\SystemRoot\…`, `\??\C:\…` and bare
+  `system32\drivers\x.sys` NT paths are normalised to real files, and the default
+  Winlogon shell (`explorer.exe`, which lives in `%windir%`) resolves — so ~150
+  legitimate Windows drivers and the default shell are no longer flagged "no image".
+
 ### Persistence — svchost ServiceDll payloads, HKCU Winlogon, SilentProcessExit
 - **ServiceDll resolution**: for svchost-hosted services the ImagePath is just
   svchost.exe (signed Microsoft) — the real payload is `Parameters\ServiceDll`. That

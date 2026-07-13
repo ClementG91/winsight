@@ -13,6 +13,7 @@ namespace WinSight.Certificates;
 /// <param name="KeyBits">Public key size in bits (0 when unknown).</param>
 /// <param name="IsRsa">Whether the public key is RSA (weak-key check only applies to RSA).</param>
 /// <param name="HasPrivateKey">Whether the machine holds the root's private key.</param>
+/// <param name="IsSelfSigned">Whether the certificate is self-signed (Subject == Issuer).</param>
 /// <param name="NotAfter">Expiry.</param>
 public sealed record TrustedCertificate(
     string Store,
@@ -23,6 +24,7 @@ public sealed record TrustedCertificate(
     int KeyBits,
     bool IsRsa,
     bool HasPrivateKey,
+    bool IsSelfSigned,
     DateTime NotAfter)
 {
     /// <summary>
@@ -39,9 +41,15 @@ public sealed record TrustedCertificate(
                 // Its presence means arbitrary trusted certificates can be minted locally.
                 risks.Add("trusted root holds a private key (can mint trusted certs)");
             }
-            if (IsWeakSignature(SignatureAlgorithm))
+            // A weak signature only matters when someone else vouched for the cert. A
+            // root is SELF-signed, so its own SHA-1 signature is not a trust input — the
+            // OS trusts it by identity, not by verifying that signature. Nearly every
+            // long-established public root (DigiCert, Baltimore, Comodo…) is SHA-1
+            // self-signed, so flagging those is pure noise. A weak signature on a
+            // NON-self-signed cert sitting in the root store, however, is genuinely odd.
+            if (!IsSelfSigned && IsWeakSignature(SignatureAlgorithm))
             {
-                risks.Add($"weak signature algorithm ({SignatureAlgorithm})");
+                risks.Add($"weak signature algorithm ({SignatureAlgorithm}) on a non-self-signed root-store cert");
             }
             if (IsRsa && KeyBits is > 0 and < 2048)
             {

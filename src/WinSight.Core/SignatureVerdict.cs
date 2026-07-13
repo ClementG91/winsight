@@ -17,6 +17,14 @@ public enum SignatureState
 
     /// <summary>Signed and the certificate chain validated to a trusted root.</summary>
     SignedTrusted,
+
+    /// <summary>
+    /// Verification could not be completed (e.g. the catalog check could not run), so
+    /// the standing is genuinely undetermined — NOT the same as "unsigned". A tool that
+    /// wants to earn trust must not cry wolf on files it simply failed to check, so
+    /// Unknown is never treated as a flag-worthy signal.
+    /// </summary>
+    Unknown,
 }
 
 /// <summary>
@@ -28,6 +36,7 @@ public readonly record struct SignatureVerdict(SignatureState State, string? Sig
 {
     public static readonly SignatureVerdict Missing = new(SignatureState.Missing, null);
     public static readonly SignatureVerdict Unsigned = new(SignatureState.Unsigned, null);
+    public static readonly SignatureVerdict Unknown = new(SignatureState.Unknown, null);
 
     /// <summary>True when the file carries any embedded signature (trusted or not).</summary>
     public bool IsSigned => State is SignatureState.SignedTrusted or SignatureState.SignedUntrusted;

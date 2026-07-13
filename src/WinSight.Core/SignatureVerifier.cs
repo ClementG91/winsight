@@ -10,10 +10,12 @@ namespace WinSight.Core;
 ///
 /// KNOWN LIMITS (Phase 2 hardening, tracked): this does NOT call WinVerifyTrust, so
 /// it does not check the PE hash against the signature, catalog (.cat) signatures,
-/// EKU=code-signing, or revocation. A tampered-but-signed binary can therefore read
-/// as SignedTrusted here. WinVerifyTrust (via CsWin32) replaces this before any
-/// blocking decision relies on it. Good enough for the read-only scanner's
-/// signed/unsigned triage; not a trust boundary yet.
+/// EKU=code-signing, or revocation. Because it cannot see CATALOG signatures (which
+/// cover most of Windows), a file with no EMBEDDED signature is reported as
+/// <see cref="SignatureState.Unknown"/> — "could not determine" — NOT
+/// <see cref="SignatureState.Unsigned"/>: claiming a catalog-signed system binary is
+/// unsigned would be a false alarm. It is the last-resort fallback behind the
+/// catalog-aware verifiers; genuine unsigned/trusted verdicts come from those.
 /// </summary>
 public sealed class SignatureVerifier : ISignatureVerifier
 {
@@ -50,7 +52,10 @@ public sealed class SignatureVerifier : ISignatureVerifier
         }
         catch (CryptographicException)
         {
-            return SignatureVerdict.Unsigned;
+            // No EMBEDDED signature — but this managed path cannot see catalog
+            // signatures, so it genuinely cannot tell "unsigned" from "catalog-signed".
+            // Report Unknown rather than fabricate an Unsigned false alarm.
+            return SignatureVerdict.Unknown;
         }
     }
 

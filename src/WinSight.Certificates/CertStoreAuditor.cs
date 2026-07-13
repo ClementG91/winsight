@@ -55,6 +55,7 @@ public sealed class CertStoreAuditor
             keyBits,
             isRsa,
             cert.HasPrivateKey,
+            string.Equals(cert.Subject, cert.Issuer, StringComparison.Ordinal),
             cert.NotAfter);
     }
 
