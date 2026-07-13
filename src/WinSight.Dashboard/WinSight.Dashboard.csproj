@@ -7,7 +7,7 @@
     <UseWindowsForms>true</UseWindowsForms>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\WinSight.Cli\WinSight.Cli.csproj" />
+    <ProjectReference Include="..\WinSight.Application\WinSight.Application.csproj" />
     <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
   </ItemGroup>
 </Project>

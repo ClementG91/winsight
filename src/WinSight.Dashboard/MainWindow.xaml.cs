@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
-using WinSight.Cli;
+using WinSight.Application;
 using WinSight.Reporting;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>WinSight.Application</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+    <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
+    <ProjectReference Include="..\WinSight.Persistence\WinSight.Persistence.csproj" />
+    <ProjectReference Include="..\WinSight.AvMonitor\WinSight.AvMonitor.csproj" />
+    <ProjectReference Include="..\WinSight.NetMonitor\WinSight.NetMonitor.csproj" />
+    <ProjectReference Include="..\WinSight.Firewall\WinSight.Firewall.csproj" />
+    <ProjectReference Include="..\WinSight.Processes\WinSight.Processes.csproj" />
+    <ProjectReference Include="..\WinSight.Modules\WinSight.Modules.csproj" />
+    <ProjectReference Include="..\WinSight.Browser\WinSight.Browser.csproj" />
+    <ProjectReference Include="..\WinSight.Certificates\WinSight.Certificates.csproj" />
+    <ProjectReference Include="..\WinSight.Hosts\WinSight.Hosts.csproj" />
+  </ItemGroup>
+</Project>

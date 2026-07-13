@@ -64,6 +64,16 @@ public sealed class OutboundPolicyEvaluatorTests
 
         Assert.Throws<ArgumentException>(() => new OutboundPolicyEvaluator(policies));
     }
+
+    [Theory]
+    [InlineData("agent.exe")]
+    [InlineData(".\\agent.exe")]
+    public void Evaluate_RejectsRelativeExecutablePath(string path)
+    {
+        var evaluator = new OutboundPolicyEvaluator([]);
+
+        Assert.Throws<ArgumentException>(() => evaluator.Evaluate(path));
+    }
 }
 
 // Integration test — reads the real Windows Firewall rules on the CI runner.

@@ -14,6 +14,7 @@ winsight/
   src/
     WinSight.Core/         # signatures, hashes, opt-in reputation
     WinSight.Reporting/    # stable shared report contract
+    WinSight.Application/  # scanner orchestration shared by CLI + dashboard
     WinSight.Persistence/  # autostart enumeration
     WinSight.AvMonitor/    # camera/mic history + live transitions
     WinSight.NetMonitor/   # IP Helper connections + DNS cache/ETW

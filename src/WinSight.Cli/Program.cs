@@ -1,5 +1,5 @@
 using System.Reflection;
-using WinSight.Cli;
+using WinSight.Application;
 using WinSight.Reporting;
 
 // winsight — the unified suite entry point. One signed binary runs every WinSight

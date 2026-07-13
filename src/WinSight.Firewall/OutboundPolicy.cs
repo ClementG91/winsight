@@ -47,6 +47,10 @@ public sealed class OutboundPolicyEvaluator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         var expanded = Environment.ExpandEnvironmentVariables(executablePath.Trim().Trim('"'));
+        if (!Path.IsPathFullyQualified(expanded))
+        {
+            throw new ArgumentException("Firewall policy paths must be absolute.", nameof(executablePath));
+        }
         return Path.GetFullPath(expanded);
     }
 }

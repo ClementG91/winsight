@@ -2,7 +2,7 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
-## Unreleased — v0.2.0
+## v0.2.0 — 2026-07-14
 
 ### Dashboard/tray, Phase 2 contracts, and release hardening
 - **WPF dashboard + system tray**: `winsight-dashboard` consumes the same shared
@@ -11,6 +11,9 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - **Reusable application entry point**: CLI adapters now expose canonical single-tool
   and overview runners; the CLI and dashboard therefore share verifier caches,
   report semantics and future module additions.
+- **Clean application boundary**: scanner orchestration now lives in the dedicated
+  `WinSight.Application` library. The dashboard no longer references the CLI
+  executable, so both frontends depend on a testable application layer.
 - **Phase 2 firewall foundation**: path-scoped `allow` / `block` / `ask` policies,
   a pure policy evaluator and the privileged WFP-engine boundary are implemented and
   unit-tested. Enforcement remains disabled until the service, authenticated IPC,
@@ -23,6 +26,9 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   enumeration tests use injected signature verdicts; focused Authenticode tests still
   exercise the real catalog/native chain without repeatedly scanning thousands of
   host-specific files or timing out shared runners.
+- **Frontend and dispatch coverage**: application-command and dashboard-catalog
+  tests ensure every scanner remains reachable exactly once; firewall-policy tests
+  now reject relative executable paths before they can cross the privileged boundary.
 - **Release integrity**: tagged releases package both the CLI and dashboard and
   publish a SHA-256 checksum alongside the archive.
 - README and architecture records now reflect the completed DNS/WMI/startup-folder

@@ -105,6 +105,9 @@ Modular tool libraries are available through the `winsight` CLI (subcommands
 `persistence | av | net | dns | all`, `--flagged`, `--json`, `--version`, `--help`)
 and the `winsight-dashboard` WPF/tray application:
 
+Both frontends use the shared `WinSight.Application` orchestration layer; detection
+logic and report semantics are not duplicated in UI code.
+
 - **Persistence** (KnockKnock-class) — 18 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
   `ServiceDll` payloads), Winlogon Shell/Userinit (HKLM+HKCU), Scheduled Tasks (Tasks

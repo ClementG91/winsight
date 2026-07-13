@@ -10,7 +10,7 @@ using WinSight.Persistence;
 using WinSight.Processes;
 using WinSight.Reporting;
 
-namespace WinSight.Cli;
+namespace WinSight.Application;
 
 /// <summary>
 /// Maps each tool's domain results into the shared <see cref="ToolReport"/> shape.
@@ -19,6 +19,10 @@ namespace WinSight.Cli;
 /// </summary>
 public static class Adapters
 {
+    public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
+        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts"],
+        StringComparer.OrdinalIgnoreCase);
+
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
     // Native WinVerifyTrust first (fast, tamper-checking), catalog-aware PS fallback
@@ -27,8 +31,10 @@ public static class Adapters
         new CachingSignatureVerifier(new NativeSignatureVerifier());
 
     /// <summary>Runs one snapshot tool by its canonical CLI name.</summary>
-    public static ToolReport Run(string command, bool flaggedOnly = false) =>
-        command.ToLowerInvariant() switch
+    public static ToolReport Run(string command, bool flaggedOnly = false)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        return command.ToLowerInvariant() switch
         {
             "persistence" => Persistence(flaggedOnly),
             "av" or "avmonitor" => CameraMic(flaggedOnly),
@@ -42,6 +48,7 @@ public static class Adapters
             "hosts" => Hosts(flaggedOnly),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
+    }
 
     /// <summary>
     /// Runs the balanced default overview. Process/module/firewall inventories remain
