@@ -89,7 +89,10 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
 
 /// <summary>
 /// Auto-start Windows services and drivers (Start type boot/system/auto) read from
-/// the service control database in the registry, keyed by ImagePath.
+/// the service control database in the registry, keyed by ImagePath. For
+/// svchost-hosted services the ImagePath is just svchost.exe (signed Microsoft) — the
+/// REAL payload is the Parameters\ServiceDll, so that DLL is surfaced as its own
+/// entry; otherwise a malicious service DLL rides invisibly under a trusted host.
 /// </summary>
 public sealed class ServiceEnumerator : IAutostartEnumerator
 {
@@ -108,7 +111,7 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 
         foreach (var name in services.GetSubKeyNames())
         {
-            RawAutostart? entry = null;
+            var entries = new List<RawAutostart>(2);
             try
             {
                 using var svc = services.OpenSubKey(name);
@@ -116,8 +119,17 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
                 if (svc?.GetValue("ImagePath") is string image && image.Length > 0 &&
                     svc.GetValue("Start") is int start && start <= 2)
                 {
-                    entry = new RawAutostart(
-                        AutostartVector.Service, name, $"HKLM\\{Root}\\{name}", image);
+                    entries.Add(new RawAutostart(
+                        AutostartVector.Service, name, $"HKLM\\{Root}\\{name}", image));
+
+                    // svchost payload: the hosted DLL is what actually runs.
+                    using var parameters = svc.OpenSubKey("Parameters");
+                    if (parameters?.GetValue("ServiceDll") is string dll && dll.Trim().Length > 0)
+                    {
+                        entries.Add(new RawAutostart(
+                            AutostartVector.Service, $"{name} (ServiceDll)",
+                            $"HKLM\\{Root}\\{name}\\Parameters [ServiceDll]", dll));
+                    }
                 }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
@@ -125,7 +137,7 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
                 // Skip service keys we cannot read.
             }
 
-            if (entry is { } e)
+            foreach (var e in entries)
             {
                 yield return e;
             }
@@ -137,6 +149,8 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 /// The Winlogon Shell/Userinit hooks — the processes the OS launches at logon.
 /// Defaults are explorer.exe and userinit.exe; malware appends its own comma-
 /// separated payload here, so any EXTRA command beyond the default is notable.
+/// Covers HKLM (machine-wide) AND HKCU — a per-user Shell/Userinit override is a
+/// quieter, no-admin variant of the same hijack.
 /// </summary>
 public sealed class WinlogonEnumerator : IAutostartEnumerator
 {
@@ -147,23 +161,27 @@ public sealed class WinlogonEnumerator : IAutostartEnumerator
 
     public IEnumerable<RawAutostart> Enumerate()
     {
-        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-        using var key = baseKey.OpenSubKey(Path);
-        if (key is null)
+        foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
         {
-            yield break;
-        }
-
-        foreach (var value in Values)
-        {
-            if (key.GetValue(value) is not string raw)
+            using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
+            using var key = baseKey.OpenSubKey(Path);
+            if (key is null)
             {
                 continue;
             }
-            foreach (var command in SplitCommands(raw))
+
+            var hiveName = hive == RegistryHive.LocalMachine ? "HKLM" : "HKCU";
+            foreach (var value in Values)
             {
-                yield return new RawAutostart(
-                    AutostartVector.Winlogon, value, $"HKLM\\{Path} [{value}]", command);
+                if (key.GetValue(value) is not string raw)
+                {
+                    continue;
+                }
+                foreach (var command in SplitCommands(raw))
+                {
+                    yield return new RawAutostart(
+                        AutostartVector.Winlogon, value, $"{hiveName}\\{Path} [{value}]", command);
+                }
             }
         }
     }
@@ -590,6 +608,51 @@ public sealed class LsaPackagesEnumerator : IAutostartEnumerator
                 }
                 yield return new RawAutostart(
                     AutostartVector.LsaPackage, pkg, $"HKLM\\{Path} [{value}]", pkg);
+            }
+        }
+    }
+}
+
+/// <summary>
+/// SilentProcessExit MonitorProcess hijacks (MITRE T1546.012): when IFEO GlobalFlag
+/// enables silent-exit monitoring for a target executable, the MonitorProcess
+/// registered here is launched every time that target exits — a quiet companion to
+/// the IFEO Debugger hijack. Any MonitorProcess entry is reported.
+/// </summary>
+public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
+{
+    private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit";
+
+    public string Surface => "SilentProcessExit monitors";
+
+    public IEnumerable<RawAutostart> Enumerate()
+    {
+        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+        using var root = baseKey.OpenSubKey(Path);
+        if (root is null)
+        {
+            yield break;
+        }
+        foreach (var target in root.GetSubKeyNames())
+        {
+            RawAutostart? entry = null;
+            try
+            {
+                using var sub = root.OpenSubKey(target);
+                if (sub?.GetValue("MonitorProcess") is string monitor && monitor.Trim().Length > 0)
+                {
+                    entry = new RawAutostart(
+                        AutostartVector.SilentProcessExit, target,
+                        $"HKLM\\{Path}\\{target} [MonitorProcess]", monitor);
+                }
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // Unreadable target key — skip.
+            }
+            if (entry is { } e)
+            {
+                yield return e;
             }
         }
     }

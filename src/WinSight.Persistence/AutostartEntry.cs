@@ -22,6 +22,7 @@ public enum AutostartVector
     AppCertDll,
     TimeProvider,
     Screensaver,
+    SilentProcessExit,
     // Phase 1.2+: LSA extensions, shims, ...
 }
 

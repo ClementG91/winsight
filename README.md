@@ -96,10 +96,13 @@ Phase 1 underway — CI green on `windows-latest`. Modular tool libraries behind
 signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 `--flagged`, `--json`, `--version`, `--help`):
 
-- **Persistence** (KnockKnock-class) — 8 autostart surfaces: Run/RunOnce/RunServices/
-  Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers, Winlogon
-  Shell/Userinit, Scheduled Tasks (Tasks XML), AppInit_DLLs, IFEO debuggers, Active
-  Setup, BootExecute — each signature-checked, resilient per-surface scan.
+- **Persistence** (KnockKnock-class) — 18 autostart surfaces: Run/RunOnce/RunServices/
+  Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
+  `ServiceDll` payloads), Winlogon Shell/Userinit (HKLM+HKCU), Scheduled Tasks (Tasks
+  XML), AppInit_DLLs, IFEO debuggers, SilentProcessExit monitors, Active Setup,
+  BootExecute, WMI event subscriptions, Startup folders (.lnk-resolved), LSA packages,
+  Print monitors, Netsh helpers, COM hijacks (HKCU CLSID), AppCertDLLs, Time
+  providers, Screensaver — each signature-checked, resilient per-surface scan.
 - **Camera/Mic** (OverSight-class) — which apps used the webcam/mic and what is live
   now (CapabilityAccessManager ConsentStore), plus real-time `av --watch` alerts the
   instant a device turns on/off.

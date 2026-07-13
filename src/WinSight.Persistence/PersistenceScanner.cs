@@ -41,6 +41,7 @@ public sealed class PersistenceScanner
             new AppCertDllsEnumerator(),
             new TimeProviderEnumerator(),
             new ScreensaverEnumerator(),
+            new SilentProcessExitEnumerator(),
         };
 
     /// <summary>

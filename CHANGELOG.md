@@ -4,6 +4,19 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Persistence — svchost ServiceDll payloads, HKCU Winlogon, SilentProcessExit
+- **ServiceDll resolution**: for svchost-hosted services the ImagePath is just
+  svchost.exe (signed Microsoft) — the real payload is `Parameters\ServiceDll`. That
+  DLL is now surfaced and signature-checked as its own entry, closing the classic
+  "malicious service DLL rides under a trusted host" blind spot.
+- **Winlogon HKCU**: Shell/Userinit are now also read from HKCU — the per-user,
+  no-admin variant of the logon hijack was previously invisible.
+- **SilentProcessExit monitors** (MITRE T1546.012): a MonitorProcess registered under
+  IFEO silent-exit monitoring launches every time its target exits — the quiet
+  companion of the IFEO Debugger hijack. New enumerator; 18 autostart surfaces now.
+- VirusTotal enrichment cap lowered 8 → 4 to match the free-tier rate limit
+  (requests past 4 were guaranteed 429s that burned quota for nothing).
+
 ### Core — security hardening pass
 - **Binary-planting resistance**: the PowerShell (signature fallback) and netstat
   (connection fallback) child processes are now launched by absolute `System32` path,

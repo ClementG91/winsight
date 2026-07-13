@@ -72,7 +72,9 @@ internal static class Adapters
             return results;
         }
         var client = new VirusTotalClient(apiKey);
-        const int cap = 8;
+        // The VT free tier allows 4 requests/minute — a scan is a single burst, so
+        // anything past 4 would just get rate-limited (429 → null) and burn quota.
+        const int cap = 4;
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in imagePaths.Where(p => seen.Add(p)).Take(cap))
         {
