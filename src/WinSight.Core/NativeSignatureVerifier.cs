@@ -100,8 +100,10 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             using var cert = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
             return cert.Subject;
         }
-        catch (CryptographicException)
+        catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
         {
+            // No extractable signer, or the file vanished between the trust check and
+            // here (TOCTOU) — the verdict stands, only the signer name is absent.
             return null;
         }
     }

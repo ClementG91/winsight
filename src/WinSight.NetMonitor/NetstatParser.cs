@@ -59,7 +59,7 @@ public static class NetstatParser
     public static bool IsExternal(string remoteAddress)
     {
         var a = remoteAddress;
-        if (string.IsNullOrEmpty(a) || a is "0.0.0.0" or "*" or "::")
+        if (string.IsNullOrEmpty(a) || a is "0.0.0.0" or "*" or "::" or "255.255.255.255")
         {
             return false;
         }
@@ -67,12 +67,14 @@ public static class NetstatParser
         {
             return false;
         }
-        if (a.StartsWith("10.", StringComparison.Ordinal) ||
+        if (a.StartsWith("0.", StringComparison.Ordinal) ||                   // 0.0.0.0/8 "this network"
+            a.StartsWith("10.", StringComparison.Ordinal) ||
             a.StartsWith("192.168.", StringComparison.Ordinal) ||
             a.StartsWith("169.254.", StringComparison.Ordinal) ||
             a.StartsWith("fe80", StringComparison.OrdinalIgnoreCase) ||       // IPv6 link-local
             a.StartsWith("fc", StringComparison.OrdinalIgnoreCase) ||         // IPv6 ULA (fc00::/7)
-            a.StartsWith("fd", StringComparison.OrdinalIgnoreCase))
+            a.StartsWith("fd", StringComparison.OrdinalIgnoreCase) ||
+            a.StartsWith("ff", StringComparison.OrdinalIgnoreCase))           // IPv6 multicast (ff00::/8)
         {
             return false;
         }
@@ -83,6 +85,14 @@ public static class NetstatParser
             {
                 return false;
             }
+        }
+        // IPv4 multicast (224.0.0.0/4) — local-segment noise (SSDP, mDNS, IGMP), not a
+        // routable off-box destination; flagging it would be pure false positives.
+        var dot = a.IndexOf('.');
+        if (dot > 0 && int.TryParse(a.AsSpan(0, dot), out var firstOctet) &&
+            firstOctet is >= 224 and <= 239)
+        {
+            return false;
         }
         return true;
     }

@@ -139,6 +139,12 @@ public sealed class NetstatParserTests
     [InlineData("::1", false)]           // IPv6 loopback
     [InlineData("fe80::1", false)]       // IPv6 link-local
     [InlineData("fc00::1", false)]       // IPv6 ULA
+    [InlineData("239.255.255.250", false)] // IPv4 multicast (SSDP)
+    [InlineData("224.0.0.251", false)]   // IPv4 multicast (mDNS)
+    [InlineData("255.255.255.255", false)] // broadcast
+    [InlineData("0.0.0.5", false)]       // 0.0.0.0/8 "this network"
+    [InlineData("ff02::fb", false)]      // IPv6 multicast (mDNS)
+    [InlineData("223.5.5.5", true)]      // just below multicast range -> public
     public void IsExternal_ClassifiesAddresses(string address, bool expected)
     {
         Assert.Equal(expected, NetstatParser.IsExternal(address));

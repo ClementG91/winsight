@@ -117,33 +117,56 @@ public static class NativeConnectionReader
     }
 
     // Shared two-call (size, then fill) buffer walk. The table is a leading DWORD
-    // count followed by a packed array of T rows.
+    // count followed by a packed array of T rows. The table can grow between the size
+    // and fill calls (TOCTOU), in which case the fill returns ERROR_INSUFFICIENT_BUFFER
+    // — retried with the fresh size instead of silently dropping every connection.
     private static IEnumerable<T> Enumerate<T>(ExtendedTableFn api, int addressFamily, int tableClass) where T : struct
     {
-        var size = 0;
-        api(IntPtr.Zero, ref size, false, addressFamily, tableClass, 0);
-        if (size <= 0)
+        const uint ErrorInsufficientBuffer = 122;
+
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            yield break;
-        }
-        var buffer = Marshal.AllocHGlobal(size);
-        try
-        {
-            if (api(buffer, ref size, false, addressFamily, tableClass, 0) != 0)
+            var size = 0;
+            api(IntPtr.Zero, ref size, false, addressFamily, tableClass, 0);
+            if (size <= 0)
             {
                 yield break;
             }
-            var count = Marshal.ReadInt32(buffer);
-            var rowSize = Marshal.SizeOf<T>();
-            var rowPtr = IntPtr.Add(buffer, sizeof(int));
-            for (var i = 0; i < count; i++)
+
+            var rows = new List<T>();
+            uint result;
+            var buffer = Marshal.AllocHGlobal(size);
+            try
             {
-                yield return Marshal.PtrToStructure<T>(IntPtr.Add(rowPtr, i * rowSize));
+                result = api(buffer, ref size, false, addressFamily, tableClass, 0);
+                if (result == 0)
+                {
+                    var count = Marshal.ReadInt32(buffer);
+                    var rowSize = Marshal.SizeOf<T>();
+                    var rowPtr = IntPtr.Add(buffer, sizeof(int));
+                    for (var i = 0; i < count; i++)
+                    {
+                        rows.Add(Marshal.PtrToStructure<T>(IntPtr.Add(rowPtr, i * rowSize)));
+                    }
+                }
             }
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
+
+            if (result == 0)
+            {
+                foreach (var row in rows)
+                {
+                    yield return row;
+                }
+                yield break;
+            }
+            if (result != ErrorInsufficientBuffer)
+            {
+                yield break; // hard failure — the caller's netstat fallback covers it
+            }
         }
     }
 

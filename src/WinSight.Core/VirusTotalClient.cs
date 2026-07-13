@@ -17,19 +17,37 @@ public sealed record VtVerdict(int Malicious, int Suspicious, int Total, string 
 /// </summary>
 public sealed class VirusTotalClient
 {
-    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private static readonly HttpClient Shared = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private readonly HttpClient _http;
     private readonly string _apiKey;
 
-    public VirusTotalClient(string apiKey) => _apiKey = apiKey;
+    /// <param name="apiKey">The user's own VirusTotal API key.</param>
+    /// <param name="http">Optional HttpClient (tests / custom pipeline); defaults to a shared instance.</param>
+    public VirusTotalClient(string apiKey, HttpClient? http = null)
+    {
+        _apiKey = apiKey;
+        _http = http ?? Shared;
+    }
+
+    /// <summary>
+    /// True when the input is a well-formed SHA-256 (64 hex chars). Lookup refuses
+    /// anything else so no attacker-influenced string can ever alter the request URL.
+    /// </summary>
+    public static bool IsSha256(string? value) =>
+        value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
     public VtVerdict? Lookup(string sha256)
     {
+        if (!IsSha256(sha256))
+        {
+            return null;
+        }
         try
         {
             using var request = new HttpRequestMessage(
                 HttpMethod.Get, $"https://www.virustotal.com/api/v3/files/{sha256}");
             request.Headers.Add("x-apikey", _apiKey);
-            using var response = Http.Send(request);
+            using var response = _http.Send(request);
             if (!response.IsSuccessStatusCode)
             {
                 return null;

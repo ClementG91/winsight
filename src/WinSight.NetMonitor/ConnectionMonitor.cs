@@ -64,7 +64,11 @@ public sealed class ConnectionMonitor
     {
         try
         {
-            using var p = Process.Start(new ProcessStartInfo("netstat", "-ano")
+            // Absolute System32 path: never resolve a child binary through the search
+            // path (binary-planting resistance).
+            var exe = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System), "netstat.exe");
+            using var p = Process.Start(new ProcessStartInfo(exe, "-ano")
             {
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
@@ -74,11 +78,24 @@ public sealed class ConnectionMonitor
             {
                 return string.Empty;
             }
-            var output = p.StandardOutput.ReadToEnd();
-            p.WaitForExit(10_000);
-            return output;
+            // Async read + kill-on-timeout: a hung netstat can't block ReadToEnd
+            // forever or leave a zombie process behind.
+            var output = p.StandardOutput.ReadToEndAsync();
+            if (!p.WaitForExit(10_000))
+            {
+                try
+                {
+                    p.Kill(entireProcessTree: true);
+                    p.WaitForExit(5_000);
+                }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException)
+                {
+                    // Already exited — the read completes either way.
+                }
+            }
+            return output.GetAwaiter().GetResult();
         }
-        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
             return string.Empty;
         }

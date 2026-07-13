@@ -38,6 +38,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight certs                          trusted root CAs + rogue-root signals
           winsight hosts                          hosts-file hijack / AV-block detection
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
+          winsight dns --watch                    live DNS queries via ETW (Administrator)
 
         Options:
           --flagged     only noteworthy items
@@ -109,6 +110,7 @@ switch (command)
         reports.Add(Adapters.Dns(flaggedOnly));
         reports.Add(Adapters.Extensions(flaggedOnly));
         reports.Add(Adapters.Hosts(flaggedOnly));
+        reports.Add(Adapters.Certificates(flaggedOnly));
         break;
     default:
         Console.Error.WriteLine(

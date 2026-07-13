@@ -189,6 +189,10 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
 
     public string Surface => "Scheduled Tasks";
 
+    // Real task definitions are a few KB; a huge file planted under \Tasks must not
+    // be read whole into memory (resource-exhaustion resistance).
+    private const long MaxTaskFileBytes = 1024 * 1024;
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         foreach (var file in SafeFiles(TasksRoot))
@@ -196,6 +200,10 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
             string xml;
             try
             {
+                if (new FileInfo(file).Length > MaxTaskFileBytes)
+                {
+                    continue;
+                }
                 xml = File.ReadAllText(file);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

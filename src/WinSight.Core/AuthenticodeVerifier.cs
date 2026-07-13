@@ -99,7 +99,13 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
             "@{n='Signer';e={if($_.SignerCertificate){$_.SignerCertificate.Subject}}} | " +
             "ConvertTo-Json -Depth 3";
 
-        using var p = Process.Start(new ProcessStartInfo("powershell", "-NoProfile -NonInteractive -Command -")
+        // Absolute System32 path: a security tool must never resolve a child binary
+        // through the search path (binary-planting / PATH-hijack resistance).
+        var exe = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "powershell.exe");
+
+        using var p = Process.Start(new ProcessStartInfo(exe, "-NoProfile -NonInteractive -Command -")
         {
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
@@ -109,9 +115,29 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
 
         p.StandardInput.WriteLine(script);
         p.StandardInput.Close();
-        var output = p.StandardOutput.ReadToEnd();
-        p.WaitForExit(30_000);
-        return output;
+
+        // Read asynchronously so a hung PowerShell can't block ReadToEnd forever;
+        // on timeout the process tree is killed (no zombie), which also completes
+        // the read by closing the pipe.
+        var output = p.StandardOutput.ReadToEndAsync();
+        if (!p.WaitForExit(30_000))
+        {
+            TryKill(p);
+        }
+        return output.GetAwaiter().GetResult();
+    }
+
+    private static void TryKill(Process p)
+    {
+        try
+        {
+            p.Kill(entireProcessTree: true);
+            p.WaitForExit(5_000);
+        }
+        catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            // Already exited or cannot be killed — the stream read completes either way.
+        }
     }
 
     private void ParseInto(string json, Dictionary<string, SignatureVerdict> results)
