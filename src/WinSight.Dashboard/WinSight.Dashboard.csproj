@@ -5,6 +5,8 @@
     <AssemblyName>winsight-dashboard</AssemblyName>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
+    <!-- WPF data binding resolves XmlLanguage to a specific culture at layout time. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Application\WinSight.Application.csproj" />

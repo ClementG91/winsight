@@ -2,6 +2,17 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.2.1 — 2026-07-14
+
+### Dashboard startup hotfix
+- Override invariant globalization for the WPF frontend. WPF resolves XAML binding
+  languages to a specific culture during layout; inheriting the libraries' invariant
+  mode caused `Cannot find non-neutral culture related to 'en-us'` and terminated the
+  packaged dashboard just after launch.
+- Add `winsight-dashboard --smoke-test`, which loads the real XAML, bindings, layout
+  and tray integration before exiting. Both CI and the tag-release workflow now run
+  this packaged-executable smoke test, preventing a file-exists-only false green.
+
 ## v0.2.0 — 2026-07-14
 
 ### Dashboard/tray, Phase 2 contracts, and release hardening

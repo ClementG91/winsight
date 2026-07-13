@@ -114,6 +114,8 @@ public partial class MainWindow : Window
         Close();
     }
 
+    internal void ExitForSmokeTest() => ExitApplication();
+
     protected override void OnClosing(CancelEventArgs e)
     {
         if (!_allowClose)

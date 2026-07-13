@@ -27,6 +27,8 @@ jobs:
           dotnet publish src/WinSight.Dashboard/WinSight.Dashboard.csproj -c Release -r win-x64 --self-contained true -p:Version=$version -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/dashboard
           $actualVersion = & ./publish/cli/winsight.exe --version
           if ($actualVersion -ne "winsight $version") { throw "Expected winsight $version, got $actualVersion" }
+          & ./publish/dashboard/winsight-dashboard.exe --smoke-test
+          if ($LASTEXITCODE -ne 0) { throw "Dashboard smoke test failed with exit code $LASTEXITCODE" }
 
       - name: Package
         shell: pwsh
