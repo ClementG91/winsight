@@ -259,6 +259,28 @@ public sealed class VirusTotalParseTests
     {
         Assert.Null(VirusTotalClient.ParseStats("{}", "x"));
     }
+
+    [Theory]
+    [InlineData("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", true)]
+    [InlineData("E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855", true)]
+    [InlineData("abc", false)]                    // too short
+    [InlineData("", false)]                       // empty
+    [InlineData(null, false)]                     // null
+    [InlineData("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85z", false)] // non-hex
+    [InlineData("../key?x=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b78", false)] // URL injection attempt
+    public void IsSha256_ValidatesStrictly(string? value, bool expected)
+    {
+        Assert.Equal(expected, VirusTotalClient.IsSha256(value));
+    }
+
+    [Fact]
+    public void Lookup_RejectsNonSha256_WithoutAnyNetworkCall()
+    {
+        // No HttpClient interaction can happen for an invalid hash — the guard
+        // returns null before any request is built.
+        var client = new VirusTotalClient("dummy-key");
+        Assert.Null(client.Lookup("not-a-hash"));
+    }
 }
 
 public sealed class CachingSignatureVerifierTests

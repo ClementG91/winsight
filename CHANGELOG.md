@@ -4,6 +4,34 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Phase 1 — user-mode tools
 
+### Core — security hardening pass
+- **Binary-planting resistance**: the PowerShell (signature fallback) and netstat
+  (connection fallback) child processes are now launched by absolute `System32` path,
+  never resolved through the search path — a security tool running elevated must not
+  be hijackable via a planted `powershell.exe`/`netstat.exe`.
+- **No more unbounded child waits**: both spawns read stdout asynchronously and kill
+  the process tree on timeout. Previously a hung child blocked `ReadToEnd()` forever
+  (the `WaitForExit` timeout was unreachable) and leaked a zombie process.
+- **VirusTotal input validation**: `Lookup` refuses anything that is not a
+  well-formed SHA-256 (64 hex chars), so no attacker-influenced string can alter the
+  request URL. The `HttpClient` is now injectable for testing.
+- **Resource-exhaustion guard**: the Scheduled Tasks enumerator skips files over
+  1 MB under `\Tasks` instead of reading them whole into memory.
+- **Connection-table TOCTOU**: `GetExtendedTcpTable/UdpTable` retries on
+  `ERROR_INSUFFICIENT_BUFFER` (table grew between the size and fill calls) instead of
+  silently returning zero connections.
+- **Fewer false positives**: IPv4/IPv6 multicast (SSDP, mDNS), broadcast and
+  `0.0.0.0/8` destinations are no longer classified as external.
+- CLI: `--help` now documents `dns --watch`; `all` includes the certificate audit.
+
+### Hosts — hosts-file hijack / AV-block detection
+- `HostsReader` parses the Windows hosts file and flags the two malware patterns: an
+  entry redirecting a hostname to a non-sink external address (phishing/MITM hijack),
+  or one blackholing a security/update domain (AV / Windows Update block). Benign
+  ad/tracker sink entries (`0.0.0.0`/`127.0.0.1`) are left unflagged. New `winsight
+  hosts` subcommand, included in `all`. Parsing is a pure static, unit-tested; the
+  real-file read is smoke-tested. Read-only.
+
 ### Persistence — screensaver hijack (SCRNSAVE.EXE)
 - `ScreensaverEnumerator` surfaces the per-user screensaver executable (a `.scr` is
   just a PE Windows runs on idle — MITRE T1546.002). Reads `SCRNSAVE.EXE` from

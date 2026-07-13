@@ -122,6 +122,9 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
 - **Certificates** (rogue-CA detection) — audits the trusted-root stores
   (`winsight certs`); flags roots holding a private key, weak signatures (SHA-1/MD5)
   or undersized RSA keys — the silent-TLS-interception signal. Read-only.
+- **Hosts** (DNS-override hijack) — parses the hosts file (`winsight hosts`); flags
+  external redirects (phishing/MITM) and blackholed security/update domains (AV /
+  Windows Update block), leaving benign ad-blocklist sinks alone. Read-only.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
 `AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises

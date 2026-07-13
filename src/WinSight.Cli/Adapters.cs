@@ -3,6 +3,7 @@ using WinSight.Browser;
 using WinSight.Certificates;
 using WinSight.Core;
 using WinSight.Firewall;
+using WinSight.Hosts;
 using WinSight.Modules;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
@@ -174,6 +175,28 @@ internal static class Adapters
                 });
         }
         return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
+    }
+
+    public static ToolReport Hosts(bool flaggedOnly)
+    {
+        var entries = new HostsReader().Snapshot();
+        var b = new ToolReport.Builder("hosts");
+        foreach (var e in entries.Where(e => !flaggedOnly || e.Notable)
+                     .OrderByDescending(e => e.Notable)
+                     .ThenBy(e => e.Hostname, StringComparer.OrdinalIgnoreCase))
+        {
+            b.Add(
+                e.Notable ? Severity.Notable : Severity.Info,
+                $"{e.Hostname} → {e.IpAddress}",
+                e.Reason ?? "static mapping",
+                new Dictionary<string, string?>
+                {
+                    ["hostname"] = e.Hostname,
+                    ["ip"] = e.IpAddress,
+                    ["reason"] = e.Reason,
+                });
+        }
+        return b.Build($"{entries.Count} hosts entry(ies), {entries.Count(e => e.Notable)} flagged");
     }
 
     public static ToolReport Certificates(bool flaggedOnly)

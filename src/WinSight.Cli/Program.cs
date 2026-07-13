@@ -13,6 +13,7 @@ using WinSight.Reporting;
 //   winsight modules                    unsigned DLLs loaded into processes
 //   winsight extensions                 browser extensions + risky permissions
 //   winsight certs                      trusted root CAs + rogue-root signals
+//   winsight hosts                      hosts-file hijack / AV-block detection
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight dns --watch                live DNS queries via ETW (Administrator)
 //   winsight ... --flagged              only noteworthy items
@@ -35,7 +36,9 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight modules                        unsigned DLLs loaded into processes
           winsight extensions                     browser extensions + risky permissions
           winsight certs                          trusted root CAs + rogue-root signals
+          winsight hosts                          hosts-file hijack / AV-block detection
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
+          winsight dns --watch                    live DNS queries via ETW (Administrator)
 
         Options:
           --flagged     only noteworthy items
@@ -97,16 +100,21 @@ switch (command)
     case "certs":
         reports.Add(Adapters.Certificates(flaggedOnly));
         break;
+    case "hosts":
+        reports.Add(Adapters.Hosts(flaggedOnly));
+        break;
     case "all":
         reports.Add(Adapters.Persistence(flaggedOnly));
         reports.Add(Adapters.CameraMic(flaggedOnly));
         reports.Add(Adapters.Connections(flaggedOnly));
         reports.Add(Adapters.Dns(flaggedOnly));
         reports.Add(Adapters.Extensions(flaggedOnly));
+        reports.Add(Adapters.Hosts(flaggedOnly));
+        reports.Add(Adapters.Certificates(flaggedOnly));
         break;
     default:
         Console.Error.WriteLine(
-            $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | all)");
+            $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | hosts | all)");
         return 2;
 }
 
