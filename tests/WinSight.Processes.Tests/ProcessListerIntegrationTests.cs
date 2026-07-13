@@ -6,14 +6,15 @@ namespace WinSight.Processes.Tests;
 /// <summary>
 /// Integration coverage: on a real Windows host there is always at least the test
 /// runner itself running, so a snapshot must never be empty and every entry must be
-/// well-formed. Runs the true WMI + signature path — this is the Windows contract.
+/// well-formed. Signature plumbing is injected so WMI/process coverage stays fast;
+/// the real Authenticode chain has dedicated integration tests in Core/Persistence.
 /// </summary>
 public sealed class ProcessListerIntegrationTests
 {
     [Fact]
     public void Snapshot_ReturnsRunningProcesses_WithValidShape()
     {
-        var processes = new ProcessLister().Snapshot();
+        var processes = new ProcessLister(new StubVerifier()).Snapshot();
 
         Assert.NotEmpty(processes);
         Assert.All(processes, p =>

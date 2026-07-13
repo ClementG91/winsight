@@ -17,7 +17,7 @@ namespace WinSight.Cli;
 /// The tools stay pure data producers; presentation lives here, once, so the renderer
 /// (text/JSON) and a future GUI consume one contract.
 /// </summary>
-internal static class Adapters
+public static class Adapters
 {
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
@@ -25,6 +25,38 @@ internal static class Adapters
     // for catalog-signed binaries, managed fallback below that — all cached.
     private static readonly ISignatureVerifier SharedVerifier =
         new CachingSignatureVerifier(new NativeSignatureVerifier());
+
+    /// <summary>Runs one snapshot tool by its canonical CLI name.</summary>
+    public static ToolReport Run(string command, bool flaggedOnly = false) =>
+        command.ToLowerInvariant() switch
+        {
+            "persistence" => Persistence(flaggedOnly),
+            "av" or "avmonitor" => CameraMic(flaggedOnly),
+            "net" or "netmonitor" => Connections(flaggedOnly),
+            "dns" => Dns(flaggedOnly),
+            "firewall" or "fw" => Firewall(flaggedOnly),
+            "processes" or "ps" => Processes(flaggedOnly),
+            "modules" or "dll" => Modules(flaggedOnly),
+            "extensions" or "ext" => Extensions(flaggedOnly),
+            "certificates" or "certs" => Certificates(flaggedOnly),
+            "hosts" => Hosts(flaggedOnly),
+            _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
+        };
+
+    /// <summary>
+    /// Runs the balanced default overview. Process/module/firewall inventories remain
+    /// explicit because they are large and would make a routine overview noisy.
+    /// </summary>
+    public static IReadOnlyList<ToolReport> RunOverview(bool flaggedOnly = false) =>
+    [
+        Persistence(flaggedOnly),
+        CameraMic(flaggedOnly),
+        Connections(flaggedOnly),
+        Dns(flaggedOnly),
+        Extensions(flaggedOnly),
+        Hosts(flaggedOnly),
+        Certificates(flaggedOnly),
+    ];
 
     public static ToolReport Persistence(bool flaggedOnly)
     {

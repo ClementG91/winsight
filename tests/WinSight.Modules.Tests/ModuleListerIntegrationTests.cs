@@ -6,8 +6,9 @@ namespace WinSight.Modules.Tests;
 /// <summary>
 /// Integration coverage: the test host itself always has DLLs loaded (coreclr, the
 /// test framework, etc.), so a snapshot must include this process with a well-formed
-/// module list. Uses a stub verifier for speed/determinism, plus one real-verifier
-/// smoke run to exercise the native Authenticode path on Windows.
+/// module list. Uses a stub verifier so this integration test remains deterministic:
+/// a real catalog scan over every process can take minutes and belongs to an explicit
+/// end-to-end smoke run, not the parallel unit-test graph.
 /// </summary>
 public sealed class ModuleListerIntegrationTests
 {
@@ -29,14 +30,6 @@ public sealed class ModuleListerIntegrationTests
             Assert.False(string.IsNullOrWhiteSpace(m.ProcessName));
             Assert.False(string.IsNullOrWhiteSpace(m.ModuleName));
         });
-    }
-
-    [Fact]
-    public void Snapshot_RealVerifier_RunsAndReturnsModules()
-    {
-        // Exercises the true native signature path over real loaded DLLs.
-        var modules = new ModuleLister().Snapshot();
-        Assert.NotEmpty(modules);
     }
 
     private sealed class StubVerifier : ISignatureVerifier

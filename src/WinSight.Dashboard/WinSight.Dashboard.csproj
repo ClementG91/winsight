@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>WinSight.Dashboard</RootNamespace>
+    <AssemblyName>winsight-dashboard</AssemblyName>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Cli\WinSight.Cli.csproj" />
+    <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
+  </ItemGroup>
+</Project>

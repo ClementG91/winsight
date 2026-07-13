@@ -10,36 +10,58 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-test:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
+          cache: true
+          cache-dependency-path: Directory.Packages.props
 
-      # Auto-discover every project/test project so new modules need no CI change.
-      - name: Build all projects
+      - name: Restore
+        run: dotnet restore winsight.sln
+
+      - name: Verify formatting
+        run: dotnet format winsight.sln --verify-no-changes --no-restore
+
+      - name: Build
+        run: dotnet build winsight.sln -c Release --no-restore
+
+      - name: Audit NuGet dependencies
+        run: dotnet list winsight.sln package --vulnerable --include-transitive
+
+      - name: Test
+        run: dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=tests"
+
+      - name: Verify release publishes
         shell: pwsh
         run: |
-          $failed = $false
-          Get-ChildItem -Recurse -Filter *.csproj | ForEach-Object {
-            Write-Host "::group::build $($_.Name)"
-            dotnet build $_.FullName -c Release
-            if ($LASTEXITCODE -ne 0) { $failed = $true }
-            Write-Host "::endgroup::"
-          }
-          if ($failed) { exit 1 }
+          dotnet publish src/WinSight.Cli/WinSight.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/cli
+          dotnet publish src/WinSight.Dashboard/WinSight.Dashboard.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/dashboard
+          & ./artifacts/cli/winsight.exe --version
+          if (-not (Test-Path ./artifacts/dashboard/winsight-dashboard.exe)) { throw "Dashboard publish is missing" }
 
-      - name: Test all test projects
-        shell: pwsh
-        run: |
-          $failed = $false
-          Get-ChildItem -Recurse -Filter *Tests.csproj | ForEach-Object {
-            Write-Host "::group::test $($_.Name)"
-            dotnet test $_.FullName -c Release --logger "console;verbosity=minimal"
-            if ($LASTEXITCODE -ne 0) { $failed = $true }
-            Write-Host "::endgroup::"
-          }
-          if ($failed) { exit 1 }
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: "**/TestResults/*.trx"
+          if-no-files-found: ignore
+
+      - name: Upload release candidates
+        uses: actions/upload-artifact@v4
+        with:
+          name: winsight-win-x64
+          path: artifacts/**

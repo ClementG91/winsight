@@ -1,7 +1,7 @@
 # WinSight — architecture
 
-Status: proposed. This is the decision record; code follows once the stack is
-confirmed.
+Status: accepted and implemented for Phase 1. Phase 2 details live in
+[`WFP_DESIGN.md`](WFP_DESIGN.md).
 
 ## Shape
 
@@ -9,17 +9,18 @@ A shared **core** + independent **tool modules** + one **dashboard/tray** shell.
 Each tool is usable standalone (like Objective-See's), but they share the core so
 signatures, process attribution and reputation are computed once.
 
-```
+```text
 winsight/
-  core/            # shared: process attribution, Authenticode, ETW session mgmt,
-                   # reputation (opt-in VirusTotal), models, IPC
-  tools/
-    persistence/   # KnockKnock-class: autostart enumeration + signing verdicts
-    avmonitor/     # OverSight-class: camera/mic activation alerts
-    netmonitor/    # Netiquette + DNSMonitor-class: connections + DNS
-    firewall/      # (Phase 2) LuLu-class: WFP per-app outbound control
-    guardian/      # (Phase 3/4) BlockBlock + RansomWhere-class: live watch/block
-  shell/           # WinUI 3 / WPF dashboard + system tray + notifications
+  src/
+    WinSight.Core/         # signatures, hashes, opt-in reputation
+    WinSight.Reporting/    # stable shared report contract
+    WinSight.Persistence/  # autostart enumeration
+    WinSight.AvMonitor/    # camera/mic history + live transitions
+    WinSight.NetMonitor/   # IP Helper connections + DNS cache/ETW
+    WinSight.Firewall/     # rules + Phase 2 policy contracts
+    WinSight.Cli/          # scriptable unified entry point
+    WinSight.Dashboard/    # WPF dashboard + system tray
+  tests/                   # pure unit tests + Windows integration smoke tests
   drivers/         # (Phase 3/4) minifilter / WFP callout (needs EV cert)
   docs/
 ```
@@ -69,11 +70,10 @@ the MVP, Rust/C++ reserved for the driver and any perf agent.**
 - **Least privilege**: run tools with the minimum rights; elevate only the specific
   operation that needs it.
 
-## Open decisions (blocking code start)
+## Decisions resolved
 
-1. **Language/stack** for the MVP — recommended **.NET 8** (vs Rust vs C++).
-2. **Ambition** — confirm **user-mode MVP first** (yes) vs pushing straight to the
-   kernel driver (not recommended; cert + time).
-3. **License** — proposed **GPLv3**.
-4. **Windows build target** — Windows CI runner (GitHub Actions `windows-latest`)
-   and/or a Windows VM, since this dev box is Linux.
+1. The user-mode application stack is C# / .NET 8 with WPF for the dashboard.
+2. Phase 1 is user-mode and read-only; kernel enforcement remains deferred.
+3. The repository is GPL-3.0-or-later.
+4. `windows-latest` is the compiler/test runner of record, with a pinned SDK for
+   reproducible local builds.

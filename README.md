@@ -77,12 +77,20 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
 - **Perf-critical core / future agent:** Rust or C++ if/when needed.
 - **Kernel driver (Phase 3/4):** C/C++ KMDF minifilter (or Rust `windows-drivers`).
 
-## Build constraint (today)
+## Build
 
-This repo is scaffolded from a **Linux** dev box. The docs, architecture, module
-layout and CI config are portable, but the .NET/Windows code must be built and
-tested on **Windows** (a Windows CI runner or VM). Nothing Windows-native is
-compiled here yet — this commit is the foundation + plan.
+WinSight targets Windows and .NET 8. Install the .NET 8 SDK, then run:
+
+```powershell
+dotnet restore winsight.sln
+dotnet build winsight.sln -c Release
+dotnet test winsight.sln -c Release --no-build
+dotnet run --project src/WinSight.Dashboard
+```
+
+`global.json` pins the supported SDK feature band. GitHub Actions builds, formats,
+tests, audits NuGet dependencies and verifies both self-contained executables on
+`windows-latest`.
 
 ## Naming
 
@@ -92,9 +100,10 @@ per-tool names here can follow that or stay descriptive. Rename freely before co
 
 ## Status
 
-Phase 1 underway — CI green on `windows-latest`. Modular tool libraries behind one
-signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
-`--flagged`, `--json`, `--version`, `--help`):
+Phase 1 is feature-complete for the first beta — CI is green on `windows-latest`.
+Modular tool libraries are available through the `winsight` CLI (subcommands
+`persistence | av | net | dns | all`, `--flagged`, `--json`, `--version`, `--help`)
+and the `winsight-dashboard` WPF/tray application:
 
 - **Persistence** (KnockKnock-class) — 18 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
@@ -145,14 +154,15 @@ is an optional VirusTotal lookup for flagged items, enabled solely by setting yo
 
 See [CHANGELOG.md](CHANGELOG.md) for step-by-step progress.
 
-Next: ETW DNS monitoring, the WFP firewall (LuLu-class), a GUI/tray shell over the
-`--json` contract, and more persistence vectors (WMI subscriptions, startup folders).
-A native `WTGetSignatureInfo` verifier is the eventual signature-perf swap behind
-`ISignatureVerifier`. Driver-backed tools (BlockBlock/RansomWhere) are a later phase
-(needs an EV certificate).
+**Current next step:** Phase 2 outbound control. The path-scoped `allow/block/ask`
+policy contracts and privileged-engine boundary are implemented and tested; the
+WFP service, authenticated IPC, audit mode and prompt flow remain. See
+[`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
+signature-performance optimization. Driver-backed BlockBlock/RansomWhere features
+remain deliberately deferred because production drivers require signing and a
+separate safety program.
 
 ## License
 
 **GPL-3.0-or-later** — Objective-See's tools are open; copyleft keeps a security tool
-auditable and forkable. (Full GPLv3 text to be vendored into `LICENSE` before first
-release.)
+auditable and forkable. The complete license text is included in [`LICENSE`](LICENSE).

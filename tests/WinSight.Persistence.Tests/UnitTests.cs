@@ -232,13 +232,27 @@ public sealed class PersistenceScannerIntegrationTests
     [Fact]
     public void Scan_ReturnsSaneAutostartEntries()
     {
-        var entries = new PersistenceScanner().Scan();
+        // Enumerator integration and signature integration are covered separately.
+        // A stub keeps this test from catalog-verifying hundreds of machine-specific
+        // service binaries and makes it stable on busy shared CI runners.
+        var entries = new PersistenceScanner(verifier: new TrustedStubVerifier()).Scan();
         Assert.NotEmpty(entries); // a real Windows box always has auto-start services
         Assert.All(entries, e =>
         {
             Assert.False(string.IsNullOrEmpty(e.Name));
             Assert.False(string.IsNullOrEmpty(e.Location));
         });
+    }
+
+    private sealed class TrustedStubVerifier : ISignatureVerifier
+    {
+        public SignatureVerdict Verify(string path) => new(SignatureState.SignedTrusted, "CN=Test");
+
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths) =>
+            paths.Distinct(StringComparer.OrdinalIgnoreCase).ToDictionary(
+                path => path,
+                _ => new SignatureVerdict(SignatureState.SignedTrusted, "CN=Test"),
+                StringComparer.OrdinalIgnoreCase);
     }
 }
 

@@ -63,59 +63,18 @@ if (command == "dns" && args.Contains("--watch"))
     return Adapters.WatchDns();
 }
 
-var reports = new List<ToolReport>();
-switch (command)
+IReadOnlyList<ToolReport> reports;
+try
 {
-    case "persistence":
-        reports.Add(Adapters.Persistence(flaggedOnly));
-        break;
-    case "av":
-    case "avmonitor":
-        reports.Add(Adapters.CameraMic(flaggedOnly));
-        break;
-    case "net":
-    case "netmonitor":
-        reports.Add(Adapters.Connections(flaggedOnly));
-        break;
-    case "dns":
-        reports.Add(Adapters.Dns(flaggedOnly));
-        break;
-    case "firewall":
-    case "fw":
-        reports.Add(Adapters.Firewall(flaggedOnly));
-        break;
-    case "processes":
-    case "ps":
-        reports.Add(Adapters.Processes(flaggedOnly));
-        break;
-    case "modules":
-    case "dll":
-        reports.Add(Adapters.Modules(flaggedOnly));
-        break;
-    case "extensions":
-    case "ext":
-        reports.Add(Adapters.Extensions(flaggedOnly));
-        break;
-    case "certificates":
-    case "certs":
-        reports.Add(Adapters.Certificates(flaggedOnly));
-        break;
-    case "hosts":
-        reports.Add(Adapters.Hosts(flaggedOnly));
-        break;
-    case "all":
-        reports.Add(Adapters.Persistence(flaggedOnly));
-        reports.Add(Adapters.CameraMic(flaggedOnly));
-        reports.Add(Adapters.Connections(flaggedOnly));
-        reports.Add(Adapters.Dns(flaggedOnly));
-        reports.Add(Adapters.Extensions(flaggedOnly));
-        reports.Add(Adapters.Hosts(flaggedOnly));
-        reports.Add(Adapters.Certificates(flaggedOnly));
-        break;
-    default:
-        Console.Error.WriteLine(
-            $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | hosts | all)");
-        return 2;
+    reports = command == "all"
+        ? Adapters.RunOverview(flaggedOnly)
+        : [Adapters.Run(command, flaggedOnly)];
+}
+catch (ArgumentOutOfRangeException)
+{
+    Console.Error.WriteLine(
+        $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | hosts | all)");
+    return 2;
 }
 
 if (json)

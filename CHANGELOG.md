@@ -2,6 +2,32 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## Unreleased — v0.2.0
+
+### Dashboard/tray, Phase 2 contracts, and release hardening
+- **WPF dashboard + system tray**: `winsight-dashboard` consumes the same shared
+  reports as the CLI, runs scans off the UI thread, filters noteworthy findings and
+  exposes every snapshot tool without duplicating detection logic.
+- **Reusable application entry point**: CLI adapters now expose canonical single-tool
+  and overview runners; the CLI and dashboard therefore share verifier caches,
+  report semantics and future module additions.
+- **Phase 2 firewall foundation**: path-scoped `allow` / `block` / `ask` policies,
+  a pure policy evaluator and the privileged WFP-engine boundary are implemented and
+  unit-tested. Enforcement remains disabled until the service, authenticated IPC,
+  audit mode and recovery path in `docs/WFP_DESIGN.md` exist.
+- **Reproducible build graph**: added `winsight.sln`, a pinned .NET 8 SDK and a
+  central 0.2.0 version. CI now restores once, verifies formatting, builds/tests the
+  solution, audits NuGet packages, smoke-publishes both Windows executables and
+  retains test/release artifacts.
+- **Deterministic integration tests**: machine-wide module, process and persistence
+  enumeration tests use injected signature verdicts; focused Authenticode tests still
+  exercise the real catalog/native chain without repeatedly scanning thousands of
+  host-specific files or timing out shared runners.
+- **Release integrity**: tagged releases package both the CLI and dashboard and
+  publish a SHA-256 checksum alongside the archive.
+- README and architecture records now reflect the completed DNS/WMI/startup-folder
+  work, the shipped dashboard, the real Windows build flow and the current WFP plan.
+
 ## Phase 1 — user-mode tools
 
 ### Core — catalog signatures actually work now (major false-positive fix)

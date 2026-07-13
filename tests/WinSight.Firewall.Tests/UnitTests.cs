@@ -24,6 +24,48 @@ public sealed class FirewallEnumTests
     }
 }
 
+public sealed class OutboundPolicyEvaluatorTests
+{
+    [Fact]
+    public void Evaluate_MatchesCanonicalPath_CaseInsensitively()
+    {
+        var path = Path.GetFullPath(@"C:\Program Files\WinSight\agent.exe");
+        var evaluator = new OutboundPolicyEvaluator(
+            [new AppFirewallPolicy(path.ToUpperInvariant(), OutboundAction.Block)]);
+
+        Assert.Equal(OutboundAction.Block, evaluator.Evaluate(path.ToLowerInvariant()));
+    }
+
+    [Fact]
+    public void Evaluate_UsesAskForUnknownProgram()
+    {
+        var evaluator = new OutboundPolicyEvaluator([]);
+
+        Assert.Equal(OutboundAction.Ask, evaluator.Evaluate(@"C:\unknown.exe"));
+    }
+
+    [Fact]
+    public void Constructor_IgnoresDisabledPolicy()
+    {
+        var evaluator = new OutboundPolicyEvaluator(
+            [new AppFirewallPolicy(@"C:\disabled.exe", OutboundAction.Block, Enabled: false)]);
+
+        Assert.Equal(OutboundAction.Ask, evaluator.Evaluate(@"C:\disabled.exe"));
+    }
+
+    [Fact]
+    public void Constructor_RejectsAmbiguousDuplicatePolicy()
+    {
+        var policies = new[]
+        {
+            new AppFirewallPolicy(@"C:\same.exe", OutboundAction.Allow),
+            new AppFirewallPolicy(@"c:\SAME.exe", OutboundAction.Block),
+        };
+
+        Assert.Throws<ArgumentException>(() => new OutboundPolicyEvaluator(policies));
+    }
+}
+
 // Integration test — reads the real Windows Firewall rules on the CI runner.
 public sealed class FirewallRuleReaderIntegrationTests
 {
