@@ -108,6 +108,12 @@ and the `winsight-dashboard` WPF/tray application:
 Both frontends use the shared `WinSight.Application` orchestration layer; detection
 logic and report semantics are not duplicated in UI code.
 
+The dashboard is designed for non-technical users: each check explains what it
+observes and what an alert means, the overview reports progress between independent
+scanners, and reports can be exported or copied. Actions are deliberately safe:
+WinSight can reveal an item's validated file location or open the corresponding
+trusted Windows console, but it never deletes, kills or blocks automatically.
+
 - **Persistence** (KnockKnock-class) — 18 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
   `ServiceDll` payloads), Winlogon Shell/Userinit (HKLM+HKCU), Scheduled Tasks (Tasks

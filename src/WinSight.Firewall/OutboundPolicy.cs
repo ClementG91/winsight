@@ -17,7 +17,7 @@ public sealed record AppFirewallPolicy(string ExecutablePath, OutboundAction Act
 /// <summary>Pure policy lookup shared by the future service, prompt UI and tests.</summary>
 public sealed class OutboundPolicyEvaluator
 {
-    private readonly IReadOnlyDictionary<string, OutboundAction> _policies;
+    private readonly Dictionary<string, OutboundAction> _policies;
 
     public OutboundPolicyEvaluator(
         IEnumerable<AppFirewallPolicy> policies,

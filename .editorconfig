@@ -16,6 +16,16 @@ dotnet_style_qualification_for_field = false:suggestion
 dotnet_style_require_accessibility_modifiers = for_non_interface_members:suggestion
 csharp_prefer_braces = true:suggestion
 csharp_style_var_when_type_is_apparent = true:suggestion
+
+# Public API names are already shipped; these naming rules would require breaking
+# changes. xUnit test names intentionally use Given_When_Then-style underscores.
+dotnet_diagnostic.CA1707.severity = none
+dotnet_diagnostic.CA1711.severity = none
+dotnet_diagnostic.CA1720.severity = none
+
+# Reader instances are dependency-injection seams even when their current
+# implementation has no instance state. Keep them substitutable instead of static.
+dotnet_diagnostic.CA1822.severity = none
 dotnet_style_prefer_conditional_expression_over_return = true:suggestion
 
 [*.{csproj,props,targets,xml,yml,yaml,json}]

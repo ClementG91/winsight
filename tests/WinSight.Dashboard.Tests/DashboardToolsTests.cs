@@ -20,4 +20,17 @@ public sealed class DashboardToolsTests
         Assert.Contains("all", commands);
         Assert.All(Adapters.SnapshotCommands, command => Assert.Contains(command, commands));
     }
+
+    [Fact]
+    public void Catalog_HasPlainLanguageHelpForEveryTool()
+    {
+        Assert.All(DashboardTools.All, tool =>
+        {
+            Assert.False(string.IsNullOrWhiteSpace(tool.ShortDescription));
+            Assert.False(string.IsNullOrWhiteSpace(tool.Description));
+            Assert.False(string.IsNullOrWhiteSpace(tool.Guidance));
+            Assert.Same(tool, DashboardTools.ForCommand(tool.Command));
+            Assert.Same(tool, DashboardTools.ForReport(tool.ReportName));
+        });
+    }
 }

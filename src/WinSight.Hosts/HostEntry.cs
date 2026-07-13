@@ -11,7 +11,7 @@ public sealed record HostEntry(string IpAddress, string Hostname)
 {
     // Blocking a domain to a sink address is the common, benign ad/tracker-blocklist
     // pattern — only noteworthy when the blocked domain is security/update related.
-    private static readonly IReadOnlySet<string> SinkAddresses = new HashSet<string>(StringComparer.Ordinal)
+    private static readonly HashSet<string> SinkAddresses = new(StringComparer.Ordinal)
     {
         "0.0.0.0", "127.0.0.1", "::1", "::",
     };

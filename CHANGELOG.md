@@ -2,6 +2,23 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.3.0 — 2026-07-14
+
+### Understandable dashboard and supply-chain hardening
+- Replace the technical tool picker with a guided French dashboard: plain-language
+  descriptions, contextual safety advice, clearer priority labels and explicit
+  read-only/privacy messaging for non-technical users.
+- Add real overview progress, cooperative stop-between-steps, selected-finding
+  details, JSON export, clipboard copy, validated file-location opening and trusted
+  Windows management-tool shortcuts. No untrusted finding value is executed.
+- Add a reusable progress contract and tests for overview membership, cancellation
+  before work starts and percentage calculation.
+- Pin every GitHub Action to an immutable commit SHA, make the NuGet vulnerability
+  audit fail closed, and attach GitHub build-provenance attestations to release ZIPs.
+- Enable the latest recommended .NET analyzers across the solution.
+- Update TraceEvent and the test SDK/runner packages; retain the .NET 8 line for
+  Windows framework packages instead of mixing .NET 10 assets into this LTS target.
+
 ## v0.2.1 — 2026-07-14
 
 ### Dashboard startup hotfix

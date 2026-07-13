@@ -260,7 +260,7 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
             .ToList();
     }
 
-    private static IReadOnlyList<string> SafeFiles(string root)
+    private static string[] SafeFiles(string root)
     {
         try
         {
@@ -283,6 +283,7 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
 public sealed class AppInitDllsEnumerator : IAutostartEnumerator
 {
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
+    private static readonly char[] Separators = [',', ' '];
 
     public string Surface => "AppInit_DLLs";
 
@@ -297,7 +298,7 @@ public sealed class AppInitDllsEnumerator : IAutostartEnumerator
                 continue;
             }
             foreach (var dll in raw.Split(
-                         new[] { ',', ' ' },
+                         Separators,
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
                 yield return new RawAutostart(

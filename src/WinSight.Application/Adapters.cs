@@ -23,6 +23,9 @@ public static class Adapters
         ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts"],
         StringComparer.OrdinalIgnoreCase);
 
+    public static IReadOnlyList<string> OverviewCommands { get; } =
+        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs"];
+
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
     // Native WinVerifyTrust first (fast, tamper-checking), catalog-aware PS fallback
@@ -54,16 +57,22 @@ public static class Adapters
     /// Runs the balanced default overview. Process/module/firewall inventories remain
     /// explicit because they are large and would make a routine overview noisy.
     /// </summary>
-    public static IReadOnlyList<ToolReport> RunOverview(bool flaggedOnly = false) =>
-    [
-        Persistence(flaggedOnly),
-        CameraMic(flaggedOnly),
-        Connections(flaggedOnly),
-        Dns(flaggedOnly),
-        Extensions(flaggedOnly),
-        Hosts(flaggedOnly),
-        Certificates(flaggedOnly),
-    ];
+    public static IReadOnlyList<ToolReport> RunOverview(
+        bool flaggedOnly = false,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var reports = new List<ToolReport>(OverviewCommands.Count);
+        for (var index = 0; index < OverviewCommands.Count; index++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var command = OverviewCommands[index];
+            progress?.Report(new ScanProgress(index, OverviewCommands.Count, command));
+            reports.Add(Run(command, flaggedOnly));
+            progress?.Report(new ScanProgress(index + 1, OverviewCommands.Count, command));
+        }
+        return reports;
+    }
 
     public static ToolReport Persistence(bool flaggedOnly)
     {
@@ -102,7 +111,7 @@ public static class Adapters
     // VirusTotal lookups for the given image paths — opt-in (WINSIGHT_VT_KEY) and
     // capped to stay within the free-tier rate limit. Empty when no key is set (the
     // tool stays local-only unless the user provides their own key).
-    private static IReadOnlyDictionary<string, VtVerdict> VtLookups(IEnumerable<string> imagePaths)
+    private static Dictionary<string, VtVerdict> VtLookups(IEnumerable<string> imagePaths)
     {
         var results = new Dictionary<string, VtVerdict>(StringComparer.OrdinalIgnoreCase);
         var apiKey = Environment.GetEnvironmentVariable("WINSIGHT_VT_KEY");

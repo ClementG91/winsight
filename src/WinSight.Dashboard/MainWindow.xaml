@@ -1,54 +1,172 @@
 <Window x:Class="WinSight.Dashboard.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="WinSight" Height="680" Width="1080" MinHeight="500" MinWidth="780"
-        Background="#F8FAFC" WindowStartupLocation="CenterScreen">
-    <Grid Margin="22">
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        Title="WinSight — sécurité Windows" Height="780" Width="1220"
+        MinHeight="620" MinWidth="960" Background="#F1F5F9"
+        WindowStartupLocation="CenterScreen">
+    <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="78" />
             <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="34" />
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,18">
-            <TextBlock FontSize="28" FontWeight="SemiBold" Foreground="#0F172A" Text="WinSight" />
-            <TextBlock Margin="0,4,0,0" Foreground="#475569"
-                       Text="Sécurité Windows transparente, locale et en lecture seule" />
-        </StackPanel>
-
-        <Border Grid.Row="1" Padding="14" CornerRadius="8" Background="White" BorderBrush="#E2E8F0" BorderThickness="1">
-            <DockPanel LastChildFill="False">
-                <ComboBox x:Name="ToolPicker" Width="230" Height="34" DisplayMemberPath="Label"
-                          SelectedValuePath="Command" VerticalContentAlignment="Center" />
-                <CheckBox x:Name="FlaggedOnly" Margin="18,0" VerticalAlignment="Center"
-                          Content="Éléments notables uniquement" IsChecked="True" />
-                <Button x:Name="ScanButton" Width="120" Height="34" Background="{StaticResource AccentBrush}"
-                        Foreground="White" BorderThickness="0" Content="Analyser" Click="ScanButton_Click" />
+        <Border Grid.Row="0" Background="#0F172A" Padding="26,14">
+            <DockPanel>
+                <Border DockPanel.Dock="Left" Width="46" Height="46" CornerRadius="12" Background="#2563EB" Margin="0,0,14,0">
+                    <TextBlock Text="W" Foreground="White" FontSize="24" FontWeight="Bold"
+                               HorizontalAlignment="Center" VerticalAlignment="Center" />
+                </Border>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock Text="Comprendre ce qui se passe sur votre PC, sans télémétrie"
+                               Foreground="#CBD5E1" FontSize="13" />
+                </StackPanel>
+                <Border DockPanel.Dock="Right" Background="#163A2D" CornerRadius="14" Padding="12,6" VerticalAlignment="Center">
+                    <TextBlock Text="● Analyse locale" Foreground="#86EFAC" FontWeight="SemiBold" />
+                </Border>
             </DockPanel>
         </Border>
 
-        <DockPanel Grid.Row="2" Margin="0,16,0,10">
-            <TextBlock x:Name="SummaryText" VerticalAlignment="Center" FontWeight="SemiBold"
-                       Foreground="#334155" Text="Prêt à analyser." />
-            <ComboBox x:Name="ReportPicker" DockPanel.Dock="Right" Width="210" Visibility="Collapsed"
-                      DisplayMemberPath="Tool" SelectionChanged="ReportPicker_SelectionChanged" />
-        </DockPanel>
+        <Grid Grid.Row="1" Margin="20">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" />
+                <ColumnDefinition Width="18" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
 
-        <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="8">
-            <DataGrid x:Name="ResultsGrid" AutoGenerateColumns="False" IsReadOnly="True"
-                      CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
-                      BorderThickness="0" AlternatingRowBackground="#F8FAFC">
-                <DataGrid.Columns>
-                    <DataGridTextColumn Header="Niveau" Binding="{Binding Severity}" Width="100" />
-                    <DataGridTextColumn Header="Élément" Binding="{Binding Title}" Width="2*" />
-                    <DataGridTextColumn Header="Détail" Binding="{Binding Detail}" Width="3*" />
-                </DataGrid.Columns>
-            </DataGrid>
+            <Border Grid.Column="0" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="14">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Margin="6,2,6,12">
+                        <TextBlock Text="Que voulez-vous vérifier ?" FontSize="17" FontWeight="SemiBold" Foreground="#0F172A" />
+                        <TextBlock Text="Choisissez une analyse. La vue d’ensemble est recommandée pour commencer."
+                                   Margin="0,5,0,0" TextWrapping="Wrap" Foreground="#64748B" FontSize="12" />
+                    </StackPanel>
+
+                    <ListBox x:Name="ToolPicker" Grid.Row="1" BorderThickness="0" Background="Transparent"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             SelectionChanged="ToolPicker_SelectionChanged"
+                             automation:AutomationProperties.Name="Type d’analyse">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="5,7" ToolTip="{Binding Description}">
+                                    <TextBlock Text="{Binding Label}" FontWeight="SemiBold" Foreground="#0F172A" />
+                                    <TextBlock Text="{Binding ShortDescription}" Margin="0,2,0,0" FontSize="11"
+                                               Foreground="#64748B" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <StackPanel Grid.Row="2" Margin="4,12,4,2">
+                        <CheckBox x:Name="FlaggedOnly" IsChecked="True" Margin="2,0,2,10"
+                                  Content="Afficher seulement ce qui mérite attention"
+                                  ToolTip="Masque les éléments normaux pour réduire le bruit." />
+                        <Button x:Name="ScanButton" Height="42" Content="Démarrer l’analyse"
+                                Background="#2563EB" Foreground="White" BorderThickness="0"
+                                FontWeight="SemiBold" Click="ScanButton_Click"
+                                automation:AutomationProperties.Name="Démarrer l’analyse sélectionnée" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Column="2">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="18">
+                    <DockPanel>
+                        <StackPanel>
+                            <TextBlock x:Name="SelectedToolTitle" FontSize="21" FontWeight="SemiBold" Foreground="#0F172A" />
+                            <TextBlock x:Name="SelectedToolDescription" Margin="0,5,0,0" Foreground="#475569"
+                                       TextWrapping="Wrap" MaxWidth="680" />
+                        </StackPanel>
+                        <Button x:Name="WindowsToolButton" DockPanel.Dock="Right" Content="Ouvrir l’outil Windows"
+                                VerticalAlignment="Center" Visibility="Collapsed" Click="WindowsToolButton_Click" />
+                    </DockPanel>
+                </Border>
+
+                <Border x:Name="ProgressPanel" Grid.Row="1" Margin="0,12,0,0" Background="#EFF6FF"
+                        BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="14" Visibility="Collapsed">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <DockPanel>
+                            <TextBlock x:Name="ProgressText" Foreground="#1E3A8A" FontWeight="SemiBold" />
+                            <Button x:Name="CancelButton" DockPanel.Dock="Right" Content="Arrêter après cette étape"
+                                    Padding="10,4" Visibility="Collapsed" Click="CancelButton_Click" />
+                        </DockPanel>
+                        <ProgressBar x:Name="ScanProgressBar" Grid.Row="1" Height="8" Margin="0,10,0,0"
+                                     Minimum="0" Maximum="100" Foreground="#2563EB"
+                                     automation:AutomationProperties.Name="Progression de l’analyse" />
+                    </Grid>
+                </Border>
+
+                <DockPanel Grid.Row="2" Margin="2,14,2,9">
+                    <TextBlock x:Name="SummaryText" VerticalAlignment="Center" FontSize="15" FontWeight="SemiBold"
+                               Foreground="#334155" Text="Prêt. Sélectionnez une analyse puis cliquez sur Démarrer." />
+                    <ComboBox x:Name="ReportPicker" DockPanel.Dock="Right" Width="220" Visibility="Collapsed"
+                              DisplayMemberPath="Tool" SelectionChanged="ReportPicker_SelectionChanged"
+                              automation:AutomationProperties.Name="Rapport affiché" />
+                </DockPanel>
+
+                <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">
+                    <DataGrid x:Name="ResultsGrid" AutoGenerateColumns="False" IsReadOnly="True"
+                              CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
+                              BorderThickness="0" AlternatingRowBackground="#F8FAFC" SelectionMode="Single"
+                              SelectionChanged="ResultsGrid_SelectionChanged"
+                              automation:AutomationProperties.Name="Résultats de sécurité">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Priorité" Binding="{Binding SeverityLabel}" Width="105" />
+                            <DataGridTextColumn Header="Élément observé" Binding="{Binding Title}" Width="2*" />
+                            <DataGridTextColumn Header="Ce que WinSight a trouvé" Binding="{Binding Detail}" Width="3*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Border>
+
+                <Border Grid.Row="4" Margin="0,12,0,0" Background="White" BorderBrush="#E2E8F0"
+                        BorderThickness="1" CornerRadius="12" Padding="14">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="Que faire ?" FontWeight="SemiBold" Foreground="#0F172A" />
+                            <TextBlock x:Name="GuidanceText" Margin="0,4,10,0" TextWrapping="Wrap"
+                                       Foreground="#475569" Text="Une alerte est un indice, pas une preuve d’infection." />
+                            <TextBlock x:Name="SelectedFindingText" Margin="0,6,10,0" TextWrapping="Wrap"
+                                       Foreground="#64748B" FontSize="12" />
+                        </StackPanel>
+                        <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                            <Button x:Name="OpenLocationButton" Content="Voir le fichier" IsEnabled="False"
+                                    Click="OpenLocationButton_Click" />
+                            <Button x:Name="CopyButton" Content="Copier les détails" IsEnabled="False"
+                                    Click="CopyButton_Click" />
+                            <Button x:Name="ExportButton" Content="Exporter en JSON" IsEnabled="False"
+                                    Click="ExportButton_Click" />
+                        </WrapPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <Border Grid.Row="2" Background="#E2E8F0" Padding="20,7">
+            <TextBlock Foreground="#475569" FontSize="11"
+                       Text="Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal reste désactivé sans WINSIGHT_VT_KEY." />
         </Border>
-
-        <TextBlock Grid.Row="4" Margin="0,10,0,0" Foreground="#64748B" FontSize="12"
-                   Text="Les analyses restent locales. VirusTotal n’est contacté que si WINSIGHT_VT_KEY est défini." />
     </Grid>
 </Window>

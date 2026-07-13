@@ -44,7 +44,7 @@ public sealed class ProcessLister
         return Build(raw);
     }
 
-    private IReadOnlyList<ProcessInfo> Build(
+    private List<ProcessInfo> Build(
         List<(int Pid, string Name, string? Path, int ParentPid, string? Command)> raw)
     {
         var verdicts = _verifier.VerifyMany(

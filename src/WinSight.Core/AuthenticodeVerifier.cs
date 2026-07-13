@@ -219,7 +219,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         }
     }
 
-    private void ParseInto(string json, Dictionary<string, SignatureVerdict> results)
+    private static void ParseInto(string json, Dictionary<string, SignatureVerdict> results)
     {
         json = json.Trim();
         if (json.Length == 0)

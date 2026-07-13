@@ -82,23 +82,28 @@ public sealed class CommandLineTests
 
 public sealed class WinlogonTests
 {
+    private static readonly string[] UserinitCommand = ["userinit.exe"];
+    private static readonly string[] ExplorerCommands = ["explorer.exe", "C:\\evil.exe"];
+
     [Fact]
     public void SplitCommands_DropsEmptiesFromTrailingComma()
     {
-        Assert.Equal(new[] { "userinit.exe" }, WinlogonEnumerator.SplitCommands("userinit.exe,"));
+        Assert.Equal(UserinitCommand, WinlogonEnumerator.SplitCommands("userinit.exe,"));
     }
 
     [Fact]
     public void SplitCommands_SplitsAppendedPayload()
     {
         Assert.Equal(
-            new[] { "explorer.exe", "C:\\evil.exe" },
+            ExplorerCommands,
             WinlogonEnumerator.SplitCommands("explorer.exe, C:\\evil.exe"));
     }
 }
 
 public sealed class ScheduledTaskTests
 {
+    private static readonly string[] NotepadCommand = [@"C:\Windows\System32\notepad.exe"];
+
     private const string TaskXml = """
         <?xml version="1.0" encoding="UTF-16"?>
         <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -114,7 +119,7 @@ public sealed class ScheduledTaskTests
     [Fact]
     public void ParseTaskCommands_ExtractsExecCommand_NamespaceAgnostic()
     {
-        Assert.Equal(new[] { @"C:\Windows\System32\notepad.exe" },
+        Assert.Equal(NotepadCommand,
             ScheduledTaskEnumerator.ParseTaskCommands(TaskXml));
     }
 

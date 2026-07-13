@@ -180,7 +180,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             data = Marshal.PtrToStructure<WinTrustData>(pData);
             data.dwStateAction = WtdStateActionClose;
             Marshal.StructureToPtr(data, pData, true);
-            WinVerifyTrust(IntPtr.Zero, ref _actionGenericVerifyV2, pData);
+            _ = WinVerifyTrust(IntPtr.Zero, ref _actionGenericVerifyV2, pData);
 
             return result;
         }

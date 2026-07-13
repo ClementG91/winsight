@@ -74,7 +74,7 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
         }
     }
 
-    private static IReadOnlyList<string> SafeFiles(string dir)
+    private static string[] SafeFiles(string dir)
     {
         try
         {

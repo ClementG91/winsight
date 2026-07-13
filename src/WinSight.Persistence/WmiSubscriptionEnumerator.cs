@@ -31,7 +31,7 @@ public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
         }
     }
 
-    private static IReadOnlyList<RawAutostart> Query(string wql, Func<ManagementBaseObject, string?> commandOf)
+    private static List<RawAutostart> Query(string wql, Func<ManagementBaseObject, string?> commandOf)
     {
         var rows = new List<RawAutostart>();
         try
