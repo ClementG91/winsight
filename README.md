@@ -130,9 +130,11 @@ signed `winsight` binary (subcommands `persistence | av | net | dns | all`,
   Windows Update block), leaving benign ad-blocklist sinks alone. Read-only.
 
 **Signatures** are verified catalog-aware (`ISignatureVerifier` /
-`AuthenticodeVerifier`): a batched `Get-AuthenticodeSignature` correctly recognises
-catalog-signed Windows binaries and flags tampering (HashMismatch), with a managed
-fallback that never throws. All tools emit a shared report shape
+`AuthenticodeVerifier`): native WinVerifyTrust first, then a batched
+`Get-AuthenticodeSignature` (via `-EncodedCommand`) that correctly recognises
+catalog-signed Windows binaries and flags tampering (HashMismatch). A file whose
+signature genuinely *cannot* be verified is reported `Unknown` — never a fabricated
+`Unsigned` — so the tools fail safe and never cry wolf. All tools emit a shared report shape
 (`WinSight.Reporting`) as human text or a stable `--json` contract for a future
 GUI/automation. Authored on Linux; CI on `windows-latest` is the compiler of record.
 Central Package Management + `.editorconfig`.

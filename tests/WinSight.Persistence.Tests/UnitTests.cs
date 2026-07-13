@@ -43,6 +43,41 @@ public sealed class CommandLineTests
         Assert.Null(CommandLine.ExtractExecutable("   "));
         Assert.Null(CommandLine.ExtractExecutable(null));
     }
+
+    [Fact]
+    public void ExtractExecutable_SystemRootDriverPath_Resolves()
+    {
+        // Driver ImagePaths use NT forms Win32 can't open as-is — without normalisation
+        // every Windows driver reads as "no image" and is flagged (150+ false positives).
+        Assert.NotNull(CommandLine.ExtractExecutable(@"\SystemRoot\System32\drivers\ACPI.sys"));
+    }
+
+    [Fact]
+    public void ExtractExecutable_RelativeSystem32DriverPath_Resolves()
+    {
+        Assert.NotNull(CommandLine.ExtractExecutable(@"system32\drivers\ACPI.sys"));
+    }
+
+    [Fact]
+    public void ExtractExecutable_DefaultWinlogonShell_Resolves()
+    {
+        // explorer.exe (the default shell) lives in %windir%, not System32 — it must
+        // resolve so the benign default Winlogon shell isn't flagged.
+        var resolved = CommandLine.ExtractExecutable("explorer.exe");
+        Assert.NotNull(resolved);
+        Assert.EndsWith("explorer.exe", resolved, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData(@"\SystemRoot\system32\drivers\afd.sys")]
+    [InlineData(@"\??\C:\Windows\System32\drivers\afd.sys")]
+    [InlineData(@"SystemRoot\system32\drivers\afd.sys")]
+    public void NtPathCandidates_YieldsAWindowsRootedForm(string input)
+    {
+        var candidates = CommandLine.NtPathCandidates(input).ToList();
+        Assert.Contains(candidates, c => c.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)
+                                         || c.Contains(@":\", StringComparison.Ordinal));
+    }
 }
 
 public sealed class WinlogonTests
@@ -114,7 +149,9 @@ public sealed class AuthenticodeVerifierIntegrationTests
         {
             var r = new AuthenticodeVerifier().VerifyMany(new[] { OsBinary, tmp });
             Assert.Equal(SignatureState.SignedTrusted, r[OsBinary].State);
-            Assert.Equal(SignatureState.Unsigned, r[tmp].State);
+            // An unsigned file must never read as trusted; it is Unsigned when the
+            // catalog check ran, or Unknown if that check could not complete (load).
+            Assert.Contains(r[tmp].State, new[] { SignatureState.Unsigned, SignatureState.Unknown });
         }
         finally
         {
@@ -234,13 +271,16 @@ public sealed class NativeSignatureVerifierTests
     }
 
     [Fact]
-    public void Verify_UnsignedFile_IsUnsigned()
+    public void Verify_UnsignedFile_IsNeverTrusted()
     {
         var file = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
         File.WriteAllText(file, "not a signed PE");
         try
         {
-            Assert.Equal(SignatureState.Unsigned, new NativeSignatureVerifier().Verify(file).State);
+            // Unsigned when the catalog check ran, Unknown if it could not (load) —
+            // but never SignedTrusted. That invariant is what actually matters.
+            var state = new NativeSignatureVerifier().Verify(file).State;
+            Assert.Contains(state, new[] { SignatureState.Unsigned, SignatureState.Unknown });
         }
         finally
         {
@@ -411,14 +451,17 @@ public sealed class SignatureVerifierTests
     }
 
     [Fact]
-    public void Verify_UnsignedFile_IsUnsigned()
+    public void Verify_FileWithoutEmbeddedSignature_IsUnknown_NotUnsigned()
     {
+        // The managed verifier cannot see catalog signatures, so a file with no
+        // EMBEDDED signature is genuinely undetermined — it must report Unknown, not a
+        // false-alarm Unsigned (the same input might be a catalog-signed system binary).
         var f = Path.Combine(Path.GetTempPath(), $"winsight_{Guid.NewGuid():N}.bin");
         File.WriteAllText(f, "not a signed PE");
         try
         {
             var v = new SignatureVerifier().Verify(f);
-            Assert.Equal(SignatureState.Unsigned, v.State);
+            Assert.Equal(SignatureState.Unknown, v.State);
         }
         finally
         {

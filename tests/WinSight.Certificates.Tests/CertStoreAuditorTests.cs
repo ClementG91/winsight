@@ -45,6 +45,27 @@ public sealed class CertStoreAuditorTests
     }
 
     [Fact]
+    public void Risks_Sha1SelfSignedRoot_IsNotFlagged()
+    {
+        // The common, benign case: nearly every established public root (DigiCert,
+        // Baltimore, Comodo…) is SHA-1 self-signed. A root's own signature is not a
+        // trust input, so this must NOT be flagged — it was a mass false positive.
+        var cert = Root(hasPrivateKey: false, sigAlg: "sha1RSA", keyBits: 2048, isRsa: true, isSelfSigned: true);
+        Assert.False(cert.Notable);
+        Assert.Empty(cert.Risks);
+    }
+
+    [Fact]
+    public void Risks_Sha1NonSelfSignedCertInRootStore_IsFlagged()
+    {
+        // A weak-signature cert that is NOT self-signed sitting in the root store is
+        // genuinely odd (an intermediate masquerading as a root) — still flagged.
+        var cert = Root(hasPrivateKey: false, sigAlg: "sha1RSA", keyBits: 2048, isRsa: true, isSelfSigned: false);
+        Assert.True(cert.Notable);
+        Assert.Contains(cert.Risks, r => r.Contains("weak signature"));
+    }
+
+    [Fact]
     public void Snapshot_ReadsTrustedRoots_WithValidShape()
     {
         // A real Windows host always ships trusted roots (Microsoft, DigiCert, …).
@@ -57,15 +78,17 @@ public sealed class CertStoreAuditorTests
         });
     }
 
-    private static TrustedCertificate Root(bool hasPrivateKey, string sigAlg, int keyBits, bool isRsa) =>
+    private static TrustedCertificate Root(
+        bool hasPrivateKey, string sigAlg, int keyBits, bool isRsa, bool isSelfSigned = true) =>
         new(
             Store: "LocalMachine\\Root",
             Subject: "CN=Test Root",
-            Issuer: "CN=Test Root",
+            Issuer: isSelfSigned ? "CN=Test Root" : "CN=Some Other CA",
             Thumbprint: "0000000000000000000000000000000000000000",
             SignatureAlgorithm: sigAlg,
             KeyBits: keyBits,
             IsRsa: isRsa,
             HasPrivateKey: hasPrivateKey,
+            IsSelfSigned: isSelfSigned,
             NotAfter: new DateTime(2040, 1, 1));
 }
