@@ -154,6 +154,42 @@ public sealed class ScreensaverEnumeratorIntegrationTests
     }
 }
 
+public sealed class SilentProcessExitEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new SilentProcessExitEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.SilentProcessExit, e.Vector);
+            Assert.Contains("MonitorProcess", e.Location);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+        });
+    }
+}
+
+public sealed class ServiceEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_SurfacesSvchostServiceDllPayloads()
+    {
+        var entries = new ServiceEnumerator().Enumerate().ToList();
+        Assert.NotEmpty(entries); // a real Windows box always has auto-start services
+
+        // Every Windows install runs svchost-hosted auto-start services, so the
+        // ServiceDll payload entries must be present and point at DLLs.
+        var dllEntries = entries.Where(e => e.Name.EndsWith("(ServiceDll)", StringComparison.Ordinal)).ToList();
+        Assert.NotEmpty(dllEntries);
+        Assert.All(dllEntries, e =>
+        {
+            Assert.Contains("ServiceDll", e.Location);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+        });
+    }
+}
+
 public sealed class PersistenceScannerIntegrationTests
 {
     [Fact]
