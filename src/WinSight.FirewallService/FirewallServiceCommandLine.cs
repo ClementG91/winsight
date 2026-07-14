@@ -18,6 +18,15 @@ public enum FirewallServiceVerb
     /// <summary>Read-only WFP interop probe (opens the engine, counts filters, changes nothing).</summary>
     WfpSelfTest,
 
+    /// <summary>Create the WinSight WFP provider and sublayer (containers only, no filter).</summary>
+    WfpProvision,
+
+    /// <summary>Remove the WinSight WFP provider and sublayer.</summary>
+    WfpDeprovision,
+
+    /// <summary>Report whether the WinSight WFP provider and sublayer exist.</summary>
+    WfpStatus,
+
     /// <summary>Unrecognized verb.</summary>
     Unknown,
 }
@@ -39,6 +48,9 @@ public static class FirewallServiceCommandLine
             "uninstall" or "remove" => FirewallServiceVerb.Uninstall,
             "status" => FirewallServiceVerb.Status,
             "wfp-selftest" => FirewallServiceVerb.WfpSelfTest,
+            "wfp-provision" => FirewallServiceVerb.WfpProvision,
+            "wfp-deprovision" => FirewallServiceVerb.WfpDeprovision,
+            "wfp-status" => FirewallServiceVerb.WfpStatus,
             _ => FirewallServiceVerb.Unknown,
         };
     }

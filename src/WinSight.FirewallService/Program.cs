@@ -21,6 +21,9 @@ return FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.Uninstall => Uninstall(),
     FirewallServiceVerb.Status => Status(),
     FirewallServiceVerb.WfpSelfTest => WfpProbe(),
+    FirewallServiceVerb.WfpProvision => WfpProvision(),
+    FirewallServiceVerb.WfpDeprovision => WfpDeprovision(),
+    FirewallServiceVerb.WfpStatus => WfpStatusVerb(),
     FirewallServiceVerb.Unknown => Usage(),
     _ => RunHost(),
 };
@@ -107,9 +110,75 @@ static int WfpProbe()
     return 1;
 }
 
+static int WfpProvision()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Creating the WFP provider/sublayer requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        WfpProvisioning.Provision();
+        Console.WriteLine(
+            "WinSight WFP provider and sublayer created (containers only: no filter, nothing is blocked). Non-persistent: a reboot removes them.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine($"WFP provision failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        return 1;
+    }
+}
+
+static int WfpDeprovision()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Removing the WFP provider/sublayer requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        WfpProvisioning.Deprovision();
+        Console.WriteLine("WinSight WFP provider and sublayer removed.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine($"WFP deprovision failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        return 1;
+    }
+}
+
+static int WfpStatusVerb()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Reading the WFP provider/sublayer status requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        var (provider, sublayer) = WfpProvisioning.Status();
+        Console.WriteLine(
+            $"WinSight WFP provider: {(provider ? "present" : "absent")}, sublayer: {(sublayer ? "present" : "absent")}.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine($"WFP status failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        return 1;
+    }
+}
+
 static int Usage()
 {
-    Console.Error.WriteLine("Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest]");
+    Console.Error.WriteLine(
+        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status]");
     return 2;
 }
 
