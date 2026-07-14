@@ -11,6 +11,7 @@ namespace WinSight.Dashboard;
 /// </summary>
 public sealed class VirusTotalSettingsStore
 {
+    private const int MaximumProtectedKeyBytes = 8 * 1024;
     public const string EnvironmentVariable = "WINSIGHT_VT_KEY";
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WinSight.VirusTotal.ApiKey.v1");
     private readonly string _path;
@@ -46,6 +47,11 @@ public sealed class VirusTotalSettingsStore
                 return null;
             }
 
+            if (new FileInfo(_path).Length > MaximumProtectedKeyBytes)
+            {
+                return null;
+            }
+
             var protectedBytes = File.ReadAllBytes(_path);
             var clearBytes = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
             var key = Encoding.UTF8.GetString(clearBytes);
@@ -72,8 +78,22 @@ public sealed class VirusTotalSettingsStore
         try
         {
             protectedBytes = ProtectedData.Protect(clearBytes, Entropy, DataProtectionScope.CurrentUser);
+            if (protectedBytes.Length > MaximumProtectedKeyBytes)
+            {
+                throw new CryptographicException("The protected VirusTotal key exceeds the safety limit.");
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllBytes(temporaryPath, protectedBytes);
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.Create,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            {
+                stream.Write(protectedBytes);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporaryPath, _path, overwrite: true);
         }
         finally

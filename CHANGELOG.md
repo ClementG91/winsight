@@ -2,6 +2,39 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.8.1 — 2026-07-14
+
+### Multilingual result semantics and Phase 1 hardening
+- Complete the English, French and Spanish dashboard presentation for structured
+  findings: persistence vectors and states, camera/microphone activity, missing
+  process images, loaded modules, hosts-file reasons, certificate risks, empty
+  extension permissions, firewall direction/action and connection ownership.
+  Forensic values such as paths, process names and domains remain byte-for-byte
+  evidence rather than translated display text.
+- Grow each localization catalog from 138 to 185 parity-checked entries, replace
+  placeholder “result(s)” wording with natural singular/plural forms, and add
+  category-level presentation tests in all three languages.
+- Extract localized finding presentation, the navigation catalog and allowlisted
+  Windows launches from `MainWindow`, and isolate optional VirusTotal enrichment
+  from scanner adapters. This reduces UI/network coupling without changing the
+  stable report or JSON shape.
+- Truncate long result cells visually with full-value hover tooltips, preventing
+  service names, paths and extension permissions from crowding adjacent columns;
+  copying and JSON export continue to preserve the complete values.
+- Propagate cancellation into VirusTotal requests and hashing boundaries, including
+  dashboard and MCP scan paths. Caller cancellation is never mistaken for an
+  ordinary reputation timeout.
+- Bound quota-accounting input to 64 KiB and encrypted API-key input to 8 KiB,
+  persist both through flushed same-volume temporary files, and continue to fail
+  closed for corrupt or oversized quota state.
+- Make the shared signature cache synchronized, five-minute expiring and LRU-bounded
+  to 4096 file fingerprints (path, size, creation time and modification time), so a
+  long-running dashboard cannot retain unlimited or indefinitely stale verdicts.
+- Add cancellation, oversized-state, cache eviction, localized result/enum and
+  Windows action allowlist regressions. The suite now contains 256 test cases.
+- Keep the product scope unchanged: WinSight remains read-only in Phase 1 and Phase 2
+  remains the least-privilege WFP outbound firewall described in `docs/WFP_DESIGN.md`.
+
 ## v0.8.0 — 2026-07-14
 
 ### Context-aware dashboard and secure optional reputation

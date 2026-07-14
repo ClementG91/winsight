@@ -37,6 +37,34 @@ public sealed class DashboardToolsTests
     }
 }
 
+public sealed class DashboardWindowsActionsTests
+{
+    [Theory]
+    [InlineData(DashboardWindowsAction.StartupApps)]
+    [InlineData(DashboardWindowsAction.Privacy)]
+    [InlineData(DashboardWindowsAction.Network)]
+    [InlineData(DashboardWindowsAction.NetworkSettings)]
+    [InlineData(DashboardWindowsAction.Firewall)]
+    [InlineData(DashboardWindowsAction.Processes)]
+    [InlineData(DashboardWindowsAction.InstalledApps)]
+    [InlineData(DashboardWindowsAction.Certificates)]
+    public void ConfiguredAction_ProducesAnAllowlistedLaunch(DashboardWindowsAction action)
+    {
+        var startInfo = DashboardWindowsActions.StartInfo(action);
+
+        Assert.False(string.IsNullOrWhiteSpace(startInfo.FileName));
+        Assert.DoesNotContain('"', startInfo.FileName);
+        Assert.NotEqual("OpenWindowsTool", DashboardWindowsActions.LabelResource(action));
+    }
+
+    [Fact]
+    public void MissingAction_CannotProduceALaunch()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            DashboardWindowsActions.StartInfo(DashboardWindowsAction.None));
+    }
+}
+
 [Collection(LocalizationCollection.Name)]
 public sealed class DashboardReportRouterTests
 {

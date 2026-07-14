@@ -107,7 +107,10 @@ public partial class MainWindow : Window, IDisposable
             else
             {
                 _reports = await Task.Run(
-                    () => (IReadOnlyList<ToolReport>)[Adapters.Run(tool.Command, flaggedOnly)],
+                    () => (IReadOnlyList<ToolReport>)[Adapters.Run(
+                        tool.Command,
+                        flaggedOnly,
+                        cancellationToken: cancellation.Token)],
                     cancellation.Token);
             }
 
@@ -249,17 +252,21 @@ public partial class MainWindow : Window, IDisposable
         _visibleReports = reports;
         var findings = reports.SelectMany(report => report.Items.Select(item =>
         {
+            var presentation = DashboardFindingPresenter.Present(report.Tool, item, Text);
             var title = categorize
-                ? $"{DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool} · {item.Title}"
-                : item.Title;
+                ? $"{DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool} · {presentation.Title}"
+                : presentation.Title;
             return new FindingView(
                 item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
                 title,
-                LocalizeFindingDetail(item),
+                presentation.Detail,
                 item);
         })).ToList();
         ResultsGrid.ItemsSource = findings;
-        SummaryText.Text = Text.Format("ResultsSummary", findings.Count, reports.Sum(report => report.NotableCount));
+        SummaryText.Text = DashboardResultSummary.Format(
+            Text,
+            findings.Count,
+            reports.Sum(report => report.NotableCount));
         SelectedFindingText.Text = findings.Count == 0
             ? Text["NoItems"]
             : Text["SelectFinding"];
@@ -272,35 +279,6 @@ public partial class MainWindow : Window, IDisposable
         _ = dialog.ShowDialog();
     }
 
-    private string LocalizeFindingDetail(ReportItem item)
-    {
-        if (!item.Fields.TryGetValue("status", out var status) || string.IsNullOrWhiteSpace(status))
-        {
-            return item.Detail;
-        }
-
-        var label = Text[$"PersistenceStatus{status}"];
-        var evidence = FirstNonEmpty(item, "image", "expectedImage", "command") ?? item.Detail;
-        var suffix = item.Fields.TryGetValue("vtMalicious", out var malicious) &&
-                     item.Fields.TryGetValue("vtTotal", out var total) &&
-                     !string.IsNullOrWhiteSpace(malicious) && !string.IsNullOrWhiteSpace(total)
-            ? $"{label}; VT {malicious}/{total}"
-            : label;
-        return $"{evidence}  [{suffix}]";
-    }
-
-    private static string? FirstNonEmpty(ReportItem item, params string[] keys)
-    {
-        foreach (var key in keys)
-        {
-            if (item.Fields.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
-        return null;
-    }
-
     private void ShowToolExplanation(DashboardTool tool)
     {
         SelectedToolTitle.Text = tool.Label;
@@ -310,7 +288,7 @@ public partial class MainWindow : Window, IDisposable
             ? Visibility.Collapsed
             : Visibility.Visible;
         WindowsToolButton.Tag = tool.WindowsAction;
-        WindowsToolButton.Content = Text[WindowsActionLabel(tool.WindowsAction)];
+        WindowsToolButton.Content = Text[DashboardWindowsActions.LabelResource(tool.WindowsAction)];
     }
 
     private void ResultsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -401,50 +379,8 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        var startInfo = WindowsActionStartInfo(action);
+        var startInfo = DashboardWindowsActions.StartInfo(action);
         TryUserAction(() => _ = Process.Start(startInfo), Text["WindowsToolOpened"]);
-    }
-
-    private static string WindowsActionLabel(DashboardWindowsAction action) => action switch
-    {
-        DashboardWindowsAction.StartupApps => "OpenStartupSettings",
-        DashboardWindowsAction.Privacy => "OpenPrivacySettings",
-        DashboardWindowsAction.Network => "OpenResourceMonitor",
-        DashboardWindowsAction.NetworkSettings => "OpenNetworkSettings",
-        DashboardWindowsAction.Firewall => "OpenFirewall",
-        DashboardWindowsAction.Processes => "OpenTaskManager",
-        DashboardWindowsAction.InstalledApps => "OpenInstalledApps",
-        DashboardWindowsAction.Certificates => "OpenCertificates",
-        _ => "OpenWindowsTool",
-    };
-
-    private static ProcessStartInfo WindowsActionStartInfo(DashboardWindowsAction action)
-    {
-        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        if (action is DashboardWindowsAction.Processes or DashboardWindowsAction.Network)
-        {
-            var executable = action == DashboardWindowsAction.Processes ? "Taskmgr.exe" : "resmon.exe";
-            return new ProcessStartInfo(Path.Combine(system, executable)) { UseShellExecute = false };
-        }
-
-        if (action is DashboardWindowsAction.Firewall or DashboardWindowsAction.Certificates)
-        {
-            var startInfo = new ProcessStartInfo(Path.Combine(system, "mmc.exe")) { UseShellExecute = false };
-            startInfo.ArgumentList.Add(Path.Combine(
-                system,
-                action == DashboardWindowsAction.Firewall ? "wf.msc" : "certlm.msc"));
-            return startInfo;
-        }
-
-        var settingsUri = action switch
-        {
-            DashboardWindowsAction.StartupApps => "ms-settings:startupapps",
-            DashboardWindowsAction.Privacy => "ms-settings:privacy-webcam",
-            DashboardWindowsAction.NetworkSettings => "ms-settings:network-status",
-            DashboardWindowsAction.InstalledApps => "ms-settings:appsfeatures",
-            _ => throw new InvalidOperationException("No Windows action is configured."),
-        };
-        return new ProcessStartInfo(settingsUri) { UseShellExecute = true };
     }
 
     private void TryUserAction(Action action, string successMessage)
@@ -517,73 +453,3 @@ public partial class MainWindow : Window, IDisposable
 }
 
 public sealed record FindingView(string SeverityLabel, string Title, string Detail, ReportItem Item);
-
-public enum DashboardWindowsAction
-{
-    None,
-    StartupApps,
-    Privacy,
-    Network,
-    NetworkSettings,
-    Firewall,
-    Processes,
-    InstalledApps,
-    Certificates,
-}
-
-public sealed record DashboardTool(
-    string Label,
-    string Command,
-    string ReportName,
-    string ShortDescription,
-    string Description,
-    string Guidance,
-    DashboardWindowsAction WindowsAction = DashboardWindowsAction.None);
-
-public static class DashboardTools
-{
-    private static IReadOnlyList<DashboardTool> _all = Build();
-
-    public static IReadOnlyList<DashboardTool> All => _all;
-
-    public static void Reload() => _all = Build();
-
-    private static IReadOnlyList<DashboardTool> Build() =>
-    [
-        Tool("Overview", "all", "all"),
-        Tool("Persistence", "persistence", "persistence", DashboardWindowsAction.StartupApps),
-        Tool("Av", "av", "camera-mic", DashboardWindowsAction.Privacy),
-        Tool("Network", "net", "connections", DashboardWindowsAction.Network),
-        Tool("Dns", "dns", "dns", DashboardWindowsAction.NetworkSettings),
-        Tool("Firewall", "firewall", "firewall", DashboardWindowsAction.Firewall),
-        Tool("Processes", "processes", "processes", DashboardWindowsAction.Processes),
-        Tool("Modules", "modules", "modules", DashboardWindowsAction.Processes),
-        Tool("Extensions", "extensions", "extensions", DashboardWindowsAction.InstalledApps),
-        Tool("Certificates", "certs", "certificates", DashboardWindowsAction.Certificates),
-        Tool("Hosts", "hosts", "hosts"),
-    ];
-
-    private static DashboardTool Tool(
-        string resourceName,
-        string command,
-        string reportName,
-        DashboardWindowsAction windowsAction = DashboardWindowsAction.None)
-    {
-        var text = LocalizationManager.Instance;
-        var prefix = $"Tool{resourceName}";
-        return new DashboardTool(
-            text[$"{prefix}Label"],
-            command,
-            reportName,
-            text[$"{prefix}Short"],
-            text[$"{prefix}Description"],
-            text[$"{prefix}Guidance"],
-            windowsAction);
-    }
-
-    public static DashboardTool? ForCommand(string command) =>
-        All.FirstOrDefault(tool => tool.Command.Equals(command, StringComparison.OrdinalIgnoreCase));
-
-    public static DashboardTool? ForReport(string reportName) =>
-        All.FirstOrDefault(tool => tool.ReportName.Equals(reportName, StringComparison.OrdinalIgnoreCase));
-}

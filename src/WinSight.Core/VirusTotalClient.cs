@@ -38,7 +38,7 @@ public sealed class VirusTotalClient
     public static bool IsSha256(string? value) =>
         value is { Length: 64 } && value.All(Uri.IsHexDigit);
 
-    public VtVerdict? Lookup(string sha256)
+    public VtVerdict? Lookup(string sha256, CancellationToken cancellationToken = default)
     {
         if (!IsSha256(sha256))
         {
@@ -49,16 +49,16 @@ public sealed class VirusTotalClient
             using var request = new HttpRequestMessage(
                 HttpMethod.Get, $"https://www.virustotal.com/api/v3/files/{sha256}");
             request.Headers.Add("x-apikey", _apiKey);
-            using var response = _http.Send(request);
+            using var response = _http.Send(request, cancellationToken);
             if (!response.IsSuccessStatusCode)
             {
                 return null;
             }
-            using var reader = new StreamReader(response.Content.ReadAsStream());
+            using var reader = new StreamReader(response.Content.ReadAsStream(cancellationToken));
             return ParseStats(reader.ReadToEnd(), sha256);
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException
-                                     or JsonException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException ||
+                                     ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
         {
             return null;
         }

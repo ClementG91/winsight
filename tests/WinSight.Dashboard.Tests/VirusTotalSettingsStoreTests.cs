@@ -42,6 +42,16 @@ public sealed class VirusTotalSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Store_RejectsOversizedProtectedPayloadBeforeReadingIt()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "oversized.bin");
+        File.WriteAllBytes(path, new byte[9 * 1024]);
+
+        Assert.Null(new VirusTotalSettingsStore(path).LoadStoredKey());
+    }
+
+    [Fact]
     public void EnvironmentConfiguration_RemainsAuthoritativeForTheSession()
     {
         var original = Environment.GetEnvironmentVariable(VirusTotalSettingsStore.EnvironmentVariable);

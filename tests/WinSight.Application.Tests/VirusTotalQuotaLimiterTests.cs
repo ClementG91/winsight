@@ -67,6 +67,18 @@ public sealed class VirusTotalQuotaLimiterTests : IDisposable
         Assert.False(snapshot.RequestAllowed);
     }
 
+    [Fact]
+    public void Guard_FailsClosedBeforeReadingOversizedAccountingState()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "oversized.json");
+        File.WriteAllBytes(path, new byte[65 * 1024]);
+        var guard = new VirusTotalQuotaLimiter(path);
+
+        Assert.False(guard.TryAcquire(out var snapshot));
+        Assert.False(snapshot.RequestAllowed);
+    }
+
     public void Dispose()
     {
         try

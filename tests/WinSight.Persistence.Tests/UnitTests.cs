@@ -403,6 +403,25 @@ public sealed class HashUtilTests
 
 public sealed class VirusTotalParseTests
 {
+    private sealed class CancellationHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK));
+        }
+
+        protected override HttpResponseMessage Send(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
+    }
+
     [Fact]
     public void ParseStats_ReadsAnalysisStats()
     {
@@ -442,6 +461,19 @@ public sealed class VirusTotalParseTests
         // returns null before any request is built.
         var client = new VirusTotalClient("dummy-key");
         Assert.Null(client.Lookup("not-a-hash"));
+    }
+
+    [Fact]
+    public void Lookup_PropagatesCallerCancellation()
+    {
+        using var http = new HttpClient(new CancellationHandler());
+        var client = new VirusTotalClient("dummy-key", http);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.ThrowsAny<OperationCanceledException>(() => client.Lookup(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            cancellation.Token));
     }
 }
 
@@ -497,6 +529,41 @@ public sealed class CachingSignatureVerifierTests
         {
             File.Delete(file);
         }
+    }
+
+    [Fact]
+    public void Verify_EvictsLeastRecentlyUsedEntryAtConfiguredBound()
+    {
+        var first = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
+        var second = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
+        File.WriteAllText(first, "first");
+        File.WriteAllText(second, "second");
+        try
+        {
+            var inner = new CountingVerifier();
+            var caching = new CachingSignatureVerifier(inner, maxEntries: 1);
+
+            caching.Verify(first);
+            caching.Verify(second);
+            caching.Verify(first);
+
+            Assert.Equal(3, inner.Calls);
+        }
+        finally
+        {
+            File.Delete(first);
+            File.Delete(second);
+        }
+    }
+
+    [Fact]
+    public void Constructor_RejectsInvalidCacheBounds()
+    {
+        var inner = new CountingVerifier();
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new CachingSignatureVerifier(inner, maxEntries: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new CachingSignatureVerifier(inner, maxAge: TimeSpan.Zero));
     }
 }
 

@@ -81,7 +81,11 @@
   <data name="StopRequested" xml:space="preserve"><value>Stop requested — the current step will finish without being interrupted abruptly…</value></data>
   <data name="NotableSeverity" xml:space="preserve"><value>Needs attention</value></data>
   <data name="InfoSeverity" xml:space="preserve"><value>Information</value></data>
-  <data name="ResultsSummary" xml:space="preserve"><value>{0} result(s) shown · {1} need attention</value></data>
+  <data name="ResultsSummary" xml:space="preserve"><value>{0} · {1}</value></data>
+  <data name="ResultCountSingle" xml:space="preserve"><value>{0} result shown</value></data>
+  <data name="ResultCountPlural" xml:space="preserve"><value>{0} results shown</value></data>
+  <data name="AttentionCountSingle" xml:space="preserve"><value>{0} needs attention</value></data>
+  <data name="AttentionCountPlural" xml:space="preserve"><value>{0} need attention</value></data>
   <data name="NoItems" xml:space="preserve"><value>No items match the current filter. This does not guarantee that the system is threat-free.</value></data>
   <data name="SelectFinding" xml:space="preserve"><value>Select a row to see the safe actions available.</value></data>
   <data name="FindingSelectionFormat" xml:space="preserve"><value>{0} — {1}&#xA;{2}</value></data>
@@ -143,4 +147,47 @@
   <data name="ToolHostsShort" xml:space="preserve"><value>Local website redirects</value></data>
   <data name="ToolHostsDescription" xml:space="preserve"><value>Detects redirects that may hijack a website or block security and update services.</value></data>
   <data name="ToolHostsGuidance" xml:space="preserve"><value>Ad blockers also use this file. Check the domain and address before changing anything.</value></data>
+  <data name="UnknownValue" xml:space="preserve"><value>Unknown</value></data>
+  <data name="NoImage" xml:space="preserve"><value>Image path unavailable</value></data>
+  <data name="SensorWebcam" xml:space="preserve"><value>Webcam</value></data>
+  <data name="SensorMicrophone" xml:space="preserve"><value>Microphone</value></data>
+  <data name="SensorItemTitle" xml:space="preserve"><value>{0}/{1}</value></data>
+  <data name="SensorInUseNow" xml:space="preserve"><value>In use now</value></data>
+  <data name="SensorLastUsed" xml:space="preserve"><value>Last used: {0}</value></data>
+  <data name="ProcessWithPid" xml:space="preserve"><value>{0} (PID {1})</value></data>
+  <data name="ModuleLoadedByProcess" xml:space="preserve"><value>{0} (PID {1}) ← {2}</value></data>
+  <data name="StaticMapping" xml:space="preserve"><value>Static mapping</value></data>
+  <data name="HostExternalRedirect" xml:space="preserve"><value>Redirects a hostname to an external address (possible hijack)</value></data>
+  <data name="HostSecurityBlackhole" xml:space="preserve"><value>Blackholes a security or update domain (possible protection bypass)</value></data>
+  <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>Trusted root holds a private key and can mint trusted certificates</value></data>
+  <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Weak signature algorithm ({0}) on a non-self-signed root-store certificate</value></data>
+  <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Undersized RSA key ({0} bits)</value></data>
+  <data name="CertificateProperties" xml:space="preserve"><value>{0}, {1}-bit key</value></data>
+  <data name="NoDeclaredPermissions" xml:space="preserve"><value>No declared permissions</value></data>
+  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="FirewallDirectionInbound" xml:space="preserve"><value>Inbound</value></data>
+  <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Outbound</value></data>
+  <data name="FirewallDirectionUnknown" xml:space="preserve"><value>Unknown direction</value></data>
+  <data name="FirewallActionAllow" xml:space="preserve"><value>Allow</value></data>
+  <data name="FirewallActionBlock" xml:space="preserve"><value>Block</value></data>
+  <data name="FirewallActionUnknown" xml:space="preserve"><value>Unknown action</value></data>
+  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}) — {2}</value></data>
+  <data name="PersistenceVectorRunKey" xml:space="preserve"><value>Run key</value></data>
+  <data name="PersistenceVectorService" xml:space="preserve"><value>Service or driver</value></data>
+  <data name="PersistenceVectorWinlogon" xml:space="preserve"><value>Winlogon</value></data>
+  <data name="PersistenceVectorScheduledTask" xml:space="preserve"><value>Scheduled task</value></data>
+  <data name="PersistenceVectorAppInitDll" xml:space="preserve"><value>AppInit DLL</value></data>
+  <data name="PersistenceVectorImageHijack" xml:space="preserve"><value>Image hijack</value></data>
+  <data name="PersistenceVectorActiveSetup" xml:space="preserve"><value>Active Setup</value></data>
+  <data name="PersistenceVectorBootExecute" xml:space="preserve"><value>BootExecute</value></data>
+  <data name="PersistenceVectorWmiSubscription" xml:space="preserve"><value>WMI subscription</value></data>
+  <data name="PersistenceVectorStartupFolder" xml:space="preserve"><value>Startup folder</value></data>
+  <data name="PersistenceVectorLsaPackage" xml:space="preserve"><value>LSA package</value></data>
+  <data name="PersistenceVectorPrintMonitor" xml:space="preserve"><value>Print monitor</value></data>
+  <data name="PersistenceVectorNetshHelper" xml:space="preserve"><value>Netsh helper</value></data>
+  <data name="PersistenceVectorComHijack" xml:space="preserve"><value>COM override</value></data>
+  <data name="PersistenceVectorAppCertDll" xml:space="preserve"><value>AppCert DLL</value></data>
+  <data name="PersistenceVectorTimeProvider" xml:space="preserve"><value>Time provider</value></data>
+  <data name="PersistenceVectorScreensaver" xml:space="preserve"><value>Screensaver</value></data>
+  <data name="PersistenceVectorSilentProcessExit" xml:space="preserve"><value>Silent process exit monitor</value></data>
 </root>

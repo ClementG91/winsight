@@ -37,14 +37,16 @@ public static class Adapters
     public static ToolReport Run(
         string command,
         bool flaggedOnly = false,
-        bool allowNetworkLookups = true)
+        bool allowNetworkLookups = true,
+        CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        cancellationToken.ThrowIfCancellationRequested();
         return command.ToLowerInvariant() switch
         {
-            "persistence" => Persistence(flaggedOnly, allowNetworkLookups),
+            "persistence" => Persistence(flaggedOnly, allowNetworkLookups, cancellationToken),
             "av" or "avmonitor" => CameraMic(flaggedOnly),
-            "net" or "netmonitor" => Connections(flaggedOnly, allowNetworkLookups),
+            "net" or "netmonitor" => Connections(flaggedOnly, allowNetworkLookups, cancellationToken),
             "dns" => Dns(flaggedOnly),
             "firewall" or "fw" => Firewall(flaggedOnly),
             "processes" or "ps" => Processes(flaggedOnly),
@@ -72,19 +74,24 @@ public static class Adapters
             cancellationToken.ThrowIfCancellationRequested();
             var command = OverviewCommands[index];
             progress?.Report(new ScanProgress(index, OverviewCommands.Count, command));
-            reports.Add(Run(command, flaggedOnly, allowNetworkLookups));
+            reports.Add(Run(command, flaggedOnly, allowNetworkLookups, cancellationToken));
             progress?.Report(new ScanProgress(index + 1, OverviewCommands.Count, command));
         }
         return reports;
     }
 
-    public static ToolReport Persistence(bool flaggedOnly, bool allowNetworkLookups = true)
+    public static ToolReport Persistence(
+        bool flaggedOnly,
+        bool allowNetworkLookups = true,
+        CancellationToken cancellationToken = default)
     {
         var entries = new PersistenceScanner(verifier: SharedVerifier).Scan();
 
         // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
-        var vt = VtLookups(entries.Where(e => e.IsSuspicious && e.ImagePath is not null)
-            .Select(e => e.ImagePath!), allowNetworkLookups);
+        var vt = VirusTotalEnricher.Lookup(
+            entries.Where(e => e.IsSuspicious && e.ImagePath is not null).Select(e => e.ImagePath!),
+            allowNetworkLookups,
+            cancellationToken);
 
         var b = new ToolReport.Builder("persistence");
         foreach (var e in entries.Where(e => !flaggedOnly || e.IsSuspicious)
@@ -131,51 +138,6 @@ public static class Adapters
         PersistenceStatus.AccessDenied => "access denied — signature not checked",
         _ => "verification error",
     };
-
-    // VirusTotal lookups for the given image paths — opt-in (WINSIGHT_VT_KEY) and
-    // capped to stay within the free-tier rate limit. Empty when no key is set (the
-    // tool stays local-only unless the user provides their own key).
-    private static Dictionary<string, VtVerdict> VtLookups(
-        IEnumerable<string> imagePaths,
-        bool allowNetworkLookups)
-    {
-        var results = new Dictionary<string, VtVerdict>(StringComparer.OrdinalIgnoreCase);
-        if (!allowNetworkLookups)
-        {
-            return results;
-        }
-        var apiKey = Environment.GetEnvironmentVariable("WINSIGHT_VT_KEY");
-        if (string.IsNullOrWhiteSpace(apiKey))
-        {
-            return results;
-        }
-        var client = new VirusTotalClient(apiKey);
-        // This per-scan cap limits work even for premium keys. The persistent,
-        // cross-process guard below additionally enforces the Community minute,
-        // daily and monthly allowances and fails closed when it cannot account.
-        const int cap = 4;
-        var candidates = imagePaths
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(path => (Path: path, Sha256: HashUtil.Sha256File(path)))
-            .Where(candidate => candidate.Sha256 is not null)
-            .GroupBy(candidate => candidate.Sha256!, StringComparer.OrdinalIgnoreCase)
-            .Take(cap);
-        foreach (var candidateGroup in candidates)
-        {
-            if (!VirusTotalQuotaLimiter.Default.TryAcquire(out _))
-            {
-                break;
-            }
-            if (client.Lookup(candidateGroup.Key) is { } verdict)
-            {
-                foreach (var candidate in candidateGroup)
-                {
-                    results[candidate.Path] = verdict;
-                }
-            }
-        }
-        return results;
-    }
 
     /// <summary>Runs the live camera/mic monitor, printing transitions until Ctrl+C.</summary>
     public static int WatchCameraMic()
@@ -287,6 +249,8 @@ public static class Adapters
                     ["hostname"] = e.Hostname,
                     ["ip"] = e.IpAddress,
                     ["reason"] = e.Reason,
+                    ["isSink"] = e.IsSink.ToString(),
+                    ["isSensitive"] = e.IsSensitive.ToString(),
                 });
         }
         return b.Build($"{entries.Count} hosts entry(ies), {entries.Count(e => e.Notable)} flagged");
@@ -312,7 +276,9 @@ public static class Adapters
                     ["thumbprint"] = c.Thumbprint,
                     ["signatureAlgorithm"] = c.SignatureAlgorithm,
                     ["keyBits"] = c.KeyBits.ToString(),
+                    ["isRsa"] = c.IsRsa.ToString(),
                     ["hasPrivateKey"] = c.HasPrivateKey.ToString(),
+                    ["isSelfSigned"] = c.IsSelfSigned.ToString(),
                     ["notAfter"] = c.NotAfter.ToString("o"),
                     ["risks"] = c.Risks.Count > 0 ? string.Join("; ", c.Risks) : null,
                 });
@@ -431,13 +397,18 @@ public static class Adapters
         return b.Build($"{records.Count} cached DNS record(s)");
     }
 
-    public static ToolReport Connections(bool flaggedOnly, bool allowNetworkLookups = true)
+    public static ToolReport Connections(
+        bool flaggedOnly,
+        bool allowNetworkLookups = true,
+        CancellationToken cancellationToken = default)
     {
         var connections = new ConnectionMonitor(SharedVerifier).Snapshot();
 
         // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections.
-        var vt = VtLookups(connections.Where(c => c.Noteworthy && c.ImagePath is not null)
-            .Select(c => c.ImagePath!), allowNetworkLookups);
+        var vt = VirusTotalEnricher.Lookup(
+            connections.Where(c => c.Noteworthy && c.ImagePath is not null).Select(c => c.ImagePath!),
+            allowNetworkLookups,
+            cancellationToken);
 
         var b = new ToolReport.Builder("connections");
         foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)

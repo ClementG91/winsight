@@ -24,6 +24,7 @@ public sealed record VirusTotalQuotaSnapshot(
 /// </summary>
 public sealed class VirusTotalQuotaLimiter
 {
+    private const int MaximumStateBytes = 64 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly string _path;
     private readonly string _mutexName;
@@ -113,6 +114,11 @@ public sealed class VirusTotalQuotaLimiter
             return new QuotaState();
         }
 
+        if (new FileInfo(_path).Length > MaximumStateBytes)
+        {
+            throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
+        }
+
         var state = JsonSerializer.Deserialize<QuotaState>(File.ReadAllText(_path), JsonOptions)
                     ?? throw new InvalidDataException("VirusTotal quota state is empty.");
         if (state.DayCount < 0 || state.MonthCount < 0 ||
@@ -152,7 +158,22 @@ public sealed class VirusTotalQuotaLimiter
         var temporaryPath = _path + ".tmp";
         try
         {
-            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state, JsonOptions));
+            var payload = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
+            if (payload.Length > MaximumStateBytes)
+            {
+                throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
+            }
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.Create,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            {
+                stream.Write(payload);
+                stream.Flush(flushToDisk: true);
+            }
             File.Move(temporaryPath, _path, overwrite: true);
         }
         finally

@@ -40,7 +40,11 @@ public sealed class McpScanService : IDisposable
                         flaggedOnly,
                         cancellationToken: cancellationToken,
                         allowNetworkLookups: false)
-                    : [Adapters.Run(scanner, flaggedOnly, allowNetworkLookups: false)],
+                    : [Adapters.Run(
+                        scanner,
+                        flaggedOnly,
+                        allowNetworkLookups: false,
+                        cancellationToken: cancellationToken)],
                 CancellationToken.None);
 
             try

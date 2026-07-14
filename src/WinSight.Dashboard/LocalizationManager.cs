@@ -54,6 +54,11 @@ public sealed class LocalizationManager : INotifyPropertyChanged
         ?? Resources.GetString(key, CultureInfo.InvariantCulture)
         ?? $"[{key}]";
 
+    public string GetOrFallback(string key, string fallback) =>
+        Resources.GetString(key, _culture)
+        ?? Resources.GetString(key, CultureInfo.InvariantCulture)
+        ?? fallback;
+
     public string Format(string key, params object?[] arguments) =>
         string.Format(_culture, this[key], arguments);
 

@@ -29,6 +29,11 @@ winsight/
   docs/
 ```
 
+The dashboard keeps detection evidence separate from localized presentation.
+`WinSight.Application` emits stable structured fields for CLI, JSON and MCP, while
+the dashboard presenter translates only WinSight-owned labels and explanations.
+Paths, process names, domains and other forensic values are never rewritten.
+
 ## Windows primitives per tool (the real engineering)
 
 - **Persistence** — read the full autostart surface: `HKLM/HKCU ...\Run`,

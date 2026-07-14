@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Globalization;
 using System.Resources;
+using WinSight.Firewall;
+using WinSight.Persistence;
 using Xunit;
 
 namespace WinSight.Dashboard.Tests;
@@ -81,6 +83,55 @@ public sealed class LocalizationTests
             Assert.False(
                 string.IsNullOrWhiteSpace(localized.GetString(key)),
                 $"Missing {cultureName} localization for resource '{key}'.");
+        }
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("fr")]
+    [InlineData("es")]
+    public void StructuredSecurityEnums_HaveExplicitLocalizedLabels(string culture)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            Assert.All(Enum.GetNames<AutostartVector>(), name =>
+                Assert.NotEqual("missing", localization.GetOrFallback($"PersistenceVector{name}", "missing")));
+            Assert.All(Enum.GetNames<PersistenceStatus>(), name =>
+                Assert.NotEqual("missing", localization.GetOrFallback($"PersistenceStatus{name}", "missing")));
+            Assert.All(Enum.GetNames<FirewallDirection>(), name =>
+                Assert.NotEqual("missing", localization.GetOrFallback($"FirewallDirection{name}", "missing")));
+            Assert.All(Enum.GetNames<FirewallAction>(), name =>
+                Assert.NotEqual("missing", localization.GetOrFallback($"FirewallAction{name}", "missing")));
+        }
+        finally
+        {
+            localization.SetCulture(original);
+        }
+    }
+
+    [Theory]
+    [InlineData("en", "1 result shown · 1 needs attention", "2 results shown · 2 need attention")]
+    [InlineData("fr", "1 résultat affiché · 1 à vérifier", "2 résultats affichés · 2 à vérifier")]
+    [InlineData("es", "1 resultado mostrado · 1 requiere atención", "2 resultados mostrados · 2 requieren atención")]
+    public void ResultSummary_UsesNaturalSingularAndPlural(
+        string culture,
+        string expectedSingular,
+        string expectedPlural)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            Assert.Equal(expectedSingular, DashboardResultSummary.Format(localization, 1, 1));
+            Assert.Equal(expectedPlural, DashboardResultSummary.Format(localization, 2, 2));
+        }
+        finally
+        {
+            localization.SetCulture(original);
         }
     }
 }

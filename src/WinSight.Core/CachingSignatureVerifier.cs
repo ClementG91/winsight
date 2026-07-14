@@ -1,20 +1,39 @@
+using System.Diagnostics;
+
 namespace WinSight.Core;
 
 /// <summary>
 /// A caching decorator over any <see cref="ISignatureVerifier"/>. A file's verdict is
-/// cached keyed by its path AND last-write time, so unchanged binaries are verified
-/// once — a big win when several tools (persistence + connections in one `all` run)
-/// check the same system binaries, and across repeated scans. The cache invalidates
-/// automatically when a file changes (different mtime). Not thread-safe; scans are
-/// sequential.
+/// cached by path and file metadata, so unchanged binaries are verified once when
+/// several tools inspect them. Entries expire and the least-recently-used entry is
+/// evicted at a fixed bound: a long-running dashboard cannot grow this cache without
+/// limit or treat an old verdict as an authorization decision.
 /// </summary>
 public sealed class CachingSignatureVerifier : ISignatureVerifier
 {
     private readonly ISignatureVerifier _inner;
-    private readonly Dictionary<string, (DateTime Mtime, SignatureVerdict Verdict)> _cache =
+    private readonly int _maxEntries;
+    private readonly TimeSpan _maxAge;
+    private readonly object _sync = new();
+    private readonly LinkedList<string> _lru = new();
+    private readonly Dictionary<string, CacheEntry> _cache =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public CachingSignatureVerifier(ISignatureVerifier inner) => _inner = inner;
+    public CachingSignatureVerifier(
+        ISignatureVerifier inner,
+        int maxEntries = 4096,
+        TimeSpan? maxAge = null)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxEntries);
+        if (maxAge is { } configuredAge && configuredAge <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxAge));
+        }
+        _inner = inner;
+        _maxEntries = maxEntries;
+        _maxAge = maxAge ?? TimeSpan.FromMinutes(5);
+    }
 
     public SignatureVerdict Verify(string path) =>
         VerifyMany([path]).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
@@ -52,32 +71,86 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     private bool TryGetCached(string path, out SignatureVerdict verdict)
     {
         verdict = default;
-        var mtime = LastWrite(path);
-        if (mtime is { } m && _cache.TryGetValue(path, out var entry) && entry.Mtime == m)
+        var fingerprint = Fingerprint(path);
+        if (fingerprint is null)
         {
+            return false;
+        }
+
+        lock (_sync)
+        {
+            if (!_cache.TryGetValue(path, out var entry) ||
+                entry.Fingerprint != fingerprint ||
+                Stopwatch.GetElapsedTime(entry.CachedAtTimestamp) > _maxAge)
+            {
+                Remove(path, entry);
+                return false;
+            }
+
+            _lru.Remove(entry.Node);
+            _lru.AddLast(entry.Node);
             verdict = entry.Verdict;
             return true;
         }
-        return false;
     }
 
     private void Store(string path, SignatureVerdict verdict)
     {
-        if (LastWrite(path) is { } mtime)
+        if (Fingerprint(path) is not { } fingerprint)
         {
-            _cache[path] = (mtime, verdict);
+            return;
+        }
+
+        lock (_sync)
+        {
+            if (_cache.TryGetValue(path, out var existing))
+            {
+                _lru.Remove(existing.Node);
+                _cache.Remove(path);
+            }
+            while (_cache.Count >= _maxEntries && _lru.First is { } oldest)
+            {
+                _cache.Remove(oldest.Value);
+                _lru.RemoveFirst();
+            }
+
+            var node = _lru.AddLast(path);
+            _cache[path] = new CacheEntry(fingerprint, verdict, Stopwatch.GetTimestamp(), node);
         }
     }
 
-    private static DateTime? LastWrite(string path)
+    private void Remove(string path, CacheEntry? entry)
+    {
+        if (entry is null)
+        {
+            return;
+        }
+        _cache.Remove(path);
+        _lru.Remove(entry.Node);
+    }
+
+    private static FileFingerprint? Fingerprint(string path)
     {
         try
         {
-            return File.Exists(path) ? File.GetLastWriteTimeUtc(path) : null;
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+            var file = new FileInfo(path);
+            return new FileFingerprint(file.Length, file.CreationTimeUtc, file.LastWriteTimeUtc);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return null;
         }
     }
+
+    private sealed record CacheEntry(
+        FileFingerprint Fingerprint,
+        SignatureVerdict Verdict,
+        long CachedAtTimestamp,
+        LinkedListNode<string> Node);
+
+    private sealed record FileFingerprint(long Length, DateTime CreationTimeUtc, DateTime LastWriteTimeUtc);
 }

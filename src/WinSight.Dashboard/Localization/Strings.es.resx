@@ -81,7 +81,11 @@
   <data name="StopRequested" xml:space="preserve"><value>Parada solicitada: el paso actual terminará sin interrumpirse de forma brusca…</value></data>
   <data name="NotableSeverity" xml:space="preserve"><value>Requiere atención</value></data>
   <data name="InfoSeverity" xml:space="preserve"><value>Información</value></data>
-  <data name="ResultsSummary" xml:space="preserve"><value>{0} resultado(s) mostrado(s) · {1} requieren atención</value></data>
+  <data name="ResultsSummary" xml:space="preserve"><value>{0} · {1}</value></data>
+  <data name="ResultCountSingle" xml:space="preserve"><value>{0} resultado mostrado</value></data>
+  <data name="ResultCountPlural" xml:space="preserve"><value>{0} resultados mostrados</value></data>
+  <data name="AttentionCountSingle" xml:space="preserve"><value>{0} requiere atención</value></data>
+  <data name="AttentionCountPlural" xml:space="preserve"><value>{0} requieren atención</value></data>
   <data name="NoItems" xml:space="preserve"><value>Ningún elemento coincide con el filtro actual. Esto no garantiza que el sistema esté libre de amenazas.</value></data>
   <data name="SelectFinding" xml:space="preserve"><value>Selecciona una fila para ver las acciones seguras disponibles.</value></data>
   <data name="FindingSelectionFormat" xml:space="preserve"><value>{0} — {1}&#xA;{2}</value></data>
@@ -143,4 +147,47 @@
   <data name="ToolHostsShort" xml:space="preserve"><value>Redirecciones locales de sitios</value></data>
   <data name="ToolHostsDescription" xml:space="preserve"><value>Detecta redirecciones que podrían secuestrar un sitio o bloquear servicios de seguridad y actualización.</value></data>
   <data name="ToolHostsGuidance" xml:space="preserve"><value>Los bloqueadores de anuncios también usan este archivo. Comprueba el dominio y la dirección antes de modificar nada.</value></data>
+  <data name="UnknownValue" xml:space="preserve"><value>Desconocido</value></data>
+  <data name="NoImage" xml:space="preserve"><value>Ruta de imagen no disponible</value></data>
+  <data name="SensorWebcam" xml:space="preserve"><value>Cámara</value></data>
+  <data name="SensorMicrophone" xml:space="preserve"><value>Micrófono</value></data>
+  <data name="SensorItemTitle" xml:space="preserve"><value>{0}/{1}</value></data>
+  <data name="SensorInUseNow" xml:space="preserve"><value>En uso ahora</value></data>
+  <data name="SensorLastUsed" xml:space="preserve"><value>Último uso: {0}</value></data>
+  <data name="ProcessWithPid" xml:space="preserve"><value>{0} (PID {1})</value></data>
+  <data name="ModuleLoadedByProcess" xml:space="preserve"><value>{0} (PID {1}) ← {2}</value></data>
+  <data name="StaticMapping" xml:space="preserve"><value>Asignación estática</value></data>
+  <data name="HostExternalRedirect" xml:space="preserve"><value>Redirige un nombre de host a una dirección externa (posible secuestro)</value></data>
+  <data name="HostSecurityBlackhole" xml:space="preserve"><value>Bloquea un dominio de seguridad o actualización (posible evasión de protección)</value></data>
+  <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>La raíz de confianza contiene una clave privada y puede crear certificados de confianza</value></data>
+  <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Algoritmo de firma débil ({0}) en un certificado no autofirmado del almacén raíz</value></data>
+  <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clave RSA demasiado corta ({0} bits)</value></data>
+  <data name="CertificateProperties" xml:space="preserve"><value>{0}, clave de {1} bits</value></data>
+  <data name="NoDeclaredPermissions" xml:space="preserve"><value>Sin permisos declarados</value></data>
+  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="FirewallDirectionInbound" xml:space="preserve"><value>Entrante</value></data>
+  <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Saliente</value></data>
+  <data name="FirewallDirectionUnknown" xml:space="preserve"><value>Dirección desconocida</value></data>
+  <data name="FirewallActionAllow" xml:space="preserve"><value>Permitir</value></data>
+  <data name="FirewallActionBlock" xml:space="preserve"><value>Bloquear</value></data>
+  <data name="FirewallActionUnknown" xml:space="preserve"><value>Acción desconocida</value></data>
+  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}) — {2}</value></data>
+  <data name="PersistenceVectorRunKey" xml:space="preserve"><value>Clave de ejecución</value></data>
+  <data name="PersistenceVectorService" xml:space="preserve"><value>Servicio o controlador</value></data>
+  <data name="PersistenceVectorWinlogon" xml:space="preserve"><value>Winlogon</value></data>
+  <data name="PersistenceVectorScheduledTask" xml:space="preserve"><value>Tarea programada</value></data>
+  <data name="PersistenceVectorAppInitDll" xml:space="preserve"><value>DLL AppInit</value></data>
+  <data name="PersistenceVectorImageHijack" xml:space="preserve"><value>Secuestro de imagen</value></data>
+  <data name="PersistenceVectorActiveSetup" xml:space="preserve"><value>Active Setup</value></data>
+  <data name="PersistenceVectorBootExecute" xml:space="preserve"><value>BootExecute</value></data>
+  <data name="PersistenceVectorWmiSubscription" xml:space="preserve"><value>Suscripción WMI</value></data>
+  <data name="PersistenceVectorStartupFolder" xml:space="preserve"><value>Carpeta de inicio</value></data>
+  <data name="PersistenceVectorLsaPackage" xml:space="preserve"><value>Paquete LSA</value></data>
+  <data name="PersistenceVectorPrintMonitor" xml:space="preserve"><value>Monitor de impresión</value></data>
+  <data name="PersistenceVectorNetshHelper" xml:space="preserve"><value>Asistente Netsh</value></data>
+  <data name="PersistenceVectorComHijack" xml:space="preserve"><value>Sustitución COM</value></data>
+  <data name="PersistenceVectorAppCertDll" xml:space="preserve"><value>DLL AppCert</value></data>
+  <data name="PersistenceVectorTimeProvider" xml:space="preserve"><value>Proveedor de hora</value></data>
+  <data name="PersistenceVectorScreensaver" xml:space="preserve"><value>Protector de pantalla</value></data>
+  <data name="PersistenceVectorSilentProcessExit" xml:space="preserve"><value>Monitor de salida silenciosa</value></data>
 </root>

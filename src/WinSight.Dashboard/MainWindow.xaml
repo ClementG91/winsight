@@ -165,9 +165,23 @@
                             <DataGridTextColumn Header="{Binding [PriorityHeader], Source={x:Static local:LocalizationManager.Instance}}"
                                                 Binding="{Binding SeverityLabel}" Width="125" />
                             <DataGridTextColumn Header="{Binding [ObservedItemHeader], Source={x:Static local:LocalizationManager.Instance}}"
-                                                Binding="{Binding Title}" Width="2*" />
+                                                Binding="{Binding Title}" Width="2*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                        <Setter Property="ToolTip" Value="{Binding Title}" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                             <DataGridTextColumn Header="{Binding [FindingHeader], Source={x:Static local:LocalizationManager.Instance}}"
-                                                Binding="{Binding Detail}" Width="3*" />
+                                                Binding="{Binding Detail}" Width="3*">
+                                <DataGridTextColumn.ElementStyle>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="TextTrimming" Value="CharacterEllipsis" />
+                                        <Setter Property="ToolTip" Value="{Binding Detail}" />
+                                    </Style>
+                                </DataGridTextColumn.ElementStyle>
+                            </DataGridTextColumn>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Border>

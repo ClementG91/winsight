@@ -45,12 +45,13 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
 - **User-mode first.** Everything in the MVP is user-mode, built on **ETW**
   (Event Tracing for Windows), **WFP** (Windows Filtering Platform), IPHelper,
   Authenticode and the registry. It ships without a kernel driver.
-- **Kernel driver is Phase 2, and expensive.** Real-time *blocking* (BlockBlock,
+- **A kernel driver is deliberately later and expensive.** Real-time *blocking* (BlockBlock,
   RansomWhere-grade file interception) needs a minifilter / WFP callout driver,
   which on modern Windows requires an **EV code-signing certificate + Microsoft
   attestation signing** (real money + process, Secure Boot / driver-signing
-  enforcement). We do NOT gate the MVP on it. Monitoring/alerting is fully doable
-  in user-mode via ETW; blocking-grade enforcement comes later, deliberately.
+  enforcement). Phase 2's per-app WFP firewall remains user-mode and needs no custom
+  driver. Monitoring/alerting is fully doable via ETW; driver-backed persistence and
+  ransomware interception remain optional Phase 3/4 work.
 - **Small, independent tools** sharing one core + one dashboard — not a monolith.
 - **No vendor lock-in, no SaaS.** Local-only. Optional VirusTotal lookups are
   opt-in and keyed by the user.
@@ -113,7 +114,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.8.0
+./scripts/Build-Release.ps1 -Version 0.8.1
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned
@@ -156,9 +157,11 @@ deletes, kills, disables or blocks automatically.
 The interface is available in **English, French and Spanish**. It follows the
 Windows display language on first launch, falls back to English for unsupported
 cultures, remembers an explicit selection, and can switch language from the header
-without restarting. Packaged-language startup is verified by CI for all three
-cultures; raw Windows paths, process names and other forensic evidence are never
-translated or altered.
+without restarting. Navigation, guidance, result states, persistence vectors,
+sensor activity, firewall actions and the other WinSight-owned result explanations
+are localized through one presentation layer. Packaged-language startup and full
+resource parity are verified by CI for all three cultures; raw Windows paths,
+process names, domains and other forensic evidence are never translated or altered.
 
 The language can also be selected explicitly for managed deployments, for example
 `winsight-dashboard --language es` (supported values: `en`, `fr`, `es`).
