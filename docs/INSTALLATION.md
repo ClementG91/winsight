@@ -107,6 +107,11 @@ From an **elevated** (Administrator) console, in the install or extracted direct
 # Check registration, or remove it
 .\winsight-firewall-service.exe status
 .\winsight-firewall-service.exe uninstall
+
+# Read-only WFP interop probe: opens the Windows Filtering Platform engine and counts
+# existing filters, then closes. It never adds or changes a filter, so connectivity is
+# untouched. Useful to confirm WFP access before any enforcement work.
+.\winsight-firewall-service.exe wfp-selftest
 ```
 
 Once registered, the dashboard's **Outbound Firewall** view changes from "service not

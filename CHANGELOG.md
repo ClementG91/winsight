@@ -4,6 +4,13 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 read-only WFP interop probe
+- Add a `wfp-selftest` verb to the firewall service executable. It opens a Windows
+  Filtering Platform engine session and counts the existing filters, then closes
+  everything. It NEVER adds, changes or removes a filter, provider or sublayer, so it
+  cannot affect connectivity. This is the safe first step of the WFP work: it confirms
+  the interop and privileges before any enforcement code exists. Requires elevation.
+
 ### Phase 2 outbound-firewall service is installable (opt-in, audit-only)
 - Ship `winsight-firewall-service.exe` in both installers and portable archives, with
   PE-architecture validation for x64 and Arm64. The per-user setup never registers it:

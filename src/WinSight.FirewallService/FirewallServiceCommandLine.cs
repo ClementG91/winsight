@@ -15,6 +15,9 @@ public enum FirewallServiceVerb
     /// <summary>Print whether the service is installed.</summary>
     Status,
 
+    /// <summary>Read-only WFP interop probe (opens the engine, counts filters, changes nothing).</summary>
+    WfpSelfTest,
+
     /// <summary>Unrecognized verb.</summary>
     Unknown,
 }
@@ -35,6 +38,7 @@ public static class FirewallServiceCommandLine
             "install" => FirewallServiceVerb.Install,
             "uninstall" or "remove" => FirewallServiceVerb.Uninstall,
             "status" => FirewallServiceVerb.Status,
+            "wfp-selftest" => FirewallServiceVerb.WfpSelfTest,
             _ => FirewallServiceVerb.Unknown,
         };
     }

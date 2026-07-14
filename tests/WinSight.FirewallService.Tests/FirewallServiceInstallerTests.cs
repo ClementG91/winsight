@@ -12,6 +12,7 @@ public sealed class FirewallServiceCommandLineTests
     [InlineData("uninstall", FirewallServiceVerb.Uninstall)]
     [InlineData("remove", FirewallServiceVerb.Uninstall)]
     [InlineData("status", FirewallServiceVerb.Status)]
+    [InlineData("wfp-selftest", FirewallServiceVerb.WfpSelfTest)]
     [InlineData("bogus", FirewallServiceVerb.Unknown)]
     public void Parse_MapsFirstArgumentToVerb(string arg, FirewallServiceVerb expected) =>
         Assert.Equal(expected, FirewallServiceCommandLine.Parse([arg]));
