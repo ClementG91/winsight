@@ -13,3 +13,6 @@ target/
 .env
 # Scan reports exported by the CLI/dashboard (winsight-<yyyyMMdd-HHmmss>.json)
 winsight-*.json
+# LLM-as-a-judge eval runs (prompts, model transcripts and scores are local only)
+evals/out/
+evals/results/

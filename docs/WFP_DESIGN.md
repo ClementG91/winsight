@@ -38,9 +38,26 @@ process ids or display names, which are transient or ambiguous.
   capped at 64 KiB. It validates the exact version, non-empty request ID, command
   payload shape, canonical paths, enums and response invariants. Policy listing is
   explicitly paged at no more than 128 entries per frame.
-- Framing is not authentication. The future named-pipe host must apply a restrictive
-  ACL and verify the impersonated Windows identity before it decodes or executes a
-  frame. The policy file must live in a service-owned ACL-protected directory.
+- `AuditOnlyFirewallEngine` is the default engine and never mutates WFP. It reports
+  `IsSupported = false`, so the service can never present enforcement as active. This
+  keeps the machine's connectivity untouched while enforcement is still being built.
+- `FirewallRequestDispatcher` turns a validated request into an effect against the
+  store and engine. An unauthenticated caller only ever receives `Unauthorized`; store
+  or engine faults collapse to `InternalFailure` with no exception text on the wire;
+  and it never promotes the persisted mode to enforcement. `EmergencyDisable` always
+  returns the machine to audit-only, even from a corrupt store.
+- `FirewallConnectionHandler` serves one authenticated request/response exchange over
+  any duplex stream, so the logic is tested without a pipe or elevation.
+- `NamedPipeFirewallServer` hosts the endpoint over a hardened local pipe.
+  `FirewallServiceSecurity.CreateHardenedSecurity` grants full control to SYSTEM and
+  Administrators, read/write to interactive local users, and explicitly denies network
+  logons so the pipe is never reachable remotely. The connected Windows identity is
+  verified while impersonating the client before any command runs, and the exchange is
+  serialized one connection at a time. `FirewallServiceClient` is the unprivileged
+  dashboard counterpart; it validates every reply through the same strict codec.
+- Framing is not authentication. The ACL plus impersonated-identity check are the
+  authentication; the policy file must still live in a service-owned ACL-protected
+  directory.
 
 ## Safety requirements before enforcement
 
@@ -59,10 +76,17 @@ process ids or display names, which are transient or ambiguous.
 
 ## Remaining Phase 2 increments
 
-1. Least-privilege service host + named-pipe ACL and Windows-identity authentication
-   using the implemented framing protocol.
-2. WFP engine/session/provider/sublayer interop and audit-only filters.
+1. Done in library form: the named-pipe host, hardened ACL, impersonated-identity
+   authentication, dispatcher and audit-only engine are implemented and tested. What
+   remains is hosting them as an installed least-privilege Windows service worker
+   (lifetime, logging, the service-owned ACL-protected policy directory) and wiring the
+   dashboard client to it.
+2. WFP engine/session/provider/sublayer interop and audit-only filters. This is the
+   first increment that touches real filters and must be developed and validated on an
+   isolated Windows VM before it ships.
 3. Prompt flow using the implemented durable policy store.
 4. Enforcement opt-in, recovery command, installer/uninstaller integration.
 
-No kernel callout driver is required for this user-mode outbound-control scope.
+No kernel callout driver is required for this user-mode outbound-control scope. No
+increment installs a live WFP filter until it has been safety-tested in isolation, so
+the shipped build stays read-only and audit-only.
