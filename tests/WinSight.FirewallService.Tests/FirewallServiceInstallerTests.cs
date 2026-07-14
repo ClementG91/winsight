@@ -61,7 +61,8 @@ public sealed class WfpProvisioningTests
         var keys = new[]
         {
             WfpProvisioning.ProviderKey, WfpProvisioning.SublayerKey,
-            WfpProvisioning.PermitFilterKey, WfpProvisioning.BlockFilterKey,
+            WfpProvisioning.PermitFilterKeyV4, WfpProvisioning.PermitFilterKeyV6,
+            WfpProvisioning.BlockFilterKeyV4, WfpProvisioning.BlockFilterKeyV6,
         };
         Assert.DoesNotContain(Guid.Empty, keys);
         Assert.Equal(keys.Length, keys.Distinct().Count());
