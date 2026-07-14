@@ -2,6 +2,31 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## Unreleased
+
+### Phase 2 firewall service endpoint (audit-only) and AI-surface evals
+- Implement the outbound-firewall service endpoint in library form, still audit-only
+  and installing no WFP filter. `AuditOnlyFirewallEngine` never mutates WFP and reports
+  `IsSupported = false`, so enforcement can never be presented as active.
+- Add `FirewallRequestDispatcher`: an unauthenticated caller only ever receives
+  `Unauthorized`, store and engine faults collapse to `InternalFailure` with no
+  exception text on the wire, the persisted mode is never promoted to enforcement, and
+  `EmergencyDisable` always returns the machine to audit-only even from a corrupt store.
+- Add `NamedPipeFirewallServer` and `FirewallServiceClient` over a hardened local pipe:
+  full control for SYSTEM and Administrators, read/write for interactive users, an
+  explicit deny for network logons, and verification of the impersonated Windows
+  identity before any command runs. `FirewallConnectionHandler` serves one exchange
+  over any duplex stream so the logic is tested without a pipe or elevation.
+- Add 12 firewall tests, including a real same-user named-pipe round trip and the
+  hardened-ACL rule assertions; the firewall project now has 50 tests.
+- Add an optional, developer-only LLM-as-a-judge eval harness under `evals/` that scores
+  the AI-facing report for accuracy, calibration, privacy, actionability and
+  non-authority. The scan uses the local `--json` contract with no network; only an
+  explicitly configured judge command contacts a model. Prompt and verdict outputs are
+  git-ignored, alongside exported `winsight-*.json` scan reports.
+- Scope is unchanged: the shipped build stays read-only and audit-only. No increment
+  installs a live WFP filter until it has been safety-tested on an isolated Windows VM.
+
 ## v0.8.1, 2026-07-14
 
 ### Multilingual result semantics and Phase 1 hardening
