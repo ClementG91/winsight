@@ -29,7 +29,7 @@ public static class Adapters
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
     // Native WinVerifyTrust first (fast, tamper-checking), catalog-aware PS fallback
-    // for catalog-signed binaries, managed fallback below that — all cached.
+    // for catalog-signed binaries, managed fallback below that, all cached.
     private static readonly ISignatureVerifier SharedVerifier =
         new CachingSignatureVerifier(new NativeSignatureVerifier());
 
@@ -131,11 +131,11 @@ public static class Adapters
 
     private static string PersistenceStatusLabel(PersistenceStatus status) => status switch
     {
-        PersistenceStatus.FileMissing => "file missing — signature not checked",
+        PersistenceStatus.FileMissing => "file missing, signature not checked",
         PersistenceStatus.SignatureValid => "signature valid",
         PersistenceStatus.Unsigned => "unsigned",
         PersistenceStatus.InvalidSignature => "invalid signature",
-        PersistenceStatus.AccessDenied => "access denied — signature not checked",
+        PersistenceStatus.AccessDenied => "access denied, signature not checked",
         _ => "verification error",
     };
 
@@ -148,7 +148,7 @@ public static class Adapters
             e.Cancel = true;
             cts.Cancel();
         };
-        Console.WriteLine("Watching camera/mic — Ctrl+C to stop.");
+        Console.WriteLine("Watching camera/mic, Ctrl+C to stop.");
         new CameraMicMonitor().Watch(OnEvent, cts.Token);
         return 0;
 
@@ -156,7 +156,7 @@ public static class Adapters
         {
             var device = e.Usage.Kind == DeviceKind.Webcam ? "webcam" : "mic";
             var verb = e.Kind == AvEventKind.Activated ? "ON " : "OFF";
-            Console.WriteLine($"  [{verb}] {device} — {e.Usage.App}");
+            Console.WriteLine($"  [{verb}] {device}, {e.Usage.App}");
         }
     }
 
@@ -169,7 +169,7 @@ public static class Adapters
             e.Cancel = true;
             cts.Cancel();
         };
-        Console.WriteLine("Watching DNS queries (ETW) — Ctrl+C to stop.");
+        Console.WriteLine("Watching DNS queries (ETW), Ctrl+C to stop.");
         try
         {
             new DnsEtwWatcher().Watch(
@@ -266,7 +266,7 @@ public static class Adapters
         {
             b.Add(
                 c.Notable ? Severity.Notable : Severity.Info,
-                $"{c.Store} — {c.Subject}",
+                $"{c.Store}, {c.Subject}",
                 c.Notable ? string.Join("; ", c.Risks) : $"{c.SignatureAlgorithm}, {c.KeyBits}-bit",
                 new Dictionary<string, string?>
                 {
@@ -323,7 +323,7 @@ public static class Adapters
         // The security signal is an unsigned/untrusted DLL loaded into a running
         // process (injection / search-order hijack). Listing every loaded module would
         // be pure noise, so items are the flagged modules; the summary carries totals.
-        // (`--flagged` is implied here — the tool only ever reports notable modules.)
+        // (`--flagged` is implied here, the tool only ever reports notable modules.)
         _ = flaggedOnly;
         foreach (var m in flagged
                      .OrderBy(m => m.ProcessName, StringComparer.OrdinalIgnoreCase)
@@ -359,7 +359,7 @@ public static class Adapters
             foreach (var r in enabled.OrderBy(r => r.Direction).ThenBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
             {
                 var detail = string.Join("  ", new[] { r.Program, r.Ports }.Where(s => !string.IsNullOrEmpty(s)));
-                b.Add(Severity.Info, $"{r.Direction}/{r.Action} — {r.DisplayName}", detail,
+                b.Add(Severity.Info, $"{r.Direction}/{r.Action}, {r.DisplayName}", detail,
                     new Dictionary<string, string?>
                     {
                         ["name"] = r.DisplayName,
@@ -378,7 +378,7 @@ public static class Adapters
     {
         var records = new DnsCacheReader().Read();
         var b = new ToolReport.Builder("dns");
-        // DNS-cache entries are visibility, not verdicts — all informational, so
+        // DNS-cache entries are visibility, not verdicts, all informational, so
         // --flagged shows the summary only.
         if (!flaggedOnly)
         {
@@ -419,8 +419,8 @@ public static class Adapters
                 c.Noteworthy ? Severity.Notable : Severity.Info,
                 $"{c.Protocol} {c.Remote}",
                 report is not null
-                    ? $"{c.Process} (pid {c.Pid}) — {c.State}  [VT {report.Malicious}/{report.Total}]"
-                    : $"{c.Process} (pid {c.Pid}) — {c.State}",
+                    ? $"{c.Process} (pid {c.Pid}), {c.State}  [VT {report.Malicious}/{report.Total}]"
+                    : $"{c.Process} (pid {c.Pid}), {c.State}",
                 new Dictionary<string, string?>
                 {
                     ["protocol"] = c.Protocol,

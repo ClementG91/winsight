@@ -4,7 +4,7 @@ namespace WinSight.NetMonitor;
 
 /// <summary>
 /// DNSMonitor-class visibility: reads the resolver cache (MSFT_DNSClientCache in
-/// root\StandardCimv2 — the same source as Get-DnsClientCache) to show recently
+/// root\StandardCimv2, the same source as Get-DnsClientCache) to show recently
 /// resolved domains and their answers. Managed via System.Management (no admin, no
 /// process spawn). A real-time ETW consumer (Microsoft-Windows-DNS-Client) is the
 /// future enhancement.
@@ -38,7 +38,7 @@ public sealed class DnsCacheReader
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Namespace/class unavailable — no cache surfaced.
+            // Namespace/class unavailable, no cache surfaced.
         }
         return records;
     }

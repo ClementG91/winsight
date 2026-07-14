@@ -3,7 +3,7 @@ using WinSight.Application;
 using WinSight.Mcp;
 using WinSight.Reporting;
 
-// winsight — the unified suite entry point. One signed binary runs every WinSight
+// winsight, the unified suite entry point. One signed binary runs every WinSight
 // tool, emitting a shared report shape as human text or the stable --json contract.
 // Read-only.
 //
@@ -29,7 +29,7 @@ if (args.Contains("--version"))
 if (args.Contains("--help") || args.Contains("-h"))
 {
     Console.WriteLine("""
-        winsight — free, open-source security tools for Windows.
+        winsight, free, open-source security tools for Windows.
 
         Usage:
           winsight [persistence|av|net|dns|all]   run checks (default: all)
@@ -62,7 +62,7 @@ if (command == "mcp")
     return await WinSightMcpHost.RunAsync();
 }
 
-// Live camera/mic monitor (OverSight-style) — long-running, prints transitions.
+// Live camera/mic monitor (OverSight-style), long-running, prints transitions.
 if ((command is "av" or "avmonitor") && args.Contains("--watch"))
 {
     return Adapters.WatchCameraMic();
@@ -102,5 +102,5 @@ else
     }
 }
 
-// Non-zero exit when anything is noteworthy — tray/CI/automation friendly.
+// Non-zero exit when anything is noteworthy, tray/CI/automation friendly.
 return reports.Sum(r => r.NotableCount) > 0 ? 1 : 0;

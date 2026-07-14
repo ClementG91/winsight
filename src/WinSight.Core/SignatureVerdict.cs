@@ -2,7 +2,7 @@ namespace WinSight.Core;
 
 /// <summary>
 /// The Authenticode standing of a file on disk. WinSight uses this everywhere it
-/// shows "who signed this" — a persistence entry, a process, a network owner.
+/// shows "who signed this", a persistence entry, a process, a network owner.
 /// </summary>
 public enum SignatureState
 {
@@ -20,7 +20,7 @@ public enum SignatureState
 
     /// <summary>
     /// Verification could not be completed (e.g. the catalog check could not run), so
-    /// the standing is genuinely undetermined — NOT the same as "unsigned". A tool that
+    /// the standing is genuinely undetermined, NOT the same as "unsigned". A tool that
     /// wants to earn trust must not cry wolf on files it simply failed to check, so
     /// Unknown is never treated as a flag-worthy signal.
     /// </summary>

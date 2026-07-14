@@ -2,7 +2,7 @@ namespace WinSight.Browser;
 
 /// <summary>
 /// An installed browser extension (Chromium family), read from its on-disk manifest.
-/// Malicious or over-permissioned extensions are a top supply-chain vector — this is
+/// Malicious or over-permissioned extensions are a top supply-chain vector, this is
 /// the unit the audit surfaces.
 /// </summary>
 /// <param name="Browser">Which browser it belongs to (Chrome, Edge, Brave, …).</param>
@@ -22,8 +22,7 @@ public sealed record BrowserExtension(
     string Path)
 {
     /// <summary>
-    /// API permissions that grant broad reach over browsing, network or the host —
-    /// the ones worth reviewing on an unfamiliar extension.
+    /// API permissions that grant broad reach over browsing, network or the host,     /// the ones worth reviewing on an unfamiliar extension.
     /// </summary>
     public static readonly IReadOnlySet<string> HighRiskPermissions = new HashSet<string>(
         StringComparer.OrdinalIgnoreCase)
@@ -36,7 +35,7 @@ public sealed record BrowserExtension(
 
     /// <summary>
     /// True when the extension declares a broad-reach API permission or a wildcard host
-    /// match — the classic "can read/modify everything you browse" profile.
+    /// match, the classic "can read/modify everything you browse" profile.
     /// </summary>
     public bool HighRisk =>
         Permissions.Any(HighRiskPermissions.Contains) ||

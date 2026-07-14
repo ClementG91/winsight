@@ -12,7 +12,7 @@ namespace WinSight.Core;
 /// it does not check the PE hash against the signature, catalog (.cat) signatures,
 /// EKU=code-signing, or revocation. Because it cannot see CATALOG signatures (which
 /// cover most of Windows), a file with no EMBEDDED signature is reported as
-/// <see cref="SignatureState.Unknown"/> — "could not determine" — NOT
+/// <see cref="SignatureState.Unknown"/>, "could not determine", NOT
 /// <see cref="SignatureState.Unsigned"/>: claiming a catalog-signed system binary is
 /// unsigned would be a false alarm. It is the last-resort fallback behind the
 /// catalog-aware verifiers; genuine unsigned/trusted verdicts come from those.
@@ -57,7 +57,7 @@ public sealed class SignatureVerifier : ISignatureVerifier
         }
         catch (CryptographicException)
         {
-            // No EMBEDDED signature — but this managed path cannot see catalog
+            // No EMBEDDED signature, but this managed path cannot see catalog
             // signatures, so it genuinely cannot tell "unsigned" from "catalog-signed".
             // Report Unknown rather than fabricate an Unsigned false alarm.
             return SignatureVerdict.Unknown;

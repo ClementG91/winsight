@@ -1,4 +1,4 @@
-# Phase 2 — outbound firewall design
+# Phase 2, outbound firewall design
 
 Status: contracts, fail-open policy storage and strict IPC framing implemented; no
 service is installed and WFP mutation is not enabled.

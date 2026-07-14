@@ -72,9 +72,9 @@ public sealed class DashboardFindingPresenterTests
     }
 
     [Theory]
-    [InlineData("en", "Inbound/Block — Rule")]
-    [InlineData("fr", "Entrant/Bloquer — Rule")]
-    [InlineData("es", "Entrante/Bloquear — Rule")]
+    [InlineData("en", "Inbound/Block, Rule")]
+    [InlineData("fr", "Entrant/Bloquer, Rule")]
+    [InlineData("es", "Entrante/Bloquear, Rule")]
     public void FirewallPresentation_LocalizesEnumsAndPreservesRuleName(string culture, string expected)
     {
         WithCulture(culture, text =>

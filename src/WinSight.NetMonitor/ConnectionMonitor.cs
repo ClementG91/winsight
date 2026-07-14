@@ -90,7 +90,7 @@ public sealed class ConnectionMonitor
                 }
                 catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException)
                 {
-                    // Already exited — the read completes either way.
+                    // Already exited, the read completes either way.
                 }
             }
             return output.GetAwaiter().GetResult();
@@ -113,7 +113,7 @@ public sealed class ConnectionMonitor
             }
             catch (Exception ex) when (ex is Win32Exception or NotSupportedException or InvalidOperationException)
             {
-                // Protected/elevated process — name only, no path.
+                // Protected/elevated process, name only, no path.
             }
             return (p.ProcessName, path);
         }

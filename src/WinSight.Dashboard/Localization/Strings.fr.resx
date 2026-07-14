@@ -4,7 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="WindowTitle" xml:space="preserve"><value>WinSight — sécurité Windows</value></data>
+  <data name="WindowTitle" xml:space="preserve"><value>WinSight, sécurité Windows</value></data>
   <data name="AppTagline" xml:space="preserve"><value>Comprendre ce qui se passe sur votre PC, sans télémétrie</value></data>
   <data name="LocalAnalysis" xml:space="preserve"><value>● Analyse locale</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Langue</value></data>
@@ -17,15 +17,15 @@
   <data name="VtQuotaPolicy" xml:space="preserve"><value>Protections Community : 4 recherches par minute glissante, 500/jour et 15 500/mois (UTC). Usage personnel/non commercial uniquement ; un usage professionnel exige un contrat VirusTotal Premium.</value></data>
   <data name="VtApiKeyLabel" xml:space="preserve"><value>Votre clé API VirusTotal</value></data>
   <data name="VtApiKeyHint" xml:space="preserve"><value>La clé est chiffrée pour votre compte Windows (DPAPI) et n’apparaît jamais dans les exports. WINSIGHT_VT_KEY reste disponible pour l’automatisation et reste prioritaire.</value></data>
-  <data name="VtStatusEnabled" xml:space="preserve"><value>Activé — une clé chiffrée est configurée pour ce compte Windows.</value></data>
-  <data name="VtStatusDisabled" xml:space="preserve"><value>Désactivé — les analyses restent entièrement locales.</value></data>
+  <data name="VtStatusEnabled" xml:space="preserve"><value>Activé, une clé chiffrée est configurée pour ce compte Windows.</value></data>
+  <data name="VtStatusDisabled" xml:space="preserve"><value>Désactivé, les analyses restent entièrement locales.</value></data>
   <data name="VtStatusEnvironment" xml:space="preserve"><value>Activé pour cette session. Une clé fournie par l’environnement reste prioritaire.</value></data>
   <data name="VtGetKey" xml:space="preserve"><value>Obtenir ma clé</value></data>
   <data name="VtDisable" xml:space="preserve"><value>Désactiver</value></data>
   <data name="VtSave" xml:space="preserve"><value>Enregistrer sûrement</value></data>
   <data name="Cancel" xml:space="preserve"><value>Annuler</value></data>
   <data name="VtInvalidKey" xml:space="preserve"><value>Saisissez une clé API VirusTotal valide (32 à 128 lettres, chiffres, « - » ou « _ »).</value></data>
-  <data name="VtSaved" xml:space="preserve"><value>Activé — la clé API a été enregistrée de manière sécurisée.</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>Activé, la clé API a été enregistrée de manière sécurisée.</value></data>
   <data name="VtSavedEnvironment" xml:space="preserve"><value>Clé chiffrée enregistrée. WINSIGHT_VT_KEY reste active et prioritaire pour cette session.</value></data>
   <data name="VtDisabled" xml:space="preserve"><value>VirusTotal est désactivé pour WinSight.</value></data>
   <data name="VtDisabledEnvironment" xml:space="preserve"><value>Clé chiffrée supprimée. VirusTotal reste activé par WINSIGHT_VT_KEY ; supprimez cette variable pour le désactiver.</value></data>
@@ -65,7 +65,7 @@
   <data name="ReadOnlyFooter" xml:space="preserve"><value>Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal est facultatif dans Paramètres.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Ouvrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
-  <data name="TrayText" xml:space="preserve"><value>WinSight — sécurité locale</value></data>
+  <data name="TrayText" xml:space="preserve"><value>WinSight, sécurité locale</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight continue dans la zone de notification.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Analyse terminée.</value></data>
   <data name="ScanCancelledSummary" xml:space="preserve"><value>Analyse arrêtée proprement entre deux étapes.</value></data>
@@ -77,8 +77,8 @@
   <data name="OverviewPreparing" xml:space="preserve"><value>Préparation de la vue d’ensemble…</value></data>
   <data name="SingleScan" xml:space="preserve"><value>Analyse « {0} » en cours…</value></data>
   <data name="ReadingWindows" xml:space="preserve"><value>WinSight lit les informations Windows. Aucune modification n’est effectuée.</value></data>
-  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
-  <data name="StopRequested" xml:space="preserve"><value>Arrêt demandé — l’étape en cours se termine sans être interrompue brutalement…</value></data>
+  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
+  <data name="StopRequested" xml:space="preserve"><value>Arrêt demandé, l’étape en cours se termine sans être interrompue brutalement…</value></data>
   <data name="NotableSeverity" xml:space="preserve"><value>À vérifier</value></data>
   <data name="InfoSeverity" xml:space="preserve"><value>Information</value></data>
   <data name="ResultsSummary" xml:space="preserve"><value>{0} · {1}</value></data>
@@ -88,7 +88,7 @@
   <data name="AttentionCountPlural" xml:space="preserve"><value>{0} à vérifier</value></data>
   <data name="NoItems" xml:space="preserve"><value>Aucun élément à afficher avec le filtre actuel. Cela ne garantit pas l’absence de menace.</value></data>
   <data name="SelectFinding" xml:space="preserve"><value>Sélectionnez une ligne pour afficher les actions sûres disponibles.</value></data>
-  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0} — {1}&#xA;{2}</value></data>
+  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0}, {1}&#xA;{2}</value></data>
   <data name="Copied" xml:space="preserve"><value>Détails copiés dans le presse-papiers.</value></data>
   <data name="ExportDialogTitle" xml:space="preserve"><value>Exporter le rapport WinSight</value></data>
   <data name="JsonFilter" xml:space="preserve"><value>Rapport JSON (*.json)|*.json</value></data>
@@ -96,11 +96,11 @@
   <data name="LocationOpened" xml:space="preserve"><value>Emplacement ouvert dans l’Explorateur.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Outil Windows ouvert.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Action impossible : {0}</value></data>
-  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Fichier absent — signature non vérifiée</value></data>
+  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Fichier absent, signature non vérifiée</value></data>
   <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Signature valide</value></data>
   <data name="PersistenceStatusUnsigned" xml:space="preserve"><value>Non signé</value></data>
   <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Signature invalide</value></data>
-  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Accès refusé — signature non vérifiée</value></data>
+  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Accès refusé, signature non vérifiée</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Erreur de vérification</value></data>
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vue d’ensemble</value></data>
@@ -164,14 +164,14 @@
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clé RSA trop courte ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, clé de {1} bits</value></data>
   <data name="NoDeclaredPermissions" xml:space="preserve"><value>Aucune autorisation déclarée</value></data>
-  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="FirewallDirectionInbound" xml:space="preserve"><value>Entrant</value></data>
   <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Sortant</value></data>
   <data name="FirewallDirectionUnknown" xml:space="preserve"><value>Direction inconnue</value></data>
   <data name="FirewallActionAllow" xml:space="preserve"><value>Autoriser</value></data>
   <data name="FirewallActionBlock" xml:space="preserve"><value>Bloquer</value></data>
   <data name="FirewallActionUnknown" xml:space="preserve"><value>Action inconnue</value></data>
-  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}) — {2}</value></data>
+  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}), {2}</value></data>
   <data name="PersistenceVectorRunKey" xml:space="preserve"><value>Clé d’exécution</value></data>
   <data name="PersistenceVectorService" xml:space="preserve"><value>Service ou pilote</value></data>
   <data name="PersistenceVectorWinlogon" xml:space="preserve"><value>Winlogon</value></data>

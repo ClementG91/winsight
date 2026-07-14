@@ -11,3 +11,5 @@ target/
 # Secrets / local
 *.local
 .env
+# Scan reports exported by the CLI/dashboard (winsight-<yyyyMMdd-HHmmss>.json)
+winsight-*.json

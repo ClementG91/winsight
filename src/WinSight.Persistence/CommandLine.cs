@@ -63,7 +63,7 @@ public static class CommandLine
         // Driver/service ImagePaths use NT-style forms the Win32 file APIs can't open
         // as-is (\SystemRoot\..., \??\C:\..., or a bare "system32\drivers\x.sys"
         // relative to %SystemRoot%). Without this, every Windows driver resolves to
-        // "no image" and gets flagged suspicious — 150+ false positives on a clean box.
+        // "no image" and gets flagged suspicious, 150+ false positives on a clean box.
         foreach (var candidate in NtPathCandidates(exe))
         {
             var probe = Probe(candidate);
@@ -82,7 +82,7 @@ public static class CommandLine
         }
 
         // Bare module name (LSA/print/driver DLLs, system commands, the default
-        // Winlogon shell) — resolve against System32 AND the Windows dir (explorer.exe
+        // Winlogon shell), resolve against System32 AND the Windows dir (explorer.exe
         // lives in %windir%, not System32), trying a .dll suffix when there's no
         // extension. Without %windir% the legitimate default shell reads as "no image".
         if (!exe.Contains('\\') && !exe.Contains('/'))

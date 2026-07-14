@@ -20,7 +20,7 @@ public interface IAutostartEnumerator
 
 /// <summary>
 /// The classic Run/RunOnce registry autostart keys, across HKLM+HKCU and both the
-/// 64-bit and 32-bit (WOW6432Node) views — a favourite malware persistence spot.
+/// 64-bit and 32-bit (WOW6432Node) views, a favourite malware persistence spot.
 /// </summary>
 public sealed class RunKeyEnumerator : IAutostartEnumerator
 {
@@ -90,7 +90,7 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
 /// <summary>
 /// Auto-start Windows services and drivers (Start type boot/system/auto) read from
 /// the service control database in the registry, keyed by ImagePath. For
-/// svchost-hosted services the ImagePath is just svchost.exe (signed Microsoft) — the
+/// svchost-hosted services the ImagePath is just svchost.exe (signed Microsoft), the
 /// REAL payload is the Parameters\ServiceDll, so that DLL is surfaced as its own
 /// entry; otherwise a malicious service DLL rides invisibly under a trusted host.
 /// </summary>
@@ -146,10 +146,10 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// The Winlogon Shell/Userinit hooks — the processes the OS launches at logon.
+/// The Winlogon Shell/Userinit hooks, the processes the OS launches at logon.
 /// Defaults are explorer.exe and userinit.exe; malware appends its own comma-
 /// separated payload here, so any EXTRA command beyond the default is notable.
-/// Covers HKLM (machine-wide) AND HKCU — a per-user Shell/Userinit override is a
+/// Covers HKLM (machine-wide) AND HKCU, a per-user Shell/Userinit override is a
 /// quieter, no-admin variant of the same hijack.
 /// </summary>
 public sealed class WinlogonEnumerator : IAutostartEnumerator
@@ -276,7 +276,7 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// AppInit_DLLs — DLLs that (when LoadAppInit_DLLs is enabled) are injected into
+/// AppInit_DLLs, DLLs that (when LoadAppInit_DLLs is enabled) are injected into
 /// every user-mode process that loads user32.dll. A powerful, oft-abused vector;
 /// any entry here is worth surfacing. Covers the 64- and 32-bit views.
 /// </summary>
@@ -309,7 +309,7 @@ public sealed class AppInitDllsEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// Active Setup StubPath commands — run once per user at first logon (and again when
+/// Active Setup StubPath commands, run once per user at first logon (and again when
 /// a component's version bumps). A quiet, per-user persistence spot. Covers both
 /// registry views.
 /// </summary>
@@ -344,7 +344,7 @@ public sealed class ActiveSetupEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// Session Manager BootExecute — native-mode commands run by smss.exe at boot,
+/// Session Manager BootExecute, native-mode commands run by smss.exe at boot,
 /// before Win32 starts (default: "autocheck autochk *"). Anything appended here is a
 /// very early, stealthy persistence vector.
 /// </summary>
@@ -374,7 +374,7 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// AppCertDLLs — DLLs loaded into every process that calls CreateProcess/WinExec and
+/// AppCertDLLs, DLLs loaded into every process that calls CreateProcess/WinExec and
 /// related APIs. A powerful, oft-abused injection/persistence vector (MITRE
 /// T1546.009). Values are DLL paths.
 /// </summary>
@@ -403,7 +403,7 @@ public sealed class AppCertDllsEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// W32Time time providers — DLLs loaded by the Windows Time service. A rogue provider
+/// W32Time time providers, DLLs loaded by the Windows Time service. A rogue provider
 /// DllName runs inside the time service; a documented, low-noise persistence spot.
 /// </summary>
 public sealed class TimeProviderEnumerator : IAutostartEnumerator
@@ -433,7 +433,7 @@ public sealed class TimeProviderEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// The screensaver executable (SCRNSAVE.EXE) — a .scr is just a PE that Windows runs
+/// The screensaver executable (SCRNSAVE.EXE), a .scr is just a PE that Windows runs
 /// on idle, so pointing it at a payload is a classic, low-noise persistence trick
 /// (MITRE T1546.002). Read per-user from HKCU\Control Panel\Desktop and its Group
 /// Policy twin, both of which can force a screensaver on.
@@ -467,7 +467,7 @@ public sealed class ScreensaverEnumerator : IAutostartEnumerator
 /// <summary>
 /// Per-user COM server registrations (HKCU\Software\Classes\CLSID\{clsid}\
 /// InprocServer32). A user-level CLSID that shadows a system one lets malware load
-/// its DLL whenever that COM object is instantiated — COM hijacking (MITRE
+/// its DLL whenever that COM object is instantiated, COM hijacking (MITRE
 /// T1546.015). HKCU is scanned (not the thousands of legitimate HKLM system CLSIDs),
 /// which is where the high-signal per-user hijacks live.
 /// </summary>
@@ -500,7 +500,7 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
-                // Unreadable CLSID key — skip.
+                // Unreadable CLSID key, skip.
             }
             if (entry is { } e)
             {
@@ -511,7 +511,7 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// Print monitors — DLLs loaded by the print spooler service (spoolsv). A rogue
+/// Print monitors, DLLs loaded by the print spooler service (spoolsv). A rogue
 /// monitor Driver DLL runs as SYSTEM at boot; a documented persistence vector.
 /// </summary>
 public sealed class PrintMonitorEnumerator : IAutostartEnumerator
@@ -541,7 +541,7 @@ public sealed class PrintMonitorEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// Netsh helper DLLs — loaded when netsh.exe runs. A malicious helper registered
+/// Netsh helper DLLs, loaded when netsh.exe runs. A malicious helper registered
 /// here executes whenever netsh is invoked; a stealthy persistence spot.
 /// </summary>
 public sealed class NetshHelperEnumerator : IAutostartEnumerator
@@ -573,7 +573,7 @@ public sealed class NetshHelperEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// LSA Security/Authentication/Notification packages — DLLs loaded into the highly
+/// LSA Security/Authentication/Notification packages, DLLs loaded into the highly
 /// privileged LSASS process. A malicious Security Support Provider or password-filter
 /// DLL registered here is a classic, powerful persistence + credential-theft vector.
 /// Values are REG_MULTI_SZ module base names (resolved against System32).
@@ -617,7 +617,7 @@ public sealed class LsaPackagesEnumerator : IAutostartEnumerator
 /// <summary>
 /// SilentProcessExit MonitorProcess hijacks (MITRE T1546.012): when IFEO GlobalFlag
 /// enables silent-exit monitoring for a target executable, the MonitorProcess
-/// registered here is launched every time that target exits — a quiet companion to
+/// registered here is launched every time that target exits, a quiet companion to
 /// the IFEO Debugger hijack. Any MonitorProcess entry is reported.
 /// </summary>
 public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
@@ -649,7 +649,7 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
-                // Unreadable target key — skip.
+                // Unreadable target key, skip.
             }
             if (entry is { } e)
             {
@@ -661,7 +661,7 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
 
 /// <summary>
 /// Image File Execution Options "Debugger" hijacks: a Debugger value on a target
-/// executable makes Windows launch the debugger INSTEAD of the target — a classic
+/// executable makes Windows launch the debugger INSTEAD of the target, a classic
 /// persistence/hijack (e.g. hijacking sethc.exe). Each Debugger entry is reported.
 /// </summary>
 public sealed class ImageHijackEnumerator : IAutostartEnumerator

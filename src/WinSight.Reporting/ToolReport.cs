@@ -28,7 +28,7 @@ public sealed record ReportItem(
 /// </summary>
 public sealed record ToolReport(string Tool, string Summary, IReadOnlyList<ReportItem> Items)
 {
-    /// <summary>Count of Notable items — the basis for a non-zero process exit.</summary>
+    /// <summary>Count of Notable items, the basis for a non-zero process exit.</summary>
     public int NotableCount => Items.Count(i => i.Severity == Severity.Notable);
 
     /// <summary>Fluent builder to keep tool adapters terse.</summary>

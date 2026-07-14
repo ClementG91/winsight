@@ -3,8 +3,8 @@ using Xunit;
 namespace WinSight.Browser.Tests;
 
 /// <summary>
-/// Drives the manifest parser against a fixture profile on disk — no installed browser
-/// required — and smoke-checks the real default-roots scan does not throw.
+/// Drives the manifest parser against a fixture profile on disk, no installed browser
+/// required, and smoke-checks the real default-roots scan does not throw.
 /// </summary>
 public sealed class ExtensionScannerTests : IDisposable
 {
@@ -68,7 +68,7 @@ public sealed class ExtensionScannerTests : IDisposable
     [Fact]
     public void DefaultRootsSnapshot_DoesNotThrow()
     {
-        // On CI there may be no browsers installed — must return a (possibly empty) list.
+        // On CI there may be no browsers installed, must return a (possibly empty) list.
         var extensions = new ExtensionScanner().Snapshot();
         Assert.NotNull(extensions);
     }

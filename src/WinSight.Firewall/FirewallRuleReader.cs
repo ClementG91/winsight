@@ -4,7 +4,7 @@ namespace WinSight.Firewall;
 
 /// <summary>
 /// LuLu-class (read-only, phase 1): reads the Windows Defender Firewall rules
-/// (MSFT_NetFirewallRule in root\StandardCimv2 — the same source as
+/// (MSFT_NetFirewallRule in root\StandardCimv2, the same source as
 /// Get-NetFirewallRule), enriched with each rule's bound program and ports from the
 /// associated application/port filters (joined by InstanceID, best-effort). Managed
 /// via System.Management (no admin needed to read). An enforcing,
@@ -50,7 +50,7 @@ public sealed class FirewallRuleReader
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Namespace/class unavailable — no rules surfaced.
+            // Namespace/class unavailable, no rules surfaced.
         }
         return rules;
     }
@@ -77,7 +77,7 @@ public sealed class FirewallRuleReader
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Filter class unavailable — rules just won't be enriched.
+            // Filter class unavailable, rules just won't be enriched.
         }
         return map;
     }

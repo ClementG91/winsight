@@ -4,7 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="WindowTitle" xml:space="preserve"><value>WinSight — seguridad de Windows</value></data>
+  <data name="WindowTitle" xml:space="preserve"><value>WinSight, seguridad de Windows</value></data>
   <data name="AppTagline" xml:space="preserve"><value>Comprende lo que ocurre en tu PC, sin telemetría</value></data>
   <data name="LocalAnalysis" xml:space="preserve"><value>● Análisis local</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Idioma</value></data>
@@ -65,7 +65,7 @@
   <data name="ReadOnlyFooter" xml:space="preserve"><value>Solo lectura: WinSight nunca elimina ni bloquea automáticamente. VirusTotal es opcional en Ajustes.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Abrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Salir</value></data>
-  <data name="TrayText" xml:space="preserve"><value>WinSight — seguridad local</value></data>
+  <data name="TrayText" xml:space="preserve"><value>WinSight, seguridad local</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight sigue ejecutándose en el área de notificación.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Análisis completado.</value></data>
   <data name="ScanCancelledSummary" xml:space="preserve"><value>Análisis detenido de forma segura entre dos pasos.</value></data>
@@ -77,7 +77,7 @@
   <data name="OverviewPreparing" xml:space="preserve"><value>Preparando la vista general…</value></data>
   <data name="SingleScan" xml:space="preserve"><value>Ejecutando «{0}»…</value></data>
   <data name="ReadingWindows" xml:space="preserve"><value>WinSight está leyendo información de Windows. No se está realizando ningún cambio.</value></data>
-  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="StopRequested" xml:space="preserve"><value>Parada solicitada: el paso actual terminará sin interrumpirse de forma brusca…</value></data>
   <data name="NotableSeverity" xml:space="preserve"><value>Requiere atención</value></data>
   <data name="InfoSeverity" xml:space="preserve"><value>Información</value></data>
@@ -88,7 +88,7 @@
   <data name="AttentionCountPlural" xml:space="preserve"><value>{0} requieren atención</value></data>
   <data name="NoItems" xml:space="preserve"><value>Ningún elemento coincide con el filtro actual. Esto no garantiza que el sistema esté libre de amenazas.</value></data>
   <data name="SelectFinding" xml:space="preserve"><value>Selecciona una fila para ver las acciones seguras disponibles.</value></data>
-  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0} — {1}&#xA;{2}</value></data>
+  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0}, {1}&#xA;{2}</value></data>
   <data name="Copied" xml:space="preserve"><value>Detalles copiados al portapapeles.</value></data>
   <data name="ExportDialogTitle" xml:space="preserve"><value>Exportar informe de WinSight</value></data>
   <data name="JsonFilter" xml:space="preserve"><value>Informe JSON (*.json)|*.json</value></data>
@@ -96,11 +96,11 @@
   <data name="LocationOpened" xml:space="preserve"><value>Ubicación abierta en el Explorador de archivos.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Herramienta de Windows abierta.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Acción no disponible: {0}</value></data>
-  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Falta el archivo — firma no comprobada</value></data>
+  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Falta el archivo, firma no comprobada</value></data>
   <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Firma válida</value></data>
   <data name="PersistenceStatusUnsigned" xml:space="preserve"><value>Sin firma</value></data>
   <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Firma no válida</value></data>
-  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Acceso denegado — firma no comprobada</value></data>
+  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Acceso denegado, firma no comprobada</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Error de verificación</value></data>
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vista general</value></data>
@@ -164,14 +164,14 @@
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clave RSA demasiado corta ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, clave de {1} bits</value></data>
   <data name="NoDeclaredPermissions" xml:space="preserve"><value>Sin permisos declarados</value></data>
-  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="FirewallDirectionInbound" xml:space="preserve"><value>Entrante</value></data>
   <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Saliente</value></data>
   <data name="FirewallDirectionUnknown" xml:space="preserve"><value>Dirección desconocida</value></data>
   <data name="FirewallActionAllow" xml:space="preserve"><value>Permitir</value></data>
   <data name="FirewallActionBlock" xml:space="preserve"><value>Bloquear</value></data>
   <data name="FirewallActionUnknown" xml:space="preserve"><value>Acción desconocida</value></data>
-  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}) — {2}</value></data>
+  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}), {2}</value></data>
   <data name="PersistenceVectorRunKey" xml:space="preserve"><value>Clave de ejecución</value></data>
   <data name="PersistenceVectorService" xml:space="preserve"><value>Servicio o controlador</value></data>
   <data name="PersistenceVectorWinlogon" xml:space="preserve"><value>Winlogon</value></data>

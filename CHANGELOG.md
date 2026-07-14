@@ -2,7 +2,7 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
-## v0.8.1 — 2026-07-14
+## v0.8.1, 2026-07-14
 
 ### Multilingual result semantics and Phase 1 hardening
 - Complete the English, French and Spanish dashboard presentation for structured
@@ -35,7 +35,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Keep the product scope unchanged: WinSight remains read-only in Phase 1 and Phase 2
   remains the least-privilege WFP outbound firewall described in `docs/WFP_DESIGN.md`.
 
-## v0.8.0 — 2026-07-14
+## v0.8.0, 2026-07-14
 
 ### Context-aware dashboard and secure optional reputation
 - Route completed overview reports by navigation category: the overview shows the
@@ -64,7 +64,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Add regression tests for cross-tab isolation, incomplete overview state, localized
   resource parity, VirusTotal key validation and DPAPI store round trips.
 
-## v0.7.2 — 2026-07-14
+## v0.7.2, 2026-07-14
 
 ### Honest persistence file and signature states
 - Preserve the normalized Windows target for orphaned service/driver registrations
@@ -91,7 +91,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   per-user VirusTotal key setup. VirusTotal remains optional and is never called
   when no local file/hash exists.
 
-## v0.7.1 — 2026-07-14
+## v0.7.1, 2026-07-14
 
 ### Unified WinSight visual identity
 - Add an original geometric vision-and-telemetry logo with a transparent high-resolution
@@ -104,7 +104,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   in x64/Arm64 ZIPs and installations. Release validation now checks alpha, dimensions,
   every ICO frame and the icons actually embedded in both executables.
 
-## v0.7.0 — 2026-07-14
+## v0.7.0, 2026-07-14
 
 ### Local read-only MCP integration
 - Ship a `winsight mcp` mode in the existing native x64 and Arm64 CLI binary,
@@ -127,7 +127,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Document AI-client configuration, data-flow privacy, interpretation rules and the
   explicit ban on MCP remediation primitives.
 
-## v0.6.0 — 2026-07-14
+## v0.6.0, 2026-07-14
 
 ### Fail-open firewall service foundation
 - Add a versioned durable policy store for the future privileged service. Policy
@@ -151,7 +151,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   authentication boundary; the future service must enforce pipe ACLs and verify the
   impersonated Windows identity before decoding or executing a request.
 
-## v0.5.1 — 2026-07-14
+## v0.5.1, 2026-07-14
 
 ### Supported runtime baseline
 - Move every user-mode component and both self-contained distributions to .NET 10
@@ -169,7 +169,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Apply the .NET 10 analyzer's concrete-collection optimization to dashboard report
   selection without changing the UI contract.
 
-## v0.5.0 — 2026-07-14
+## v0.5.0, 2026-07-14
 
 ### Native Windows distribution and documented detection contract
 - Ship separate self-contained x64 and Arm64 portable archives and per-user Windows
@@ -190,7 +190,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Update project, security and contributor documentation to cover the dashboard,
   packages, installer supply chain and dual-architecture release gate.
 
-## v0.4.0 — 2026-07-14
+## v0.4.0, 2026-07-14
 
 ### Runtime multilingual dashboard
 - Localize the complete dashboard chrome, safety guidance, progress, errors, tray
@@ -203,7 +203,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Add exhaustive resource-key coverage, culture fallback and catalog localization
   tests. CI and release pipelines now smoke-test all three packaged languages.
 
-## v0.3.0 — 2026-07-14
+## v0.3.0, 2026-07-14
 
 ### Understandable dashboard and supply-chain hardening
 - Replace the technical tool picker with a guided French dashboard: plain-language
@@ -220,7 +220,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - Update TraceEvent and the test SDK/runner packages; retain the .NET 8 line for
   Windows framework packages instead of mixing .NET 10 assets into this LTS target.
 
-## v0.2.1 — 2026-07-14
+## v0.2.1, 2026-07-14
 
 ### Dashboard startup hotfix
 - Override invariant globalization for the WPF frontend. WPF resolves XAML binding
@@ -231,7 +231,7 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   and tray integration before exiting. Both CI and the tag-release workflow now run
   this packaged-executable smoke test, preventing a file-exists-only false green.
 
-## v0.2.0 — 2026-07-14
+## v0.2.0, 2026-07-14
 
 ### Dashboard/tray, Phase 2 contracts, and release hardening
 - **WPF dashboard + system tray**: `winsight-dashboard` consumes the same shared
@@ -263,20 +263,20 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 - README and architecture records now reflect the completed DNS/WMI/startup-folder
   work, the shipped dashboard, the real Windows build flow and the current WFP plan.
 
-## Phase 1 — user-mode tools
+## Phase 1, user-mode tools
 
-### Core — catalog signatures actually work now (major false-positive fix)
+### Core, catalog signatures actually work now (major false-positive fix)
 Running the tools against a real Windows box exposed a signal-destroying bug and
 several large false-positive sources. A security tool that cries wolf is worse than
 none, so this pass makes the verdicts trustworthy:
 - **Catalog verification was silently failing.** The catalog-aware fallback fed its
   script to `powershell -Command -` over stdin, which produced NO output from a
-  non-interactive child process — so every catalog-signed system binary (cmd.exe,
+  non-interactive child process, so every catalog-signed system binary (cmd.exe,
   DWrite.dll, every driver…) read as *Unsigned*. Switched to `-EncodedCommand`
   (base64 UTF-16LE). Result on a clean machine: modules unsigned **3097 → ~750**,
   processes **73 → ~32**, persistence flagged **258 → 4**.
 - **New `Unknown` signature state.** A file whose signature *cannot be checked* (the
-  catalog probe failed, e.g. under heavy load) is now reported `Unknown` — never a
+  catalog probe failed, e.g. under heavy load) is now reported `Unknown`, never a
   fabricated `Unsigned`. Only a definitive check yields `Unsigned`, so the tool
   fails safe (silent) instead of failing loud (false alarms). `Unknown` is never a
   flag-worthy signal.
@@ -286,32 +286,32 @@ none, so this pass makes the verdicts trustworthy:
   false "unsigned". The progress/error streams are silenced and drained so nothing
   leaks to the terminal mid-scan.
 - **Certificates: no more SHA-1-self-signed false positives.** A root is *self-signed*,
-  so its own SHA-1 signature is not a trust input — nearly every established public
+  so its own SHA-1 signature is not a trust input, nearly every established public
   root (DigiCert, Baltimore, Comodo…) is SHA-1 self-signed. Weak-signature is now
   flagged only on a NON-self-signed cert in the root store. Flagged roots **40 → 10**
   (the remainder are genuine 1024-bit legacy roots).
 - **Persistence: driver ImagePaths resolve.** `\SystemRoot\…`, `\??\C:\…` and bare
   `system32\drivers\x.sys` NT paths are normalised to real files, and the default
-  Winlogon shell (`explorer.exe`, which lives in `%windir%`) resolves — so ~150
+  Winlogon shell (`explorer.exe`, which lives in `%windir%`) resolves, so ~150
   legitimate Windows drivers and the default shell are no longer flagged "no image".
 
-### Persistence — svchost ServiceDll payloads, HKCU Winlogon, SilentProcessExit
+### Persistence, svchost ServiceDll payloads, HKCU Winlogon, SilentProcessExit
 - **ServiceDll resolution**: for svchost-hosted services the ImagePath is just
-  svchost.exe (signed Microsoft) — the real payload is `Parameters\ServiceDll`. That
+  svchost.exe (signed Microsoft), the real payload is `Parameters\ServiceDll`. That
   DLL is now surfaced and signature-checked as its own entry, closing the classic
   "malicious service DLL rides under a trusted host" blind spot.
-- **Winlogon HKCU**: Shell/Userinit are now also read from HKCU — the per-user,
+- **Winlogon HKCU**: Shell/Userinit are now also read from HKCU, the per-user,
   no-admin variant of the logon hijack was previously invisible.
 - **SilentProcessExit monitors** (MITRE T1546.012): a MonitorProcess registered under
-  IFEO silent-exit monitoring launches every time its target exits — the quiet
+  IFEO silent-exit monitoring launches every time its target exits, the quiet
   companion of the IFEO Debugger hijack. New enumerator; 18 autostart surfaces now.
 - VirusTotal enrichment cap lowered 8 → 4 to match the free-tier rate limit
   (requests past 4 were guaranteed 429s that burned quota for nothing).
 
-### Core — security hardening pass
+### Core, security hardening pass
 - **Binary-planting resistance**: the PowerShell (signature fallback) and netstat
   (connection fallback) child processes are now launched by absolute `System32` path,
-  never resolved through the search path — a security tool running elevated must not
+  never resolved through the search path, a security tool running elevated must not
   be hijackable via a planted `powershell.exe`/`netstat.exe`.
 - **No more unbounded child waits**: both spawns read stdout asynchronously and kill
   the process tree on timeout. Previously a hung child blocked `ReadToEnd()` forever
@@ -328,7 +328,7 @@ none, so this pass makes the verdicts trustworthy:
   `0.0.0.0/8` destinations are no longer classified as external.
 - CLI: `--help` now documents `dns --watch`; `all` includes the certificate audit.
 
-### Hosts — hosts-file hijack / AV-block detection
+### Hosts, hosts-file hijack / AV-block detection
 - `HostsReader` parses the Windows hosts file and flags the two malware patterns: an
   entry redirecting a hostname to a non-sink external address (phishing/MITM hijack),
   or one blackholing a security/update domain (AV / Windows Update block). Benign
@@ -336,166 +336,166 @@ none, so this pass makes the verdicts trustworthy:
   hosts` subcommand, included in `all`. Parsing is a pure static, unit-tested; the
   real-file read is smoke-tested. Read-only.
 
-### Persistence — screensaver hijack (SCRNSAVE.EXE)
+### Persistence, screensaver hijack (SCRNSAVE.EXE)
 - `ScreensaverEnumerator` surfaces the per-user screensaver executable (a `.scr` is
-  just a PE Windows runs on idle — MITRE T1546.002). Reads `SCRNSAVE.EXE` from
+  just a PE Windows runs on idle, MITRE T1546.002). Reads `SCRNSAVE.EXE` from
   `HKCU\Control Panel\Desktop` and its Group Policy twin, each signature-checked. 17
   autostart surfaces now.
 
-### Certificates — trusted-root store audit (rogue-CA detection)
+### Certificates, trusted-root store audit (rogue-CA detection)
 - `CertStoreAuditor` reads the machine + user trusted-root stores (`X509Store`,
   read-only) and flags rogue-CA signals: a trusted root that holds a **private key**
-  (arbitrary trusted certs can be minted locally — Superfish/eDellRoot class), a
+  (arbitrary trusted certs can be minted locally, Superfish/eDellRoot class), a
   **weak signature** (SHA-1/MD5/MD2) or an **undersized RSA key** (<2048-bit). New
   `winsight certs` subcommand. Risk classification is pure and unit-tested; a Windows
   integration test asserts the real store read returns well-formed roots. Read-only.
 
-### Extensions — browser extension audit (supply-chain)
+### Extensions, browser extension audit (supply-chain)
 - `ExtensionScanner` reads the Chromium-family profiles (Chrome, Edge, Brave, Vivaldi,
-  Opera) for installed extensions and parses each manifest — name (with `__MSG_`
+  Opera) for installed extensions and parses each manifest, name (with `__MSG_`
   locale resolution), version and declared permissions/host_permissions. Extensions
   declaring broad-reach permissions (`<all_urls>`, `tabs`, `webRequest`, `cookies`,
   `nativeMessaging`, `debugger`, `scripting`, wildcard hosts, …) are flagged high-risk.
   New `winsight extensions` (alias `ext`) subcommand, included in `all`. Read-only,
   roots injectable so parsing is unit-tested against a fixture (no browser needed).
 
-### Modules — loaded-DLL audit (injection / side-load detection)
+### Modules, loaded-DLL audit (injection / side-load detection)
 - `ModuleLister` enumerates the DLLs loaded into every accessible running process
   (System.Diagnostics) and batch-verifies each distinct module's Authenticode
   signature through the shared verifier. Unsigned or untrusted DLLs loaded into a
-  running process — the classic injection / search-order-hijack signal — are reported
+  running process, the classic injection / search-order-hijack signal, are reported
   as notable; the summary carries the totals (loaded modules across N processes, M
   unsigned). New `winsight modules` (alias `dll`) subcommand. Processes that can't be
   opened (protected, cross-bitness, exited) are skipped, never guessed. Read-only.
 
-### Processes — running-process viewer (TaskExplorer-class)
+### Processes, running-process viewer (TaskExplorer-class)
 - `ProcessLister` snapshots every running process via `Win32_Process` (System.Management):
   pid, name, full image path, parent pid and command line, then batch-verifies each
-  distinct image's Authenticode signature through the shared verifier — so unsigned or
+  distinct image's Authenticode signature through the shared verifier, so unsigned or
   untrusted running code surfaces as notable. New `winsight processes` (alias `ps`)
   subcommand; `--flagged` shows only unsigned/untrusted images, `--json` for the GUI.
   Read-only, no admin needed for the basics. Integration test asserts a non-empty,
   well-formed snapshot (incl. the test process) and honours the injected verifier.
 
-### DNS — real-time ETW watch
+### DNS, real-time ETW watch
 - `DnsEtwWatcher` opens an ETW session on Microsoft-Windows-DNS-Client for live DNS
   visibility: `winsight dns --watch` prints every name a process resolves as it
   happens, complementing the one-shot cache reader. Requires Administrator (ETW
   session); the session stops cleanly on Ctrl+C and a clear message is shown when not
   elevated. Adds the `Microsoft.Diagnostics.Tracing.TraceEvent` dependency.
 
-### Signatures — native WinVerifyTrust (perf, tamper)
+### Signatures, native WinVerifyTrust (perf, tamper)
 - `NativeSignatureVerifier` verifies the embedded Authenticode signature via
-  WinVerifyTrust (native, no process spawn) — fast, and detects tampering directly.
+  WinVerifyTrust (native, no process spawn), fast, and detects tampering directly.
   Files with no embedded signature (catalog-signed OS binaries) defer to the
   catalog-aware `AuthenticodeVerifier`; any native failure defers too, so a verdict is
   never fabricated. Wired as the default (behind the cache). Uses only the stable
   WINTRUST struct layouts; `MapResult` unit-tested + the native->catalog chain covered
   by a Windows integration test.
 
-### Reputation — opt-in VirusTotal
+### Reputation, opt-in VirusTotal
 - Optional VirusTotal file-reputation for flagged persistence items: set
   `WINSIGHT_VT_KEY` (your own API key) and each flagged, resolvable binary is SHA-256
-  hashed and looked up (capped for rate limits) — malicious/total counts + a report
+  hashed and looked up (capped for rate limits), malicious/total counts + a report
   link in text and `--json`. STRICTLY opt-in and the ONLY network call; without a key
   WinSight stays 100% local. `HashUtil` + `VirusTotalClient` (ParseStats unit-tested).
 
-### Performance — shared signature-verdict cache
+### Performance, shared signature-verdict cache
 - `CachingSignatureVerifier` (decorator) caches verdicts by path + last-write time and
   is shared across tools, so the same system binaries checked by persistence and
   connections in one `winsight all` run are verified once; cache auto-invalidates on
   file change.
 
-### Persistence — AppCertDLLs + time providers
+### Persistence, AppCertDLLs + time providers
 - `AppCertDllsEnumerator` (DLLs injected into processes that call CreateProcess/etc.,
   MITRE T1546.009) and `TimeProviderEnumerator` (W32Time provider DllNames). 16
   autostart surfaces now.
 
-### Persistence — COM hijacking (HKCU CLSID)
+### Persistence, COM hijacking (HKCU CLSID)
 - `ComHijackEnumerator` surfaces per-user COM server registrations
-  (HKCU\Software\Classes\CLSID\{clsid}\InprocServer32) — COM hijacking (MITRE
+  (HKCU\Software\Classes\CLSID\{clsid}\InprocServer32), COM hijacking (MITRE
   T1546.015). HKCU-scoped for high signal (vs the thousands of legit HKLM system
   CLSIDs). 14 autostart surfaces now.
 
-### Persistence — print monitors + netsh helpers
+### Persistence, print monitors + netsh helpers
 - `PrintMonitorEnumerator` (spooler-loaded Driver DLLs, run as SYSTEM) and
-  `NetshHelperEnumerator` (DLLs loaded when netsh runs) — two more classic ASEPs.
+  `NetshHelperEnumerator` (DLLs loaded when netsh runs), two more classic ASEPs.
   13 autostart surfaces now.
 
-### Persistence — LSA packages + System32 module resolution
+### Persistence, LSA packages + System32 module resolution
 - `LsaPackagesEnumerator` surfaces LSA Security/Authentication/Notification packages
-  (DLLs loaded into LSASS — a classic SSP / password-filter persistence + credential
+  (DLLs loaded into LSASS, a classic SSP / password-filter persistence + credential
   theft vector). `CommandLine.ExtractExecutable` now resolves bare module names
   against System32 (adding `.dll`), so LSA/AppInit/driver DLLs signature-check
   properly. 11 autostart surfaces now.
 
-### Persistence — Startup folders
+### Persistence, Startup folders
 - `StartupFolderEnumerator` surfaces items in the per-user and all-users Startup
   folders, resolving `.lnk` targets via WScript.Shell (COM, best-effort) so the
   signature check sees the real binary. 10 autostart surfaces now.
 
-### Firewall — program + ports per rule
+### Firewall, program + ports per rule
 - `FirewallRuleReader` now enriches each rule with its bound program
   (MSFT_NetFirewallApplicationFilter) and protocol/ports (MSFT_NetFirewallPortFilter),
-  joined by InstanceID — the LuLu-relevant "which app, which ports". Best-effort:
+  joined by InstanceID, the LuLu-relevant "which app, which ports". Best-effort:
   degrades to name-only if the filters aren't present.
 
-### Firewall — rule viewer (LuLu-class, read-only phase 1)
+### Firewall, rule viewer (LuLu-class, read-only phase 1)
 - `FirewallRuleReader` lists Windows Defender Firewall rules (MSFT_NetFirewallRule
-  via System.Management) — see what your firewall allows/blocks. New `winsight
+  via System.Management), see what your firewall allows/blocks. New `winsight
   firewall` subcommand. Per-rule program/port enrichment and an enforcing,
   prompt-on-connection firewall are later phases.
 
-### Connections — IPv6 support (audit fix)
+### Connections, IPv6 support (audit fix)
 - `NativeConnectionReader` now reads the IPv6 TCP/UDP tables (AF_INET6,
   MIB_*6ROW_OWNER_PID) alongside IPv4, and `IsExternal` treats IPv6 ULA (fc00::/7)
   as private. A connection monitor that ignored IPv6 would miss modern C2/exfil.
 
-### DNS — resolver-cache visibility (DNSMonitor-class)
+### DNS, resolver-cache visibility (DNSMonitor-class)
 - `DnsCacheReader` surfaces recently resolved domains + answers from the resolver
-  cache (MSFT_DNSClientCache via System.Management — managed, no admin, no process
+  cache (MSFT_DNSClientCache via System.Management, managed, no admin, no process
   spawn). New `winsight dns` subcommand, included in `all`. Real-time ETW
   (Microsoft-Windows-DNS-Client) is the future enhancement.
 
-### Persistence — WMI event subscriptions
+### Persistence, WMI event subscriptions
 - `WmiSubscriptionEnumerator` surfaces permanent WMI subscription consumers
-  (CommandLine + ActiveScript) from root\subscription — a stealthy, fileless
+  (CommandLine + ActiveScript) from root\subscription, a stealthy, fileless
   persistence technique. Adds the `System.Management` dependency; access-denied /
   missing-namespace degrade to empty (never throws). 9 autostart surfaces now.
 
 ### CLI polish
 - `winsight --version` and `winsight --help` / `-h`.
 
-## Repo — collaboration & release readiness
+## Repo, collaboration & release readiness
 - Full GPL-3.0 `LICENSE` text; `CODE_OF_CONDUCT` (Contributor Covenant 2.1),
   `CONTRIBUTING`, `SECURITY` (private vulnerability reporting); issue templates
   (bug/feature) + config, PR template, `CODEOWNERS`, Dependabot (NuGet + Actions),
   `.gitattributes`, README badges. A `release` workflow publishes a self-contained
   `winsight.exe` to a GitHub Release on `v*` tags.
 
-## Phase 1 — user-mode tools
+## Phase 1, user-mode tools
 
-### Connections — native IP Helper tables
+### Connections, native IP Helper tables
 - `NativeConnectionReader` reads the TCP/UDP tables via GetExtendedTcpTable /
   GetExtendedUdpTable (structured, fast, locale-independent) with owning PIDs,
   replacing the netstat text spawn (kept as a fallback). Endianness/state mapping is
   pure + unit-tested; the real native call is exercised by the connections
   integration test on Windows CI.
 
-### Camera/Mic — real-time monitor (OverSight-class)
+### Camera/Mic, real-time monitor (OverSight-class)
 - `CameraMicMonitor` raises Activated/Deactivated events the moment an app turns the
   webcam/mic on or off, via a pure unit-tested snapshot Diff over a polling loop
   (driver-free; RegNotifyChangeKeyValue is the future event-driven optimization).
   `winsight av --watch` prints live alerts until Ctrl+C.
 
-### Integration tests — proving each part functions on real Windows
+### Integration tests, proving each part functions on real Windows
 - Integration tests execute the real pipeline on the CI Windows runner: persistence
   scan (registry + signature batch), ConsentStore read, connection snapshot, and
   catalog-signed-binary verification. First proof the blind-authored code FUNCTIONS,
   not just compiles. `AuthenticodeVerifier` now matches PowerShell output back to
   inputs by normalised full path (robust to path-string form differences).
 
-### Signature hardening — catalog-aware Authenticode
+### Signature hardening, catalog-aware Authenticode
 - `ISignatureVerifier` abstraction + `AuthenticodeVerifier`: one batched
   `Get-AuthenticodeSignature` per scan, catalog + embedded aware, detects tampering
   (HashMismatch), managed fallback that never throws. Persistence + Connections now
@@ -510,16 +510,16 @@ none, so this pass makes the verdicts trustworthy:
   stable camelCase `--json` contract (for the future GUI/automation). Tools stay pure
   data producers; presentation lives once in `Cli/Adapters`.
 
-### Module 3 — Connections (Netiquette-class)
+### Module 3, Connections (Netiquette-class)
 - Active TCP/UDP snapshot attributed to the owning process + its signature; flags
   external, established connections owned by unsigned/unresolved processes.
   (Interim: `netstat -ano` parse; native `GetExtendedTcpTable` is next.)
 
-### Module 2 — Camera/Mic (OverSight-class)
+### Module 2, Camera/Mic (OverSight-class)
 - CapabilityAccessManager ConsentStore reader: which apps used the webcam/mic and
   what is live right now.
 
-### Module 1 — Persistence (KnockKnock-class)
+### Module 1, Persistence (KnockKnock-class)
 - 8 autostart surfaces: Run/RunOnce/RunServices/Policies\Explorer\Run (HKLM+HKCU ×
   64/32-bit), Services & drivers, Winlogon Shell/Userinit, Scheduled Tasks (Tasks
   XML), AppInit_DLLs, IFEO debuggers, Active Setup, BootExecute. Managed Authenticode

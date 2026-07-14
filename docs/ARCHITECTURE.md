@@ -1,4 +1,4 @@
-# WinSight — architecture
+# WinSight, architecture
 
 Status: accepted and implemented for Phase 1. Phase 2 details live in
 [`WFP_DESIGN.md`](WFP_DESIGN.md).
@@ -36,38 +36,38 @@ Paths, process names, domains and other forensic values are never rewritten.
 
 ## Windows primitives per tool (the real engineering)
 
-- **Persistence** — read the full autostart surface: `HKLM/HKCU ...\Run`,
+- **Persistence**, read the full autostart surface: `HKLM/HKCU ...\Run`,
   `RunOnce`, Scheduled Tasks (Task Scheduler COM / `\Windows\System32\Tasks`),
   Services (`HKLM\SYSTEM\CurrentControlSet\Services`), WMI `__EventFilter` /
   `CommandLineEventConsumer`, startup folders, `Winlogon` (Shell/Userinit),
   `AppInit_DLLs`, print monitors, drivers. Verdict each via **WinVerifyTrust**
-  (Authenticode). This is the same surface Autoruns covers — but OSS and scriptable.
-- **Camera/Mic** — activation signal from ETW providers and the
+  (Authenticode). This is the same surface Autoruns covers, but OSS and scriptable.
+- **Camera/Mic**, activation signal from ETW providers and the
   `CapabilityAccessManager\ConsentStore\{webcam,microphone}` registry (per-app
   `LastUsedTimeStart/Stop`), cross-checked with `MMDevice`/audio session state.
   Attribute to the owning process; alert on transition to active.
-- **Net + DNS** — connection table via **IPHelper** (`GetExtendedTcpTable`/Udp),
+- **Net + DNS**, connection table via **IPHelper** (`GetExtendedTcpTable`/Udp),
   live events + DNS via ETW (`Microsoft-Windows-DNS-Client`,
   `Microsoft-Windows-Kernel-Network`). Map socket → PID → signed binary.
-- **Firewall (Phase 2)** — **WFP** (Windows Filtering Platform) user-mode filters
+- **Firewall (Phase 2)**, **WFP** (Windows Filtering Platform) user-mode filters
   keyed by app id; a prompt-on-new-connection UX. WFP alone (no driver) covers
   most of LuLu's outbound-control use case.
-- **Guardian (Phase 3/4)** — real-time persistence + ransomware. Monitoring is
+- **Guardian (Phase 3/4)**, real-time persistence + ransomware. Monitoring is
   ETW/user-mode; *blocking* needs a **minifilter** (`FltRegisterFilter`) or WFP
   callout **driver** → EV cert + attestation signing. Explicitly deferred.
 
 ## Why .NET for user-mode (recommended)
 
 - Broadest, best-documented Win32 surface via **CsWin32** (source-generated
-  P/Invoke) — persistence, IPHelper, WinVerifyTrust are all a struct away.
-- **TraceEvent** (Microsoft) is the mature ETW consumer library — the backbone of
-  the av/net/dns monitors — with no hand-rolled ETW plumbing.
+  P/Invoke), persistence, IPHelper, WinVerifyTrust are all a struct away.
+- **TraceEvent** (Microsoft) is the mature ETW consumer library, the backbone of
+  the av/net/dns monitors, with no hand-rolled ETW plumbing.
 - Tray apps, notifications and the WPF dashboard are first-class.
 - Fast to an installable MVP. Perf-critical bits can drop to Rust/C++ later without
   reworking the shell.
 
-Alternatives considered: **Rust** (`windows-rs`) — great for a small, dependency-light
-signed agent and the eventual driver, steeper ETW ergonomics; **C++/WDF** — mandatory
+Alternatives considered: **Rust** (`windows-rs`), great for a small, dependency-light
+signed agent and the eventual driver, steeper ETW ergonomics; **C++/WDF**, mandatory
 for the kernel driver, overkill for the user-mode MVP. Recommendation: **.NET 10 LTS
 for the supported user-mode suite, Rust/C++ reserved for the driver and any perf
 agent.**

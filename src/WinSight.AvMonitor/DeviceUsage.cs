@@ -10,7 +10,7 @@ public enum DeviceKind
 /// <summary>
 /// One application's recorded use of a capture device, as Windows tracks it in the
 /// CapabilityAccessManager. <see cref="Active"/> means the device is in use RIGHT NOW
-/// by this app (a start with no matching stop) — the OverSight-style "you're being
+/// by this app (a start with no matching stop), the OverSight-style "you're being
 /// watched/heard" signal.
 /// </summary>
 /// <param name="Kind">Webcam or microphone.</param>

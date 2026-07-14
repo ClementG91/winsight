@@ -28,7 +28,7 @@ public sealed class CertStoreAuditor
             }
             catch (CryptographicException)
             {
-                // Store not present for this location — skip, don't guess.
+                // Store not present for this location, skip, don't guess.
                 continue;
             }
 
@@ -76,7 +76,7 @@ public sealed class CertStoreAuditor
         }
         catch (CryptographicException)
         {
-            // Unreadable key — report as unknown rather than fail the whole scan.
+            // Unreadable key, report as unknown rather than fail the whole scan.
         }
         return (0, false);
     }

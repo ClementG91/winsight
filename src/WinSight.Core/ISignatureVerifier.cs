@@ -12,7 +12,7 @@ public interface ISignatureVerifier
 
     /// <summary>
     /// Verifies many files at once. Implementations SHOULD batch (the point of the
-    /// method) — a scan resolves dozens of images and per-file process spawns would
+    /// method), a scan resolves dozens of images and per-file process spawns would
     /// be slow. Returns a verdict per input path (case-insensitive keys).
     /// </summary>
     IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths);

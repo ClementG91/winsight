@@ -70,7 +70,7 @@ public sealed class CommandLineTests
     [Fact]
     public void ExtractExecutable_SystemRootDriverPath_Resolves()
     {
-        // Driver ImagePaths use NT forms Win32 can't open as-is — without normalisation
+        // Driver ImagePaths use NT forms Win32 can't open as-is, without normalisation
         // every Windows driver reads as "no image" and is flagged (150+ false positives).
         Assert.NotNull(CommandLine.ExtractExecutable(@"\SystemRoot\System32\drivers\ACPI.sys"));
     }
@@ -84,7 +84,7 @@ public sealed class CommandLineTests
     [Fact]
     public void ExtractExecutable_DefaultWinlogonShell_Resolves()
     {
-        // explorer.exe (the default shell) lives in %windir%, not System32 — it must
+        // explorer.exe (the default shell) lives in %windir%, not System32, it must
         // resolve so the benign default Winlogon shell isn't flagged.
         var resolved = CommandLine.ExtractExecutable("explorer.exe");
         Assert.NotNull(resolved);
@@ -153,7 +153,7 @@ public sealed class ScheduledTaskTests
     }
 }
 
-// Integration tests — run the real pipeline on the Windows CI runner (registry,
+// Integration tests, run the real pipeline on the Windows CI runner (registry,
 // PowerShell signature batch). They are the first proof the blind-authored code
 // actually FUNCTIONS on Windows, not just compiles.
 public sealed class AuthenticodeVerifierIntegrationTests
@@ -163,7 +163,7 @@ public sealed class AuthenticodeVerifierIntegrationTests
     [Fact]
     public void Verify_CatalogSignedOsBinary_IsTrusted()
     {
-        // kernel32.dll is catalog-signed — the managed check would miss it; this proves
+        // kernel32.dll is catalog-signed, the managed check would miss it; this proves
         // the catalog-aware PowerShell path works end-to-end.
         Assert.Equal(SignatureState.SignedTrusted, new AuthenticodeVerifier().Verify(OsBinary).State);
     }
@@ -351,7 +351,7 @@ public sealed class NativeSignatureVerifierTests
     public void Verify_CatalogSignedOsBinary_IsTrusted_ViaFallback()
     {
         // kernel32 is catalog-signed: WinVerifyTrust reports NOSIGNATURE, the catalog
-        // fallback resolves it — validating the full native->catalog chain.
+        // fallback resolves it, validating the full native->catalog chain.
         var path = Path.Combine(Environment.SystemDirectory, "kernel32.dll");
         Assert.Equal(SignatureState.SignedTrusted, new NativeSignatureVerifier().Verify(path).State);
     }
@@ -363,8 +363,7 @@ public sealed class NativeSignatureVerifierTests
         File.WriteAllText(file, "not a signed PE");
         try
         {
-            // Unsigned when the catalog check ran, Unknown if it could not (load) —
-            // but never SignedTrusted. That invariant is what actually matters.
+            // Unsigned when the catalog check ran, Unknown if it could not (load),             // but never SignedTrusted. That invariant is what actually matters.
             var state = new NativeSignatureVerifier().Verify(file).State;
             Assert.Contains(state, new[] { SignatureState.Unsigned, SignatureState.Unknown });
         }
@@ -457,7 +456,7 @@ public sealed class VirusTotalParseTests
     [Fact]
     public void Lookup_RejectsNonSha256_WithoutAnyNetworkCall()
     {
-        // No HttpClient interaction can happen for an invalid hash — the guard
+        // No HttpClient interaction can happen for an invalid hash, the guard
         // returns null before any request is built.
         var client = new VirusTotalClient("dummy-key");
         Assert.Null(client.Lookup("not-a-hash"));
@@ -616,7 +615,7 @@ public sealed class SignatureVerifierTests
     public void Verify_FileWithoutEmbeddedSignature_IsUnknown_NotUnsigned()
     {
         // The managed verifier cannot see catalog signatures, so a file with no
-        // EMBEDDED signature is genuinely undetermined — it must report Unknown, not a
+        // EMBEDDED signature is genuinely undetermined, it must report Unknown, not a
         // false-alarm Unsigned (the same input might be a catalog-signed system binary).
         var f = Path.Combine(Path.GetTempPath(), $"winsight_{Guid.NewGuid():N}.bin");
         File.WriteAllText(f, "not a signed PE");

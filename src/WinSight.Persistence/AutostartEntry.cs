@@ -38,7 +38,7 @@ public enum PersistenceStatus
 }
 
 /// <summary>
-/// One persistently-installed item — the unit KnockKnock-style scanning reveals.
+/// One persistently-installed item, the unit KnockKnock-style scanning reveals.
 /// It records WHERE it persists (Vector/Location), the raw command, the resolved
 /// executable, and that executable's signature verdict. Recognition/inspection only;
 /// WinSight never silently removes anything.

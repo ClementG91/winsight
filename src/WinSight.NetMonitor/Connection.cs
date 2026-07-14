@@ -4,7 +4,7 @@ namespace WinSight.NetMonitor;
 
 /// <summary>
 /// A live network connection attributed to its owning process and that process's
-/// signature — the Netiquette-class "who is talking to whom" unit.
+/// signature, the Netiquette-class "who is talking to whom" unit.
 /// </summary>
 /// <param name="Protocol">TCP or UDP.</param>
 /// <param name="Local">Local endpoint.</param>

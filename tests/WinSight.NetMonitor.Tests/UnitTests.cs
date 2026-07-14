@@ -51,7 +51,7 @@ public sealed class DnsRecordTypeTests
     }
 }
 
-// Integration test — reads the real DNS resolver cache on the Windows CI runner.
+// Integration test, reads the real DNS resolver cache on the Windows CI runner.
 public sealed class DnsCacheReaderIntegrationTests
 {
     [Fact]
@@ -67,7 +67,7 @@ public sealed class DnsCacheReaderIntegrationTests
     }
 }
 
-// Integration test — runs the real netstat snapshot + process resolution +
+// Integration test, runs the real netstat snapshot + process resolution +
 // signature batch on the Windows CI runner (validates the whole net pipeline).
 public sealed class ConnectionMonitorIntegrationTests
 {
