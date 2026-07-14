@@ -27,6 +27,12 @@ public enum FirewallServiceVerb
     /// <summary>Report whether the WinSight WFP provider and sublayer exist.</summary>
     WfpStatus,
 
+    /// <summary>Add a non-blocking PERMIT filter to the WinSight sublayer (blocks nothing).</summary>
+    WfpFilterAdd,
+
+    /// <summary>Remove the non-blocking PERMIT filter.</summary>
+    WfpFilterRemove,
+
     /// <summary>Unrecognized verb.</summary>
     Unknown,
 }
@@ -51,6 +57,8 @@ public static class FirewallServiceCommandLine
             "wfp-provision" => FirewallServiceVerb.WfpProvision,
             "wfp-deprovision" => FirewallServiceVerb.WfpDeprovision,
             "wfp-status" => FirewallServiceVerb.WfpStatus,
+            "wfp-filter-add" => FirewallServiceVerb.WfpFilterAdd,
+            "wfp-filter-remove" => FirewallServiceVerb.WfpFilterRemove,
             _ => FirewallServiceVerb.Unknown,
         };
     }

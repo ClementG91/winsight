@@ -22,16 +22,33 @@ public static partial class WfpProvisioning
     /// <summary>Stable identity of the WinSight WFP sublayer.</summary>
     public static readonly Guid SublayerKey = new("d7a9b1e1-5c3a-4b8e-9f21-6c0a7e2d1f34");
 
+    /// <summary>Stable identity of the WinSight non-blocking PERMIT audit filter.</summary>
+    public static readonly Guid PermitFilterKey = new("d7a9b1e2-5c3a-4b8e-9f21-6c0a7e2d1f34");
+
+    // FWPM_LAYER_ALE_AUTH_CONNECT_V4: the outbound-connect authorization layer.
+    private static readonly Guid AleAuthConnectV4 = new("c38d57d1-05a7-4c33-904f-7fbceee60e82");
+
     private const string ProviderName = "WinSight";
     private const string ProviderDescription = "WinSight outbound firewall provider (audit-only).";
     private const string SublayerName = "WinSight outbound";
     private const string SublayerDescription =
         "WinSight outbound firewall sublayer (audit-only, no filter installed).";
 
+    private const string PermitFilterName = "WinSight audit permit";
+    private const string PermitFilterDescription =
+        "Non-blocking PERMIT filter (proves WFP filter interop; blocks nothing).";
+
     private const uint RpcCAuthnWinNt = 10;
+    private const uint FwpEFilterNotFound = 0x80320003;
     private const uint FwpEProviderNotFound = 0x80320005;
     private const uint FwpESublayerNotFound = 0x80320007;
     private const uint FwpEAlreadyExists = 0x80320009;
+
+    // FWP_ACTION_PERMIT = FWP_ACTION_FLAG_TERMINATING (0x1000) | 0x02. A PERMIT does not
+    // block: it authorizes the connection, which is already the default, so adding it
+    // changes no observable behaviour. FWP_EMPTY weight lets WFP auto-assign a weight.
+    private const uint FwpActionPermit = 0x00001002;
+    private const uint FwpEmpty = 0;
 
     /// <summary>Creates the provider and sublayer (idempotent). Installs no filter.</summary>
     public static void Provision()
@@ -80,8 +97,79 @@ public static partial class WfpProvisioning
         }
     }
 
-    /// <summary>Reports whether the provider and sublayer currently exist.</summary>
-    public static (bool Provider, bool Sublayer) Status()
+    /// <summary>
+    /// Adds a single non-blocking PERMIT filter to the WinSight sublayer at the outbound
+    /// connect layer. A PERMIT authorizes the connection (already the default), so this
+    /// blocks nothing; it proves the filter interop works. Requires the sublayer to exist
+    /// (run <see cref="Provision"/> first). Idempotent.
+    /// </summary>
+    public static void AddPermitFilter()
+    {
+        var engine = OpenEngine();
+        try
+        {
+            InTransaction(engine, () =>
+            {
+                var name = Marshal.StringToHGlobalUni(PermitFilterName);
+                var description = Marshal.StringToHGlobalUni(PermitFilterDescription);
+                var providerKey = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
+                try
+                {
+                    Marshal.StructureToPtr(ProviderKey, providerKey, false);
+                    var filter = new FwpmFilter0
+                    {
+                        FilterKey = PermitFilterKey,
+                        DisplayData = new FwpmDisplayData0 { Name = name, Description = description },
+                        Flags = 0,
+                        ProviderKey = providerKey,
+                        LayerKey = AleAuthConnectV4,
+                        SubLayerKey = SublayerKey,
+                        Weight = new FwpValue0 { Type = FwpEmpty, Value = 0 },
+                        NumFilterConditions = 0,
+                        FilterCondition = IntPtr.Zero,
+                        Action = new FwpmAction0 { Type = FwpActionPermit, FilterOrCalloutKey = Guid.Empty },
+                    };
+                    var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
+                    if (result is not 0 and not FwpEAlreadyExists)
+                    {
+                        throw new Win32Exception((int)result);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(name);
+                    Marshal.FreeHGlobal(description);
+                    Marshal.FreeHGlobal(providerKey);
+                }
+            });
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    /// <summary>Removes the PERMIT filter (idempotent).</summary>
+    public static void RemovePermitFilter()
+    {
+        var engine = OpenEngine();
+        try
+        {
+            var key = PermitFilterKey;
+            var result = NativeMethods.FwpmFilterDeleteByKey0(engine, ref key);
+            if (result is not 0 and not FwpEFilterNotFound)
+            {
+                throw new Win32Exception((int)result);
+            }
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    /// <summary>Reports whether the provider, sublayer and PERMIT filter currently exist.</summary>
+    public static (bool Provider, bool Sublayer, bool PermitFilter) Status()
     {
         var engine = OpenEngine();
         try
@@ -100,7 +188,14 @@ public static partial class WfpProvisioning
                 NativeMethods.FwpmFreeMemory0(ref sublayer);
             }
 
-            return (providerExists, sublayerExists);
+            var filterKey = PermitFilterKey;
+            var filterExists = NativeMethods.FwpmFilterGetByKey0(engine, ref filterKey, out var filter) == 0;
+            if (filter != IntPtr.Zero)
+            {
+                NativeMethods.FwpmFreeMemory0(ref filter);
+            }
+
+            return (providerExists, sublayerExists, filterExists);
         }
         finally
         {
@@ -237,6 +332,45 @@ public static partial class WfpProvisioning
         public ushort Weight;
     }
 
+    // FWP_VALUE0: a tagged 8-byte union. Only FWP_EMPTY (type 0, value 0) is used here,
+    // which asks WFP to auto-assign the filter weight.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FwpValue0
+    {
+        public uint Type;
+        public ulong Value;
+    }
+
+    // FWPM_ACTION0: action type plus a GUID union (callout/filter type), unused for PERMIT.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FwpmAction0
+    {
+        public uint Type;
+        public Guid FilterOrCalloutKey;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FwpmFilter0
+    {
+        public Guid FilterKey;
+        public FwpmDisplayData0 DisplayData;
+        public uint Flags;
+        public IntPtr ProviderKey;
+        public FwpByteBlob ProviderData;
+        public Guid LayerKey;
+        public Guid SubLayerKey;
+        public FwpValue0 Weight;
+        public uint NumFilterConditions;
+        public IntPtr FilterCondition;
+        public FwpmAction0 Action;
+
+        // union { UINT64 rawContext; GUID providerContextKey; }: zeroed (no context).
+        public Guid ProviderContextKey;
+        public IntPtr Reserved;
+        public ulong FilterId;
+        public FwpValue0 EffectiveWeight;
+    }
+
     private static partial class NativeMethods
     {
         [LibraryImport("fwpuclnt.dll", StringMarshalling = StringMarshalling.Utf16)]
@@ -272,6 +406,15 @@ public static partial class WfpProvisioning
 
         [LibraryImport("fwpuclnt.dll")]
         internal static partial uint FwpmSubLayerGetByKey0(IntPtr engineHandle, ref Guid key, out IntPtr subLayer);
+
+        [LibraryImport("fwpuclnt.dll")]
+        internal static partial uint FwpmFilterAdd0(IntPtr engineHandle, ref FwpmFilter0 filter, IntPtr sd, out ulong id);
+
+        [LibraryImport("fwpuclnt.dll")]
+        internal static partial uint FwpmFilterDeleteByKey0(IntPtr engineHandle, ref Guid key);
+
+        [LibraryImport("fwpuclnt.dll")]
+        internal static partial uint FwpmFilterGetByKey0(IntPtr engineHandle, ref Guid key, out IntPtr filter);
 
         [LibraryImport("fwpuclnt.dll")]
         internal static partial void FwpmFreeMemory0(ref IntPtr p);

@@ -4,6 +4,17 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 non-blocking WFP PERMIT filter (proves filter interop)
+- Add `wfp-filter-add` and `wfp-filter-remove` verbs. They add and remove a single PERMIT
+  filter in the WinSight sublayer at `FWPM_LAYER_ALE_AUTH_CONNECT_V4`. A PERMIT authorizes
+  the outbound connect, which is already the default, so it blocks nothing: it exists only
+  to prove the full filter interop (`FwpmFilterAdd0` with the complete `FWPM_FILTER0`,
+  `FWP_VALUE0` and `FWPM_ACTION0` marshalling) works and is cleanly removable.
+- The filter is added inside a transaction, is idempotent, and references the WinSight
+  provider and sublayer. `wfp-status` now also reports the permit-filter presence.
+- Requires elevation and a prior `wfp-provision`. No blocking logic exists yet;
+  connectivity is untouched.
+
 ### Phase 2 WFP provider and sublayer (containers only, no filter)
 - Add `wfp-provision`, `wfp-deprovision` and `wfp-status` verbs to the firewall service.
   They create and remove the WinSight-owned WFP provider and sublayer, which are
