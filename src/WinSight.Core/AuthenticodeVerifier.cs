@@ -60,7 +60,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
 
     // Runs one chunk, retrying until every path in it has a catalog verdict. A
     // PowerShell spawn can transiently fail or return truncated output under load (a
-    // slow cold start hitting the timeout, a partial pipe) — without a retry, the
+    // slow cold start hitting the timeout, a partial pipe), without a retry, the
     // uncovered paths silently fall to the catalog-blind managed verifier and read as
     // "Unsigned", so a scan run twice could show 4 flagged then 130. Get-Authenticode-
     // Signature returns exactly one object per input path, so ANY missing path means
@@ -85,7 +85,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
 
             if (expected.All(byFullPath.ContainsKey))
             {
-                return; // fully covered — no need to respawn
+                return; // fully covered, no need to respawn
             }
         }
 
@@ -165,7 +165,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         var literals = string.Join(",", paths.Select(p => "'" + p.Replace("'", "''") + "'"));
         var script =
             "$ErrorActionPreference='SilentlyContinue';" +
-            // Silence the progress stream too — otherwise PowerShell writes CLIXML
+            // Silence the progress stream too, otherwise PowerShell writes CLIXML
             // progress records to stderr that leak onto the user's terminal mid-scan.
             "$ProgressPreference='SilentlyContinue';" +
             "@(" + literals + ") | Get-AuthenticodeSignature | " +
@@ -220,7 +220,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException)
         {
-            // Already exited or cannot be killed — the stream read completes either way.
+            // Already exited or cannot be killed, the stream read completes either way.
         }
     }
 

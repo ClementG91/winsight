@@ -33,14 +33,14 @@ public sealed class CameraMicMonitorTests
     [Fact]
     public void Diff_DuplicateActiveKey_DoesNotThrow()
     {
-        // Same app under HKCU + HKLM, both active — must dedupe, not throw.
+        // Same app under HKCU + HKLM, both active, must dedupe, not throw.
         Assert.Empty(CameraMicMonitor.Diff(
             [Cam("zoom", true), Cam("zoom", true)],
             [Cam("zoom", true), Cam("zoom", true)]));
     }
 }
 
-// Integration test — runs the real ConsentStore read on the Windows CI runner.
+// Integration test, runs the real ConsentStore read on the Windows CI runner.
 public sealed class CapabilityAccessReaderIntegrationTests
 {
     [Fact]

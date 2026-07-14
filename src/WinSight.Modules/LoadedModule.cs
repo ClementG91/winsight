@@ -20,7 +20,7 @@ public sealed record LoadedModule(
     SignatureVerdict Signature)
 {
     /// <summary>
-    /// A loaded module whose file is unsigned or untrusted — worth a look. Modules
+    /// A loaded module whose file is unsigned or untrusted, worth a look. Modules
     /// with no resolvable path are not flagged.
     /// </summary>
     public bool Unsigned =>

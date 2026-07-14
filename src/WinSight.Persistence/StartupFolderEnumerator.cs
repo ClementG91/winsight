@@ -3,10 +3,10 @@ using System.Runtime.InteropServices;
 namespace WinSight.Persistence;
 
 /// <summary>
-/// The Startup folders (per-user and all-users) — anything dropped here runs at
+/// The Startup folders (per-user and all-users), anything dropped here runs at
 /// logon, a classic malware persistence spot. Shortcuts (.lnk) are resolved to their
 /// target executable via WScript.Shell (COM), so the signature check sees the real
-/// binary; non-shortcut files are reported as-is. Resolution is best-effort — a .lnk
+/// binary; non-shortcut files are reported as-is. Resolution is best-effort, a .lnk
 /// that cannot be resolved falls back to the shortcut path.
 /// </summary>
 public sealed class StartupFolderEnumerator : IAutostartEnumerator
@@ -45,7 +45,7 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
     }
 
     // Resolves a .lnk's target executable via WScript.Shell. COM interop can fail in
-    // several ways (missing object, binder, access) — any failure degrades to null.
+    // several ways (missing object, binder, access), any failure degrades to null.
     private static string? ResolveShortcut(string lnkPath)
     {
         var type = Type.GetTypeFromProgID("WScript.Shell");

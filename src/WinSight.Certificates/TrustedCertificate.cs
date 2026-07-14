@@ -28,7 +28,7 @@ public sealed record TrustedCertificate(
     DateTime NotAfter)
 {
     /// <summary>
-    /// Concrete reasons this trusted root warrants review — empty for a clean root.
+    /// Concrete reasons this trusted root warrants review, empty for a clean root.
     /// </summary>
     public IReadOnlyList<string> Risks
     {
@@ -42,7 +42,7 @@ public sealed record TrustedCertificate(
                 risks.Add("trusted root holds a private key (can mint trusted certs)");
             }
             // A weak signature only matters when someone else vouched for the cert. A
-            // root is SELF-signed, so its own SHA-1 signature is not a trust input — the
+            // root is SELF-signed, so its own SHA-1 signature is not a trust input, the
             // OS trusts it by identity, not by verifying that signature. Nearly every
             // long-established public root (DigiCert, Baltimore, Comodo…) is SHA-1
             // self-signed, so flagging those is pure noise. A weak signature on a

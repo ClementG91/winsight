@@ -31,7 +31,7 @@ public sealed class CertStoreAuditorTests
     [Fact]
     public void Risks_SmallEccKey_IsNotFlaggedAsUndersized()
     {
-        // 256-bit ECC is strong — the small-key rule is RSA-only.
+        // 256-bit ECC is strong, the small-key rule is RSA-only.
         var cert = Root(hasPrivateKey: false, sigAlg: "sha256ECDSA", keyBits: 256, isRsa: false);
         Assert.False(cert.Notable);
     }
@@ -49,7 +49,7 @@ public sealed class CertStoreAuditorTests
     {
         // The common, benign case: nearly every established public root (DigiCert,
         // Baltimore, Comodo…) is SHA-1 self-signed. A root's own signature is not a
-        // trust input, so this must NOT be flagged — it was a mass false positive.
+        // trust input, so this must NOT be flagged, it was a mass false positive.
         var cert = Root(hasPrivateKey: false, sigAlg: "sha1RSA", keyBits: 2048, isRsa: true, isSelfSigned: true);
         Assert.False(cert.Notable);
         Assert.Empty(cert.Risks);
@@ -59,7 +59,7 @@ public sealed class CertStoreAuditorTests
     public void Risks_Sha1NonSelfSignedCertInRootStore_IsFlagged()
     {
         // A weak-signature cert that is NOT self-signed sitting in the root store is
-        // genuinely odd (an intermediate masquerading as a root) — still flagged.
+        // genuinely odd (an intermediate masquerading as a root), still flagged.
         var cert = Root(hasPrivateKey: false, sigAlg: "sha1RSA", keyBits: 2048, isRsa: true, isSelfSigned: false);
         Assert.True(cert.Notable);
         Assert.Contains(cert.Risks, r => r.Contains("weak signature"));

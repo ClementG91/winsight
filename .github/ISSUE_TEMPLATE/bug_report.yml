@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting! For **security vulnerabilities**, do NOT use this form —
-        see [SECURITY.md](../blob/main/SECURITY.md).
+        Thanks for reporting! For **security vulnerabilities**, do NOT use this form.
+        See [SECURITY.md](../blob/main/SECURITY.md).
   - type: dropdown
     id: tool
     attributes:

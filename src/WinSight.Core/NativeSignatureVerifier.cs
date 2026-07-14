@@ -5,16 +5,16 @@ using System.Security.Cryptography.X509Certificates;
 namespace WinSight.Core;
 
 /// <summary>
-/// Native Authenticode verification via WinVerifyTrust (wintrust.dll) — the OS API,
+/// Native Authenticode verification via WinVerifyTrust (wintrust.dll), the OS API,
 /// fast and no process spawn. It checks the EMBEDDED signature (PE hash + certificate
 /// chain + policy), so it detects tampering and trusts real embedded signatures
 /// directly. WinVerifyTrust does not resolve CATALOG signatures (most OS binaries), so
 /// a file with no embedded signature is deferred to the catalog-aware fallback
-/// (<see cref="AuthenticodeVerifier"/>). Any native failure also defers — a verdict is
+/// (<see cref="AuthenticodeVerifier"/>). Any native failure also defers, a verdict is
 /// never worse than the fallback, and never fabricated.
 ///
 /// The interop uses only the stable WINTRUST_DATA/WINTRUST_FILE_INFO layouts (all
-/// DWORD/pointer fields, one IN-only path string) — no fragile out-struct marshalling.
+/// DWORD/pointer fields, one IN-only path string), no fragile out-struct marshalling.
 /// </summary>
 public sealed class NativeSignatureVerifier : ISignatureVerifier
 {
@@ -107,7 +107,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
         {
             // No extractable signer, or the file vanished between the trust check and
-            // here (TOCTOU) — the verdict stands, only the signer name is absent.
+            // here (TOCTOU), the verdict stands, only the signer name is absent.
             return null;
         }
     }

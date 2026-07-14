@@ -1,4 +1,4 @@
-# Normalise line endings — LF in the repo, checked out per-platform.
+# Normalise line endings: LF in the repo, checked out per-platform.
 * text=auto eol=lf
 
 # C#/project files

@@ -84,7 +84,7 @@ public sealed class OutboundPolicyEvaluatorTests
     }
 }
 
-// Integration test — reads the real Windows Firewall rules on the CI runner.
+// Integration test, reads the real Windows Firewall rules on the CI runner.
 public sealed class FirewallRuleReaderIntegrationTests
 {
     [Fact]

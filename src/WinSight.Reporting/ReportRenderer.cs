@@ -13,7 +13,7 @@ public static class ReportRenderer
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        // camelCase property names — the idiomatic JSON contract. Dictionary keys in
+        // camelCase property names, the idiomatic JSON contract. Dictionary keys in
         // Fields are already camelCase and pass through unchanged.
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },

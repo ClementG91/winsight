@@ -52,7 +52,7 @@ public static class NetstatParser
     }
 
     /// <summary>
-    /// True when a remote address is a routable, off-box destination — i.e. not a
+    /// True when a remote address is a routable, off-box destination, i.e. not a
     /// wildcard, loopback, or RFC-1918/link-local private address. These are the
     /// connections worth attention (something is talking to the outside world).
     /// </summary>
@@ -86,7 +86,7 @@ public static class NetstatParser
                 return false;
             }
         }
-        // IPv4 multicast (224.0.0.0/4) — local-segment noise (SSDP, mDNS, IGMP), not a
+        // IPv4 multicast (224.0.0.0/4), local-segment noise (SSDP, mDNS, IGMP), not a
         // routable off-box destination; flagging it would be pure false positives.
         var dot = a.IndexOf('.');
         if (dot > 0 && int.TryParse(a.AsSpan(0, dot), out var firstOctet) &&

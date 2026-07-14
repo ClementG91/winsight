@@ -3,11 +3,11 @@ using System.Management;
 namespace WinSight.Persistence;
 
 /// <summary>
-/// Permanent WMI event subscriptions — a stealthy, fileless persistence technique:
+/// Permanent WMI event subscriptions, a stealthy, fileless persistence technique:
 /// an __EventFilter (trigger) bound to an event consumer (payload) in the
 /// root\subscription namespace. This enumerates the ACTION side: CommandLine and
 /// ActiveScript consumers, whose command/script is what runs. Any entry here is
-/// notable — legitimate software rarely installs these.
+/// notable, legitimate software rarely installs these.
 /// </summary>
 public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
 {
@@ -52,7 +52,7 @@ public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Namespace unavailable / access denied — no subscriptions surfaced.
+            // Namespace unavailable / access denied, no subscriptions surfaced.
         }
         return rows;
     }

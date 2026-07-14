@@ -2,9 +2,9 @@
 
 These are the canonical visual assets for the project:
 
-- `winsight-logo.png` — transparent high-resolution master for documentation.
-- `winsight-logo-256.png` — tightly framed application/UI image.
-- `winsight.ico` — Windows icon containing 16, 20, 24, 32, 40, 48, 64, 128 and
+- `winsight-logo.png`, transparent high-resolution master for documentation.
+- `winsight-logo-256.png`, tightly framed application/UI image.
+- `winsight.ico`, Windows icon containing 16, 20, 24, 32, 40, 48, 64, 128 and
   256 pixel frames.
 
 The mark combines an abstract eye with four telemetry panes. It must remain recognizable

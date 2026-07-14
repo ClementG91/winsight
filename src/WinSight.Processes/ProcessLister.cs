@@ -6,7 +6,7 @@ namespace WinSight.Processes;
 /// <summary>
 /// TaskExplorer-class process lister: snapshots running processes (Win32_Process via
 /// System.Management) with their image path, parent and command line, and batch-checks
-/// each image's Authenticode signature — so unsigned/untrusted running code stands out.
+/// each image's Authenticode signature, so unsigned/untrusted running code stands out.
 /// Read-only; no admin needed for the basics.
 /// </summary>
 public sealed class ProcessLister

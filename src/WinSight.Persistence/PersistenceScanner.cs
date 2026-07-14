@@ -4,7 +4,7 @@ namespace WinSight.Persistence;
 
 /// <summary>
 /// KnockKnock-class scanner: sweeps every registered autostart surface, resolves each
-/// item's on-disk executable, and attaches its Authenticode verdict. Read-only — it
+/// item's on-disk executable, and attaches its Authenticode verdict. Read-only, it
 /// reveals what persists; it never removes anything.
 /// </summary>
 public sealed class PersistenceScanner
@@ -62,7 +62,7 @@ public sealed class PersistenceScanner
                                          or System.Security.SecurityException
                                          or IOException)
             {
-                // isolate a failing surface — the rest of the scan proceeds
+                // isolate a failing surface, the rest of the scan proceeds
             }
         }
 

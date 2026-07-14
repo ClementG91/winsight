@@ -10,7 +10,7 @@ public sealed record DnsQueryEvent(string Name, string Type, int ProcessId);
 
 /// <summary>
 /// Real-time DNS visibility via an ETW session on the Microsoft-Windows-DNS-Client
-/// provider — every name a process resolves, as it happens (the DNSMonitor "live"
+/// provider, every name a process resolves, as it happens (the DNSMonitor "live"
 /// mode, complementing the one-shot cache reader). Requires Administrator (creating an
 /// ETW session is privileged); the caller surfaces that. The session is stopped
 /// cleanly on cancellation.
@@ -35,7 +35,7 @@ public sealed class DnsEtwWatcher
             }
             catch (Exception)
             {
-                // Session already gone — nothing to do.
+                // Session already gone, nothing to do.
             }
         });
 

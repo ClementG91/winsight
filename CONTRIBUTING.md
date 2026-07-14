@@ -10,7 +10,7 @@ Contributions of code, tests, docs, and bug reports are all welcome.
   explicit and opt-in.
 - **No telemetry.** The suite is local-only. Network calls (e.g. reputation lookups)
   must be opt-in and user-keyed.
-- **Transparency.** This is a security tool — code must be auditable. Prefer clear,
+- **Transparency.** This is a security tool, code must be auditable. Prefer clear,
   documented implementations over clever ones.
 
 ## Project layout
@@ -64,7 +64,7 @@ published MCP tool remains read-only and non-destructive.
 - MCP tools must remain local-stdio, bounded and read-only. New evidence fields need
   an explicit privacy review; never expose a mutation tool merely because a scanner
   can identify a Windows object.
-- Keep the Phase-1 lexicon: recognition / status / signal — never security theater.
+- Keep the Phase-1 lexicon: recognition / status / signal, never security theater.
 
 ## Commit & PR process
 
@@ -77,7 +77,7 @@ published MCP tool remains read-only and non-destructive.
 ## Reporting bugs / requesting features
 
 Use the issue templates. For **security vulnerabilities**, do NOT open a public
-issue — see [SECURITY.md](SECURITY.md).
+issue, see [SECURITY.md](SECURITY.md).
 
 By contributing, you agree that your contributions are licensed under the project's
 [GPL-3.0-or-later](LICENSE) license.

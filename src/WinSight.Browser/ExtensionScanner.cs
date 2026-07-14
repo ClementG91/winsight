@@ -114,7 +114,7 @@ public sealed class ExtensionScanner
         }
     }
 
-    // Extension names are often "__MSG_key__" — resolve against the default-locale
+    // Extension names are often "__MSG_key__", resolve against the default-locale
     // messages.json when present, else fall back to the raw value or the id.
     private static string ResolveName(JsonElement manifest, string versionDir, string id)
     {

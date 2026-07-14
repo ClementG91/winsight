@@ -6,7 +6,7 @@ namespace WinSight.Modules;
 
 /// <summary>
 /// Enumerates the DLLs loaded into every accessible running process and batch-checks
-/// each distinct module's Authenticode signature — surfacing unsigned/untrusted DLLs
+/// each distinct module's Authenticode signature, surfacing unsigned/untrusted DLLs
 /// injected or side-loaded into legitimate processes. Read-only; processes that can't
 /// be opened (protected, cross-bitness, already exited) are skipped, never guessed.
 /// </summary>
@@ -33,7 +33,7 @@ public sealed class ModuleLister
             catch (Exception ex) when (
                 ex is Win32Exception or InvalidOperationException or NotSupportedException)
             {
-                // Access denied / process exited / cross-bitness — skip, don't fabricate.
+                // Access denied / process exited / cross-bitness, skip, don't fabricate.
             }
             finally
             {

@@ -3,8 +3,7 @@ using WinSight.Core;
 namespace WinSight.Processes;
 
 /// <summary>
-/// A running process with its on-disk image, parent, command line and signature —
-/// the TaskExplorer-class unit.
+/// A running process with its on-disk image, parent, command line and signature, /// the TaskExplorer-class unit.
 /// </summary>
 /// <param name="Pid">Process id.</param>
 /// <param name="Name">Image name (e.g. explorer.exe).</param>
@@ -21,7 +20,7 @@ public sealed record ProcessInfo(
     SignatureVerdict Signature)
 {
     /// <summary>
-    /// A running process whose on-disk image is unsigned or untrusted — worth a look.
+    /// A running process whose on-disk image is unsigned or untrusted, worth a look.
     /// Processes with no resolvable image (protected/system) are not flagged.
     /// </summary>
     public bool Unsigned =>

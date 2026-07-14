@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/branding/winsight-logo.png" width="180" alt="WinSight — Windows security visibility" />
+  <img src="assets/branding/winsight-logo.png" width="180" alt="WinSight, Windows security visibility" />
 </p>
 
 <h1 align="center">WinSight</h1>
@@ -9,11 +9,11 @@
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-informational)
 ![.NET 10 LTS](https://img.shields.io/badge/.NET-10.0_LTS-512bd4)
 
-> Free, open-source, transparent security tools for Windows — in the spirit of
+> Free, open-source, transparent security tools for Windows, in the spirit of
 > [Objective-See](https://objective-see.org/tools.html) for macOS.
 
 **Goal:** let a normal Windows user *see and control* what is actually happening on
-their machine — what persists, what watches the camera/mic, what phones home — with
+their machine, what persists, what watches the camera/mic, what phones home, with
 small, single-purpose, auditable tools under one roof. No telemetry, no account, no
 paywall.
 
@@ -26,15 +26,15 @@ The building blocks exist but are scattered, and the best of them is closed-sour
 
 | Objective-See (macOS) | Function | Windows: what exists today | Gap |
 |---|---|---|---|
-| KnockKnock | enumerate persistence | **Autoruns** (Sysinternals) — *closed source* | OSS gap |
-| BlockBlock | real-time persistence alert/block | — | **no OSS** |
+| KnockKnock | enumerate persistence | **Autoruns** (Sysinternals), *closed source* | OSS gap |
+| BlockBlock | real-time persistence alert/block | none | **no OSS** |
 | LuLu | outbound firewall | simplewall, Portmaster (OSS, standalone) | integration gap |
-| OverSight | camera/mic use alerts | — (a little closed freeware) | **no OSS** |
-| RansomWhere? | ransomware behavior stop | — (research only) | **no OSS** |
+| OverSight | camera/mic use alerts | none (a little closed freeware) | **no OSS** |
+| RansomWhere? | ransomware behavior stop | none (research only) | **no OSS** |
 | TaskExplorer | process inspector | Process Hacker / System Informer (OSS) | covered |
-| Netiquette | live connections | TCPView (Sysinternals) — *closed* | OSS gap |
-| DNSMonitor | DNS queries | — | **no OSS** |
-| What's Your Sign | signature check | Sigcheck (Sysinternals) — *closed* | OSS gap |
+| Netiquette | live connections | TCPView (Sysinternals), *closed* | OSS gap |
+| DNSMonitor | DNS queries | none | **no OSS** |
+| What's Your Sign | signature check | Sigcheck (Sysinternals), *closed* | OSS gap |
 
 **Takeaway:** don't re-clone Sysinternals or Process Hacker. The real value is the
 **four "no OSS" gaps** (cam/mic, ransomware behavior, real-time persistence,
@@ -52,31 +52,31 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
   enforcement). Phase 2's per-app WFP firewall remains user-mode and needs no custom
   driver. Monitoring/alerting is fully doable via ETW; driver-backed persistence and
   ransomware interception remain optional Phase 3/4 work.
-- **Small, independent tools** sharing one core + one dashboard — not a monolith.
+- **Small, independent tools** sharing one core + one dashboard, not a monolith.
 - **No vendor lock-in, no SaaS.** Local-only. Optional VirusTotal lookups are
   opt-in and keyed by the user.
 
-## MVP (Phase 1 — user-mode, no driver, ships fast)
+## MVP (Phase 1: user-mode, no driver, ships fast)
 
-1. **Persistence Scanner** (KnockKnock-class) — enumerate every autostart vector
+1. **Persistence Scanner** (KnockKnock-class), enumerate every autostart vector
    (Run keys, Scheduled Tasks, Services, WMI event subs, startup folders, drivers,
    winlogon/AppInit, etc.), verify Authenticode signatures, flag the unsigned/odd.
-2. **Camera & Mic Monitor** (OverSight-class) — tray alerts when the webcam/mic go
+2. **Camera & Mic Monitor** (OverSight-class), tray alerts when the webcam/mic go
    active, with per-process attribution (ETW + `CapabilityAccessManager` registry).
-3. **Connection & DNS Monitor** (Netiquette + DNSMonitor-class) — live outbound
+3. **Connection & DNS Monitor** (Netiquette + DNSMonitor-class), live outbound
    connections (IPHelper) and DNS queries (ETW `Microsoft-Windows-DNS-Client`).
 4. **Unified dashboard** + a shared **signature/reputation** helper (What's Your
    Sign-class) used by all tools.
 
 ## Roadmap (later phases)
 
-- **Phase 2 — Firewall** (LuLu-class) on **WFP**, per-app outbound control.
-- **Phase 3 — Real-time persistence** (BlockBlock-class): promote the scanner to a
+- **Phase 2 Firewall** (LuLu-class) on **WFP**, per-app outbound control.
+- **Phase 3 Real-time persistence** (BlockBlock-class): promote the scanner to a
   live watcher; optional minifilter for blocking (cert required).
-- **Phase 4 — Ransomware canary** (RansomWhere-class): canary files + entropy/rename
+- **Phase 4 Ransomware canary** (RansomWhere-class): canary files + entropy/rename
   heuristics; minifilter for true interception (cert required).
 
-## Stack (locked — see `docs/ARCHITECTURE.md`)
+## Stack (locked, see `docs/ARCHITECTURE.md`)
 
 - **App + user-mode tools:** C# / **.NET 10 LTS**, `CsWin32` for P/Invoke, `TraceEvent`
   for ETW, WPF tray/dashboard. Fastest path with the broadest Win32
@@ -166,36 +166,36 @@ process names, domains and other forensic evidence are never translated or alter
 The language can also be selected explicitly for managed deployments, for example
 `winsight-dashboard --language es` (supported values: `en`, `fr`, `es`).
 
-- **Persistence** (KnockKnock-class) — 18 autostart surfaces: Run/RunOnce/RunServices/
+- **Persistence** (KnockKnock-class), 18 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
   `ServiceDll` payloads), Winlogon Shell/Userinit (HKLM+HKCU), Scheduled Tasks (Tasks
   XML), AppInit_DLLs, IFEO debuggers, SilentProcessExit monitors, Active Setup,
   BootExecute, WMI event subscriptions, Startup folders (.lnk-resolved), LSA packages,
   Print monitors, Netsh helpers, COM hijacks (HKCU CLSID), AppCertDLLs, Time
-  providers, Screensaver — each signature-checked, resilient per-surface scan.
-- **Camera/Mic** (OverSight-class) — which apps used the webcam/mic and what is live
+  providers, Screensaver, each signature-checked, resilient per-surface scan.
+- **Camera/Mic** (OverSight-class), which apps used the webcam/mic and what is live
   now (CapabilityAccessManager ConsentStore), plus real-time `av --watch` alerts the
   instant a device turns on/off.
-- **Connections** (Netiquette-class) — active TCP/UDP (IPv4 + IPv6) via native IP
+- **Connections** (Netiquette-class), active TCP/UDP (IPv4 + IPv6) via native IP
   Helper tables (GetExtendedTcpTable/Udp), attributed to the owning process + its
   signature; flags external, established, unsigned owners.
-- **DNS** (DNSMonitor-class) — recently resolved domains from the resolver cache, plus
+- **DNS** (DNSMonitor-class), recently resolved domains from the resolver cache, plus
   real-time `dns --watch` (live ETW queries, Administrator).
-- **Firewall** (LuLu-class, read-only) — lists Windows Defender Firewall rules
+- **Firewall** (LuLu-class, read-only), lists Windows Defender Firewall rules
   (`winsight firewall`). An enforcing per-app firewall is a later phase.
-- **Processes** (TaskExplorer-class) — every running process with its image path,
+- **Processes** (TaskExplorer-class), every running process with its image path,
   parent, command line and Authenticode signature (`winsight processes` / `ps`);
   flags unsigned or untrusted running images. Read-only.
-- **Modules** (DLL-injection audit) — the DLLs loaded into every accessible process,
+- **Modules** (DLL-injection audit), the DLLs loaded into every accessible process,
   signature-checked (`winsight modules` / `dll`); flags unsigned/untrusted DLLs
   side-loaded or injected into running processes. Read-only.
-- **Extensions** (browser supply-chain) — installed extensions across the
+- **Extensions** (browser supply-chain), installed extensions across the
   Chromium-family browsers with their declared permissions (`winsight extensions` /
   `ext`); flags extensions holding broad-reach permissions. Read-only.
-- **Certificates** (rogue-CA detection) — audits the trusted-root stores
+- **Certificates** (rogue-CA detection), audits the trusted-root stores
   (`winsight certs`); flags roots holding a private key, weak signatures (SHA-1/MD5)
-  or undersized RSA keys — the silent-TLS-interception signal. Read-only.
-- **Hosts** (DNS-override hijack) — parses the hosts file (`winsight hosts`); flags
+  or undersized RSA keys, the silent-TLS-interception signal. Read-only.
+- **Hosts** (DNS-override hijack), parses the hosts file (`winsight hosts`); flags
   external redirects (phishing/MITM) and blackholed security/update domains (AV /
   Windows Update block), leaving benign ad-blocklist sinks alone. Read-only.
 
@@ -203,8 +203,8 @@ The language can also be selected explicitly for managed deployments, for exampl
 `AuthenticodeVerifier`): native WinVerifyTrust first, then a batched
 `Get-AuthenticodeSignature` (via `-EncodedCommand`) that correctly recognises
 catalog-signed Windows binaries and flags tampering (HashMismatch). A file whose
-signature genuinely *cannot* be verified is reported `Unknown` — never a fabricated
-`Unsigned` — so the tools fail safe and never cry wolf. All tools emit a shared report shape
+signature genuinely *cannot* be verified is reported `Unknown`, never a fabricated
+`Unsigned`, so the tools fail safe and never cry wolf. All tools emit a shared report shape
 (`WinSight.Reporting`) as human text or a stable `--json` contract for
 GUI/automation. Native x64 and Arm64 Windows CI runners are the execution record.
 Central Package Management + `.editorconfig`.
@@ -246,5 +246,5 @@ separate safety program.
 
 ## License
 
-**GPL-3.0-or-later** — Objective-See's tools are open; copyleft keeps a security tool
+**GPL-3.0-or-later**, Objective-See's tools are open; copyleft keeps a security tool
 auditable and forkable. The complete license text is included in [`LICENSE`](LICENSE).

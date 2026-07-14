@@ -5,7 +5,7 @@ namespace WinSight.NetMonitor;
 
 /// <summary>
 /// Reads the active TCP/UDP tables natively via IP Helper (GetExtendedTcpTable /
-/// GetExtendedUdpTable) — structured, fast, and locale-independent, unlike parsing
+/// GetExtendedUdpTable), structured, fast, and locale-independent, unlike parsing
 /// netstat text. Rows are all fixed DWORDs (MIB_*ROW_OWNER_PID), so marshalling is
 /// straightforward. ConnectionMonitor falls back to netstat if these entry points are
 /// unavailable.
@@ -30,7 +30,7 @@ public static class NativeConnectionReader
         IntPtr pUdpTable, ref int dwOutBufLen, bool sort, int ipVersion, int tblClass, int reserved);
 
     // Fields are populated by Marshal at runtime, so the compiler sees them as never
-    // assigned (CS0649) — expected for interop structs.
+    // assigned (CS0649), expected for interop structs.
 #pragma warning disable CS0649
     [StructLayout(LayoutKind.Sequential)]
     private struct MibTcpRowOwnerPid
@@ -119,7 +119,7 @@ public static class NativeConnectionReader
     // Shared two-call (size, then fill) buffer walk. The table is a leading DWORD
     // count followed by a packed array of T rows. The table can grow between the size
     // and fill calls (TOCTOU), in which case the fill returns ERROR_INSUFFICIENT_BUFFER
-    // — retried with the fresh size instead of silently dropping every connection.
+    //, retried with the fresh size instead of silently dropping every connection.
     private static IEnumerable<T> Enumerate<T>(ExtendedTableFn api, int addressFamily, int tableClass) where T : struct
     {
         const uint ErrorInsufficientBuffer = 122;
@@ -165,7 +165,7 @@ public static class NativeConnectionReader
             }
             if (result != ErrorInsufficientBuffer)
             {
-                yield break; // hard failure — the caller's netstat fallback covers it
+                yield break; // hard failure, the caller's netstat fallback covers it
             }
         }
     }

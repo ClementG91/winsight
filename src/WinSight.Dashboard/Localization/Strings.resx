@@ -4,7 +4,7 @@
   <resheader name="version"><value>2.0</value></resheader>
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
-  <data name="WindowTitle" xml:space="preserve"><value>WinSight — Windows security</value></data>
+  <data name="WindowTitle" xml:space="preserve"><value>WinSight, Windows security</value></data>
   <data name="AppTagline" xml:space="preserve"><value>Understand what is happening on your PC, without telemetry</value></data>
   <data name="LocalAnalysis" xml:space="preserve"><value>● Local analysis</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Language</value></data>
@@ -17,15 +17,15 @@
   <data name="VtQuotaPolicy" xml:space="preserve"><value>Community safeguards: 4 lookups per rolling minute, 500/day and 15,500/month (UTC). Personal/non-commercial use only; business use requires a VirusTotal Premium agreement.</value></data>
   <data name="VtApiKeyLabel" xml:space="preserve"><value>Your VirusTotal API key</value></data>
   <data name="VtApiKeyHint" xml:space="preserve"><value>The key is encrypted for your Windows account (DPAPI) and is never included in exports. WINSIGHT_VT_KEY remains available for automation and takes precedence.</value></data>
-  <data name="VtStatusEnabled" xml:space="preserve"><value>Enabled — an encrypted key is configured for this Windows account.</value></data>
-  <data name="VtStatusDisabled" xml:space="preserve"><value>Disabled — scans remain fully local.</value></data>
+  <data name="VtStatusEnabled" xml:space="preserve"><value>Enabled, an encrypted key is configured for this Windows account.</value></data>
+  <data name="VtStatusDisabled" xml:space="preserve"><value>Disabled, scans remain fully local.</value></data>
   <data name="VtStatusEnvironment" xml:space="preserve"><value>Enabled for this session. An environment-provided key takes precedence.</value></data>
   <data name="VtGetKey" xml:space="preserve"><value>Get my key</value></data>
   <data name="VtDisable" xml:space="preserve"><value>Disable</value></data>
   <data name="VtSave" xml:space="preserve"><value>Save securely</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="VtInvalidKey" xml:space="preserve"><value>Enter a valid VirusTotal API key (32 to 128 letters, digits, “-” or “_”).</value></data>
-  <data name="VtSaved" xml:space="preserve"><value>Enabled — the API key has been stored securely.</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>Enabled, the API key has been stored securely.</value></data>
   <data name="VtSavedEnvironment" xml:space="preserve"><value>Encrypted key saved. WINSIGHT_VT_KEY remains active and takes precedence for this session.</value></data>
   <data name="VtDisabled" xml:space="preserve"><value>VirusTotal is disabled for WinSight.</value></data>
   <data name="VtDisabledEnvironment" xml:space="preserve"><value>Encrypted key removed. VirusTotal remains enabled by WINSIGHT_VT_KEY; remove that variable to disable it.</value></data>
@@ -65,7 +65,7 @@
   <data name="ReadOnlyFooter" xml:space="preserve"><value>Read-only: WinSight never deletes or blocks automatically. VirusTotal is optional in Settings.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Open WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
-  <data name="TrayText" xml:space="preserve"><value>WinSight — local security</value></data>
+  <data name="TrayText" xml:space="preserve"><value>WinSight, local security</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight is still running in the notification area.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Analysis complete.</value></data>
   <data name="ScanCancelledSummary" xml:space="preserve"><value>Analysis stopped safely between two steps.</value></data>
@@ -77,8 +77,8 @@
   <data name="OverviewPreparing" xml:space="preserve"><value>Preparing the overview…</value></data>
   <data name="SingleScan" xml:space="preserve"><value>Running “{0}”…</value></data>
   <data name="ReadingWindows" xml:space="preserve"><value>WinSight is reading Windows information. No changes are being made.</value></data>
-  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
-  <data name="StopRequested" xml:space="preserve"><value>Stop requested — the current step will finish without being interrupted abruptly…</value></data>
+  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
+  <data name="StopRequested" xml:space="preserve"><value>Stop requested, the current step will finish without being interrupted abruptly…</value></data>
   <data name="NotableSeverity" xml:space="preserve"><value>Needs attention</value></data>
   <data name="InfoSeverity" xml:space="preserve"><value>Information</value></data>
   <data name="ResultsSummary" xml:space="preserve"><value>{0} · {1}</value></data>
@@ -88,7 +88,7 @@
   <data name="AttentionCountPlural" xml:space="preserve"><value>{0} need attention</value></data>
   <data name="NoItems" xml:space="preserve"><value>No items match the current filter. This does not guarantee that the system is threat-free.</value></data>
   <data name="SelectFinding" xml:space="preserve"><value>Select a row to see the safe actions available.</value></data>
-  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0} — {1}&#xA;{2}</value></data>
+  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0}, {1}&#xA;{2}</value></data>
   <data name="Copied" xml:space="preserve"><value>Details copied to the clipboard.</value></data>
   <data name="ExportDialogTitle" xml:space="preserve"><value>Export WinSight report</value></data>
   <data name="JsonFilter" xml:space="preserve"><value>JSON report (*.json)|*.json</value></data>
@@ -96,11 +96,11 @@
   <data name="LocationOpened" xml:space="preserve"><value>Location opened in File Explorer.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Windows tool opened.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Action unavailable: {0}</value></data>
-  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>File missing — signature not checked</value></data>
+  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>File missing, signature not checked</value></data>
   <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Signature valid</value></data>
   <data name="PersistenceStatusUnsigned" xml:space="preserve"><value>Unsigned</value></data>
   <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Invalid signature</value></data>
-  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Access denied — signature not checked</value></data>
+  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Access denied, signature not checked</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Verification error</value></data>
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Overview</value></data>
@@ -164,14 +164,14 @@
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Undersized RSA key ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, {1}-bit key</value></data>
   <data name="NoDeclaredPermissions" xml:space="preserve"><value>No declared permissions</value></data>
-  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="FirewallDirectionInbound" xml:space="preserve"><value>Inbound</value></data>
   <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Outbound</value></data>
   <data name="FirewallDirectionUnknown" xml:space="preserve"><value>Unknown direction</value></data>
   <data name="FirewallActionAllow" xml:space="preserve"><value>Allow</value></data>
   <data name="FirewallActionBlock" xml:space="preserve"><value>Block</value></data>
   <data name="FirewallActionUnknown" xml:space="preserve"><value>Unknown action</value></data>
-  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}) — {2}</value></data>
+  <data name="ConnectionProcessState" xml:space="preserve"><value>{0} (PID {1}), {2}</value></data>
   <data name="PersistenceVectorRunKey" xml:space="preserve"><value>Run key</value></data>
   <data name="PersistenceVectorService" xml:space="preserve"><value>Service or driver</value></data>
   <data name="PersistenceVectorWinlogon" xml:space="preserve"><value>Winlogon</value></data>
