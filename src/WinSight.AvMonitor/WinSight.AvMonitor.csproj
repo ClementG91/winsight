@@ -2,7 +2,4 @@
   <PropertyGroup>
     <RootNamespace>WinSight.AvMonitor</RootNamespace>
   </PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Win32.Registry" />
-  </ItemGroup>
 </Project>

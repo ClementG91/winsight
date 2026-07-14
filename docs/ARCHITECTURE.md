@@ -62,8 +62,9 @@ winsight/
 
 Alternatives considered: **Rust** (`windows-rs`) — great for a small, dependency-light
 signed agent and the eventual driver, steeper ETW ergonomics; **C++/WDF** — mandatory
-for the kernel driver, overkill for the user-mode MVP. Recommendation: **.NET 8 for
-the MVP, Rust/C++ reserved for the driver and any perf agent.**
+for the kernel driver, overkill for the user-mode MVP. Recommendation: **.NET 10 LTS
+for the supported user-mode suite, Rust/C++ reserved for the driver and any perf
+agent.**
 
 ## Non-negotiables
 
@@ -78,7 +79,7 @@ the MVP, Rust/C++ reserved for the driver and any perf agent.**
 
 ## Decisions resolved
 
-1. The user-mode application stack is C# / .NET 8 with WPF for the dashboard.
+1. The user-mode application stack is C# / .NET 10 LTS with WPF for the dashboard.
 2. Phase 1 is user-mode and read-only; kernel enforcement remains deferred.
 3. The repository is GPL-3.0-or-later.
 4. A pinned .NET SDK defines the build. Native x64 and Arm64 Windows runners execute

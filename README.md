@@ -3,7 +3,7 @@
 [![CI](https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg)](https://github.com/ClementG91/winsight/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 ![Platform: Windows](https://img.shields.io/badge/platform-Windows-informational)
-![.NET 8](https://img.shields.io/badge/.NET-8.0-512bd4)
+![.NET 10 LTS](https://img.shields.io/badge/.NET-10.0_LTS-512bd4)
 
 > Free, open-source, transparent security tools for Windows — in the spirit of
 > [Objective-See](https://objective-see.org/tools.html) for macOS.
@@ -71,7 +71,7 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
 
 ## Stack (locked — see `docs/ARCHITECTURE.md`)
 
-- **App + user-mode tools:** C# / **.NET 8**, `CsWin32` for P/Invoke, `TraceEvent`
+- **App + user-mode tools:** C# / **.NET 10 LTS**, `CsWin32` for P/Invoke, `TraceEvent`
   for ETW, WPF tray/dashboard. Fastest path with the broadest Win32
   coverage.
 - **Perf-critical core / future agent:** Rust or C++ if/when needed.
@@ -92,7 +92,7 @@ provenance verification, silent deployment and the current Authenticode limitati
 
 ## Build from source
 
-WinSight targets Windows and .NET 8. Install the .NET 8 SDK, then run:
+WinSight targets Windows and .NET 10 LTS. Install the .NET 10 SDK, then run:
 
 ```powershell
 dotnet restore winsight.sln
@@ -107,7 +107,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.5.0
+./scripts/Build-Release.ps1 -Version 0.5.1
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned

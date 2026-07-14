@@ -28,7 +28,8 @@ Tools are pure data producers; presentation lives in the `winsight` CLI via
 
 ## Building and testing
 
-The code targets **.NET 8 (`net8.0-windows`)** and must be built on **Windows**.
+The code targets **.NET 10 LTS (`net10.0-windows10.0.19041.0`)** and must be
+built on **Windows 10 22H2 or newer**.
 
 ```powershell
 dotnet restore winsight.sln
@@ -39,10 +40,10 @@ dotnet test winsight.sln -c Release --no-build
 The full release candidate can be reproduced with:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.5.0
+./scripts/Build-Release.ps1 -Version 0.5.1
 ./scripts/Test-Installer.ps1 `
-  -InstallerPath out/release/winsight-v0.5.0-win-x64-setup.exe `
-  -Version 0.5.0 -Architecture x64
+  -InstallerPath out/release/winsight-v0.5.1-win-x64-setup.exe `
+  -Version 0.5.1 -Architecture x64
 ```
 
 CI builds/tests on Windows, audits dependencies, constructs x64 and Arm64 packages,

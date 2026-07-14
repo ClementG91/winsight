@@ -19,7 +19,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly Forms.ToolStripItem _openTrayItem;
     private readonly Forms.ToolStripItem _exitTrayItem;
     private IReadOnlyList<ToolReport> _reports = [];
-    private IReadOnlyList<ReportChoice> _reportChoices = [];
+    private List<ReportChoice> _reportChoices = [];
     private CancellationTokenSource? _scanCancellation;
     private bool _allowClose;
     private bool _disposed;

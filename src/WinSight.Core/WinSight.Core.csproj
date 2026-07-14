@@ -2,8 +2,4 @@
   <PropertyGroup>
     <RootNamespace>WinSight.Core</RootNamespace>
   </PropertyGroup>
-  <ItemGroup>
-    <!-- Registry access on net8.0-windows. -->
-    <PackageReference Include="Microsoft.Win32.Registry" />
-  </ItemGroup>
 </Project>

@@ -2,6 +2,24 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.5.1 — 2026-07-14
+
+### Supported runtime baseline
+- Move every user-mode component and both self-contained distributions to .NET 10
+  LTS, extending the supported runtime lifecycle through November 2028 while
+  preserving the Windows 10 22H2, Windows 11, x64 and Arm64 support matrix.
+- Pin the reproducible build to SDK 10.0.301 and align `System.Management` with the
+  serviced .NET 10 line. Remove the obsolete standalone Registry compatibility
+  package now supplied by the Windows target framework.
+- Make the minimum Windows API contract explicit in the target framework and update
+  CI, release automation, contributor instructions and user-facing examples to the
+  same runtime and release baseline.
+- Adapt the Authenticode signer extraction path to .NET 10's certificate-loader
+  diagnostics without weakening the existing WinVerifyTrust verification or
+  catalog-aware fallback.
+- Apply the .NET 10 analyzer's concrete-collection optimization to dashboard report
+  selection without changing the UI contract.
+
 ## v0.5.0 — 2026-07-14
 
 ### Native Windows distribution and documented detection contract

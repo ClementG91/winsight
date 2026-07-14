@@ -97,7 +97,11 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     {
         try
         {
+            // X509CertificateLoader cannot extract an Authenticode signer from a
+            // signed PE image; CreateFromSignedFile remains the dedicated API.
+#pragma warning disable SYSLIB0057
             using var cert = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
+#pragma warning restore SYSLIB0057
             return cert.Subject;
         }
         catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)

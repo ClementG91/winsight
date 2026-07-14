@@ -38,7 +38,12 @@ public sealed class SignatureVerifier : ISignatureVerifier
         try
         {
             // Throws CryptographicException when the file carries no signature.
+            // X509CertificateLoader only accepts PEM/DER/PFX input and cannot
+            // extract a signer from a PE file. Keep the platform API until .NET
+            // exposes an equivalent signed-file loader.
+#pragma warning disable SYSLIB0057
             using var embedded = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
+#pragma warning restore SYSLIB0057
             signer = embedded;
 
             using var chain = new X509Chain();
