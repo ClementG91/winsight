@@ -2,6 +2,33 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.7.2 — 2026-07-14
+
+### Honest persistence file and signature states
+- Preserve the normalized Windows target for orphaned service/driver registrations
+  even when the file is absent. A value such as `system32\DRIVERS\WinSetupMon.sys`
+  now reports the expected `%SystemRoot%` path instead of an empty image field.
+- Separate file resolution from Authenticode verification with explicit
+  `FileMissing`, `AccessDenied`, `SignatureValid`, `Unsigned`, `InvalidSignature`
+  and `VerificationError` outcomes. Missing/inaccessible files state that their
+  signature was not checked; they are never presented as unsigned malware.
+- Correct PowerShell signature mapping: `UnknownError` is invalid, while
+  `NotSupportedFileFormat`, `Incompatible`, absent output and future unknown states
+  are verification errors rather than fabricated unsigned verdicts.
+- Add regression coverage for missing relative drivers, missing unquoted paths with
+  spaces, verifier non-invocation for absent files and every documented PowerShell
+  signature status.
+- Update the official MCP C# SDK from 1.3.0 to the current stable 1.4.1. Keep the
+  production protocol on stable `2025-11-25`; the breaking `2026-07-28` revision is
+  still a release candidate as of this release date.
+- Let the local release builder cross-package both x64 and Arm64 while executing MCP
+  smoke tests only for the host architecture; native x64/Arm64 CI still executes
+  each binary. This removes a false local failure from trying to launch Arm64 code
+  on an x64 workstation without weakening the release gate.
+- Document the WinSetupMon orphan pattern, precise report semantics and safe
+  per-user VirusTotal key setup. VirusTotal remains optional and is never called
+  when no local file/hash exists.
+
 ## v0.7.1 — 2026-07-14
 
 ### Unified WinSight visual identity

@@ -60,6 +60,12 @@
   <data name="LocationOpened" xml:space="preserve"><value>Ubicación abierta en el Explorador de archivos.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Herramienta de Windows abierta.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Acción no disponible: {0}</value></data>
+  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Falta el archivo — firma no comprobada</value></data>
+  <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Firma válida</value></data>
+  <data name="PersistenceStatusUnsigned" xml:space="preserve"><value>Sin firma</value></data>
+  <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Firma no válida</value></data>
+  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Acceso denegado — firma no comprobada</value></data>
+  <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Error de verificación</value></data>
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vista general</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>La comprobación recomendada en un clic</value></data>

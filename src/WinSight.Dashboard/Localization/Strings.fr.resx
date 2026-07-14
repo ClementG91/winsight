@@ -60,6 +60,12 @@
   <data name="LocationOpened" xml:space="preserve"><value>Emplacement ouvert dans l’Explorateur.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Outil Windows ouvert.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Action impossible : {0}</value></data>
+  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Fichier absent — signature non vérifiée</value></data>
+  <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Signature valide</value></data>
+  <data name="PersistenceStatusUnsigned" xml:space="preserve"><value>Non signé</value></data>
+  <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Signature invalide</value></data>
+  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Accès refusé — signature non vérifiée</value></data>
+  <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Erreur de vérification</value></data>
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vue d’ensemble</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>Le contrôle recommandé en un clic</value></data>

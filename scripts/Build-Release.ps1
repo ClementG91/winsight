@@ -29,6 +29,13 @@ if (Test-Path -LiteralPath $outputRoot)
 }
 New-Item -ItemType Directory -Path $outputRoot | Out-Null
 
+$nativeArchitecture = switch ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString())
+{
+    "X64" { "x64" }
+    "Arm64" { "arm64" }
+    default { $null }
+}
+
 if (-not $SkipSbom)
 {
     dotnet tool restore
@@ -86,8 +93,15 @@ foreach ($architecture in $Architectures)
         -ExecutablePaths @(
             (Join-Path $packageRoot "winsight.exe"),
             (Join-Path $packageRoot "winsight-dashboard.exe"))
-    & (Join-Path $PSScriptRoot "Test-McpServer.ps1") `
-        -ServerPath (Join-Path $packageRoot "winsight.exe") -Version $Version
+    if ($architecture -eq $nativeArchitecture)
+    {
+        & (Join-Path $PSScriptRoot "Test-McpServer.ps1") `
+            -ServerPath (Join-Path $packageRoot "winsight.exe") -Version $Version
+    }
+    else
+    {
+        Write-Output "Skipping the $architecture MCP execution test on this $nativeArchitecture host; native CI runs it."
+    }
 
     if (-not $SkipSbom)
     {

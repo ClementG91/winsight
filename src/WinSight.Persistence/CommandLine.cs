@@ -2,6 +2,26 @@ using System.Text;
 
 namespace WinSight.Persistence;
 
+/// <summary>The outcome of mapping an autostart command to an on-disk image.</summary>
+public enum ImageResolutionStatus
+{
+    Present,
+    FileMissing,
+    AccessDenied,
+    Error,
+    Unresolved,
+}
+
+/// <summary>
+/// Keeps the existing image separate from the normalized path Windows would load.
+/// This distinction matters for orphaned service/driver registrations: an absent
+/// file is not an unsigned file and its signature was never checked.
+/// </summary>
+public readonly record struct ExecutableResolution(
+    string? ImagePath,
+    string? ExpectedPath,
+    ImageResolutionStatus Status);
+
 /// <summary>
 /// Best-effort extraction of the executable path from an autostart command string.
 /// Registry autostart values are raw command lines: quoted or not, with arguments,
@@ -16,18 +36,29 @@ public static class CommandLine
     /// arguments, and environment-variable expansion.
     /// </summary>
     public static string? ExtractExecutable(string? command)
+        => ResolveExecutable(command).ImagePath;
+
+    /// <summary>
+    /// Resolves a command while preserving a normalized expected path when the file
+    /// is absent or inaccessible. Callers can therefore report the real condition
+    /// instead of collapsing it into an ambiguous missing-signature verdict.
+    /// </summary>
+    public static ExecutableResolution ResolveExecutable(string? command)
     {
         if (string.IsNullOrWhiteSpace(command))
         {
-            return null;
+            return new(null, null, ImageResolutionStatus.Unresolved);
         }
 
         var expanded = Environment.ExpandEnvironmentVariables(command.Trim());
         var exe = expanded.StartsWith('"') ? FirstQuoted(expanded) : FirstToken(expanded);
         if (string.IsNullOrEmpty(exe))
         {
-            return null;
+            return new(null, null, ImageResolutionStatus.Unresolved);
         }
+
+        string? expected = null;
+        string? inaccessible = null;
 
         // Driver/service ImagePaths use NT-style forms the Win32 file APIs can't open
         // as-is (\SystemRoot\..., \??\C:\..., or a bare "system32\drivers\x.sys"
@@ -35,9 +66,18 @@ public static class CommandLine
         // "no image" and gets flagged suspicious — 150+ false positives on a clean box.
         foreach (var candidate in NtPathCandidates(exe))
         {
-            if (File.Exists(candidate))
+            var probe = Probe(candidate);
+            if (probe.Status == ImageResolutionStatus.Present)
             {
-                return Path.GetFullPath(candidate);
+                return probe;
+            }
+            if (probe.ExpectedPath is { } probePath && Path.IsPathFullyQualified(probePath))
+            {
+                expected = probePath;
+                if (probe.Status == ImageResolutionStatus.AccessDenied)
+                {
+                    inaccessible = probePath;
+                }
             }
         }
 
@@ -55,13 +95,63 @@ public static class CommandLine
                          Path.Combine(windir, exe), Path.Combine(windir, exe + ".exe"),
                      })
             {
-                if (File.Exists(candidate))
+                var probe = Probe(candidate);
+                if (probe.Status == ImageResolutionStatus.Present)
                 {
-                    return candidate;
+                    return probe;
+                }
+                if (probe.Status == ImageResolutionStatus.AccessDenied)
+                {
+                    inaccessible = probe.ExpectedPath;
                 }
             }
+            // A bare module name can legitimately resolve through several Windows
+            // loader rules. Do not claim one guessed location is definitely absent.
+            return inaccessible is not null
+                ? new(null, inaccessible, ImageResolutionStatus.AccessDenied)
+                : new(null, null, ImageResolutionStatus.Unresolved);
         }
-        return null;
+
+        return inaccessible is not null
+            ? new(null, inaccessible, ImageResolutionStatus.AccessDenied)
+            : expected is not null
+                ? new(null, expected, ImageResolutionStatus.FileMissing)
+                : new(null, null, ImageResolutionStatus.Unresolved);
+    }
+
+    private static ExecutableResolution Probe(string candidate)
+    {
+        string full;
+        try
+        {
+            full = Path.GetFullPath(candidate);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return new(null, null, ImageResolutionStatus.Unresolved);
+        }
+
+        try
+        {
+            var attributes = File.GetAttributes(full);
+            return (attributes & FileAttributes.Directory) == 0
+                ? new(full, full, ImageResolutionStatus.Present)
+                : new(null, full, ImageResolutionStatus.Unresolved);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return new(null, full, ImageResolutionStatus.AccessDenied);
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or DriveNotFoundException)
+        {
+            return new(null, full, ImageResolutionStatus.FileMissing);
+        }
+        catch (IOException)
+        {
+            // Sharing violations and transient filesystem failures mean the target
+            // could not be inspected reliably; do not mislabel this as access denial.
+            return new(null, full, ImageResolutionStatus.Error);
+        }
     }
 
     /// <summary>
@@ -122,6 +212,29 @@ public static class CommandLine
             {
                 return candidate.ToString();
             }
+        }
+
+        // Preserve an unquoted path containing spaces even when its target is gone.
+        // Service ImagePath values frequently omit quotes; the executable extension
+        // is a safer boundary than the first whitespace for reporting an orphan.
+        int? executableEnd = null;
+        foreach (var extension in new[] { ".exe", ".com", ".dll", ".sys", ".scr" })
+        {
+            var searchFrom = 0;
+            while (s.IndexOf(extension, searchFrom, StringComparison.OrdinalIgnoreCase) is var end && end >= 0)
+            {
+                var after = end + extension.Length;
+                if (after == s.Length || char.IsWhiteSpace(s[after]))
+                {
+                    executableEnd = executableEnd is null ? after : Math.Min(executableEnd.Value, after);
+                    break;
+                }
+                searchFrom = after;
+            }
+        }
+        if (executableEnd is { } boundary)
+        {
+            return s[..boundary];
         }
         // Fall back to the first whitespace-delimited token.
         return parts.Length > 0 ? parts[0] : string.Empty;

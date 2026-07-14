@@ -29,6 +29,29 @@ public sealed class CommandLineTests
     }
 
     [Fact]
+    public void ResolveExecutable_MissingRelativeDriver_PreservesNormalizedWindowsPath()
+    {
+        var name = $"WinSightMissing-{Guid.NewGuid():N}.sys";
+        var resolution = CommandLine.ResolveExecutable($@"system32\DRIVERS\{name}");
+
+        Assert.Equal(ImageResolutionStatus.FileMissing, resolution.Status);
+        Assert.Null(resolution.ImagePath);
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "system32", "DRIVERS", name),
+            resolution.ExpectedPath,
+            ignoreCase: true);
+    }
+
+    [Fact]
+    public void ResolveExecutable_UnquotedMissingPathWithSpaces_PreservesWholeImage()
+    {
+        var resolution = CommandLine.ResolveExecutable(@"C:\Program Files\Missing Vendor\agent.exe --service");
+
+        Assert.Equal(ImageResolutionStatus.FileMissing, resolution.Status);
+        Assert.Equal(@"C:\Program Files\Missing Vendor\agent.exe", resolution.ExpectedPath, ignoreCase: true);
+    }
+
+    [Fact]
     public void ExtractExecutable_BareModuleName_ResolvesInSystem32()
     {
         // kernel32 -> C:\Windows\System32\kernel32.dll (uses the real System32).
@@ -261,6 +284,50 @@ public sealed class PersistenceScannerIntegrationTests
     }
 }
 
+public sealed class PersistenceScannerResolutionTests
+{
+    [Fact]
+    public void Scan_OrphanedDriver_IsMissingNotUnsigned_AndVerifierIsNotCalled()
+    {
+        var name = $"WinSightMissing-{Guid.NewGuid():N}.sys";
+        var verifier = new RejectingVerifier();
+        var scanner = new PersistenceScanner(
+            [new SingleEnumerator(new RawAutostart(
+                AutostartVector.Service,
+                "WinSetupMon",
+                @"HKLM\SYSTEM\CurrentControlSet\Services\WinSetupMon",
+                $@"system32\DRIVERS\{name}"))],
+            verifier);
+
+        var entry = Assert.Single(scanner.Scan());
+
+        Assert.Equal(ImageResolutionStatus.FileMissing, entry.ImageStatus);
+        Assert.Equal(PersistenceStatus.FileMissing, entry.Status);
+        Assert.Equal(SignatureState.Missing, entry.Signature.State);
+        Assert.Null(entry.ImagePath);
+        Assert.EndsWith(Path.Combine("system32", "DRIVERS", name), entry.ExpectedImagePath, StringComparison.OrdinalIgnoreCase);
+        Assert.True(entry.IsSuspicious);
+        Assert.False(verifier.Called);
+    }
+
+    private sealed class SingleEnumerator(RawAutostart entry) : IAutostartEnumerator
+    {
+        public string Surface => "test";
+        public IEnumerable<RawAutostart> Enumerate() => [entry];
+    }
+
+    private sealed class RejectingVerifier : ISignatureVerifier
+    {
+        public bool Called { get; private set; }
+        public SignatureVerdict Verify(string path) => throw new InvalidOperationException();
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+        {
+            Called = paths.Count > 0;
+            return new Dictionary<string, SignatureVerdict>();
+        }
+    }
+}
+
 public sealed class NativeSignatureVerifierTests
 {
     [Theory]
@@ -440,16 +507,25 @@ public sealed class AuthenticodeMapStatusTests
     [InlineData("NotSigned", SignatureState.Unsigned)]
     [InlineData("HashMismatch", SignatureState.SignedUntrusted)] // signed then tampered
     [InlineData("NotTrusted", SignatureState.SignedUntrusted)]
-    [InlineData(null, SignatureState.Unsigned)]
+    [InlineData("UnknownError", SignatureState.SignedUntrusted)]
+    [InlineData("NotSupportedFileFormat", SignatureState.Unknown)]
+    [InlineData("Incompatible", SignatureState.Unknown)]
+    [InlineData(null, SignatureState.Unknown)]
     public void MapStatus_MapsSignatureStatus(string? status, SignatureState expected)
     {
         Assert.Equal(expected, AuthenticodeVerifier.MapStatus(status, "CN=Acme").State);
     }
 
     [Fact]
-    public void MapStatus_UnknownStatusWithoutSigner_IsUnsigned()
+    public void MapStatus_UnknownStatusWithoutSigner_IsInvalidNotUnsigned()
     {
-        Assert.Equal(SignatureState.Unsigned, AuthenticodeVerifier.MapStatus("UnknownError", null).State);
+        Assert.Equal(SignatureState.SignedUntrusted, AuthenticodeVerifier.MapStatus("UnknownError", null).State);
+    }
+
+    [Fact]
+    public void MapStatus_UnrecognizedStatus_IsVerificationError()
+    {
+        Assert.Equal(SignatureState.Unknown, AuthenticodeVerifier.MapStatus("FutureStatus", null).State);
     }
 
     [Fact]

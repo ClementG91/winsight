@@ -26,12 +26,42 @@ dashboard and CLI.
 
 ## Verdict model
 
-- `Trusted`: Windows validated the embedded or catalog signature.
-- `Unsigned`: verification completed and no trusted signature exists.
-- `Untrusted`/`HashMismatch`: a signature exists but Windows does not trust it or
-  the file no longer matches it.
-- `Unknown`: verification could not complete. WinSight never converts this into a
-  fabricated unsigned verdict.
+Persistence results deliberately separate file discovery from signature checking:
+
+- `FileMissing`: WinSight normalized the command to the path Windows would load,
+  but no file exists there. The signature was **not checked**. This commonly means
+  an orphaned registration and is not proof of an active infection.
+- `AccessDenied`: the target could not be inspected because Windows denied or
+  prevented access. The signature was **not checked**.
+- `SignatureValid`: Windows validated the embedded or catalog signature.
+- `Unsigned`: verification completed and Windows reported `NotSigned`.
+- `InvalidSignature`: Windows reported an invalid/untrusted signature, including
+  hash mismatch, explicit distrust or `UnknownError`.
+- `VerificationError`: the command could not be resolved or verification could not
+  complete, including unsupported/incompatible file formats. WinSight never converts
+  this into a fabricated unsigned verdict.
+
+The lower-level JSON `signature` field is null when no check was possible, while
+`signatureChecked` says so explicitly. Persistence consumers should use `status`,
+`fileStatus`, `image`, `expectedImage`, `signatureChecked` and `signature` together.
+VirusTotal is attempted only for a present, flagged image because an absent file has
+no bytes to hash.
+
+### Example: orphaned WinSetupMon driver registration
+
+Microsoft includes `WinSetupMon.sys` in
+[Windows Setup/Safe OS dynamic updates](https://support.microsoft.com/en-gb/topic/kb5074111-safe-os-dynamic-update-for-windows-11-versions-24h2-and-25h2-january-29-2026-7d2ab6bf-c62d-467e-a1cb-240bf5ef96ac).
+Some
+machines retain `HKLM\SYSTEM\CurrentControlSet\Services\WinSetupMon` after the
+driver file has been removed. For an `ImagePath` such as
+`system32\DRIVERS\WinSetupMon.sys`, WinSight normalizes the expected target to
+`%SystemRoot%\System32\drivers\WinSetupMon.sys`.
+
+If that target is absent, the result is `FileMissing` and “signature not checked”,
+not `Unsigned`. If it exists, the actual bytes are checked normally; a valid
+Microsoft signature is strong benign evidence, while an unsigned, invalid or
+hash-mismatched same-name file needs investigation. Do not delete the service solely
+because it is orphaned: confirm Windows Update/Setup state and keep a recovery path.
 
 Raw paths, process names, command lines and other forensic evidence are preserved
 verbatim even when the interface is translated.

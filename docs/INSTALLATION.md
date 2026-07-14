@@ -42,6 +42,31 @@ The installed `winsight.exe mcp` mode is an on-demand local MCP child process fo
 clients. The installer does not enable it, add it to startup, create a service or
 open a network port. See [`MCP.md`](MCP.md) before connecting an AI client.
 
+## Optional VirusTotal reputation
+
+VirusTotal is disabled by default. Each user who wants reputation enrichment must
+create their **own** VirusTotal Community account/API key and set it in their Windows
+user environment. The project maintainer must never embed, publish or share a single
+project key: that would expose a credential, mix users' quota and remove meaningful
+consent for sending hashes to a third party.
+
+```powershell
+# Run as the normal Windows user; no Administrator shell is required.
+[Environment]::SetEnvironmentVariable("WINSIGHT_VT_KEY", "PASTE-YOUR-OWN-KEY", "User")
+```
+
+Close and reopen WinSight after setting it. To disable the integration again:
+
+```powershell
+[Environment]::SetEnvironmentVariable("WINSIGHT_VT_KEY", $null, "User")
+```
+
+Never put the key in a bug report, exported scan, repository file or screenshot.
+WinSight submits only SHA-256 lookups for a bounded number of flagged, existing
+files. A blank VirusTotal result is expected when the key is absent, the target file
+is missing (there is nothing to hash), the lookup is disabled in MCP mode, the hash
+is unknown to VirusTotal, or the user's quota/network is unavailable.
+
 ## Portable archive
 
 Extract the ZIP to a directory you control, then run `winsight-dashboard.exe`.
@@ -53,7 +78,7 @@ inside the archive together, including the `_manifest` SBOM directory.
 Verify a download in PowerShell:
 
 ```powershell
-$artifact = "winsight-v0.7.1-win-x64-setup.exe"
+$artifact = "winsight-v0.7.2-win-x64-setup.exe"
 $expected = (Get-Content "$artifact.sha256").Split()[0]
 $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "WinSight checksum mismatch" }
@@ -68,10 +93,10 @@ protect integrity and provenance, but they are not a substitute for Authenticode
 
 ```powershell
 # Per-user, silent, no automatic launch
-./winsight-v0.7.1-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+./winsight-v0.7.2-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Explicit language: english, french, or spanish
-./winsight-v0.7.1-win-x64-setup.exe /LANG=french
+./winsight-v0.7.2-win-x64-setup.exe /LANG=french
 ```
 
 Use the architecture-specific artifact in deployment tooling. Do not redistribute

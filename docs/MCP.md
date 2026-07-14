@@ -66,11 +66,20 @@ trusted to receive local paths and command lines.
 
 ## Protocol and compatibility
 
-WinSight pins the [latest published stable MCP revision](https://modelcontextprotocol.io/specification/2025-11-25),
-`2025-11-25`, through the [official C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk).
+As verified on **2026-07-14**, WinSight pins the
+[latest published stable MCP revision](https://modelcontextprotocol.io/specification/2025-11-25),
+`2025-11-25`, through version **1.4.1** of the
+[official C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk).
 Packaging and installer tests perform a real initialization,
 list every tool, verify the read-only annotations and invoke the capability tool on
 native x64 and Arm64 runners.
+
+The date in a protocol revision is not the age of this documentation. A breaking
+[`2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
+exists, but its final specification is scheduled for 2026-07-28. WinSight does not
+ship preview protocol behavior in a production release. Migration will be evaluated
+after the final revision and stable SDK support are published, with the existing
+subprocess interoperability tests retained as the compatibility gate.
 
 The MCP surface follows the same report semantics as the CLI and dashboard. A
 `notable` item is evidence worth investigating, not proof of compromise and not a

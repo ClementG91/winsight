@@ -148,10 +148,15 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         "NotSigned" => SignatureVerdict.Unsigned,
         "HashMismatch" => new SignatureVerdict(SignatureState.SignedUntrusted, signer), // tampered
         "NotTrusted" => new SignatureVerdict(SignatureState.SignedUntrusted, signer),
-        null or "" => SignatureVerdict.Unsigned,
-        // UnknownError / NotSupportedFileFormat / Incompatible / ...: if a signer was
-        // extracted treat as signed-but-untrusted, else unsigned. Never fabricate trust.
-        _ => signer is null ? SignatureVerdict.Unsigned : new SignatureVerdict(SignatureState.SignedUntrusted, signer),
+        // UnknownError means invalid according to PowerShell's SignatureStatus
+        // contract. Keep any signer evidence and classify it as invalid.
+        "UnknownError" => signer is null
+            ? new SignatureVerdict(SignatureState.SignedUntrusted, null)
+            : new SignatureVerdict(SignatureState.SignedUntrusted, signer),
+        // Unsupported/incompatible formats and missing output are verification
+        // failures, never proof that a file is unsigned.
+        "NotSupportedFileFormat" or "Incompatible" or null or "" => SignatureVerdict.Unknown,
+        _ => SignatureVerdict.Unknown,
     };
 
     private static string RunPowerShell(IReadOnlyList<string> paths)

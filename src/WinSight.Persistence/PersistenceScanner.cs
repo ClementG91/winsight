@@ -69,19 +69,29 @@ public sealed class PersistenceScanner
         // 2. Resolve each record's executable, then verify EVERY signature in one
         //    batch (a single Get-AuthenticodeSignature call, not one process per item).
         var resolved = raws
-            .Select(r => (Raw: r, Image: CommandLine.ExtractExecutable(r.Command)))
+            .Select(r => (Raw: r, Resolution: CommandLine.ResolveExecutable(r.Command)))
             .ToList();
         var verdicts = _verifier.VerifyMany(
-            resolved.Where(x => x.Image is not null).Select(x => x.Image!).ToList());
+            resolved.Where(x => x.Resolution.ImagePath is not null)
+                .Select(x => x.Resolution.ImagePath!).ToList());
 
         // 3. Assemble.
         var results = new List<AutostartEntry>(resolved.Count);
-        foreach (var (raw, image) in resolved)
+        foreach (var (raw, resolution) in resolved)
         {
+            var image = resolution.ImagePath;
             var verdict = image is not null && verdicts.TryGetValue(image, out var v)
                 ? v
                 : SignatureVerdict.Missing;
-            results.Add(new AutostartEntry(raw.Vector, raw.Name, raw.Location, raw.Command, image, verdict));
+            results.Add(new AutostartEntry(
+                raw.Vector,
+                raw.Name,
+                raw.Location,
+                raw.Command,
+                image,
+                resolution.ExpectedPath,
+                resolution.Status,
+                verdict));
         }
         return results;
     }

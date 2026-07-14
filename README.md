@@ -17,9 +17,11 @@ their machine — what persists, what watches the camera/mic, what phones home �
 small, single-purpose, auditable tools under one roof. No telemetry, no account, no
 paywall.
 
-## Why this exists (verified prior-art check, 2026-07)
+## Why this exists (landscape snapshot reviewed 2026-07-14)
 
-Objective-See's macOS suite has **no unified open-source equivalent on Windows.**
+This is a maintained, non-exhaustive product-landscape snapshot rather than a claim
+that no new project can exist. Objective-See's macOS suite currently has no known
+unified open-source equivalent on Windows.
 The building blocks exist but are scattered, and the best of them is closed-source:
 
 | Objective-See (macOS) | Function | Windows: what exists today | Gap |
@@ -111,7 +113,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.7.1
+./scripts/Build-Release.ps1 -Version 0.7.2
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned
@@ -204,7 +206,16 @@ Central Package Management + `.editorconfig`.
 
 **Reputation is opt-in.** WinSight is local-only by default; the *only* network call
 is an optional VirusTotal lookup for flagged items, enabled solely by setting your own
-`WINSIGHT_VT_KEY`. No key → no network, no telemetry.
+`WINSIGHT_VT_KEY`. No key → no network, no telemetry. Every user configures their own
+key; WinSight never ships a maintainer credential. Missing files have no hash, so an
+empty VT result is normal for an orphaned registration. See the safe setup and removal
+commands in [`docs/INSTALLATION.md`](docs/INSTALLATION.md#optional-virustotal-reputation).
+
+Persistence reports now distinguish a normalized-but-absent target (`FileMissing`),
+access denial, a valid signature, a definitive unsigned file, an invalid signature
+and a verification error. In particular, a leftover Windows service entry is not
+described as unsigned merely because its driver file no longer exists; see the
+[`WinSetupMon` example](docs/DETECTIONS.md#example-orphaned-winsetupmon-driver-registration).
 
 See [CHANGELOG.md](CHANGELOG.md) for step-by-step progress.
 

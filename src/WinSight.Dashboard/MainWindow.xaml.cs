@@ -251,7 +251,7 @@ public partial class MainWindow : Window, IDisposable
         var findings = report.Items.Select(item => new FindingView(
             item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
             item.Title,
-            item.Detail,
+            LocalizeFindingDetail(item),
             item)).ToList();
         ResultsGrid.ItemsSource = findings;
         SummaryText.Text = Text.Format("ResultsSummary", findings.Count, report.NotableCount);
@@ -263,6 +263,35 @@ public partial class MainWindow : Window, IDisposable
         {
             ShowToolExplanation(reportTool);
         }
+    }
+
+    private string LocalizeFindingDetail(ReportItem item)
+    {
+        if (!item.Fields.TryGetValue("status", out var status) || string.IsNullOrWhiteSpace(status))
+        {
+            return item.Detail;
+        }
+
+        var label = Text[$"PersistenceStatus{status}"];
+        var evidence = FirstNonEmpty(item, "image", "expectedImage", "command") ?? item.Detail;
+        var suffix = item.Fields.TryGetValue("vtMalicious", out var malicious) &&
+                     item.Fields.TryGetValue("vtTotal", out var total) &&
+                     !string.IsNullOrWhiteSpace(malicious) && !string.IsNullOrWhiteSpace(total)
+            ? $"{label}; VT {malicious}/{total}"
+            : label;
+        return $"{evidence}  [{suffix}]";
+    }
+
+    private static string? FirstNonEmpty(ReportItem item, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (item.Fields.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                return value;
+            }
+        }
+        return null;
     }
 
     private void ShowToolExplanation(DashboardTool tool)

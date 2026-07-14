@@ -91,10 +91,14 @@ public static class Adapters
                      .OrderByDescending(e => e.IsSuspicious).ThenBy(e => e.Vector))
         {
             var report = e.ImagePath is not null && vt.TryGetValue(e.ImagePath, out var v) ? v : null;
+            var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? e.Command;
+            var detail = report is not null
+                ? $"{displayedPath}  [VT {report.Malicious}/{report.Total}]"
+                : $"{displayedPath}  [{PersistenceStatusLabel(e.Status)}]";
             b.Add(
                 e.IsSuspicious ? Severity.Notable : Severity.Info,
                 $"{e.Vector}/{e.Name}",
-                report is not null ? $"{e.ImagePath}  [VT {report.Malicious}/{report.Total}]" : e.ImagePath ?? e.Command,
+                detail,
                 new Dictionary<string, string?>
                 {
                     ["vector"] = e.Vector.ToString(),
@@ -102,7 +106,13 @@ public static class Adapters
                     ["location"] = e.Location,
                     ["command"] = e.Command,
                     ["image"] = e.ImagePath,
-                    ["signature"] = e.Signature.State.ToString(),
+                    ["expectedImage"] = e.ExpectedImagePath,
+                    ["fileStatus"] = e.ImageStatus.ToString(),
+                    ["signature"] = e.ImageStatus == ImageResolutionStatus.Present
+                        ? e.Signature.State.ToString()
+                        : null,
+                    ["signatureChecked"] = (e.ImageStatus == ImageResolutionStatus.Present).ToString(),
+                    ["status"] = e.Status.ToString(),
                     ["signer"] = e.Signature.Signer,
                     ["vtMalicious"] = report?.Malicious.ToString(),
                     ["vtTotal"] = report?.Total.ToString(),
@@ -111,6 +121,16 @@ public static class Adapters
         }
         return b.Build($"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged");
     }
+
+    private static string PersistenceStatusLabel(PersistenceStatus status) => status switch
+    {
+        PersistenceStatus.FileMissing => "file missing — signature not checked",
+        PersistenceStatus.SignatureValid => "signature valid",
+        PersistenceStatus.Unsigned => "unsigned",
+        PersistenceStatus.InvalidSignature => "invalid signature",
+        PersistenceStatus.AccessDenied => "access denied — signature not checked",
+        _ => "verification error",
+    };
 
     // VirusTotal lookups for the given image paths — opt-in (WINSIGHT_VT_KEY) and
     // capped to stay within the free-tier rate limit. Empty when no key is set (the

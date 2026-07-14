@@ -60,6 +60,12 @@
   <data name="LocationOpened" xml:space="preserve"><value>Location opened in File Explorer.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Windows tool opened.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Action unavailable: {0}</value></data>
+  <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>File missing — signature not checked</value></data>
+  <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Signature valid</value></data>
+  <data name="PersistenceStatusUnsigned" xml:space="preserve"><value>Unsigned</value></data>
+  <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Invalid signature</value></data>
+  <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Access denied — signature not checked</value></data>
+  <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Verification error</value></data>
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Overview</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>The recommended one-click check</value></data>
