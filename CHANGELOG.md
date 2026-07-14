@@ -4,6 +4,17 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 outbound block now covers IPv6 as well as IPv4
+- Install every WinSight WFP filter (the PERMIT audit filter and the per-application BLOCK
+  filter) at BOTH `FWPM_LAYER_ALE_AUTH_CONNECT_V4` and `FWPM_LAYER_ALE_AUTH_CONNECT_V6`.
+  An IPv4-only filter is bypassable: an application that reaches the network over IPv6
+  would not be blocked. Both halves are added and removed in one transaction.
+- Note on testing: `ping` is not a valid target for an app-scoped block, because
+  `ping.exe` performs its ICMP echo through the IP Helper service (`IcmpSendEcho`), so at
+  the ALE connect layer the traffic is attributed to that service, not to `ping.exe`. Use
+  a tool that opens its own TCP socket (e.g. a copied `curl.exe`) to observe a per-app
+  block.
+
 ### Phase 2 per-application outbound BLOCK (WFP, isolated to one app)
 - Add `wfp-block-add <path>` and `wfp-block-remove` verbs. `wfp-block-add` installs a WFP
   BLOCK filter that stops outbound connections for a SINGLE application, matched by its

@@ -22,14 +22,23 @@ public static partial class WfpProvisioning
     /// <summary>Stable identity of the WinSight WFP sublayer.</summary>
     public static readonly Guid SublayerKey = new("d7a9b1e1-5c3a-4b8e-9f21-6c0a7e2d1f34");
 
-    /// <summary>Stable identity of the WinSight non-blocking PERMIT audit filter.</summary>
-    public static readonly Guid PermitFilterKey = new("d7a9b1e2-5c3a-4b8e-9f21-6c0a7e2d1f34");
+    /// <summary>Stable identity of the WinSight non-blocking PERMIT audit filter (IPv4).</summary>
+    public static readonly Guid PermitFilterKeyV4 = new("d7a9b1e2-5c3a-4b8e-9f21-6c0a7e2d1f34");
 
-    /// <summary>Stable identity of the WinSight per-application BLOCK filter.</summary>
-    public static readonly Guid BlockFilterKey = new("d7a9b1e3-5c3a-4b8e-9f21-6c0a7e2d1f34");
+    /// <summary>Stable identity of the WinSight non-blocking PERMIT audit filter (IPv6).</summary>
+    public static readonly Guid PermitFilterKeyV6 = new("d7a9b1e4-5c3a-4b8e-9f21-6c0a7e2d1f34");
 
-    // FWPM_LAYER_ALE_AUTH_CONNECT_V4: the outbound-connect authorization layer.
+    /// <summary>Stable identity of the WinSight per-application BLOCK filter (IPv4).</summary>
+    public static readonly Guid BlockFilterKeyV4 = new("d7a9b1e3-5c3a-4b8e-9f21-6c0a7e2d1f34");
+
+    /// <summary>Stable identity of the WinSight per-application BLOCK filter (IPv6).</summary>
+    public static readonly Guid BlockFilterKeyV6 = new("d7a9b1e5-5c3a-4b8e-9f21-6c0a7e2d1f34");
+
+    // The outbound-connect authorization layers. A real outbound firewall MUST cover both
+    // IP versions: an app that reaches the network over IPv6 would otherwise bypass an
+    // IPv4-only filter. Every filter below is installed at both.
     private static readonly Guid AleAuthConnectV4 = new("c38d57d1-05a7-4c33-904f-7fbceee60e82");
+    private static readonly Guid AleAuthConnectV6 = new("4a72393b-319f-44bc-84c3-ba54dcb3b6b4");
 
     // FWPM_CONDITION_ALE_APP_ID: matches the connecting application's binary.
     private static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
@@ -43,6 +52,9 @@ public static partial class WfpProvisioning
     private const string PermitFilterName = "WinSight audit permit";
     private const string PermitFilterDescription =
         "Non-blocking PERMIT filter (proves WFP filter interop; blocks nothing).";
+    private const string BlockFilterName = "WinSight block";
+    private const string BlockFilterDescription =
+        "Blocks outbound connections for one application (per-app, IPv4 and IPv6).";
 
     private const uint RpcCAuthnWinNt = 10;
     private const uint FwpEFilterNotFound = 0x80320003;
@@ -125,37 +137,10 @@ public static partial class WfpProvisioning
         {
             InTransaction(engine, () =>
             {
-                var name = Marshal.StringToHGlobalUni(PermitFilterName);
-                var description = Marshal.StringToHGlobalUni(PermitFilterDescription);
-                var providerKey = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
-                try
-                {
-                    Marshal.StructureToPtr(ProviderKey, providerKey, false);
-                    var filter = new FwpmFilter0
-                    {
-                        FilterKey = PermitFilterKey,
-                        DisplayData = new FwpmDisplayData0 { Name = name, Description = description },
-                        Flags = 0,
-                        ProviderKey = providerKey,
-                        LayerKey = AleAuthConnectV4,
-                        SubLayerKey = SublayerKey,
-                        Weight = new FwpValue0 { Type = FwpEmpty, Value = 0 },
-                        NumFilterConditions = 0,
-                        FilterCondition = IntPtr.Zero,
-                        Action = new FwpmAction0 { Type = FwpActionPermit, FilterOrCalloutKey = Guid.Empty },
-                    };
-                    var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
-                    if (result is not 0 and not FwpEAlreadyExists)
-                    {
-                        throw new Win32Exception((int)result);
-                    }
-                }
-                finally
-                {
-                    Marshal.FreeHGlobal(name);
-                    Marshal.FreeHGlobal(description);
-                    Marshal.FreeHGlobal(providerKey);
-                }
+                AddFilter(engine, PermitFilterKeyV4, AleAuthConnectV4, FwpActionPermit,
+                    IntPtr.Zero, 0, PermitFilterName, PermitFilterDescription);
+                AddFilter(engine, PermitFilterKeyV6, AleAuthConnectV6, FwpActionPermit,
+                    IntPtr.Zero, 0, PermitFilterName, PermitFilterDescription);
             });
         }
         finally
@@ -164,18 +149,14 @@ public static partial class WfpProvisioning
         }
     }
 
-    /// <summary>Removes the PERMIT filter (idempotent).</summary>
+    /// <summary>Removes the PERMIT filter from both IP layers (idempotent).</summary>
     public static void RemovePermitFilter()
     {
         var engine = OpenEngine();
         try
         {
-            var key = PermitFilterKey;
-            var result = NativeMethods.FwpmFilterDeleteByKey0(engine, ref key);
-            if (result is not 0 and not FwpEFilterNotFound)
-            {
-                throw new Win32Exception((int)result);
-            }
+            DeleteFilter(engine, PermitFilterKeyV4);
+            DeleteFilter(engine, PermitFilterKeyV6);
         }
         finally
         {
@@ -186,9 +167,10 @@ public static partial class WfpProvisioning
     /// <summary>
     /// Adds a BLOCK filter that stops outbound connections for a SINGLE application,
     /// matched by its WFP app id (derived from the executable path). Only that binary is
-    /// affected; every other application keeps connecting normally. Replaces any previous
-    /// WinSight block filter (one at a time) and runs in a transaction. Requires the
-    /// sublayer to exist (run <see cref="Provision"/> first).
+    /// affected; every other application keeps connecting normally. The filter is installed
+    /// at BOTH the IPv4 and IPv6 connect layers so the app cannot bypass it over IPv6.
+    /// Replaces any previous WinSight block filter, runs in one transaction, and requires
+    /// the sublayer to exist (run <see cref="Provision"/> first).
     /// </summary>
     public static void AddBlockFilter(string executablePath)
     {
@@ -202,22 +184,13 @@ public static partial class WfpProvisioning
             {
                 InTransaction(engine, () =>
                 {
-                    // One block filter at a time: drop any prior one first.
-                    var existing = BlockFilterKey;
-                    var removed = NativeMethods.FwpmFilterDeleteByKey0(engine, ref existing);
-                    if (removed is not 0 and not FwpEFilterNotFound)
-                    {
-                        throw new Win32Exception((int)removed);
-                    }
+                    // One block target at a time: drop any prior block filters first.
+                    DeleteFilter(engine, BlockFilterKeyV4);
+                    DeleteFilter(engine, BlockFilterKeyV6);
 
-                    var name = Marshal.StringToHGlobalUni("WinSight block");
-                    var description = Marshal.StringToHGlobalUni(
-                        "Blocks outbound connections for one application (VM/testing).");
-                    var providerKey = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
                     var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
                     try
                     {
-                        Marshal.StructureToPtr(ProviderKey, providerKey, false);
                         var condition = new FwpmFilterCondition0
                         {
                             FieldKey = AleAppIdCondition,
@@ -226,30 +199,13 @@ public static partial class WfpProvisioning
                         };
                         Marshal.StructureToPtr(condition, conditionPtr, false);
 
-                        var filter = new FwpmFilter0
-                        {
-                            FilterKey = BlockFilterKey,
-                            DisplayData = new FwpmDisplayData0 { Name = name, Description = description },
-                            Flags = 0,
-                            ProviderKey = providerKey,
-                            LayerKey = AleAuthConnectV4,
-                            SubLayerKey = SublayerKey,
-                            Weight = new FwpValue0 { Type = FwpEmpty, Value = 0 },
-                            NumFilterConditions = 1,
-                            FilterCondition = conditionPtr,
-                            Action = new FwpmAction0 { Type = FwpActionBlock, FilterOrCalloutKey = Guid.Empty },
-                        };
-                        var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
-                        if (result != 0)
-                        {
-                            throw new Win32Exception((int)result);
-                        }
+                        AddFilter(engine, BlockFilterKeyV4, AleAuthConnectV4, FwpActionBlock,
+                            conditionPtr, 1, BlockFilterName, BlockFilterDescription);
+                        AddFilter(engine, BlockFilterKeyV6, AleAuthConnectV6, FwpActionBlock,
+                            conditionPtr, 1, BlockFilterName, BlockFilterDescription);
                     }
                     finally
                     {
-                        Marshal.FreeHGlobal(name);
-                        Marshal.FreeHGlobal(description);
-                        Marshal.FreeHGlobal(providerKey);
                         Marshal.FreeHGlobal(conditionPtr);
                     }
                 });
@@ -265,22 +221,66 @@ public static partial class WfpProvisioning
         }
     }
 
-    /// <summary>Removes the per-application BLOCK filter (idempotent).</summary>
+    /// <summary>Removes the per-application BLOCK filter from both IP layers (idempotent).</summary>
     public static void RemoveBlockFilter()
     {
         var engine = OpenEngine();
         try
         {
-            var key = BlockFilterKey;
-            var result = NativeMethods.FwpmFilterDeleteByKey0(engine, ref key);
-            if (result is not 0 and not FwpEFilterNotFound)
+            DeleteFilter(engine, BlockFilterKeyV4);
+            DeleteFilter(engine, BlockFilterKeyV6);
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    // Adds one filter to one layer. Conditions (if any) are supplied pre-marshalled by the
+    // caller so the same app-id blob can back both the IPv4 and IPv6 filters.
+    private static void AddFilter(
+        IntPtr engine, Guid filterKey, Guid layerKey, uint action,
+        IntPtr conditions, uint conditionCount, string name, string description)
+    {
+        var namePtr = Marshal.StringToHGlobalUni(name);
+        var descriptionPtr = Marshal.StringToHGlobalUni(description);
+        var providerKey = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
+        try
+        {
+            Marshal.StructureToPtr(ProviderKey, providerKey, false);
+            var filter = new FwpmFilter0
+            {
+                FilterKey = filterKey,
+                DisplayData = new FwpmDisplayData0 { Name = namePtr, Description = descriptionPtr },
+                Flags = 0,
+                ProviderKey = providerKey,
+                LayerKey = layerKey,
+                SubLayerKey = SublayerKey,
+                Weight = new FwpValue0 { Type = FwpEmpty, Value = 0 },
+                NumFilterConditions = conditionCount,
+                FilterCondition = conditions,
+                Action = new FwpmAction0 { Type = action, FilterOrCalloutKey = Guid.Empty },
+            };
+            var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
+            if (result is not 0 and not FwpEAlreadyExists)
             {
                 throw new Win32Exception((int)result);
             }
         }
         finally
         {
-            _ = NativeMethods.FwpmEngineClose0(engine);
+            Marshal.FreeHGlobal(namePtr);
+            Marshal.FreeHGlobal(descriptionPtr);
+            Marshal.FreeHGlobal(providerKey);
+        }
+    }
+
+    private static void DeleteFilter(IntPtr engine, Guid filterKey)
+    {
+        var result = NativeMethods.FwpmFilterDeleteByKey0(engine, ref filterKey);
+        if (result is not 0 and not FwpEFilterNotFound)
+        {
+            throw new Win32Exception((int)result);
         }
     }
 
@@ -314,7 +314,10 @@ public static partial class WfpProvisioning
                 NativeMethods.FwpmFreeMemory0(ref sublayer);
             }
 
-            return (providerExists, sublayerExists, FilterExists(engine, PermitFilterKey), FilterExists(engine, BlockFilterKey));
+            // A filter set is "present" when its IPv4 half exists; the V6 half is added
+            // and removed in the same transaction, so the two are always in step.
+            return (providerExists, sublayerExists,
+                FilterExists(engine, PermitFilterKeyV4), FilterExists(engine, BlockFilterKeyV4));
         }
         finally
         {
