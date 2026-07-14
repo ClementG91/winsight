@@ -95,6 +95,33 @@ public sealed class DashboardFindingPresenterTests
     }
 
     [Theory]
+    [InlineData("en", "Service not installed", "Block")]
+    [InlineData("fr", "Service non installé", "Bloquer")]
+    [InlineData("es", "Servicio no instalado", "Bloquear")]
+    public void OutboundFirewallPresentation_LocalizesStatusAndAction(
+        string culture,
+        string expectedUnavailable,
+        string expectedBlock)
+    {
+        WithCulture(culture, text =>
+        {
+            var status = Item(Severity.Info, new() { ["kind"] = "status", ["available"] = "False" });
+            var statusResult = DashboardFindingPresenter.Present("outbound-firewall", status, text);
+            Assert.StartsWith(expectedUnavailable, statusResult.Detail);
+
+            var policy = Item(Severity.Info, new()
+            {
+                ["kind"] = "policy",
+                ["path"] = @"C:\apps\a.exe",
+                ["action"] = "Block",
+            });
+            var policyResult = DashboardFindingPresenter.Present("outbound-firewall", policy, text);
+            Assert.Equal(@"C:\apps\a.exe", policyResult.Title);
+            Assert.Equal(expectedBlock, policyResult.Detail);
+        });
+    }
+
+    [Theory]
     [InlineData("en")]
     [InlineData("fr")]
     [InlineData("es")]
@@ -109,6 +136,7 @@ public sealed class DashboardFindingPresenterTests
                 ["certificates"] = Item(Severity.Notable, new() { ["hasPrivateKey"] = "True" }),
                 ["extensions"] = Item(Severity.Info, new()),
                 ["connections"] = Item(Severity.Info, new() { ["process"] = "app", ["pid"] = "7", ["state"] = "ESTABLISHED" }),
+                ["outbound-firewall"] = Item(Severity.Info, new() { ["kind"] = "status", ["available"] = "False" }),
             };
 
             foreach (var sample in samples)

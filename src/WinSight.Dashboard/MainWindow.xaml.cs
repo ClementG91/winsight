@@ -23,6 +23,7 @@ public partial class MainWindow : Window, IDisposable
     private IReadOnlyList<ToolReport> _visibleReports = [];
     private string? _lastScanCommand;
     private CancellationTokenSource? _scanCancellation;
+    private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -97,7 +98,14 @@ public partial class MainWindow : Window, IDisposable
         try
         {
             var flaggedOnly = FlaggedOnly.IsChecked == true;
-            if (tool.Command == "all")
+            if (tool.Command == "outbound-firewall")
+            {
+                // Live status over the authenticated pipe (I/O, not a CPU scan). When
+                // the service is not installed this degrades to "unavailable".
+                var view = await _firewallGateway.GetViewAsync(cancellation.Token);
+                _reports = [FirewallServiceAdapter.BuildReport(view)];
+            }
+            else if (tool.Command == "all")
             {
                 var progress = new Progress<ScanProgress>(UpdateProgress);
                 _reports = await Task.Run(

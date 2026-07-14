@@ -127,6 +127,17 @@
   <data name="ToolFirewallShort" xml:space="preserve"><value>Règles réseau actuellement actives</value></data>
   <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventorie les règles du pare-feu Microsoft Defender. Le blocage automatique reste désactivé tant que le service WFP sécurisé n’est pas livré.</value></data>
   <data name="ToolFirewallGuidance" xml:space="preserve"><value>Utilisez l’outil Windows pour modifier une règle. Conservez une voie de récupération avant de bloquer un service système.</value></data>
+  <data name="ToolOutboundFirewallLabel" xml:space="preserve"><value>Pare-feu sortant</value></data>
+  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Contrôle sortant par application (audit seul)</value></data>
+  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>Le service de pare-feu sortant WinSight : s’il est installé, son mode et les politiques par application enregistrées. Il est en audit seul et n’installe encore aucun filtre.</value></data>
+  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Rien n’est bloqué. L’application des règles est une étape ultérieure et facultative. Une désactivation d’urgence revient à l’audit seul à tout moment.</value></data>
+  <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>Pare-feu sortant WinSight</value></data>
+  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service non installé. WinSight ne filtre pas votre trafic sortant ; les analyses restent locales et en lecture seule.</value></data>
+  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Installé, audit seul. Les politiques sont enregistrées mais rien n’est bloqué.</value></data>
+  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Installé et applique les politiques par application.</value></data>
+  <data name="OutboundActionAllow" xml:space="preserve"><value>Autoriser</value></data>
+  <data name="OutboundActionBlock" xml:space="preserve"><value>Bloquer</value></data>
+  <data name="OutboundActionAsk" xml:space="preserve"><value>Demander</value></data>
   <data name="ToolProcessesLabel" xml:space="preserve"><value>Processus</value></data>
   <data name="ToolProcessesShort" xml:space="preserve"><value>Programmes en cours d’exécution</value></data>
   <data name="ToolProcessesDescription" xml:space="preserve"><value>Liste les processus, leur chemin, leur parent, leur ligne de commande et leur signature.</value></data>
