@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.7.1 — 2026-07-14
+
+### Unified WinSight visual identity
+- Add an original geometric vision-and-telemetry logo with a transparent high-resolution
+  source, an optimized 256 px UI asset and a nine-resolution Windows ICO.
+- Replace the dashboard's placeholder letter and generic system shield with the WinSight
+  mark in the header, window chrome, taskbar and notification area.
+- Embed the same icon in both native CLI/dashboard executables and the Windows installer,
+  so Start menu, desktop shortcuts, Explorer and Add/Remove Programs share one identity.
+- Display the brand in the repository README and ship the complete, documented asset set
+  in x64/Arm64 ZIPs and installations. Release validation now checks alpha, dimensions,
+  every ICO frame and the icons actually embedded in both executables.
+
 ## v0.7.0 — 2026-07-14
 
 ### Local read-only MCP integration

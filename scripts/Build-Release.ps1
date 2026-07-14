@@ -74,11 +74,18 @@ foreach ($architecture in $Architectures)
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\INSTALLATION.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\DETECTIONS.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\MCP.md") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $repoRoot "assets\branding") `
+        -Destination (Join-Path $packageRoot "assets\branding") -Recurse
 
     & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") `
         -Path (Join-Path $packageRoot "winsight.exe") -Architecture $architecture
     & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") `
         -Path (Join-Path $packageRoot "winsight-dashboard.exe") -Architecture $architecture
+    & (Join-Path $PSScriptRoot "Test-Branding.ps1") `
+        -BrandingPath (Join-Path $packageRoot "assets\branding") `
+        -ExecutablePaths @(
+            (Join-Path $packageRoot "winsight.exe"),
+            (Join-Path $packageRoot "winsight-dashboard.exe"))
     & (Join-Path $PSScriptRoot "Test-McpServer.ps1") `
         -ServerPath (Join-Path $packageRoot "winsight.exe") -Version $Version
 
@@ -132,7 +139,11 @@ foreach ($architecture in $Architectures)
             "LICENSE",
             "INSTALLATION.md",
             "DETECTIONS.md",
-            "MCP.md"
+            "MCP.md",
+            "assets/branding/winsight-logo.png",
+            "assets/branding/winsight-logo-256.png",
+            "assets/branding/winsight.ico",
+            "assets/branding/README.md"
         )
         if (-not $SkipSbom)
         {
@@ -165,6 +176,9 @@ foreach ($architecture in $Architectures)
 
         $installerName = "winsight-v$Version-$rid-setup.exe"
         $installerPath = Join-Path $outputRoot $installerName
+        & (Join-Path $PSScriptRoot "Test-Branding.ps1") `
+            -BrandingPath (Join-Path $packageRoot "assets\branding") `
+            -ExecutablePaths @($installerPath)
         $installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
         Set-Content -LiteralPath "$installerPath.sha256" -Value "$installerHash  $installerName" -Encoding ascii
     }

@@ -71,6 +71,15 @@ try
     {
         throw "Installed SPDX SBOM is missing."
     }
+
+    foreach ($brandAsset in @("winsight-logo.png", "winsight-logo-256.png", "winsight.ico", "README.md"))
+    {
+        $assetPath = Join-Path $installDirectory "assets\branding\$brandAsset"
+        if (-not (Test-Path -LiteralPath $assetPath))
+        {
+            throw "Installed brand asset is missing: $assetPath"
+        }
+    }
 }
 finally
 {

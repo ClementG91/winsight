@@ -3,7 +3,8 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinSight.Dashboard"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
-        Title="{Binding [WindowTitle], Source={x:Static local:LocalizationManager.Instance}}" Height="780" Width="1220"
+        Title="{Binding [WindowTitle], Source={x:Static local:LocalizationManager.Instance}}"
+        Icon="Assets/winsight-logo.png" Height="780" Width="1220"
         MinHeight="620" MinWidth="960" Background="#F1F5F9"
         WindowStartupLocation="CenterScreen">
     <Grid>
@@ -15,10 +16,9 @@
 
         <Border Grid.Row="0" Background="#0F172A" Padding="26,14">
             <DockPanel>
-                <Border DockPanel.Dock="Left" Width="46" Height="46" CornerRadius="12" Background="#2563EB" Margin="0,0,14,0">
-                    <TextBlock Text="W" Foreground="White" FontSize="24" FontWeight="Bold"
-                               HorizontalAlignment="Center" VerticalAlignment="Center" />
-                </Border>
+                <Image DockPanel.Dock="Left" Width="50" Height="50" Margin="0,0,14,0"
+                       Source="Assets/winsight-logo.png" Stretch="Uniform"
+                       automation:AutomationProperties.Name="WinSight" />
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}"

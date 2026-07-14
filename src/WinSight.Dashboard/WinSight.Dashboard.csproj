@@ -3,6 +3,7 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>WinSight.Dashboard</RootNamespace>
     <AssemblyName>winsight-dashboard</AssemblyName>
+    <ApplicationIcon>..\..\assets\branding\winsight.ico</ApplicationIcon>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <!-- WPF data binding resolves XmlLanguage to a specific culture at layout time. -->
@@ -11,5 +12,9 @@
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Application\WinSight.Application.csproj" />
     <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="..\..\assets\branding\winsight-logo-256.png"
+              Link="Assets\winsight-logo.png" />
   </ItemGroup>
 </Project>

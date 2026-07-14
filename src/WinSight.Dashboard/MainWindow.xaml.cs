@@ -15,6 +15,7 @@ namespace WinSight.Dashboard;
 
 public partial class MainWindow : Window, IDisposable
 {
+    private readonly Drawing.Icon? _applicationIcon;
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ToolStripItem _openTrayItem;
     private readonly Forms.ToolStripItem _exitTrayItem;
@@ -36,9 +37,10 @@ public partial class MainWindow : Window, IDisposable
         var menu = new Forms.ContextMenuStrip();
         _openTrayItem = menu.Items.Add(Text["TrayOpen"], null, (_, _) => Dispatcher.Invoke(ShowFromTray));
         _exitTrayItem = menu.Items.Add(Text["TrayExit"], null, (_, _) => Dispatcher.Invoke(ExitApplication));
+        _applicationIcon = TryLoadApplicationIcon();
         _trayIcon = new Forms.NotifyIcon
         {
-            Icon = Drawing.SystemIcons.Shield,
+            Icon = _applicationIcon ?? Drawing.SystemIcons.Shield,
             Text = Text["TrayText"],
             Visible = true,
             ContextMenuStrip = menu,
@@ -58,6 +60,20 @@ public partial class MainWindow : Window, IDisposable
     }
 
     private static LocalizationManager Text => LocalizationManager.Instance;
+
+    private static Drawing.Icon? TryLoadApplicationIcon()
+    {
+        try
+        {
+            return string.IsNullOrWhiteSpace(Environment.ProcessPath)
+                ? null
+                : Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath);
+        }
+        catch (Exception ex) when (ex is ArgumentException or ExternalException or FileNotFoundException)
+        {
+            return null;
+        }
+    }
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
@@ -426,6 +442,7 @@ public partial class MainWindow : Window, IDisposable
         _scanCancellation?.Dispose();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
+        _applicationIcon?.Dispose();
         _disposed = true;
         GC.SuppressFinalize(this);
     }

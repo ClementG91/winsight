@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>WinSight.Cli</RootNamespace>
     <AssemblyName>winsight</AssemblyName>
+    <ApplicationIcon>..\..\assets\branding\winsight.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Application\WinSight.Application.csproj" />

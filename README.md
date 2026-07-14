@@ -1,4 +1,8 @@
-# WinSight
+<p align="center">
+  <img src="assets/branding/winsight-logo.png" width="180" alt="WinSight — Windows security visibility" />
+</p>
+
+<h1 align="center">WinSight</h1>
 
 [![CI](https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg)](https://github.com/ClementG91/winsight/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
@@ -107,7 +111,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.7.0
+./scripts/Build-Release.ps1 -Version 0.7.1
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned

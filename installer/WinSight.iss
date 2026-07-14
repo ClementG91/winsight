@@ -51,6 +51,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern dynamic
 SetupLogging=yes
+SetupIconFile={#MyRepoRoot}\assets\branding\winsight.ico
 CloseApplications=yes
 RestartApplications=no
 UninstallDisplayIcon={app}\winsight-dashboard.exe
