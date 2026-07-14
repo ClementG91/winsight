@@ -59,7 +59,10 @@ public static partial class WfpProvisioning
     // but only the connections that match the filter's conditions (a single application).
     private const uint FwpActionBlock = 0x00001001;
     private const uint FwpEmpty = 0;
-    private const uint FwpByteBlobType = 10;
+
+    // FWP_DATA_TYPE.FWP_BYTE_BLOB_TYPE = 12 (10 is FWP_DOUBLE). The app-id condition
+    // value is a byte blob, so this must be 12 or WFP rejects the condition.
+    private const uint FwpByteBlobType = 12;
     private const uint FwpMatchEqual = 0;
 
     /// <summary>Creates the provider and sublayer (idempotent). Installs no filter.</summary>
