@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  quality:
+  build-test:
     runs-on: windows-latest
     timeout-minutes: 25
     steps:
@@ -51,7 +51,7 @@ jobs:
           if-no-files-found: ignore
 
   package:
-    needs: quality
+    needs: build-test
     strategy:
       fail-fast: false
       matrix:
