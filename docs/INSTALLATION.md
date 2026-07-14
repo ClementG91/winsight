@@ -125,6 +125,16 @@ From an **elevated** (Administrator) console, in the install or extracted direct
 # interop. Requires wfp-provision first.
 .\winsight-firewall-service.exe wfp-filter-add
 .\winsight-firewall-service.exe wfp-filter-remove
+
+# Block ONE application's outbound connections, matched by executable path. Only that
+# binary is affected; every other app keeps working. Requires wfp-provision first.
+# Test it safely with a copy of a harmless tool, e.g.:
+#   Copy-Item C:\Windows\System32\ping.exe C:\pingtest.exe
+#   .\winsight-firewall-service.exe wfp-block-add C:\pingtest.exe
+#   C:\pingtest.exe 8.8.8.8      # fails (blocked), while normal ping still works
+#   .\winsight-firewall-service.exe wfp-block-remove
+.\winsight-firewall-service.exe wfp-block-add "C:\full\path\to\app.exe"
+.\winsight-firewall-service.exe wfp-block-remove
 ```
 
 Once registered, the dashboard's **Outbound Firewall** view changes from "service not

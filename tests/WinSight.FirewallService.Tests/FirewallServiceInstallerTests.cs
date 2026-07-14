@@ -18,6 +18,8 @@ public sealed class FirewallServiceCommandLineTests
     [InlineData("wfp-status", FirewallServiceVerb.WfpStatus)]
     [InlineData("wfp-filter-add", FirewallServiceVerb.WfpFilterAdd)]
     [InlineData("wfp-filter-remove", FirewallServiceVerb.WfpFilterRemove)]
+    [InlineData("wfp-block-add", FirewallServiceVerb.WfpBlockAdd)]
+    [InlineData("wfp-block-remove", FirewallServiceVerb.WfpBlockRemove)]
     [InlineData("bogus", FirewallServiceVerb.Unknown)]
     public void Parse_MapsFirstArgumentToVerb(string arg, FirewallServiceVerb expected) =>
         Assert.Equal(expected, FirewallServiceCommandLine.Parse([arg]));
@@ -58,7 +60,8 @@ public sealed class WfpProvisioningTests
     {
         var keys = new[]
         {
-            WfpProvisioning.ProviderKey, WfpProvisioning.SublayerKey, WfpProvisioning.PermitFilterKey,
+            WfpProvisioning.ProviderKey, WfpProvisioning.SublayerKey,
+            WfpProvisioning.PermitFilterKey, WfpProvisioning.BlockFilterKey,
         };
         Assert.DoesNotContain(Guid.Empty, keys);
         Assert.Equal(keys.Length, keys.Distinct().Count());

@@ -26,6 +26,8 @@ return FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.WfpStatus => WfpStatusVerb(),
     FirewallServiceVerb.WfpFilterAdd => WfpFilterAdd(),
     FirewallServiceVerb.WfpFilterRemove => WfpFilterRemove(),
+    FirewallServiceVerb.WfpBlockAdd => WfpBlockAdd(args),
+    FirewallServiceVerb.WfpBlockRemove => WfpBlockRemove(),
     FirewallServiceVerb.Unknown => Usage(),
     _ => RunHost(),
 };
@@ -165,14 +167,66 @@ static int WfpStatusVerb()
 
     try
     {
-        var (provider, sublayer, filter) = WfpProvisioning.Status();
+        var (provider, sublayer, permit, block) = WfpProvisioning.Status();
         Console.WriteLine(
-            $"WinSight WFP provider: {(provider ? "present" : "absent")}, sublayer: {(sublayer ? "present" : "absent")}, permit-filter: {(filter ? "present" : "absent")}.");
+            $"WinSight WFP provider: {Present(provider)}, sublayer: {Present(sublayer)}, permit-filter: {Present(permit)}, block-filter: {Present(block)}.");
         return 0;
+
+        static string Present(bool value) => value ? "present" : "absent";
     }
     catch (Win32Exception ex)
     {
         Console.Error.WriteLine($"WFP status failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        return 1;
+    }
+}
+
+static int WfpBlockAdd(string[] arguments)
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Adding a WFP block filter requires an elevated (Administrator) console.");
+        return 1;
+    }
+    if (arguments.Length < 2 || string.IsNullOrWhiteSpace(arguments[1]))
+    {
+        Console.Error.WriteLine("Usage: winsight-firewall-service wfp-block-add <full path to an executable>");
+        return 2;
+    }
+
+    var executable = arguments[1];
+    try
+    {
+        WfpProvisioning.AddBlockFilter(executable);
+        Console.WriteLine(
+            $"Blocking outbound connections for '{executable}'. Only that application is affected; everything else keeps working. Run wfp-block-remove to undo.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine(
+            $"WFP block add failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}. Run wfp-provision first, and pass a full executable path.");
+        return 1;
+    }
+}
+
+static int WfpBlockRemove()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Removing the WFP block filter requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        WfpProvisioning.RemoveBlockFilter();
+        Console.WriteLine("Removed the WinSight block filter.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine($"WFP block remove failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
         return 1;
     }
 }
@@ -224,7 +278,7 @@ static int WfpFilterRemove()
 static int Usage()
 {
     Console.Error.WriteLine(
-        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status|wfp-filter-add|wfp-filter-remove]");
+        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status|wfp-filter-add|wfp-filter-remove|wfp-block-add <path>|wfp-block-remove]");
     return 2;
 }
 
