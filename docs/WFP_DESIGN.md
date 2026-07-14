@@ -76,11 +76,11 @@ process ids or display names, which are transient or ambiguous.
 
 ## Remaining Phase 2 increments
 
-1. Done in library form: the named-pipe host, hardened ACL, impersonated-identity
-   authentication, dispatcher and audit-only engine are implemented and tested. What
-   remains is hosting them as an installed least-privilege Windows service worker
-   (lifetime, logging, the service-owned ACL-protected policy directory) and wiring the
-   dashboard client to it.
+1. Done. The named-pipe host, hardened ACL, impersonated-identity authentication,
+   dispatcher and audit-only engine are implemented and tested, and are hosted by a
+   least-privilege Windows service worker (`WinSight.FirewallService`) that provisions an
+   ACL-protected policy directory under ProgramData. What remains is installer/uninstaller
+   registration of the service and wiring the dashboard client to it.
 2. WFP engine/session/provider/sublayer interop and audit-only filters. This is the
    first increment that touches real filters and must be developed and validated on an
    isolated Windows VM before it ships.

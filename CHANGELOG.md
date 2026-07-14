@@ -17,8 +17,14 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   explicit deny for network logons, and verification of the impersonated Windows
   identity before any command runs. `FirewallConnectionHandler` serves one exchange
   over any duplex stream so the logic is tested without a pipe or elevation.
-- Add 12 firewall tests, including a real same-user named-pipe round trip and the
-  hardened-ACL rule assertions; the firewall project now has 50 tests.
+- Host the endpoint as a least-privilege Windows service worker (`WinSight.FirewallService`)
+  built on `Microsoft.Extensions.Hosting.WindowsServices`. It runs the listener for the
+  service lifetime, provisions an ACL-protected policy directory under ProgramData
+  (full control for SYSTEM and Administrators only, inheritance removed), and installs no
+  WFP filter. Console execution is supported for local debugging.
+- Add 17 firewall/service tests, including a real same-user named-pipe round trip, the
+  hardened pipe- and directory-ACL assertions, and the worker start/stop lifecycle; the
+  firewall project has 50 tests and the service project 5.
 - Add an optional, developer-only LLM-as-a-judge eval harness under `evals/` that scores
   the AI-facing report for accuracy, calibration, privacy, actionability and
   non-authority. The scan uses the local `--json` contract with no network; only an
