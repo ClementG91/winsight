@@ -8,7 +8,7 @@ namespace WinSight.Firewall;
 /// directly. The client validates the reply through the same strict codec, so a
 /// malformed or over-sized frame is rejected rather than trusted.
 /// </summary>
-public sealed class FirewallServiceClient
+public sealed class FirewallServiceClient : IFirewallServiceClient
 {
     private readonly string _pipeName;
 
