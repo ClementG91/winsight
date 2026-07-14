@@ -113,7 +113,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.7.2
+./scripts/Build-Release.ps1 -Version 0.8.0
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned
@@ -147,9 +147,11 @@ See [`docs/MCP.md`](docs/MCP.md) for client configuration and the threat model.
 
 The dashboard is designed for non-technical users: each check explains what it
 observes and what an alert means, the overview reports progress between independent
-scanners, and reports can be exported or copied. Actions are deliberately safe:
-WinSight can reveal an item's validated file location or open the corresponding
-trusted Windows console, but it never deletes, kills or blocks automatically.
+scanners, and each navigation page shows only evidence from its own category.
+Reports can be exported or copied; export follows the currently visible scope.
+Actions are deliberately safe: WinSight can reveal an item's validated file location
+or open the corresponding trusted Windows console or Settings page, but it never
+deletes, kills, disables or blocks automatically.
 
 The interface is available in **English, French and Spanish**. It follows the
 Windows display language on first launch, falls back to English for unsupported
@@ -205,11 +207,16 @@ GUI/automation. Native x64 and Arm64 Windows CI runners are the execution record
 Central Package Management + `.editorconfig`.
 
 **Reputation is opt-in.** WinSight is local-only by default; the *only* network call
-is an optional VirusTotal lookup for flagged items, enabled solely by setting your own
-`WINSIGHT_VT_KEY`. No key → no network, no telemetry. Every user configures their own
-key; WinSight never ships a maintainer credential. Missing files have no hash, so an
-empty VT result is normal for an orphaned registration. See the safe setup and removal
-commands in [`docs/INSTALLATION.md`](docs/INSTALLATION.md#optional-virustotal-reputation).
+is an optional VirusTotal lookup for flagged items. Every user configures their own
+key from **Settings** (encrypted for that Windows account with DPAPI), or an
+administrator supplies `WINSIGHT_VT_KEY` for automation. WinSight never ships a
+maintainer credential. No key means no network and no telemetry; MCP scans prohibit
+the lookup even when a key exists. WinSight persistently enforces at most 4 lookups
+per rolling minute, 500/day and 15,500/month (UTC), with no automatic quota retry.
+VirusTotal Community keys are for personal/non-commercial use; business workflows
+require an appropriate VirusTotal Premium agreement. Missing files have no hash, so
+an empty VT result is normal for an orphaned registration. See the details in
+[`docs/INSTALLATION.md`](docs/INSTALLATION.md#optional-virustotal-reputation).
 
 Persistence reports now distinguish a normalized-but-absent target (`FileMissing`),
 access denial, a valid signature, a definitive unsigned file, an invalid signature

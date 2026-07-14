@@ -20,7 +20,8 @@ public partial class MainWindow : Window, IDisposable
     private readonly Forms.ToolStripItem _openTrayItem;
     private readonly Forms.ToolStripItem _exitTrayItem;
     private IReadOnlyList<ToolReport> _reports = [];
-    private List<ReportChoice> _reportChoices = [];
+    private IReadOnlyList<ToolReport> _visibleReports = [];
+    private string? _lastScanCommand;
     private CancellationTokenSource? _scanCancellation;
     private bool _allowClose;
     private bool _disposed;
@@ -86,7 +87,8 @@ public partial class MainWindow : Window, IDisposable
         _scanCancellation = cancellation;
         SetScanningState(tool, scanning: true);
         ResultsGrid.ItemsSource = null;
-        ReportPicker.Visibility = Visibility.Collapsed;
+        _visibleReports = [];
+        _lastScanCommand = null;
         ExportButton.IsEnabled = false;
         CopyButton.IsEnabled = false;
         OpenLocationButton.IsEnabled = false;
@@ -109,30 +111,30 @@ public partial class MainWindow : Window, IDisposable
                     cancellation.Token);
             }
 
-            RefreshReportChoices();
-            ReportPicker.Visibility = _reports.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-            ReportPicker.SelectedIndex = 0;
-            ShowReport(_reports[0]);
+            _lastScanCommand = tool.Command;
+            ShowToolContext(tool);
             ScanProgressBar.IsIndeterminate = false;
             ScanProgressBar.Value = 100;
             ProgressText.Text = Text["ProgressComplete"];
-            ExportButton.IsEnabled = true;
         }
         catch (OperationCanceledException)
         {
             _reports = [];
+            _lastScanCommand = null;
             SummaryText.Text = Text["ScanCancelledSummary"];
             ProgressText.Text = Text["ProgressCancelled"];
         }
         catch (UnauthorizedAccessException)
         {
             _reports = [];
+            _lastScanCommand = null;
             SummaryText.Text = Text["InsufficientSummary"];
             ProgressText.Text = Text["ProgressInsufficient"];
         }
         catch (Exception ex)
         {
             _reports = [];
+            _lastScanCommand = null;
             SummaryText.Text = Text.Format("ScanFailed", ex.Message);
             ProgressText.Text = Text["UnexpectedError"];
         }
@@ -153,6 +155,7 @@ public partial class MainWindow : Window, IDisposable
         ToolPicker.IsEnabled = !scanning;
         FlaggedOnly.IsEnabled = !scanning;
         LanguagePicker.IsEnabled = !scanning;
+        SettingsButton.IsEnabled = !scanning;
         ProgressPanel.Visibility = scanning || _reports.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.Visibility = scanning && tool.Command == "all" ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.IsEnabled = scanning;
@@ -191,15 +194,7 @@ public partial class MainWindow : Window, IDisposable
     {
         if (ToolPicker.SelectedItem is DashboardTool tool)
         {
-            ShowToolExplanation(tool);
-        }
-    }
-
-    private void ReportPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (ReportPicker.SelectedItem is ReportChoice choice)
-        {
-            ShowReport(choice.Report);
+            ShowToolContext(tool);
         }
     }
 
@@ -211,32 +206,16 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var selectedCommand = (ToolPicker.SelectedItem as DashboardTool)?.Command ?? "all";
-        var selectedReport = (ReportPicker.SelectedItem as ReportChoice)?.Report;
         Text.SetCulture(language.Code, remember: true);
         DashboardTools.Reload();
         ToolPicker.ItemsSource = DashboardTools.All;
         ToolPicker.SelectedItem = DashboardTools.ForCommand(selectedCommand) ?? DashboardTools.All[0];
         RefreshTrayText();
 
-        if (_reports.Count > 0)
+        if (ToolPicker.SelectedItem is DashboardTool selectedTool)
         {
-            RefreshReportChoices();
-            ReportPicker.SelectedItem = _reportChoices.FirstOrDefault(choice => ReferenceEquals(choice.Report, selectedReport))
-                ?? _reportChoices[0];
-            ShowReport(((ReportChoice)ReportPicker.SelectedItem).Report);
+            ShowToolContext(selectedTool);
         }
-        else
-        {
-            SummaryText.Text = Text["ReadySummary"];
-        }
-    }
-
-    private void RefreshReportChoices()
-    {
-        _reportChoices = _reports.Select(report => new ReportChoice(
-            DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool,
-            report)).ToList();
-        ReportPicker.ItemsSource = _reportChoices;
     }
 
     private void RefreshTrayText()
@@ -246,23 +225,51 @@ public partial class MainWindow : Window, IDisposable
         _trayIcon.Text = Text["TrayText"];
     }
 
-    private void ShowReport(ToolReport report)
+    private void ShowToolContext(DashboardTool tool)
     {
-        var findings = report.Items.Select(item => new FindingView(
-            item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
-            item.Title,
-            LocalizeFindingDetail(item),
-            item)).ToList();
+        ShowToolExplanation(tool);
+        var selection = DashboardReportRouter.Select(tool, _lastScanCommand, _reports);
+        if (!selection.Available)
+        {
+            _visibleReports = [];
+            ResultsGrid.ItemsSource = null;
+            SummaryText.Text = Text.Format("RunThisAnalysis", tool.Label);
+            SelectedFindingText.Text = Text["NoAnalysisForTool"];
+            CopyButton.IsEnabled = false;
+            OpenLocationButton.IsEnabled = false;
+            ExportButton.IsEnabled = false;
+            return;
+        }
+
+        ShowReports(selection.Reports, selection.Categorize);
+    }
+
+    private void ShowReports(IReadOnlyList<ToolReport> reports, bool categorize)
+    {
+        _visibleReports = reports;
+        var findings = reports.SelectMany(report => report.Items.Select(item =>
+        {
+            var title = categorize
+                ? $"{DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool} · {item.Title}"
+                : item.Title;
+            return new FindingView(
+                item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
+                title,
+                LocalizeFindingDetail(item),
+                item);
+        })).ToList();
         ResultsGrid.ItemsSource = findings;
-        SummaryText.Text = Text.Format("ResultsSummary", findings.Count, report.NotableCount);
+        SummaryText.Text = Text.Format("ResultsSummary", findings.Count, reports.Sum(report => report.NotableCount));
         SelectedFindingText.Text = findings.Count == 0
             ? Text["NoItems"]
             : Text["SelectFinding"];
+        ExportButton.IsEnabled = true;
+    }
 
-        if (DashboardTools.ForReport(report.Tool) is { } reportTool)
-        {
-            ShowToolExplanation(reportTool);
-        }
+    private void SettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new VirusTotalSettingsWindow { Owner = this };
+        _ = dialog.ShowDialog();
     }
 
     private string LocalizeFindingDetail(ReportItem item)
@@ -303,6 +310,7 @@ public partial class MainWindow : Window, IDisposable
             ? Visibility.Collapsed
             : Visibility.Visible;
         WindowsToolButton.Tag = tool.WindowsAction;
+        WindowsToolButton.Content = Text[WindowsActionLabel(tool.WindowsAction)];
     }
 
     private void ResultsGrid_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -347,7 +355,7 @@ public partial class MainWindow : Window, IDisposable
 
     private void ExportButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_reports.Count == 0)
+        if (_visibleReports.Count == 0)
         {
             return;
         }
@@ -369,7 +377,7 @@ public partial class MainWindow : Window, IDisposable
         TryUserAction(() =>
         {
             using var writer = File.CreateText(dialog.FileName);
-            ReportRenderer.RenderJson(_reports, writer);
+            ReportRenderer.RenderJson(_visibleReports, writer);
         }, Text.Format("Exported", dialog.FileName));
     }
 
@@ -393,19 +401,50 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-        ProcessStartInfo startInfo;
-        if (action == DashboardWindowsAction.Processes)
-        {
-            startInfo = new ProcessStartInfo(Path.Combine(system, "Taskmgr.exe")) { UseShellExecute = false };
-        }
-        else
-        {
-            startInfo = new ProcessStartInfo(Path.Combine(system, "mmc.exe")) { UseShellExecute = false };
-            startInfo.ArgumentList.Add(Path.Combine(system,
-                action == DashboardWindowsAction.Firewall ? "wf.msc" : "certlm.msc"));
-        }
+        var startInfo = WindowsActionStartInfo(action);
         TryUserAction(() => _ = Process.Start(startInfo), Text["WindowsToolOpened"]);
+    }
+
+    private static string WindowsActionLabel(DashboardWindowsAction action) => action switch
+    {
+        DashboardWindowsAction.StartupApps => "OpenStartupSettings",
+        DashboardWindowsAction.Privacy => "OpenPrivacySettings",
+        DashboardWindowsAction.Network => "OpenResourceMonitor",
+        DashboardWindowsAction.NetworkSettings => "OpenNetworkSettings",
+        DashboardWindowsAction.Firewall => "OpenFirewall",
+        DashboardWindowsAction.Processes => "OpenTaskManager",
+        DashboardWindowsAction.InstalledApps => "OpenInstalledApps",
+        DashboardWindowsAction.Certificates => "OpenCertificates",
+        _ => "OpenWindowsTool",
+    };
+
+    private static ProcessStartInfo WindowsActionStartInfo(DashboardWindowsAction action)
+    {
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        if (action is DashboardWindowsAction.Processes or DashboardWindowsAction.Network)
+        {
+            var executable = action == DashboardWindowsAction.Processes ? "Taskmgr.exe" : "resmon.exe";
+            return new ProcessStartInfo(Path.Combine(system, executable)) { UseShellExecute = false };
+        }
+
+        if (action is DashboardWindowsAction.Firewall or DashboardWindowsAction.Certificates)
+        {
+            var startInfo = new ProcessStartInfo(Path.Combine(system, "mmc.exe")) { UseShellExecute = false };
+            startInfo.ArgumentList.Add(Path.Combine(
+                system,
+                action == DashboardWindowsAction.Firewall ? "wf.msc" : "certlm.msc"));
+            return startInfo;
+        }
+
+        var settingsUri = action switch
+        {
+            DashboardWindowsAction.StartupApps => "ms-settings:startupapps",
+            DashboardWindowsAction.Privacy => "ms-settings:privacy-webcam",
+            DashboardWindowsAction.NetworkSettings => "ms-settings:network-status",
+            DashboardWindowsAction.InstalledApps => "ms-settings:appsfeatures",
+            _ => throw new InvalidOperationException("No Windows action is configured."),
+        };
+        return new ProcessStartInfo(settingsUri) { UseShellExecute = true };
     }
 
     private void TryUserAction(Action action, string successMessage)
@@ -479,13 +518,16 @@ public partial class MainWindow : Window, IDisposable
 
 public sealed record FindingView(string SeverityLabel, string Title, string Detail, ReportItem Item);
 
-public sealed record ReportChoice(string Label, ToolReport Report);
-
 public enum DashboardWindowsAction
 {
     None,
+    StartupApps,
+    Privacy,
+    Network,
+    NetworkSettings,
     Firewall,
     Processes,
+    InstalledApps,
     Certificates,
 }
 
@@ -509,14 +551,14 @@ public static class DashboardTools
     private static IReadOnlyList<DashboardTool> Build() =>
     [
         Tool("Overview", "all", "all"),
-        Tool("Persistence", "persistence", "persistence"),
-        Tool("Av", "av", "camera-mic"),
-        Tool("Network", "net", "connections"),
-        Tool("Dns", "dns", "dns"),
+        Tool("Persistence", "persistence", "persistence", DashboardWindowsAction.StartupApps),
+        Tool("Av", "av", "camera-mic", DashboardWindowsAction.Privacy),
+        Tool("Network", "net", "connections", DashboardWindowsAction.Network),
+        Tool("Dns", "dns", "dns", DashboardWindowsAction.NetworkSettings),
         Tool("Firewall", "firewall", "firewall", DashboardWindowsAction.Firewall),
         Tool("Processes", "processes", "processes", DashboardWindowsAction.Processes),
-        Tool("Modules", "modules", "modules"),
-        Tool("Extensions", "extensions", "extensions"),
+        Tool("Modules", "modules", "modules", DashboardWindowsAction.Processes),
+        Tool("Extensions", "extensions", "extensions", DashboardWindowsAction.InstalledApps),
         Tool("Certificates", "certs", "certificates", DashboardWindowsAction.Certificates),
         Tool("Hosts", "hosts", "hosts"),
     ];

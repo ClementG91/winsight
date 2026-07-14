@@ -1,4 +1,5 @@
 using WinSight.Application;
+using WinSight.Reporting;
 using Xunit;
 
 namespace WinSight.Dashboard.Tests;
@@ -33,5 +34,50 @@ public sealed class DashboardToolsTests
             Assert.Same(tool, DashboardTools.ForCommand(tool.Command));
             Assert.Same(tool, DashboardTools.ForReport(tool.ReportName));
         });
+    }
+}
+
+[Collection(LocalizationCollection.Name)]
+public sealed class DashboardReportRouterTests
+{
+    private static readonly ToolReport Persistence = new("persistence", "one", []);
+    private static readonly ToolReport Connections = new("connections", "two", []);
+
+    [Fact]
+    public void OverviewScan_FeedsOverviewAndOnlyTheSelectedCategory()
+    {
+        var reports = new[] { Persistence, Connections };
+
+        var overview = DashboardReportRouter.Select(DashboardTools.ForCommand("all")!, "all", reports);
+        var network = DashboardReportRouter.Select(DashboardTools.ForCommand("net")!, "all", reports);
+
+        Assert.True(overview.Available);
+        Assert.True(overview.Categorize);
+        Assert.Equal(reports, overview.Reports);
+        Assert.False(network.Categorize);
+        Assert.Equal([Connections], network.Reports);
+    }
+
+    [Fact]
+    public void CategoryWithoutReport_DoesNotReuseAnotherCategory()
+    {
+        var selection = DashboardReportRouter.Select(
+            DashboardTools.ForCommand("net")!,
+            "persistence",
+            [Persistence]);
+
+        Assert.False(selection.Available);
+        Assert.Empty(selection.Reports);
+    }
+
+    [Fact]
+    public void Overview_DoesNotMisrepresentASingleScanAsACompleteOverview()
+    {
+        var selection = DashboardReportRouter.Select(
+            DashboardTools.ForCommand("all")!,
+            "persistence",
+            [Persistence]);
+
+        Assert.False(selection.Available);
     }
 }

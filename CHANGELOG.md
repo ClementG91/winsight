@@ -2,6 +2,35 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.8.0 — 2026-07-14
+
+### Context-aware dashboard and secure optional reputation
+- Route completed overview reports by navigation category: the overview shows the
+  complete balanced scan, while Network, DNS, Persistence and every other page show
+  only their own evidence. A category that has not run displays an explicit prompt
+  instead of stale findings from another scanner.
+- Remove the redundant report selector and make JSON export follow the active view,
+  so the visible scope and exported scope cannot silently disagree.
+- Replace the oversized stop control with a compact, right-aligned button while
+  retaining the safe between-step cancellation behaviour and explanatory tooltip.
+- Rebuild the header layout for consistent vertical alignment and add an accessible
+  Settings entry in English, French and Spanish.
+- Add an in-app VirusTotal setup dialog. Each user supplies their own key, which is
+  encrypted at rest with Windows DPAPI for that account, never exported, and applied
+  without restarting. Environment configuration remains authoritative for managed
+  automation; MCP scans still prohibit all reputation-network requests.
+- Enforce Community-key allowances across dashboard and CLI processes with persistent
+  rolling-minute (4), UTC daily (500) and UTC monthly (15,500) counters. Accounting
+  fails closed, HTTP quota errors are never retried, and the UI/docs clearly reserve
+  Community keys for personal/non-commercial use. Identical hashes within one scan
+  are deduplicated before consuming quota.
+- Add explicit, user-initiated links to trusted Windows surfaces for each relevant
+  category: Startup apps, privacy, Resource Monitor, network settings, Firewall,
+  Task Manager, installed apps and certificate management. WinSight itself remains
+  read-only and never deletes, kills, disables or blocks an item.
+- Add regression tests for cross-tab isolation, incomplete overview state, localized
+  resource parity, VirusTotal key validation and DPAPI store round trips.
+
 ## v0.7.2 — 2026-07-14
 
 ### Honest persistence file and signature states

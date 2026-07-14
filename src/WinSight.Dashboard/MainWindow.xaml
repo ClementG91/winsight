@@ -14,20 +14,33 @@
             <RowDefinition Height="34" />
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="#0F172A" Padding="26,14">
-            <DockPanel>
-                <Image DockPanel.Dock="Left" Width="50" Height="50" Margin="0,0,14,0"
-                       Source="Assets/winsight-logo.png" Stretch="Uniform"
-                       automation:AutomationProperties.Name="WinSight" />
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}"
-                               Foreground="#CBD5E1" FontSize="13" />
+        <Border Grid.Row="0" Background="#0F172A" Padding="26,12">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Image Width="50" Height="50" Margin="0,0,14,0"
+                           Source="Assets/winsight-logo.png" Stretch="Uniform"
+                           automation:AutomationProperties.Name="WinSight" />
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
+                        <TextBlock Text="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}"
+                                   Foreground="#CBD5E1" FontSize="13" />
+                    </StackPanel>
                 </StackPanel>
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="SettingsButton" Height="32" Margin="0,0,16,0" Padding="12,0"
+                            VerticalContentAlignment="Center"
+                            Content="{Binding [SettingsButton], Source={x:Static local:LocalizationManager.Instance}}"
+                            Click="SettingsButton_Click"
+                            automation:AutomationProperties.Name="{Binding [SettingsAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                     <TextBlock Text="{Binding [LanguageLabel], Source={x:Static local:LocalizationManager.Instance}}"
                                Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,7,0" />
-                    <ComboBox x:Name="LanguagePicker" Width="105" Margin="0,0,14,0"
+                    <ComboBox x:Name="LanguagePicker" Width="112" Height="32" Margin="0,0,14,0"
+                              VerticalContentAlignment="Center" Padding="7,0"
                               DisplayMemberPath="NativeName" SelectedValuePath="Code"
                               SelectionChanged="LanguagePicker_SelectionChanged"
                               automation:AutomationProperties.Name="{Binding [LanguagePickerAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
@@ -36,7 +49,7 @@
                                    Foreground="#86EFAC" FontWeight="SemiBold" />
                     </Border>
                 </StackPanel>
-            </DockPanel>
+            </Grid>
         </Border>
 
         <Grid Grid.Row="1" Margin="20">
@@ -117,12 +130,19 @@
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="Auto" />
                         </Grid.RowDefinitions>
-                        <DockPanel>
-                            <TextBlock x:Name="ProgressText" Foreground="#1E3A8A" FontWeight="SemiBold" />
-                            <Button x:Name="CancelButton" DockPanel.Dock="Right"
-                                    Content="{Binding [StopAfterStep], Source={x:Static local:LocalizationManager.Instance}}"
-                                    Padding="10,4" Visibility="Collapsed" Click="CancelButton_Click" />
-                        </DockPanel>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="ProgressText" VerticalAlignment="Center"
+                                       Foreground="#1E3A8A" FontWeight="SemiBold" />
+                            <Button x:Name="CancelButton" Grid.Column="1" Margin="12,0,0,0"
+                                    Content="{Binding [StopAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
+                                    ToolTip="{Binding [StopAfterStep], Source={x:Static local:LocalizationManager.Instance}}"
+                                    Padding="12,4" MinWidth="0" HorizontalAlignment="Right"
+                                    Visibility="Collapsed" Click="CancelButton_Click" />
+                        </Grid>
                         <ProgressBar x:Name="ScanProgressBar" Grid.Row="1" Height="8" Margin="0,10,0,0"
                                      Minimum="0" Maximum="100" Foreground="#2563EB"
                                      automation:AutomationProperties.Name="{Binding [ProgressAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
@@ -133,9 +153,6 @@
                     <TextBlock x:Name="SummaryText" VerticalAlignment="Center" FontSize="15" FontWeight="SemiBold"
                                Foreground="#334155"
                                Text="{Binding [ReadySummary], Source={x:Static local:LocalizationManager.Instance}}" />
-                    <ComboBox x:Name="ReportPicker" DockPanel.Dock="Right" Width="220" Visibility="Collapsed"
-                              DisplayMemberPath="Label" SelectionChanged="ReportPicker_SelectionChanged"
-                              automation:AutomationProperties.Name="{Binding [ReportPickerAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                 </DockPanel>
 
                 <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">

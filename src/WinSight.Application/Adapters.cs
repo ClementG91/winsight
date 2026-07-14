@@ -140,21 +140,38 @@ public static class Adapters
         bool allowNetworkLookups)
     {
         var results = new Dictionary<string, VtVerdict>(StringComparer.OrdinalIgnoreCase);
+        if (!allowNetworkLookups)
+        {
+            return results;
+        }
         var apiKey = Environment.GetEnvironmentVariable("WINSIGHT_VT_KEY");
-        if (!allowNetworkLookups || string.IsNullOrWhiteSpace(apiKey))
+        if (string.IsNullOrWhiteSpace(apiKey))
         {
             return results;
         }
         var client = new VirusTotalClient(apiKey);
-        // The VT free tier allows 4 requests/minute — a scan is a single burst, so
-        // anything past 4 would just get rate-limited (429 → null) and burn quota.
+        // This per-scan cap limits work even for premium keys. The persistent,
+        // cross-process guard below additionally enforces the Community minute,
+        // daily and monthly allowances and fails closed when it cannot account.
         const int cap = 4;
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in imagePaths.Where(p => seen.Add(p)).Take(cap))
+        var candidates = imagePaths
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => (Path: path, Sha256: HashUtil.Sha256File(path)))
+            .Where(candidate => candidate.Sha256 is not null)
+            .GroupBy(candidate => candidate.Sha256!, StringComparer.OrdinalIgnoreCase)
+            .Take(cap);
+        foreach (var candidateGroup in candidates)
         {
-            if (HashUtil.Sha256File(path) is { } sha && client.Lookup(sha) is { } verdict)
+            if (!VirusTotalQuotaLimiter.Default.TryAcquire(out _))
             {
-                results[path] = verdict;
+                break;
+            }
+            if (client.Lookup(candidateGroup.Key) is { } verdict)
+            {
+                foreach (var candidate in candidateGroup)
+                {
+                    results[candidate.Path] = verdict;
+                }
             }
         }
         return results;

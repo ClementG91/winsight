@@ -45,17 +45,34 @@ open a network port. See [`MCP.md`](MCP.md) before connecting an AI client.
 ## Optional VirusTotal reputation
 
 VirusTotal is disabled by default. Each user who wants reputation enrichment must
-create their **own** VirusTotal Community account/API key and set it in their Windows
-user environment. The project maintainer must never embed, publish or share a single
-project key: that would expose a credential, mix users' quota and remove meaningful
-consent for sending hashes to a third party.
+create their **own** VirusTotal Community account/API key. The project maintainer must
+never embed, publish or share a single project key: that would expose a credential,
+mix users' quota and remove meaningful consent for sending hashes to a third party.
+
+For an interactive installation, open **Settings** in the WinSight header, paste the
+key and choose **Save securely**. The key is encrypted at rest with Windows DPAPI for
+the current account, is available immediately, and is never written to reports or
+exports. Choose **Disable** in the same dialog to remove the encrypted key.
+
+For a standard Community key, WinSight coordinates dashboard and CLI requests with a
+persistent per-user guard: no more than 4 lookups in any rolling 60-second window,
+500 in a UTC day, or 15,500 in a UTC month. It does not retry a rejected or HTTP 429
+request. Activity made through the VirusTotal website or another application is not
+visible to this local counter, so the provider's remaining quota is always final.
+Community access is for personal/non-commercial use only; a business, commercial or
+government workflow requires an appropriate VirusTotal Premium agreement. See the
+official [Public API rules](https://docs.virustotal.com/reference/getting-started)
+and [quota reset behaviour](https://docs.virustotal.com/docs/consumption-quotas-handled).
+
+Managed deployments and portable CLI automation can instead set the user environment
+variable below. It takes precedence over the dashboard's encrypted setting:
 
 ```powershell
 # Run as the normal Windows user; no Administrator shell is required.
 [Environment]::SetEnvironmentVariable("WINSIGHT_VT_KEY", "PASTE-YOUR-OWN-KEY", "User")
 ```
 
-Close and reopen WinSight after setting it. To disable the integration again:
+Close and reopen WinSight after setting an environment variable. To remove it again:
 
 ```powershell
 [Environment]::SetEnvironmentVariable("WINSIGHT_VT_KEY", $null, "User")
@@ -78,7 +95,7 @@ inside the archive together, including the `_manifest` SBOM directory.
 Verify a download in PowerShell:
 
 ```powershell
-$artifact = "winsight-v0.7.2-win-x64-setup.exe"
+$artifact = "winsight-v0.8.0-win-x64-setup.exe"
 $expected = (Get-Content "$artifact.sha256").Split()[0]
 $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "WinSight checksum mismatch" }
@@ -93,10 +110,10 @@ protect integrity and provenance, but they are not a substitute for Authenticode
 
 ```powershell
 # Per-user, silent, no automatic launch
-./winsight-v0.7.2-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+./winsight-v0.8.0-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Explicit language: english, french, or spanish
-./winsight-v0.7.2-win-x64-setup.exe /LANG=french
+./winsight-v0.8.0-win-x64-setup.exe /LANG=french
 ```
 
 Use the architecture-specific artifact in deployment tooling. Do not redistribute

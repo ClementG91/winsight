@@ -9,6 +9,27 @@
   <data name="LocalAnalysis" xml:space="preserve"><value>● Analyse locale</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Langue</value></data>
   <data name="LanguagePickerAutomation" xml:space="preserve"><value>Langue de l’interface</value></data>
+  <data name="SettingsButton" xml:space="preserve"><value>⚙ Paramètres</value></data>
+  <data name="SettingsAutomation" xml:space="preserve"><value>Ouvrir les paramètres des services facultatifs</value></data>
+  <data name="SettingsTitle" xml:space="preserve"><value>Paramètres WinSight</value></data>
+  <data name="VtSettingsHeading" xml:space="preserve"><value>Réputation VirusTotal</value></data>
+  <data name="VtSettingsDescription" xml:space="preserve"><value>Facultatif. WinSight envoie uniquement le hash SHA-256 d’un fichier existant notable à VirusTotal. Aucun fichier n’est téléversé. L’accès MCP n’active jamais ces requêtes.</value></data>
+  <data name="VtQuotaPolicy" xml:space="preserve"><value>Protections Community : 4 recherches par minute glissante, 500/jour et 15 500/mois (UTC). Usage personnel/non commercial uniquement ; un usage professionnel exige un contrat VirusTotal Premium.</value></data>
+  <data name="VtApiKeyLabel" xml:space="preserve"><value>Votre clé API VirusTotal</value></data>
+  <data name="VtApiKeyHint" xml:space="preserve"><value>La clé est chiffrée pour votre compte Windows (DPAPI) et n’apparaît jamais dans les exports. WINSIGHT_VT_KEY reste disponible pour l’automatisation et reste prioritaire.</value></data>
+  <data name="VtStatusEnabled" xml:space="preserve"><value>Activé — une clé chiffrée est configurée pour ce compte Windows.</value></data>
+  <data name="VtStatusDisabled" xml:space="preserve"><value>Désactivé — les analyses restent entièrement locales.</value></data>
+  <data name="VtStatusEnvironment" xml:space="preserve"><value>Activé pour cette session. Une clé fournie par l’environnement reste prioritaire.</value></data>
+  <data name="VtGetKey" xml:space="preserve"><value>Obtenir ma clé</value></data>
+  <data name="VtDisable" xml:space="preserve"><value>Désactiver</value></data>
+  <data name="VtSave" xml:space="preserve"><value>Enregistrer sûrement</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Annuler</value></data>
+  <data name="VtInvalidKey" xml:space="preserve"><value>Saisissez une clé API VirusTotal valide (32 à 128 lettres, chiffres, « - » ou « _ »).</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>Activé — la clé API a été enregistrée de manière sécurisée.</value></data>
+  <data name="VtSavedEnvironment" xml:space="preserve"><value>Clé chiffrée enregistrée. WINSIGHT_VT_KEY reste active et prioritaire pour cette session.</value></data>
+  <data name="VtDisabled" xml:space="preserve"><value>VirusTotal est désactivé pour WinSight.</value></data>
+  <data name="VtDisabledEnvironment" xml:space="preserve"><value>Clé chiffrée supprimée. VirusTotal reste activé par WINSIGHT_VT_KEY ; supprimez cette variable pour le désactiver.</value></data>
+  <data name="VtSettingsError" xml:space="preserve"><value>Le paramètre n’a pas pu être modifié : {0}</value></data>
   <data name="ChooseCheckTitle" xml:space="preserve"><value>Que voulez-vous vérifier ?</value></data>
   <data name="ChooseCheckSubtitle" xml:space="preserve"><value>Choisissez une analyse. La vue d’ensemble est recommandée pour commencer.</value></data>
   <data name="ToolPickerAutomation" xml:space="preserve"><value>Type d’analyse</value></data>
@@ -17,9 +38,20 @@
   <data name="StartAnalysis" xml:space="preserve"><value>Démarrer l’analyse</value></data>
   <data name="StartAnalysisAutomation" xml:space="preserve"><value>Démarrer l’analyse de sécurité sélectionnée</value></data>
   <data name="OpenWindowsTool" xml:space="preserve"><value>Ouvrir l’outil Windows</value></data>
+  <data name="OpenStartupSettings" xml:space="preserve"><value>Ouvrir les applications au démarrage</value></data>
+  <data name="OpenPrivacySettings" xml:space="preserve"><value>Ouvrir les paramètres de confidentialité</value></data>
+  <data name="OpenResourceMonitor" xml:space="preserve"><value>Ouvrir le Moniteur de ressources</value></data>
+  <data name="OpenNetworkSettings" xml:space="preserve"><value>Ouvrir les paramètres réseau</value></data>
+  <data name="OpenFirewall" xml:space="preserve"><value>Ouvrir le Pare-feu Windows</value></data>
+  <data name="OpenTaskManager" xml:space="preserve"><value>Ouvrir le Gestionnaire des tâches</value></data>
+  <data name="OpenInstalledApps" xml:space="preserve"><value>Ouvrir les applications installées</value></data>
+  <data name="OpenCertificates" xml:space="preserve"><value>Ouvrir les certificats</value></data>
+  <data name="StopAnalysis" xml:space="preserve"><value>Arrêter</value></data>
   <data name="StopAfterStep" xml:space="preserve"><value>Arrêter après cette étape</value></data>
   <data name="ProgressAutomation" xml:space="preserve"><value>Progression de l’analyse</value></data>
   <data name="ReadySummary" xml:space="preserve"><value>Prêt. Sélectionnez une analyse puis cliquez sur Démarrer.</value></data>
+  <data name="RunThisAnalysis" xml:space="preserve"><value>Lancez « {0} » pour afficher ses propres résultats.</value></data>
+  <data name="NoAnalysisForTool" xml:space="preserve"><value>Aucun résultat d’une autre catégorie n’est affiché ici. Lancez ce contrôle ou la vue d’ensemble.</value></data>
   <data name="ReportPickerAutomation" xml:space="preserve"><value>Rapport affiché</value></data>
   <data name="ResultsAutomation" xml:space="preserve"><value>Résultats de sécurité</value></data>
   <data name="PriorityHeader" xml:space="preserve"><value>Priorité</value></data>
@@ -30,7 +62,7 @@
   <data name="OpenFile" xml:space="preserve"><value>Voir le fichier</value></data>
   <data name="CopyDetails" xml:space="preserve"><value>Copier les détails</value></data>
   <data name="ExportJson" xml:space="preserve"><value>Exporter en JSON</value></data>
-  <data name="ReadOnlyFooter" xml:space="preserve"><value>Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal reste désactivé sans WINSIGHT_VT_KEY.</value></data>
+  <data name="ReadOnlyFooter" xml:space="preserve"><value>Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal est facultatif dans Paramètres.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Ouvrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight — sécurité locale</value></data>

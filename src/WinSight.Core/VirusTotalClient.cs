@@ -13,7 +13,9 @@ public sealed record VtVerdict(int Malicious, int Suspicious, int Total, string 
 /// Optional VirusTotal file-reputation lookup by SHA-256. STRICTLY opt-in: it only
 /// runs when the user supplies their own API key, and is the ONLY thing in WinSight
 /// that touches the network — the tool is local-only by default. Failures (no result,
-/// rate limit, offline) return null; a reputation lookup never blocks a scan.
+/// rate limit, offline) return null; a reputation lookup never blocks a scan and is
+/// never automatically retried. Cross-process quota enforcement lives in the shared
+/// application adapter so every scanner uses the same accounting policy.
 /// </summary>
 public sealed class VirusTotalClient
 {

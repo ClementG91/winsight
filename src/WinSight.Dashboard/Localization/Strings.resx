@@ -9,6 +9,27 @@
   <data name="LocalAnalysis" xml:space="preserve"><value>● Local analysis</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Language</value></data>
   <data name="LanguagePickerAutomation" xml:space="preserve"><value>Interface language</value></data>
+  <data name="SettingsButton" xml:space="preserve"><value>⚙ Settings</value></data>
+  <data name="SettingsAutomation" xml:space="preserve"><value>Open optional service settings</value></data>
+  <data name="SettingsTitle" xml:space="preserve"><value>WinSight settings</value></data>
+  <data name="VtSettingsHeading" xml:space="preserve"><value>VirusTotal reputation</value></data>
+  <data name="VtSettingsDescription" xml:space="preserve"><value>Optional. WinSight sends only the SHA-256 hash of a noteworthy existing file to VirusTotal. No file is uploaded. MCP access never enables these requests.</value></data>
+  <data name="VtQuotaPolicy" xml:space="preserve"><value>Community safeguards: 4 lookups per rolling minute, 500/day and 15,500/month (UTC). Personal/non-commercial use only; business use requires a VirusTotal Premium agreement.</value></data>
+  <data name="VtApiKeyLabel" xml:space="preserve"><value>Your VirusTotal API key</value></data>
+  <data name="VtApiKeyHint" xml:space="preserve"><value>The key is encrypted for your Windows account (DPAPI) and is never included in exports. WINSIGHT_VT_KEY remains available for automation and takes precedence.</value></data>
+  <data name="VtStatusEnabled" xml:space="preserve"><value>Enabled — an encrypted key is configured for this Windows account.</value></data>
+  <data name="VtStatusDisabled" xml:space="preserve"><value>Disabled — scans remain fully local.</value></data>
+  <data name="VtStatusEnvironment" xml:space="preserve"><value>Enabled for this session. An environment-provided key takes precedence.</value></data>
+  <data name="VtGetKey" xml:space="preserve"><value>Get my key</value></data>
+  <data name="VtDisable" xml:space="preserve"><value>Disable</value></data>
+  <data name="VtSave" xml:space="preserve"><value>Save securely</value></data>
+  <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="VtInvalidKey" xml:space="preserve"><value>Enter a valid VirusTotal API key (32 to 128 letters, digits, “-” or “_”).</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>Enabled — the API key has been stored securely.</value></data>
+  <data name="VtSavedEnvironment" xml:space="preserve"><value>Encrypted key saved. WINSIGHT_VT_KEY remains active and takes precedence for this session.</value></data>
+  <data name="VtDisabled" xml:space="preserve"><value>VirusTotal is disabled for WinSight.</value></data>
+  <data name="VtDisabledEnvironment" xml:space="preserve"><value>Encrypted key removed. VirusTotal remains enabled by WINSIGHT_VT_KEY; remove that variable to disable it.</value></data>
+  <data name="VtSettingsError" xml:space="preserve"><value>The setting could not be changed: {0}</value></data>
   <data name="ChooseCheckTitle" xml:space="preserve"><value>What would you like to check?</value></data>
   <data name="ChooseCheckSubtitle" xml:space="preserve"><value>Choose a check. The overview is recommended to get started.</value></data>
   <data name="ToolPickerAutomation" xml:space="preserve"><value>Analysis type</value></data>
@@ -17,9 +38,20 @@
   <data name="StartAnalysis" xml:space="preserve"><value>Start analysis</value></data>
   <data name="StartAnalysisAutomation" xml:space="preserve"><value>Start the selected security analysis</value></data>
   <data name="OpenWindowsTool" xml:space="preserve"><value>Open Windows tool</value></data>
+  <data name="OpenStartupSettings" xml:space="preserve"><value>Open Startup apps</value></data>
+  <data name="OpenPrivacySettings" xml:space="preserve"><value>Open privacy settings</value></data>
+  <data name="OpenResourceMonitor" xml:space="preserve"><value>Open Resource Monitor</value></data>
+  <data name="OpenNetworkSettings" xml:space="preserve"><value>Open network settings</value></data>
+  <data name="OpenFirewall" xml:space="preserve"><value>Open Windows Firewall</value></data>
+  <data name="OpenTaskManager" xml:space="preserve"><value>Open Task Manager</value></data>
+  <data name="OpenInstalledApps" xml:space="preserve"><value>Open installed apps</value></data>
+  <data name="OpenCertificates" xml:space="preserve"><value>Open certificates</value></data>
+  <data name="StopAnalysis" xml:space="preserve"><value>Stop</value></data>
   <data name="StopAfterStep" xml:space="preserve"><value>Stop after this step</value></data>
   <data name="ProgressAutomation" xml:space="preserve"><value>Analysis progress</value></data>
   <data name="ReadySummary" xml:space="preserve"><value>Ready. Select an analysis, then click Start.</value></data>
+  <data name="RunThisAnalysis" xml:space="preserve"><value>Run “{0}” to display its own results.</value></data>
+  <data name="NoAnalysisForTool" xml:space="preserve"><value>No result from another category is shown here. Start this check or run the overview.</value></data>
   <data name="ReportPickerAutomation" xml:space="preserve"><value>Displayed report</value></data>
   <data name="ResultsAutomation" xml:space="preserve"><value>Security results</value></data>
   <data name="PriorityHeader" xml:space="preserve"><value>Priority</value></data>
@@ -30,7 +62,7 @@
   <data name="OpenFile" xml:space="preserve"><value>View file</value></data>
   <data name="CopyDetails" xml:space="preserve"><value>Copy details</value></data>
   <data name="ExportJson" xml:space="preserve"><value>Export as JSON</value></data>
-  <data name="ReadOnlyFooter" xml:space="preserve"><value>Read-only: WinSight never deletes or blocks automatically. VirusTotal stays disabled without WINSIGHT_VT_KEY.</value></data>
+  <data name="ReadOnlyFooter" xml:space="preserve"><value>Read-only: WinSight never deletes or blocks automatically. VirusTotal is optional in Settings.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Open WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight — local security</value></data>

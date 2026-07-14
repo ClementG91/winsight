@@ -71,6 +71,12 @@ agent.**
 
 - **Local-only, no telemetry.** A security tool that phones home is a contradiction.
 - **Every network/VT lookup is opt-in and user-keyed.**
+- Interactive VirusTotal credentials are protected per Windows user with DPAPI;
+  managed automation may use `WINSIGHT_VT_KEY`. Neither path is exposed to MCP or
+  report serialization.
+- Community quotas are enforced by a fail-closed per-user counter shared across
+  WinSight processes (rolling minute plus UTC day/month); HTTP quota responses are
+  not retried.
 - **Reproducible releases** with signed Git commits/tags, SHA-256, build provenance
   and SPDX SBOM attestations. Authenticode signing is mandatory once a public
   code-signing certificate is available; the unsigned-publisher limitation is

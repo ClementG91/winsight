@@ -1,0 +1,63 @@
+<Window x:Class="WinSight.Dashboard.VirusTotalSettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WinSight.Dashboard"
+        xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
+        Title="{Binding [SettingsTitle], Source={x:Static local:LocalizationManager.Instance}}"
+        Icon="Assets/winsight-logo.png" Width="540" Height="450"
+        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F8FAFC"
+        ShowInTaskbar="False">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="{Binding [VtSettingsHeading], Source={x:Static local:LocalizationManager.Instance}}"
+                   FontSize="22" FontWeight="SemiBold" Foreground="#0F172A" />
+        <StackPanel Grid.Row="1" Margin="0,8,0,0">
+            <TextBlock TextWrapping="Wrap" Foreground="#475569"
+                       Text="{Binding [VtSettingsDescription], Source={x:Static local:LocalizationManager.Instance}}" />
+            <TextBlock Margin="0,7,0,0" TextWrapping="Wrap" Foreground="#9A3412" FontWeight="SemiBold"
+                       Text="{Binding [VtQuotaPolicy], Source={x:Static local:LocalizationManager.Instance}}" />
+        </StackPanel>
+
+        <Border Grid.Row="2" Margin="0,18,0,0" Padding="12,9" CornerRadius="8"
+                Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1">
+            <TextBlock x:Name="StatusText" Foreground="#1E3A8A" FontWeight="SemiBold" TextWrapping="Wrap" />
+        </Border>
+
+        <StackPanel Grid.Row="3" Margin="0,18,0,0">
+            <TextBlock Text="{Binding [VtApiKeyLabel], Source={x:Static local:LocalizationManager.Instance}}"
+                       FontWeight="SemiBold" Foreground="#0F172A" />
+            <PasswordBox x:Name="ApiKeyBox" Height="36" Margin="0,7,0,0" Padding="9,5"
+                         VerticalContentAlignment="Center" MaxLength="128"
+                         automation:AutomationProperties.Name="{Binding [VtApiKeyLabel], Source={x:Static local:LocalizationManager.Instance}}" />
+            <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" Foreground="#64748B" FontSize="12"
+                       Text="{Binding [VtApiKeyHint], Source={x:Static local:LocalizationManager.Instance}}" />
+        </StackPanel>
+
+        <Grid Grid.Row="5" Margin="0,22,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Content="{Binding [VtGetKey], Source={x:Static local:LocalizationManager.Instance}}"
+                    Click="GetKeyButton_Click" />
+            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <Button Content="{Binding [VtDisable], Source={x:Static local:LocalizationManager.Instance}}"
+                        Click="DisableButton_Click" />
+                <Button Content="{Binding [Cancel], Source={x:Static local:LocalizationManager.Instance}}"
+                        IsCancel="True" />
+                <Button Content="{Binding [VtSave], Source={x:Static local:LocalizationManager.Instance}}"
+                        Background="#2563EB" Foreground="White" BorderThickness="0"
+                        IsDefault="True" Click="SaveButton_Click" />
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>
