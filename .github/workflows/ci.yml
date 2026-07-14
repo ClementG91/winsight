@@ -1,9 +1,5 @@
 name: ci
 
-# WinSight is net8.0-windows (Win32/registry/Authenticode), so CI runs on Windows.
-# This is the compiler of record — the project is authored on Linux but built/tested
-# here.
-
 on:
   push:
     branches: [main]
@@ -18,14 +14,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-test:
+  quality:
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: "8.0.x"
+          architecture: x64
           cache: true
           cache-dependency-path: Directory.Packages.props
 
@@ -43,29 +40,64 @@ jobs:
         run: ./scripts/Test-VulnerablePackages.ps1
 
       - name: Test
-        run: dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=tests"
-
-      - name: Verify release publishes
-        shell: pwsh
-        run: |
-          dotnet publish src/WinSight.Cli/WinSight.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/cli
-          dotnet publish src/WinSight.Dashboard/WinSight.Dashboard.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/dashboard
-          & ./artifacts/cli/winsight.exe --version
-          foreach ($language in @("en", "fr", "es")) {
-            & ./artifacts/dashboard/winsight-dashboard.exe --language $language --smoke-test
-            if ($LASTEXITCODE -ne 0) { throw "Dashboard $language smoke test failed with exit code $LASTEXITCODE" }
-          }
+        run: dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=tests-x64"
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: test-results
+          name: test-results-x64
           path: "**/TestResults/*.trx"
           if-no-files-found: ignore
 
-      - name: Upload release candidates
+  package:
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: windows-latest
+            installer_language: french
+          - architecture: arm64
+            runner: windows-11-arm
+            installer_language: spanish
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "8.0.x"
+          architecture: ${{ matrix.architecture }}
+          cache: true
+          cache-dependency-path: Directory.Packages.props
+
+      - name: Build release candidate
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content Directory.Build.props
+          $version = $props.Project.PropertyGroup.Version
+          ./scripts/Build-Release.ps1 -Version $version -Architectures ${{ matrix.architecture }}
+
+      - name: Test native installer lifecycle
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content Directory.Build.props
+          $version = $props.Project.PropertyGroup.Version
+          ./scripts/Test-Installer.ps1 `
+            -InstallerPath "out/release/winsight-v$version-win-${{ matrix.architecture }}-setup.exe" `
+            -Version $version `
+            -Architecture ${{ matrix.architecture }} `
+            -InstallerLanguage ${{ matrix.installer_language }}
+
+      - name: Upload release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: winsight-win-x64
-          path: artifacts/**
+          name: winsight-win-${{ matrix.architecture }}
+          path: |
+            out/release/*.zip
+            out/release/*.exe
+            out/release/*.json
+            out/release/*.sha256
+          if-no-files-found: error

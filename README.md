@@ -72,12 +72,25 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
 ## Stack (locked — see `docs/ARCHITECTURE.md`)
 
 - **App + user-mode tools:** C# / **.NET 8**, `CsWin32` for P/Invoke, `TraceEvent`
-  for ETW, WinUI 3 (or WPF) tray/dashboard. Fastest path with the broadest Win32
+  for ETW, WPF tray/dashboard. Fastest path with the broadest Win32
   coverage.
 - **Perf-critical core / future agent:** Rust or C++ if/when needed.
 - **Kernel driver (Phase 3/4):** C/C++ KMDF minifilter (or Rust `windows-drivers`).
 
-## Build
+## Install
+
+Download the installer matching the PC from the
+[latest release](https://github.com/ClementG91/winsight/releases/latest):
+
+- Intel/AMD 64-bit Windows: `winsight-vX.Y.Z-win-x64-setup.exe`
+- Windows on Arm: `winsight-vX.Y.Z-win-arm64-setup.exe`
+
+The installer is per-user and does not require .NET or administrator privileges.
+Portable ZIPs are published for both architectures. See
+[`docs/INSTALLATION.md`](docs/INSTALLATION.md) for the support matrix, checksum and
+provenance verification, silent deployment and the current Authenticode limitation.
+
+## Build from source
 
 WinSight targets Windows and .NET 8. Install the .NET 8 SDK, then run:
 
@@ -89,8 +102,17 @@ dotnet run --project src/WinSight.Dashboard
 ```
 
 `global.json` pins the supported SDK feature band. GitHub Actions builds, formats,
-tests, audits NuGet dependencies and verifies both self-contained executables on
-`windows-latest`.
+tests and audits NuGet dependencies. Release candidates are packaged and installed
+end-to-end on native x64 and native Arm64 Windows runners. To reproduce the complete
+release payload locally:
+
+```powershell
+./scripts/Build-Release.ps1 -Version 0.5.0
+```
+
+The build script restores the pinned Microsoft SBOM tool and installs the pinned
+Inno Setup compiler after verifying both its official SHA-256 and Authenticode
+signature.
 
 ## Naming
 
@@ -100,9 +122,11 @@ per-tool names here can follow that or stay descriptive. Rename freely before co
 
 ## Status
 
-Phase 1 is feature-complete for the first beta — CI is green on `windows-latest`.
+Phase 1 is feature-complete for the first beta. CI gates quality on x64 and executes
+the packaged application and installer on native x64 and native Arm64 Windows.
 Modular tool libraries are available through the `winsight` CLI (subcommands
-`persistence | av | net | dns | all`, `--flagged`, `--json`, `--version`, `--help`)
+`persistence | av | net | dns | firewall | processes | modules | extensions | certs |
+hosts | all`, `--flagged`, `--json`, `--version`, `--help`)
 and the `winsight-dashboard` WPF/tray application:
 
 Both frontends use the shared `WinSight.Application` orchestration layer; detection
@@ -163,8 +187,8 @@ The language can also be selected explicitly for managed deployments, for exampl
 catalog-signed Windows binaries and flags tampering (HashMismatch). A file whose
 signature genuinely *cannot* be verified is reported `Unknown` — never a fabricated
 `Unsigned` — so the tools fail safe and never cry wolf. All tools emit a shared report shape
-(`WinSight.Reporting`) as human text or a stable `--json` contract for a future
-GUI/automation. Authored on Linux; CI on `windows-latest` is the compiler of record.
+(`WinSight.Reporting`) as human text or a stable `--json` contract for
+GUI/automation. Native x64 and Arm64 Windows CI runners are the execution record.
 Central Package Management + `.editorconfig`.
 
 **Reputation is opt-in.** WinSight is local-only by default; the *only* network call
@@ -172,6 +196,11 @@ is an optional VirusTotal lookup for flagged items, enabled solely by setting yo
 `WINSIGHT_VT_KEY`. No key → no network, no telemetry.
 
 See [CHANGELOG.md](CHANGELOG.md) for step-by-step progress.
+
+The exact evidence sources, notable-signal rules, verdict semantics and known blind
+spots are maintained in [`docs/DETECTIONS.md`](docs/DETECTIONS.md). WinSight is a
+triage and visibility tool, not antivirus or EDR; a notable result is evidence to
+investigate rather than proof of malware.
 
 **Current next step:** Phase 2 outbound control. The path-scoped `allow/block/ask`
 policy contracts and privileged-engine boundary are implemented and tested; the

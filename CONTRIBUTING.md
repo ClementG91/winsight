@@ -16,8 +16,11 @@ Contributions of code, tests, docs, and bug reports are all welcome.
 ## Project layout
 
 ```
-src/    tool libraries (Core, Persistence, AvMonitor, NetMonitor, Reporting) + the winsight CLI
-tests/  xUnit tests (pure unit tests + Windows integration tests)
+src/        tool libraries, shared application layer, CLI and WPF dashboard
+tests/      xUnit unit, integration, frontend and localization tests
+installer/  multilingual Inno Setup definition
+scripts/    dependency audit, packaging and installer validation
+docs/       architecture, installation, detection and Phase 2 safety contracts
 ```
 
 Tools are pure data producers; presentation lives in the `winsight` CLI via
@@ -28,18 +31,33 @@ Tools are pure data producers; presentation lives in the `winsight` CLI via
 The code targets **.NET 8 (`net8.0-windows`)** and must be built on **Windows**.
 
 ```powershell
-dotnet build -c Release
-dotnet test  -c Release
+dotnet restore winsight.sln
+dotnet build winsight.sln -c Release --no-restore
+dotnet test winsight.sln -c Release --no-build
 ```
 
-CI (GitHub Actions, `windows-latest`) auto-discovers and builds/tests every project on
-every push and PR. **All checks must be green** before a PR is merged.
+The full release candidate can be reproduced with:
+
+```powershell
+./scripts/Build-Release.ps1 -Version 0.5.0
+./scripts/Test-Installer.ps1 `
+  -InstallerPath out/release/winsight-v0.5.0-win-x64-setup.exe `
+  -Version 0.5.0 -Architecture x64
+```
+
+CI builds/tests on Windows, audits dependencies, constructs x64 and Arm64 packages,
+and executes each installer plus the trilingual WPF smoke test on a native runner.
+**All checks must be green** before a PR is merged or a release is published.
 
 ## Coding standards
 
 - Follow `.editorconfig` and the existing style; `TreatWarningsAsErrors` is on.
 - Add tests: pure logic as unit tests, real-system behavior as integration tests.
 - Native interop stays behind an interface with a managed fallback where practical.
+- Architecture-specific code needs native x64 and Arm64 coverage or a documented,
+  fail-closed reason why it cannot run on one of them.
+- Installer changes must preserve least privilege, clean uninstall and the separation
+  between read-only Phase 1 functionality and disabled Phase 2 enforcement.
 - Keep the Phase-1 lexicon: recognition / status / signal — never security theater.
 
 ## Commit & PR process

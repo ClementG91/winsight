@@ -29,13 +29,21 @@ public disclosure. We will credit reporters who wish to be acknowledged.
 
 ## Scope
 
-In scope: the WinSight tool libraries and CLI (persistence, camera/mic, connections,
-signature verification, reporting). Of particular interest:
+In scope: all WinSight libraries, CLI, dashboard, packaging scripts, installers and
+GitHub release workflows. Of particular interest:
 
 - Signature-verification bypass (a tampered binary reported as trusted).
 - Privilege or path-handling issues in the scanners.
-- Any code path that could modify user state (WinSight is intended to be read-only).
+- Unsafe dashboard actions or execution of attacker-controlled finding data.
+- Installer privilege escalation, architecture confusion, unsafe upgrade/uninstall
+  behavior, or release-provenance/SBOM inconsistencies.
+- Any scanner code path that unexpectedly modifies user state (analysis is intended
+  to be read-only).
 
-Out of scope: issues in third-party dependencies (report upstream), and the inherent
-limitation that the current signature check relies on `Get-AuthenticodeSignature`
-(the native `WTGetSignatureInfo` path is tracked).
+Third-party dependency vulnerabilities should normally be reported upstream, but a
+WinSight-specific exploitable integration remains in scope. Public release binaries
+currently lack Authenticode signing because the project does not own a public
+code-signing certificate; checksum or SmartScreen warnings caused solely by that
+documented limitation are not vulnerabilities. Integrity is currently supplied by
+SHA-256 files, GitHub build-provenance/SBOM attestations, and signed Git commits and
+tags.

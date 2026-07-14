@@ -1,7 +1,5 @@
 name: release
 
-# Builds a self-contained winsight.exe and attaches it to a GitHub Release when a
-# v* tag is pushed.
 on:
   push:
     tags: ["v*"]
@@ -12,58 +10,121 @@ permissions:
   attestations: write
 
 jobs:
-  release:
-    runs-on: windows-latest
-    timeout-minutes: 20
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: windows-latest
+            installer_language: french
+          - architecture: arm64
+            runner: windows-11-arm
+            installer_language: spanish
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: "8.0.x"
+          architecture: ${{ matrix.architecture }}
+          cache: true
+          cache-dependency-path: Directory.Packages.props
 
-      - name: Restore
-        run: dotnet restore winsight.sln
-
-      - name: Audit NuGet dependencies
+      - name: Validate tag version
         shell: pwsh
-        run: ./scripts/Test-VulnerablePackages.ps1
-
-      - name: Build and test tagged source
         run: |
-          dotnet build winsight.sln -c Release --no-restore
-          dotnet test winsight.sln -c Release --no-build --logger "console;verbosity=minimal"
+          $tagVersion = "${{ github.ref_name }}".TrimStart("v")
+          [xml]$props = Get-Content Directory.Build.props
+          $projectVersion = $props.Project.PropertyGroup.Version
+          if ($tagVersion -ne $projectVersion) {
+            throw "Tag version $tagVersion does not match project version $projectVersion."
+          }
 
-      - name: Publish CLI and dashboard
+      - name: Restore, build and test tagged source
+        shell: pwsh
+        run: |
+          dotnet restore winsight.sln
+          dotnet build winsight.sln -c Release --no-restore
+          dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=release-${{ matrix.architecture }}"
+
+      - name: Verify formatting and dependencies
+        if: matrix.architecture == 'x64'
+        shell: pwsh
+        run: |
+          dotnet format winsight.sln --verify-no-changes --no-restore
+          ./scripts/Test-VulnerablePackages.ps1
+
+      - name: Build release artifacts
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
-          dotnet publish src/WinSight.Cli/WinSight.Cli.csproj -c Release -r win-x64 --self-contained true -p:Version=$version -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/cli
-          dotnet publish src/WinSight.Dashboard/WinSight.Dashboard.csproj -c Release -r win-x64 --self-contained true -p:Version=$version -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish/dashboard
-          $actualVersion = & ./publish/cli/winsight.exe --version
-          if ($actualVersion -ne "winsight $version") { throw "Expected winsight $version, got $actualVersion" }
-          foreach ($language in @("en", "fr", "es")) {
-            & ./publish/dashboard/winsight-dashboard.exe --language $language --smoke-test
-            if ($LASTEXITCODE -ne 0) { throw "Dashboard $language smoke test failed with exit code $LASTEXITCODE" }
-          }
+          ./scripts/Build-Release.ps1 -Version $version -Architectures ${{ matrix.architecture }}
 
-      - name: Package
+      - name: Test native installer lifecycle
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path package | Out-Null
-          Copy-Item publish/cli/winsight.exe package/
-          Copy-Item publish/dashboard/winsight-dashboard.exe package/
-          Compress-Archive -Path package/* -DestinationPath winsight-${{ github.ref_name }}-win-x64.zip
-          (Get-FileHash winsight-${{ github.ref_name }}-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant() + "  winsight-${{ github.ref_name }}-win-x64.zip" | Set-Content winsight-${{ github.ref_name }}-win-x64.zip.sha256 -Encoding ascii
+          $version = "${{ github.ref_name }}".TrimStart("v")
+          ./scripts/Test-Installer.ps1 `
+            -InstallerPath "out/release/winsight-v$version-win-${{ matrix.architecture }}-setup.exe" `
+            -Version $version `
+            -Architecture ${{ matrix.architecture }} `
+            -InstallerLanguage ${{ matrix.installer_language }}
 
-      - name: Attest release archive provenance
+      - name: Upload release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: release-${{ matrix.architecture }}
+          path: |
+            out/release/*.zip
+            out/release/*.exe
+            out/release/*.json
+            out/release/*.sha256
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify release checksums
+        shell: pwsh
+        run: |
+          foreach ($checksumFile in Get-ChildItem release-assets -Filter *.sha256) {
+            $parts = (Get-Content $checksumFile.FullName).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
+            $artifact = Join-Path $checksumFile.DirectoryName $parts[1]
+            $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -ne $parts[0]) { throw "Checksum mismatch for $artifact" }
+          }
+
+      - name: Attest release provenance
         uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
-          subject-path: winsight-*-win-x64.zip
+          subject-path: |
+            release-assets/*.zip
+            release-assets/*-setup.exe
+
+      - name: Attest x64 SBOM
+        uses: actions/attest-sbom@51e74621a501c89df81fc1391c5a8f4cfc9fab2f # v3
+        with:
+          subject-path: release-assets/winsight-${{ github.ref_name }}-win-x64.zip
+          sbom-path: release-assets/winsight-${{ github.ref_name }}-win-x64.spdx.json
+
+      - name: Attest Arm64 SBOM
+        uses: actions/attest-sbom@51e74621a501c89df81fc1391c5a8f4cfc9fab2f # v3
+        with:
+          subject-path: release-assets/winsight-${{ github.ref_name }}-win-arm64.zip
+          sbom-path: release-assets/winsight-${{ github.ref_name }}-win-arm64.spdx.json
 
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
         with:
-          files: |
-            winsight-*-win-x64.zip
-            winsight-*-win-x64.zip.sha256
+          files: release-assets/*
           generate_release_notes: true

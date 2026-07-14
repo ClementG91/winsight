@@ -22,6 +22,8 @@ winsight/
     WinSight.Cli/          # scriptable unified entry point
     WinSight.Dashboard/    # WPF dashboard + system tray
   tests/                   # pure unit tests + Windows integration smoke tests
+  installer/               # least-privilege multilingual Windows installer
+  scripts/                 # audited packaging, SBOM and installer validation
   drivers/         # (Phase 3/4) minifilter / WFP callout (needs EV cert)
   docs/
 ```
@@ -54,7 +56,7 @@ winsight/
   P/Invoke) — persistence, IPHelper, WinVerifyTrust are all a struct away.
 - **TraceEvent** (Microsoft) is the mature ETW consumer library — the backbone of
   the av/net/dns monitors — with no hand-rolled ETW plumbing.
-- Tray apps, notifications, WinUI 3 dashboard are first-class.
+- Tray apps, notifications and the WPF dashboard are first-class.
 - Fast to an installable MVP. Perf-critical bits can drop to Rust/C++ later without
   reworking the shell.
 
@@ -67,7 +69,10 @@ the MVP, Rust/C++ reserved for the driver and any perf agent.**
 
 - **Local-only, no telemetry.** A security tool that phones home is a contradiction.
 - **Every network/VT lookup is opt-in and user-keyed.**
-- **Reproducible, signed releases**; SBOM; the whole thing auditable.
+- **Reproducible releases** with signed Git commits/tags, SHA-256, build provenance
+  and SPDX SBOM attestations. Authenticode signing is mandatory once a public
+  code-signing certificate is available; the unsigned-publisher limitation is
+  disclosed until then.
 - **Least privilege**: run tools with the minimum rights; elevate only the specific
   operation that needs it.
 
@@ -76,5 +81,6 @@ the MVP, Rust/C++ reserved for the driver and any perf agent.**
 1. The user-mode application stack is C# / .NET 8 with WPF for the dashboard.
 2. Phase 1 is user-mode and read-only; kernel enforcement remains deferred.
 3. The repository is GPL-3.0-or-later.
-4. `windows-latest` is the compiler/test runner of record, with a pinned SDK for
-   reproducible local builds.
+4. A pinned .NET SDK defines the build. Native x64 and Arm64 Windows runners execute
+   their own packaged binaries and installers; the x64 runner also gates formatting
+   and dependency auditing.

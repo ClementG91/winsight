@@ -4,6 +4,7 @@ obj/
 *.user
 .vs/
 out/
+.tools/
 # Rust
 target/
 # Secrets / local

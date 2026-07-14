@@ -2,6 +2,27 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.5.0 — 2026-07-14
+
+### Native Windows distribution and documented detection contract
+- Ship separate self-contained x64 and Arm64 portable archives and per-user Windows
+  installers. Each installer selects English, French or Spanish, creates normal
+  Start-menu/uninstall entries, requests no elevation by default and rejects the
+  wrong processor architecture instead of silently installing an emulated build.
+- Add a pinned, checksum- and Authenticode-verified Inno Setup bootstrap plus one
+  reproducible release script for local builds, CI and tagged releases.
+- Exercise the complete install/start/uninstall lifecycle on native x64 and native
+  Arm64 GitHub-hosted Windows runners, including real WPF startup in all three UI
+  languages and PE-machine validation for both executables.
+- Publish SPDX 2.2 SBOMs, SHA-256 files, build-provenance attestations and SBOM
+  attestations for every architecture alongside installers and portable archives.
+- Document the supported Windows baseline, processor selection, silent deployment,
+  integrity verification, complete detection inventory, verdict semantics and
+  important blind spots. Explicitly disclose that public binaries are not yet
+  Authenticode-signed because the project has no public code-signing certificate.
+- Update project, security and contributor documentation to cover the dashboard,
+  packages, installer supply chain and dual-architecture release gate.
+
 ## v0.4.0 — 2026-07-14
 
 ### Runtime multilingual dashboard
