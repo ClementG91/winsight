@@ -42,6 +42,21 @@ public enum FirewallServiceVerb
     /// <summary>Report whether a given application is currently blocked.</summary>
     WfpBlockStatus,
 
+    /// <summary>Report the persisted enforcement mode.</summary>
+    EnforceStatus,
+
+    /// <summary>Enable enforcement: persist it and apply every stored Block policy.</summary>
+    EnforceEnable,
+
+    /// <summary>Disable enforcement: lift every filter, then persist audit-only.</summary>
+    EnforceDisable,
+
+    /// <summary>Persist and apply a Block decision for one application.</summary>
+    BlockApp,
+
+    /// <summary>Persist and apply an Allow decision for one application.</summary>
+    AllowApp,
+
     /// <summary>Unrecognized verb.</summary>
     Unknown,
 }
@@ -71,6 +86,11 @@ public static class FirewallServiceCommandLine
             "wfp-block-add" => FirewallServiceVerb.WfpBlockAdd,
             "wfp-block-remove" => FirewallServiceVerb.WfpBlockRemove,
             "wfp-block-status" => FirewallServiceVerb.WfpBlockStatus,
+            "enforce-status" => FirewallServiceVerb.EnforceStatus,
+            "enforce-enable" => FirewallServiceVerb.EnforceEnable,
+            "enforce-disable" => FirewallServiceVerb.EnforceDisable,
+            "block-app" => FirewallServiceVerb.BlockApp,
+            "allow-app" => FirewallServiceVerb.AllowApp,
             _ => FirewallServiceVerb.Unknown,
         };
     }

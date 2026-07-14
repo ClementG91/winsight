@@ -29,6 +29,11 @@ return FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.WfpBlockAdd => WfpBlockAdd(args),
     FirewallServiceVerb.WfpBlockRemove => WfpBlockRemove(args),
     FirewallServiceVerb.WfpBlockStatus => WfpBlockStatus(args),
+    FirewallServiceVerb.EnforceStatus => EnforceStatus(),
+    FirewallServiceVerb.EnforceEnable => EnforceEnable(),
+    FirewallServiceVerb.EnforceDisable => EnforceDisable(),
+    FirewallServiceVerb.BlockApp => SetAppPolicy(args, OutboundAction.Block),
+    FirewallServiceVerb.AllowApp => SetAppPolicy(args, OutboundAction.Allow),
     FirewallServiceVerb.Unknown => Usage(),
     _ => RunHost(),
 };
@@ -307,10 +312,114 @@ static int WfpFilterRemove()
     }
 }
 
+static int EnforceStatus()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Reading enforcement status requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        var mode = CreateCoordinator().GetModeAsync().GetAwaiter().GetResult();
+        Console.WriteLine($"Enforcement mode: {mode}.");
+        return 0;
+    }
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    {
+        Console.Error.WriteLine($"Enforcement status failed: {ex.Message}");
+        return 1;
+    }
+}
+
+static int EnforceEnable()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Enabling enforcement requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        CreateCoordinator().EnableAsync().GetAwaiter().GetResult();
+        Console.WriteLine("Enforcement enabled. Stored Block policies are applied, and the service reapplies them on boot.");
+        return 0;
+    }
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    {
+        Console.Error.WriteLine($"Enable enforcement failed: {ex.Message}");
+        return 1;
+    }
+}
+
+static int EnforceDisable()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Disabling enforcement requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        CreateCoordinator().DisableAsync().GetAwaiter().GetResult();
+        Console.WriteLine("Enforcement disabled. Every WinSight block was lifted and the mode is audit-only.");
+        return 0;
+    }
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    {
+        Console.Error.WriteLine($"Disable enforcement failed: {ex.Message}");
+        return 1;
+    }
+}
+
+static int SetAppPolicy(string[] arguments, OutboundAction action)
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Setting an application policy requires an elevated (Administrator) console.");
+        return 1;
+    }
+    if (arguments.Length < 2 || string.IsNullOrWhiteSpace(arguments[1]))
+    {
+        Console.Error.WriteLine($"Usage: winsight-firewall-service {arguments.FirstOrDefault() ?? "block-app"} <full path to an executable>");
+        return 2;
+    }
+
+    try
+    {
+        CreateCoordinator().SetPolicyAsync(arguments[1], action).GetAwaiter().GetResult();
+        Console.WriteLine($"Policy for '{arguments[1]}' set to {action} and applied.");
+        return 0;
+    }
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    {
+        Console.Error.WriteLine($"Set policy failed: {ex.Message}");
+        return 1;
+    }
+}
+
+static EnforcementCoordinator CreateCoordinator()
+{
+    try
+    {
+        FirewallServicePaths.ProvisionDirectory(FirewallServicePaths.DefaultDirectory);
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+    {
+        Console.Error.WriteLine($"WinSight firewall: could not harden the policy directory ({ex.Message}). Continuing.");
+    }
+
+    var store = new FirewallPolicyStore(FirewallServicePaths.DefaultPolicyFile, allowEnforcement: true);
+    return new EnforcementCoordinator(store, new WfpOutboundFirewallEngine());
+}
+
 static int Usage()
 {
     Console.Error.WriteLine(
-        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status|wfp-filter-add|wfp-filter-remove|wfp-block-add <path>|wfp-block-remove <path>|wfp-block-status <path>]");
+        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status|wfp-filter-add|wfp-filter-remove|wfp-block-add <path>|wfp-block-remove <path>|wfp-block-status <path>|enforce-status|enforce-enable|enforce-disable|block-app <path>|allow-app <path>]");
     return 2;
 }
 
@@ -333,8 +442,21 @@ static int RunHost()
             $"WinSight firewall: could not harden the policy directory ({ex.Message}). Continuing.");
     }
 
-    builder.Services.AddSingleton(new FirewallPolicyStore(policyFile));
-    builder.Services.AddSingleton<IOutboundFirewallEngine, AuditOnlyFirewallEngine>();
+    // The service is the privileged gate: it may load and act on Enforcement mode. Decide
+    // the engine once at startup from the persisted mode. Audit-only stays the default, so
+    // a machine only enforces after an explicit enforce-enable.
+    var store = new FirewallPolicyStore(policyFile, allowEnforcement: true);
+    var enforcing = store.LoadOrAuditAsync().GetAwaiter().GetResult().Configuration.Mode
+        == OutboundFirewallMode.Enforcement;
+    IOutboundFirewallEngine engine = enforcing
+        ? new WfpOutboundFirewallEngine()
+        : new AuditOnlyFirewallEngine();
+
+    builder.Services.AddSingleton(store);
+    builder.Services.AddSingleton<IOutboundFirewallEngine>(engine);
+    builder.Services.AddSingleton(sp => new EnforcementCoordinator(
+        sp.GetRequiredService<FirewallPolicyStore>(),
+        sp.GetRequiredService<IOutboundFirewallEngine>()));
     builder.Services.AddSingleton(sp => new FirewallRequestDispatcher(
         sp.GetRequiredService<FirewallPolicyStore>(),
         sp.GetRequiredService<IOutboundFirewallEngine>()));
@@ -342,6 +464,12 @@ static int RunHost()
         sp.GetRequiredService<FirewallRequestDispatcher>()));
     builder.Services.AddSingleton<IFirewallServiceListener>(sp => new NamedPipeFirewallServer(
         sp.GetRequiredService<FirewallConnectionHandler>()));
+
+    // Only when enforcing does the service reinstall the (non-persistent) block filters.
+    if (enforcing)
+    {
+        builder.Services.AddHostedService<EnforcementStartupService>();
+    }
     builder.Services.AddHostedService<FirewallServiceWorker>();
 
     builder.Build().Run();

@@ -1,3 +1,4 @@
+using WinSight.Firewall;
 using WinSight.FirewallService;
 using Xunit;
 
@@ -21,6 +22,11 @@ public sealed class FirewallServiceCommandLineTests
     [InlineData("wfp-block-add", FirewallServiceVerb.WfpBlockAdd)]
     [InlineData("wfp-block-remove", FirewallServiceVerb.WfpBlockRemove)]
     [InlineData("wfp-block-status", FirewallServiceVerb.WfpBlockStatus)]
+    [InlineData("enforce-status", FirewallServiceVerb.EnforceStatus)]
+    [InlineData("enforce-enable", FirewallServiceVerb.EnforceEnable)]
+    [InlineData("enforce-disable", FirewallServiceVerb.EnforceDisable)]
+    [InlineData("block-app", FirewallServiceVerb.BlockApp)]
+    [InlineData("allow-app", FirewallServiceVerb.AllowApp)]
     [InlineData("bogus", FirewallServiceVerb.Unknown)]
     public void Parse_MapsFirstArgumentToVerb(string arg, FirewallServiceVerb expected) =>
         Assert.Equal(expected, FirewallServiceCommandLine.Parse([arg]));
@@ -105,5 +111,91 @@ public sealed class WfpOutboundFirewallEngineTests
 
         await Assert.ThrowsAsync<OperationCanceledException>(
             () => engine.ApplyAsync(new WinSight.Firewall.AppFirewallPolicy(@"C:\a.exe", WinSight.Firewall.OutboundAction.Block), cts.Token));
+    }
+}
+
+public sealed class EnforcementCoordinatorTests : IDisposable
+{
+    private readonly string _directory = Path.Combine(
+        Path.GetTempPath(), $"winsight-enforce-{Guid.NewGuid():N}");
+
+    private FirewallPolicyStore Store() =>
+        new(Path.Combine(_directory, "policies.json"), allowEnforcement: true);
+
+    [Fact]
+    public async Task SetPolicy_Block_PersistsAndAppliesToEngine()
+    {
+        var store = Store();
+        var engine = new RecordingEngine();
+        var coordinator = new EnforcementCoordinator(store, engine);
+
+        await coordinator.SetPolicyAsync(@"C:\apps\a.exe", OutboundAction.Block);
+
+        var stored = Assert.Single((await store.LoadAsync()).Policies);
+        Assert.Equal(OutboundAction.Block, stored.Action);
+        Assert.Contains(engine.Applied, p => p.Action == OutboundAction.Block);
+    }
+
+    [Fact]
+    public async Task Enable_PersistsEnforcement_AndAppliesOnlyBlockPolicies()
+    {
+        var store = Store();
+        await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.AuditOnly,
+        [
+            new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block),
+            new AppFirewallPolicy(@"C:\apps\allow.exe", OutboundAction.Allow),
+        ]));
+        var engine = new RecordingEngine();
+        var coordinator = new EnforcementCoordinator(store, engine);
+
+        await coordinator.EnableAsync();
+
+        Assert.Equal(OutboundFirewallMode.Enforcement, await coordinator.GetModeAsync());
+        var applied = Assert.Single(engine.Applied);
+        Assert.EndsWith("block.exe", applied.ExecutablePath, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Disable_LiftsEveryFilter_ThenPersistsAuditOnly()
+    {
+        var store = Store();
+        await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
+            [new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block)]));
+        var engine = new RecordingEngine();
+        var coordinator = new EnforcementCoordinator(store, engine);
+
+        await coordinator.DisableAsync();
+
+        Assert.Contains(engine.Removed, path => path.EndsWith("block.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(OutboundFirewallMode.AuditOnly, await coordinator.GetModeAsync());
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_directory))
+        {
+            Directory.Delete(_directory, recursive: true);
+        }
+    }
+
+    private sealed class RecordingEngine : IOutboundFirewallEngine
+    {
+        public List<AppFirewallPolicy> Applied { get; } = [];
+
+        public List<string> Removed { get; } = [];
+
+        public bool IsSupported => true;
+
+        public Task ApplyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default)
+        {
+            Applied.Add(policy);
+            return Task.CompletedTask;
+        }
+
+        public Task RemoveAsync(string executablePath, CancellationToken cancellationToken = default)
+        {
+            Removed.Add(executablePath);
+            return Task.CompletedTask;
+        }
     }
 }
