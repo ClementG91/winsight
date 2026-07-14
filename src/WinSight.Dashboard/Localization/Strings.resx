@@ -127,6 +127,17 @@
   <data name="ToolFirewallShort" xml:space="preserve"><value>Currently active network rules</value></data>
   <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventories Microsoft Defender Firewall rules. Automatic blocking stays disabled until the secured WFP service is delivered.</value></data>
   <data name="ToolFirewallGuidance" xml:space="preserve"><value>Use the Windows tool to change a rule. Keep a recovery path before blocking a system service.</value></data>
+  <data name="ToolOutboundFirewallLabel" xml:space="preserve"><value>Outbound Firewall</value></data>
+  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Per-app outbound control (audit-only)</value></data>
+  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>The WinSight outbound-firewall service: whether it is installed, its mode, and the stored per-application policies. It is audit-only and installs no filter yet.</value></data>
+  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Nothing is blocked. Enforcement is a later, opt-in step. An emergency disable returns to audit-only at any time.</value></data>
+  <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>WinSight outbound firewall</value></data>
+  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service not installed. WinSight is not filtering your outbound traffic; scans stay local and read-only.</value></data>
+  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Installed, audit-only. Policies are recorded but nothing is blocked.</value></data>
+  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Installed and enforcing per-application policies.</value></data>
+  <data name="OutboundActionAllow" xml:space="preserve"><value>Allow</value></data>
+  <data name="OutboundActionBlock" xml:space="preserve"><value>Block</value></data>
+  <data name="OutboundActionAsk" xml:space="preserve"><value>Ask</value></data>
   <data name="ToolProcessesLabel" xml:space="preserve"><value>Processes</value></data>
   <data name="ToolProcessesShort" xml:space="preserve"><value>Programs currently running</value></data>
   <data name="ToolProcessesDescription" xml:space="preserve"><value>Lists processes, their paths, parents, command lines and signatures.</value></data>

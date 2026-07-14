@@ -25,6 +25,7 @@ public static class DashboardFindingPresenter
             "certificates" => Certificate(item, text),
             "extensions" => Extension(item, text),
             "firewall" => Firewall(item, text),
+            "outbound-firewall" => OutboundFirewall(item, text),
             "connections" => Connection(item, text),
             _ => new FindingPresentation(item.Title, item.Detail),
         };
@@ -142,6 +143,27 @@ public static class DashboardFindingPresenter
         var details = new[] { Field(item, "program"), Field(item, "ports") }
             .Where(value => !string.IsNullOrWhiteSpace(value));
         return new FindingPresentation(text.Format("FirewallRuleTitle", direction, action, name), string.Join("  ", details));
+    }
+
+    private static FindingPresentation OutboundFirewall(ReportItem item, LocalizationManager text)
+    {
+        if (Field(item, "kind") == "policy")
+        {
+            var action = Field(item, "action");
+            return new FindingPresentation(
+                Field(item, "path") ?? item.Title,
+                text.GetOrFallback($"OutboundAction{action}", action ?? item.Detail));
+        }
+
+        if (!BoolField(item, "available"))
+        {
+            return new FindingPresentation(text["OutboundFirewallServiceTitle"], text["OutboundFirewallUnavailable"]);
+        }
+
+        var detail = Field(item, "mode") == "Enforcement"
+            ? text["OutboundFirewallEnforcing"]
+            : text["OutboundFirewallAuditOnly"];
+        return new FindingPresentation(text["OutboundFirewallServiceTitle"], detail);
     }
 
     private static FindingPresentation Connection(ReportItem item, LocalizationManager text)

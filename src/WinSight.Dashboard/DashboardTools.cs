@@ -39,6 +39,7 @@ public static class DashboardTools
         Tool("Network", "net", "connections", DashboardWindowsAction.Network),
         Tool("Dns", "dns", "dns", DashboardWindowsAction.NetworkSettings),
         Tool("Firewall", "firewall", "firewall", DashboardWindowsAction.Firewall),
+        Tool("OutboundFirewall", "outbound-firewall", "outbound-firewall", DashboardWindowsAction.Firewall),
         Tool("Processes", "processes", "processes", DashboardWindowsAction.Processes),
         Tool("Modules", "modules", "modules", DashboardWindowsAction.Processes),
         Tool("Extensions", "extensions", "extensions", DashboardWindowsAction.InstalledApps),

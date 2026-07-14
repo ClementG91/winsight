@@ -4,6 +4,21 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 outbound-firewall dashboard view (read-only)
+- Add an "Outbound Firewall" navigation entry that shows the WinSight firewall service
+  over the authenticated pipe: whether it is installed, its mode, whether enforcement is
+  active, and the stored per-application policies. `FirewallServiceAdapter` projects the
+  gateway view into the shared report shape, so it reuses the existing rendering, export
+  and localization pipeline.
+- When the service is not installed or unreachable, the view degrades to an explicit
+  "service not installed, traffic is not being filtered, read-only" message rather than
+  an error, so the dashboard never implies the machine is being filtered when it is not.
+- Localize the status, mode and per-app action labels in English, French and Spanish;
+  executable paths stay verbatim as forensic evidence. Add adapter and localized-presenter
+  tests (solution total now 281).
+- Read-only in this increment: the dashboard never mutates policy. Scope unchanged, the
+  shipped build stays audit-only and installs no WFP filter.
+
 ### Phase 2 firewall service endpoint (audit-only) and AI-surface evals
 - Implement the outbound-firewall service endpoint in library form, still audit-only
   and installing no WFP filter. `AuditOnlyFirewallEngine` never mutates WFP and reports
