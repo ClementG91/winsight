@@ -25,8 +25,14 @@ public static partial class WfpProvisioning
     /// <summary>Stable identity of the WinSight non-blocking PERMIT audit filter.</summary>
     public static readonly Guid PermitFilterKey = new("d7a9b1e2-5c3a-4b8e-9f21-6c0a7e2d1f34");
 
+    /// <summary>Stable identity of the WinSight per-application BLOCK filter.</summary>
+    public static readonly Guid BlockFilterKey = new("d7a9b1e3-5c3a-4b8e-9f21-6c0a7e2d1f34");
+
     // FWPM_LAYER_ALE_AUTH_CONNECT_V4: the outbound-connect authorization layer.
     private static readonly Guid AleAuthConnectV4 = new("c38d57d1-05a7-4c33-904f-7fbceee60e82");
+
+    // FWPM_CONDITION_ALE_APP_ID: matches the connecting application's binary.
+    private static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
 
     private const string ProviderName = "WinSight";
     private const string ProviderDescription = "WinSight outbound firewall provider (audit-only).";
@@ -48,7 +54,13 @@ public static partial class WfpProvisioning
     // block: it authorizes the connection, which is already the default, so adding it
     // changes no observable behaviour. FWP_EMPTY weight lets WFP auto-assign a weight.
     private const uint FwpActionPermit = 0x00001002;
+
+    // FWP_ACTION_BLOCK = FWP_ACTION_FLAG_TERMINATING (0x1000) | 0x01. This one blocks,
+    // but only the connections that match the filter's conditions (a single application).
+    private const uint FwpActionBlock = 0x00001001;
     private const uint FwpEmpty = 0;
+    private const uint FwpByteBlobType = 10;
+    private const uint FwpMatchEqual = 0;
 
     /// <summary>Creates the provider and sublayer (idempotent). Installs no filter.</summary>
     public static void Provision()
@@ -168,8 +180,119 @@ public static partial class WfpProvisioning
         }
     }
 
-    /// <summary>Reports whether the provider, sublayer and PERMIT filter currently exist.</summary>
-    public static (bool Provider, bool Sublayer, bool PermitFilter) Status()
+    /// <summary>
+    /// Adds a BLOCK filter that stops outbound connections for a SINGLE application,
+    /// matched by its WFP app id (derived from the executable path). Only that binary is
+    /// affected; every other application keeps connecting normally. Replaces any previous
+    /// WinSight block filter (one at a time) and runs in a transaction. Requires the
+    /// sublayer to exist (run <see cref="Provision"/> first).
+    /// </summary>
+    public static void AddBlockFilter(string executablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+
+        var appId = GetAppId(executablePath);
+        try
+        {
+            var engine = OpenEngine();
+            try
+            {
+                InTransaction(engine, () =>
+                {
+                    // One block filter at a time: drop any prior one first.
+                    var existing = BlockFilterKey;
+                    var removed = NativeMethods.FwpmFilterDeleteByKey0(engine, ref existing);
+                    if (removed is not 0 and not FwpEFilterNotFound)
+                    {
+                        throw new Win32Exception((int)removed);
+                    }
+
+                    var name = Marshal.StringToHGlobalUni("WinSight block");
+                    var description = Marshal.StringToHGlobalUni(
+                        "Blocks outbound connections for one application (VM/testing).");
+                    var providerKey = Marshal.AllocHGlobal(Marshal.SizeOf<Guid>());
+                    var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
+                    try
+                    {
+                        Marshal.StructureToPtr(ProviderKey, providerKey, false);
+                        var condition = new FwpmFilterCondition0
+                        {
+                            FieldKey = AleAppIdCondition,
+                            MatchType = FwpMatchEqual,
+                            ConditionValue = new FwpConditionValue0 { Type = FwpByteBlobType, Value = appId },
+                        };
+                        Marshal.StructureToPtr(condition, conditionPtr, false);
+
+                        var filter = new FwpmFilter0
+                        {
+                            FilterKey = BlockFilterKey,
+                            DisplayData = new FwpmDisplayData0 { Name = name, Description = description },
+                            Flags = 0,
+                            ProviderKey = providerKey,
+                            LayerKey = AleAuthConnectV4,
+                            SubLayerKey = SublayerKey,
+                            Weight = new FwpValue0 { Type = FwpEmpty, Value = 0 },
+                            NumFilterConditions = 1,
+                            FilterCondition = conditionPtr,
+                            Action = new FwpmAction0 { Type = FwpActionBlock, FilterOrCalloutKey = Guid.Empty },
+                        };
+                        var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
+                        if (result != 0)
+                        {
+                            throw new Win32Exception((int)result);
+                        }
+                    }
+                    finally
+                    {
+                        Marshal.FreeHGlobal(name);
+                        Marshal.FreeHGlobal(description);
+                        Marshal.FreeHGlobal(providerKey);
+                        Marshal.FreeHGlobal(conditionPtr);
+                    }
+                });
+            }
+            finally
+            {
+                _ = NativeMethods.FwpmEngineClose0(engine);
+            }
+        }
+        finally
+        {
+            NativeMethods.FwpmFreeMemory0(ref appId);
+        }
+    }
+
+    /// <summary>Removes the per-application BLOCK filter (idempotent).</summary>
+    public static void RemoveBlockFilter()
+    {
+        var engine = OpenEngine();
+        try
+        {
+            var key = BlockFilterKey;
+            var result = NativeMethods.FwpmFilterDeleteByKey0(engine, ref key);
+            if (result is not 0 and not FwpEFilterNotFound)
+            {
+                throw new Win32Exception((int)result);
+            }
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    private static IntPtr GetAppId(string executablePath)
+    {
+        var result = NativeMethods.FwpmGetAppIdFromFileName0(executablePath, out var appId);
+        if (result != 0)
+        {
+            throw new Win32Exception((int)result);
+        }
+        return appId;
+    }
+
+    /// <summary>Reports which WinSight WFP objects currently exist.</summary>
+    public static (bool Provider, bool Sublayer, bool PermitFilter, bool BlockFilter) Status()
     {
         var engine = OpenEngine();
         try
@@ -188,19 +311,22 @@ public static partial class WfpProvisioning
                 NativeMethods.FwpmFreeMemory0(ref sublayer);
             }
 
-            var filterKey = PermitFilterKey;
-            var filterExists = NativeMethods.FwpmFilterGetByKey0(engine, ref filterKey, out var filter) == 0;
-            if (filter != IntPtr.Zero)
-            {
-                NativeMethods.FwpmFreeMemory0(ref filter);
-            }
-
-            return (providerExists, sublayerExists, filterExists);
+            return (providerExists, sublayerExists, FilterExists(engine, PermitFilterKey), FilterExists(engine, BlockFilterKey));
         }
         finally
         {
             _ = NativeMethods.FwpmEngineClose0(engine);
         }
+    }
+
+    private static bool FilterExists(IntPtr engine, Guid key)
+    {
+        var exists = NativeMethods.FwpmFilterGetByKey0(engine, ref key, out var filter) == 0;
+        if (filter != IntPtr.Zero)
+        {
+            NativeMethods.FwpmFreeMemory0(ref filter);
+        }
+        return exists;
     }
 
     private static IntPtr OpenEngine()
@@ -349,6 +475,23 @@ public static partial class WfpProvisioning
         public Guid FilterOrCalloutKey;
     }
 
+    // FWP_CONDITION_VALUE0: a tagged value. For an app-id match the type is
+    // FWP_BYTE_BLOB_TYPE and the value is a pointer to the app-id byte blob.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FwpConditionValue0
+    {
+        public uint Type;
+        public IntPtr Value;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FwpmFilterCondition0
+    {
+        public Guid FieldKey;
+        public uint MatchType;
+        public FwpConditionValue0 ConditionValue;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FwpmFilter0
     {
@@ -415,6 +558,9 @@ public static partial class WfpProvisioning
 
         [LibraryImport("fwpuclnt.dll")]
         internal static partial uint FwpmFilterGetByKey0(IntPtr engineHandle, ref Guid key, out IntPtr filter);
+
+        [LibraryImport("fwpuclnt.dll", StringMarshalling = StringMarshalling.Utf16)]
+        internal static partial uint FwpmGetAppIdFromFileName0(string fileName, out IntPtr appId);
 
         [LibraryImport("fwpuclnt.dll")]
         internal static partial void FwpmFreeMemory0(ref IntPtr p);

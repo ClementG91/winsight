@@ -4,6 +4,18 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 per-application outbound BLOCK (WFP, isolated to one app)
+- Add `wfp-block-add <path>` and `wfp-block-remove` verbs. `wfp-block-add` installs a WFP
+  BLOCK filter that stops outbound connections for a SINGLE application, matched by its
+  app id (`FwpmGetAppIdFromFileName0` + a `FWPM_CONDITION_ALE_APP_ID` equal condition).
+  Only that binary is affected; every other application keeps connecting normally.
+- One block filter at a time, added in a transaction and idempotent (a new block replaces
+  the prior one). `wfp-status` now reports the block-filter presence too.
+- This is the first actually-blocking capability. It is deliberately per-app (never a
+  global block), requires elevation and a prior `wfp-provision`, and is intended for
+  validation on an isolated VM with a harmless test executable. It is not wired into the
+  shipped service path: the default build still installs and blocks nothing.
+
 ### Phase 2 non-blocking WFP PERMIT filter (proves filter interop)
 - Add `wfp-filter-add` and `wfp-filter-remove` verbs. They add and remove a single PERMIT
   filter in the WinSight sublayer at `FWPM_LAYER_ALE_AUTH_CONNECT_V4`. A PERMIT authorizes
