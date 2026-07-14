@@ -13,7 +13,7 @@ namespace WinSight.Firewall;
 /// This host performs no WFP mutation. It is the Phase 2 increment-1 transport around
 /// the audit-only dispatcher; enabling enforcement is separate, later and gated.
 /// </summary>
-public sealed class NamedPipeFirewallServer
+public sealed class NamedPipeFirewallServer : IFirewallServiceListener
 {
     private readonly FirewallConnectionHandler _handler;
     private readonly string _pipeName;
