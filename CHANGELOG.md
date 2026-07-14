@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.4.0 — 2026-07-14
+
+### Runtime multilingual dashboard
+- Localize the complete dashboard chrome, safety guidance, progress, errors, tray
+  menu and analysis catalog in English, French and Spanish using standard .NET
+  satellite resources with English as the safe fallback.
+- Detect the Windows UI culture, remember the user's explicit choice and allow
+  language switching from the header without restarting or interrupting a scan.
+- Localize overview report names and severity labels while preserving raw Windows
+  evidence exactly as collected for forensic accuracy.
+- Add exhaustive resource-key coverage, culture fallback and catalog localization
+  tests. CI and release pipelines now smoke-test all three packaged languages.
+
 ## v0.3.0 — 2026-07-14
 
 ### Understandable dashboard and supply-chain hardening

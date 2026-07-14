@@ -2,6 +2,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <RootNamespace>WinSight.Dashboard.Tests</RootNamespace>
+    <!-- Localization tests must match the WPF frontend, not the invariant scanner libraries. -->
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" />

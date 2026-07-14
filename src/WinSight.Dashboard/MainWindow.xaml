@@ -1,8 +1,9 @@
 <Window x:Class="WinSight.Dashboard.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:WinSight.Dashboard"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
-        Title="WinSight — sécurité Windows" Height="780" Width="1220"
+        Title="{Binding [WindowTitle], Source={x:Static local:LocalizationManager.Instance}}" Height="780" Width="1220"
         MinHeight="620" MinWidth="960" Background="#F1F5F9"
         WindowStartupLocation="CenterScreen">
     <Grid>
@@ -20,12 +21,21 @@
                 </Border>
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
-                    <TextBlock Text="Comprendre ce qui se passe sur votre PC, sans télémétrie"
+                    <TextBlock Text="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}"
                                Foreground="#CBD5E1" FontSize="13" />
                 </StackPanel>
-                <Border DockPanel.Dock="Right" Background="#163A2D" CornerRadius="14" Padding="12,6" VerticalAlignment="Center">
-                    <TextBlock Text="● Analyse locale" Foreground="#86EFAC" FontWeight="SemiBold" />
-                </Border>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding [LanguageLabel], Source={x:Static local:LocalizationManager.Instance}}"
+                               Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,7,0" />
+                    <ComboBox x:Name="LanguagePicker" Width="105" Margin="0,0,14,0"
+                              DisplayMemberPath="NativeName" SelectedValuePath="Code"
+                              SelectionChanged="LanguagePicker_SelectionChanged"
+                              automation:AutomationProperties.Name="{Binding [LanguagePickerAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
+                    <Border Background="#163A2D" CornerRadius="14" Padding="12,6">
+                        <TextBlock Text="{Binding [LocalAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
+                                   Foreground="#86EFAC" FontWeight="SemiBold" />
+                    </Border>
+                </StackPanel>
             </DockPanel>
         </Border>
 
@@ -44,15 +54,16 @@
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <StackPanel Margin="6,2,6,12">
-                        <TextBlock Text="Que voulez-vous vérifier ?" FontSize="17" FontWeight="SemiBold" Foreground="#0F172A" />
-                        <TextBlock Text="Choisissez une analyse. La vue d’ensemble est recommandée pour commencer."
+                        <TextBlock Text="{Binding [ChooseCheckTitle], Source={x:Static local:LocalizationManager.Instance}}"
+                                   FontSize="17" FontWeight="SemiBold" Foreground="#0F172A" />
+                        <TextBlock Text="{Binding [ChooseCheckSubtitle], Source={x:Static local:LocalizationManager.Instance}}"
                                    Margin="0,5,0,0" TextWrapping="Wrap" Foreground="#64748B" FontSize="12" />
                     </StackPanel>
 
                     <ListBox x:Name="ToolPicker" Grid.Row="1" BorderThickness="0" Background="Transparent"
                              ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                              SelectionChanged="ToolPicker_SelectionChanged"
-                             automation:AutomationProperties.Name="Type d’analyse">
+                             automation:AutomationProperties.Name="{Binding [ToolPickerAutomation], Source={x:Static local:LocalizationManager.Instance}}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
                                 <StackPanel Margin="5,7" ToolTip="{Binding Description}">
@@ -66,12 +77,13 @@
 
                     <StackPanel Grid.Row="2" Margin="4,12,4,2">
                         <CheckBox x:Name="FlaggedOnly" IsChecked="True" Margin="2,0,2,10"
-                                  Content="Afficher seulement ce qui mérite attention"
-                                  ToolTip="Masque les éléments normaux pour réduire le bruit." />
-                        <Button x:Name="ScanButton" Height="42" Content="Démarrer l’analyse"
+                                  Content="{Binding [FlaggedOnly], Source={x:Static local:LocalizationManager.Instance}}"
+                                  ToolTip="{Binding [FlaggedOnlyTooltip], Source={x:Static local:LocalizationManager.Instance}}" />
+                        <Button x:Name="ScanButton" Height="42"
+                                Content="{Binding [StartAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
                                 Background="#2563EB" Foreground="White" BorderThickness="0"
                                 FontWeight="SemiBold" Click="ScanButton_Click"
-                                automation:AutomationProperties.Name="Démarrer l’analyse sélectionnée" />
+                                automation:AutomationProperties.Name="{Binding [StartAnalysisAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                     </StackPanel>
                 </Grid>
             </Border>
@@ -92,7 +104,8 @@
                             <TextBlock x:Name="SelectedToolDescription" Margin="0,5,0,0" Foreground="#475569"
                                        TextWrapping="Wrap" MaxWidth="680" />
                         </StackPanel>
-                        <Button x:Name="WindowsToolButton" DockPanel.Dock="Right" Content="Ouvrir l’outil Windows"
+                        <Button x:Name="WindowsToolButton" DockPanel.Dock="Right"
+                                Content="{Binding [OpenWindowsTool], Source={x:Static local:LocalizationManager.Instance}}"
                                 VerticalAlignment="Center" Visibility="Collapsed" Click="WindowsToolButton_Click" />
                     </DockPanel>
                 </Border>
@@ -106,21 +119,23 @@
                         </Grid.RowDefinitions>
                         <DockPanel>
                             <TextBlock x:Name="ProgressText" Foreground="#1E3A8A" FontWeight="SemiBold" />
-                            <Button x:Name="CancelButton" DockPanel.Dock="Right" Content="Arrêter après cette étape"
+                            <Button x:Name="CancelButton" DockPanel.Dock="Right"
+                                    Content="{Binding [StopAfterStep], Source={x:Static local:LocalizationManager.Instance}}"
                                     Padding="10,4" Visibility="Collapsed" Click="CancelButton_Click" />
                         </DockPanel>
                         <ProgressBar x:Name="ScanProgressBar" Grid.Row="1" Height="8" Margin="0,10,0,0"
                                      Minimum="0" Maximum="100" Foreground="#2563EB"
-                                     automation:AutomationProperties.Name="Progression de l’analyse" />
+                                     automation:AutomationProperties.Name="{Binding [ProgressAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                     </Grid>
                 </Border>
 
                 <DockPanel Grid.Row="2" Margin="2,14,2,9">
                     <TextBlock x:Name="SummaryText" VerticalAlignment="Center" FontSize="15" FontWeight="SemiBold"
-                               Foreground="#334155" Text="Prêt. Sélectionnez une analyse puis cliquez sur Démarrer." />
+                               Foreground="#334155"
+                               Text="{Binding [ReadySummary], Source={x:Static local:LocalizationManager.Instance}}" />
                     <ComboBox x:Name="ReportPicker" DockPanel.Dock="Right" Width="220" Visibility="Collapsed"
-                              DisplayMemberPath="Tool" SelectionChanged="ReportPicker_SelectionChanged"
-                              automation:AutomationProperties.Name="Rapport affiché" />
+                              DisplayMemberPath="Label" SelectionChanged="ReportPicker_SelectionChanged"
+                              automation:AutomationProperties.Name="{Binding [ReportPickerAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                 </DockPanel>
 
                 <Border Grid.Row="3" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">
@@ -128,11 +143,14 @@
                               CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                               BorderThickness="0" AlternatingRowBackground="#F8FAFC" SelectionMode="Single"
                               SelectionChanged="ResultsGrid_SelectionChanged"
-                              automation:AutomationProperties.Name="Résultats de sécurité">
+                              automation:AutomationProperties.Name="{Binding [ResultsAutomation], Source={x:Static local:LocalizationManager.Instance}}">
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="Priorité" Binding="{Binding SeverityLabel}" Width="105" />
-                            <DataGridTextColumn Header="Élément observé" Binding="{Binding Title}" Width="2*" />
-                            <DataGridTextColumn Header="Ce que WinSight a trouvé" Binding="{Binding Detail}" Width="3*" />
+                            <DataGridTextColumn Header="{Binding [PriorityHeader], Source={x:Static local:LocalizationManager.Instance}}"
+                                                Binding="{Binding SeverityLabel}" Width="125" />
+                            <DataGridTextColumn Header="{Binding [ObservedItemHeader], Source={x:Static local:LocalizationManager.Instance}}"
+                                                Binding="{Binding Title}" Width="2*" />
+                            <DataGridTextColumn Header="{Binding [FindingHeader], Source={x:Static local:LocalizationManager.Instance}}"
+                                                Binding="{Binding Detail}" Width="3*" />
                         </DataGrid.Columns>
                     </DataGrid>
                 </Border>
@@ -145,18 +163,23 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <StackPanel>
-                            <TextBlock Text="Que faire ?" FontWeight="SemiBold" Foreground="#0F172A" />
+                            <TextBlock Text="{Binding [WhatToDo], Source={x:Static local:LocalizationManager.Instance}}"
+                                       FontWeight="SemiBold" Foreground="#0F172A" />
                             <TextBlock x:Name="GuidanceText" Margin="0,4,10,0" TextWrapping="Wrap"
-                                       Foreground="#475569" Text="Une alerte est un indice, pas une preuve d’infection." />
+                                       Foreground="#475569"
+                                       Text="{Binding [DefaultGuidance], Source={x:Static local:LocalizationManager.Instance}}" />
                             <TextBlock x:Name="SelectedFindingText" Margin="0,6,10,0" TextWrapping="Wrap"
                                        Foreground="#64748B" FontSize="12" />
                         </StackPanel>
                         <WrapPanel Grid.Column="1" VerticalAlignment="Center">
-                            <Button x:Name="OpenLocationButton" Content="Voir le fichier" IsEnabled="False"
+                            <Button x:Name="OpenLocationButton"
+                                    Content="{Binding [OpenFile], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
                                     Click="OpenLocationButton_Click" />
-                            <Button x:Name="CopyButton" Content="Copier les détails" IsEnabled="False"
+                            <Button x:Name="CopyButton"
+                                    Content="{Binding [CopyDetails], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
                                     Click="CopyButton_Click" />
-                            <Button x:Name="ExportButton" Content="Exporter en JSON" IsEnabled="False"
+                            <Button x:Name="ExportButton"
+                                    Content="{Binding [ExportJson], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
                                     Click="ExportButton_Click" />
                         </WrapPanel>
                     </Grid>
@@ -166,7 +189,7 @@
 
         <Border Grid.Row="2" Background="#E2E8F0" Padding="20,7">
             <TextBlock Foreground="#475569" FontSize="11"
-                       Text="Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal reste désactivé sans WINSIGHT_VT_KEY." />
+                       Text="{Binding [ReadOnlyFooter], Source={x:Static local:LocalizationManager.Instance}}" />
         </Border>
     </Grid>
 </Window>

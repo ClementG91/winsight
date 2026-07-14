@@ -7,6 +7,14 @@ public partial class App : System.Windows.Application
 {
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        var languageIndex = Array.FindIndex(
+            e.Args,
+            argument => argument.Equals("--language", StringComparison.OrdinalIgnoreCase));
+        if (languageIndex >= 0 && languageIndex + 1 < e.Args.Length)
+        {
+            LocalizationManager.Instance.SetCulture(e.Args[languageIndex + 1]);
+        }
+
         var window = new MainWindow();
         window.Show();
 

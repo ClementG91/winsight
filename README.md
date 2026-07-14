@@ -114,6 +114,16 @@ scanners, and reports can be exported or copied. Actions are deliberately safe:
 WinSight can reveal an item's validated file location or open the corresponding
 trusted Windows console, but it never deletes, kills or blocks automatically.
 
+The interface is available in **English, French and Spanish**. It follows the
+Windows display language on first launch, falls back to English for unsupported
+cultures, remembers an explicit selection, and can switch language from the header
+without restarting. Packaged-language startup is verified by CI for all three
+cultures; raw Windows paths, process names and other forensic evidence are never
+translated or altered.
+
+The language can also be selected explicitly for managed deployments, for example
+`winsight-dashboard --language es` (supported values: `en`, `fr`, `es`).
+
 - **Persistence** (KnockKnock-class) — 18 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
   `ServiceDll` payloads), Winlogon Shell/Userinit (HKLM+HKCU), Scheduled Tasks (Tasks

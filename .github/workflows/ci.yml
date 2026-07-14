@@ -51,8 +51,10 @@ jobs:
           dotnet publish src/WinSight.Cli/WinSight.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/cli
           dotnet publish src/WinSight.Dashboard/WinSight.Dashboard.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o artifacts/dashboard
           & ./artifacts/cli/winsight.exe --version
-          & ./artifacts/dashboard/winsight-dashboard.exe --smoke-test
-          if ($LASTEXITCODE -ne 0) { throw "Dashboard smoke test failed with exit code $LASTEXITCODE" }
+          foreach ($language in @("en", "fr", "es")) {
+            & ./artifacts/dashboard/winsight-dashboard.exe --language $language --smoke-test
+            if ($LASTEXITCODE -ne 0) { throw "Dashboard $language smoke test failed with exit code $LASTEXITCODE" }
+          }
 
       - name: Upload test results
         if: always()

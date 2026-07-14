@@ -16,25 +16,30 @@ namespace WinSight.Dashboard;
 public partial class MainWindow : Window, IDisposable
 {
     private readonly Forms.NotifyIcon _trayIcon;
+    private readonly Forms.ToolStripItem _openTrayItem;
+    private readonly Forms.ToolStripItem _exitTrayItem;
     private IReadOnlyList<ToolReport> _reports = [];
+    private IReadOnlyList<ReportChoice> _reportChoices = [];
     private CancellationTokenSource? _scanCancellation;
     private bool _allowClose;
     private bool _disposed;
+    private bool _initializing = true;
     private bool _shownTrayHint;
 
     public MainWindow()
     {
         InitializeComponent();
+        DashboardTools.Reload();
         ToolPicker.ItemsSource = DashboardTools.All;
         ToolPicker.SelectedIndex = 0;
 
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("Ouvrir WinSight", null, (_, _) => Dispatcher.Invoke(ShowFromTray));
-        menu.Items.Add("Quitter", null, (_, _) => Dispatcher.Invoke(ExitApplication));
+        _openTrayItem = menu.Items.Add(Text["TrayOpen"], null, (_, _) => Dispatcher.Invoke(ShowFromTray));
+        _exitTrayItem = menu.Items.Add(Text["TrayExit"], null, (_, _) => Dispatcher.Invoke(ExitApplication));
         _trayIcon = new Forms.NotifyIcon
         {
             Icon = Drawing.SystemIcons.Shield,
-            Text = "WinSight — sécurité locale",
+            Text = Text["TrayText"],
             Visible = true,
             ContextMenuStrip = menu,
         };
@@ -46,7 +51,13 @@ public partial class MainWindow : Window, IDisposable
                 HideToTray();
             }
         };
+
+        LanguagePicker.ItemsSource = Text.SupportedLanguages;
+        LanguagePicker.SelectedValue = Text.CurrentCode;
+        _initializing = false;
     }
+
+    private static LocalizationManager Text => LocalizationManager.Instance;
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
@@ -82,32 +93,32 @@ public partial class MainWindow : Window, IDisposable
                     cancellation.Token);
             }
 
-            ReportPicker.ItemsSource = _reports;
+            RefreshReportChoices();
             ReportPicker.Visibility = _reports.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
             ReportPicker.SelectedIndex = 0;
             ShowReport(_reports[0]);
             ScanProgressBar.IsIndeterminate = false;
             ScanProgressBar.Value = 100;
-            ProgressText.Text = "Analyse terminée.";
+            ProgressText.Text = Text["ProgressComplete"];
             ExportButton.IsEnabled = true;
         }
         catch (OperationCanceledException)
         {
             _reports = [];
-            SummaryText.Text = "Analyse arrêtée proprement entre deux étapes.";
-            ProgressText.Text = "Analyse arrêtée.";
+            SummaryText.Text = Text["ScanCancelledSummary"];
+            ProgressText.Text = Text["ProgressCancelled"];
         }
         catch (UnauthorizedAccessException)
         {
             _reports = [];
-            SummaryText.Text = "Droits insuffisants. Cette analyse nécessite peut-être un lancement en administrateur.";
-            ProgressText.Text = "Analyse impossible avec les droits actuels.";
+            SummaryText.Text = Text["InsufficientSummary"];
+            ProgressText.Text = Text["ProgressInsufficient"];
         }
         catch (Exception ex)
         {
             _reports = [];
-            SummaryText.Text = $"L’analyse a échoué : {ex.Message}";
-            ProgressText.Text = "Une erreur inattendue est survenue.";
+            SummaryText.Text = Text.Format("ScanFailed", ex.Message);
+            ProgressText.Text = Text["UnexpectedError"];
         }
         finally
         {
@@ -125,6 +136,7 @@ public partial class MainWindow : Window, IDisposable
         ScanButton.IsEnabled = !scanning;
         ToolPicker.IsEnabled = !scanning;
         FlaggedOnly.IsEnabled = !scanning;
+        LanguagePicker.IsEnabled = !scanning;
         ProgressPanel.Visibility = scanning || _reports.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.Visibility = scanning && tool.Command == "all" ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.IsEnabled = scanning;
@@ -134,9 +146,9 @@ public partial class MainWindow : Window, IDisposable
             ScanProgressBar.Value = 0;
             ScanProgressBar.IsIndeterminate = tool.Command != "all";
             ProgressText.Text = tool.Command == "all"
-                ? "Préparation de la vue d’ensemble…"
-                : $"Analyse « {tool.Label} » en cours…";
-            SummaryText.Text = "WinSight lit les informations Windows. Aucune modification n’est effectuée.";
+                ? Text["OverviewPreparing"]
+                : Text.Format("SingleScan", tool.Label);
+            SummaryText.Text = Text["ReadingWindows"];
         }
     }
 
@@ -145,14 +157,18 @@ public partial class MainWindow : Window, IDisposable
         ScanProgressBar.IsIndeterminate = false;
         ScanProgressBar.Value = progress.Percent;
         var tool = DashboardTools.ForCommand(progress.Command);
-        ProgressText.Text = $"{progress.Completed}/{progress.Total} — {tool?.Label ?? progress.Command}";
+        ProgressText.Text = Text.Format(
+            "ProgressFormat",
+            progress.Completed,
+            progress.Total,
+            tool?.Label ?? progress.Command);
     }
 
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
         _scanCancellation?.Cancel();
         CancelButton.IsEnabled = false;
-        ProgressText.Text = "Arrêt demandé — l’étape en cours se termine sans être interrompue brutalement…";
+        ProgressText.Text = Text["StopRequested"];
     }
 
     private void ToolPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -165,24 +181,67 @@ public partial class MainWindow : Window, IDisposable
 
     private void ReportPicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (ReportPicker.SelectedItem is ToolReport report)
+        if (ReportPicker.SelectedItem is ReportChoice choice)
         {
-            ShowReport(report);
+            ShowReport(choice.Report);
         }
+    }
+
+    private void LanguagePicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_initializing || LanguagePicker.SelectedItem is not UiLanguage language)
+        {
+            return;
+        }
+
+        var selectedCommand = (ToolPicker.SelectedItem as DashboardTool)?.Command ?? "all";
+        var selectedReport = (ReportPicker.SelectedItem as ReportChoice)?.Report;
+        Text.SetCulture(language.Code, remember: true);
+        DashboardTools.Reload();
+        ToolPicker.ItemsSource = DashboardTools.All;
+        ToolPicker.SelectedItem = DashboardTools.ForCommand(selectedCommand) ?? DashboardTools.All[0];
+        RefreshTrayText();
+
+        if (_reports.Count > 0)
+        {
+            RefreshReportChoices();
+            ReportPicker.SelectedItem = _reportChoices.FirstOrDefault(choice => ReferenceEquals(choice.Report, selectedReport))
+                ?? _reportChoices[0];
+            ShowReport(((ReportChoice)ReportPicker.SelectedItem).Report);
+        }
+        else
+        {
+            SummaryText.Text = Text["ReadySummary"];
+        }
+    }
+
+    private void RefreshReportChoices()
+    {
+        _reportChoices = _reports.Select(report => new ReportChoice(
+            DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool,
+            report)).ToList();
+        ReportPicker.ItemsSource = _reportChoices;
+    }
+
+    private void RefreshTrayText()
+    {
+        _openTrayItem.Text = Text["TrayOpen"];
+        _exitTrayItem.Text = Text["TrayExit"];
+        _trayIcon.Text = Text["TrayText"];
     }
 
     private void ShowReport(ToolReport report)
     {
         var findings = report.Items.Select(item => new FindingView(
-            item.Severity == Severity.Notable ? "À vérifier" : "Information",
+            item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
             item.Title,
             item.Detail,
             item)).ToList();
         ResultsGrid.ItemsSource = findings;
-        SummaryText.Text = $"{findings.Count} résultat(s) affiché(s) · {report.NotableCount} à vérifier";
+        SummaryText.Text = Text.Format("ResultsSummary", findings.Count, report.NotableCount);
         SelectedFindingText.Text = findings.Count == 0
-            ? "Aucun élément à afficher avec le filtre actuel. Cela ne garantit pas l’absence de menace."
-            : "Sélectionnez une ligne pour afficher les actions sûres disponibles.";
+            ? Text["NoItems"]
+            : Text["SelectFinding"];
 
         if (DashboardTools.ForReport(report.Tool) is { } reportTool)
         {
@@ -213,7 +272,11 @@ public partial class MainWindow : Window, IDisposable
 
         CopyButton.IsEnabled = true;
         OpenLocationButton.IsEnabled = FindingActions.ExistingAbsolutePath(finding.Item) is not null;
-        SelectedFindingText.Text = $"{finding.SeverityLabel} — {finding.Title}\n{finding.Detail}";
+        SelectedFindingText.Text = Text.Format(
+            "FindingSelectionFormat",
+            finding.SeverityLabel,
+            finding.Title,
+            finding.Detail);
     }
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
@@ -234,7 +297,7 @@ public partial class MainWindow : Window, IDisposable
         }
         TryUserAction(
             () => System.Windows.Clipboard.SetText(text.ToString()),
-            "Détails copiés dans le presse-papiers.");
+            Text["Copied"]);
     }
 
     private void ExportButton_Click(object sender, RoutedEventArgs e)
@@ -246,10 +309,10 @@ public partial class MainWindow : Window, IDisposable
 
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Exporter le rapport WinSight",
+            Title = Text["ExportDialogTitle"],
             FileName = $"winsight-{DateTime.Now:yyyyMMdd-HHmmss}.json",
             DefaultExt = ".json",
-            Filter = "Rapport JSON (*.json)|*.json",
+            Filter = Text["JsonFilter"],
             AddExtension = true,
             OverwritePrompt = true,
         };
@@ -262,7 +325,7 @@ public partial class MainWindow : Window, IDisposable
         {
             using var writer = File.CreateText(dialog.FileName);
             ReportRenderer.RenderJson(_reports, writer);
-        }, $"Rapport exporté : {dialog.FileName}");
+        }, Text.Format("Exported", dialog.FileName));
     }
 
     private void OpenLocationButton_Click(object sender, RoutedEventArgs e)
@@ -275,7 +338,7 @@ public partial class MainWindow : Window, IDisposable
         var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
         var startInfo = new ProcessStartInfo(explorer) { UseShellExecute = false };
         startInfo.ArgumentList.Add(Directory.Exists(path) ? path : $"/select,{path}");
-        TryUserAction(() => _ = Process.Start(startInfo), "Emplacement ouvert dans l’Explorateur.");
+        TryUserAction(() => _ = Process.Start(startInfo), Text["LocationOpened"]);
     }
 
     private void WindowsToolButton_Click(object sender, RoutedEventArgs e)
@@ -297,7 +360,7 @@ public partial class MainWindow : Window, IDisposable
             startInfo.ArgumentList.Add(Path.Combine(system,
                 action == DashboardWindowsAction.Firewall ? "wf.msc" : "certlm.msc"));
         }
-        TryUserAction(() => _ = Process.Start(startInfo), "Outil Windows ouvert.");
+        TryUserAction(() => _ = Process.Start(startInfo), Text["WindowsToolOpened"]);
     }
 
     private void TryUserAction(Action action, string successMessage)
@@ -310,7 +373,7 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception ex) when (ex is Win32Exception or IOException
                                      or UnauthorizedAccessException or ExternalException)
         {
-            SummaryText.Text = $"Action impossible : {ex.Message}";
+            SummaryText.Text = Text.Format("ActionFailed", ex.Message);
         }
     }
 
@@ -326,7 +389,7 @@ public partial class MainWindow : Window, IDisposable
         Hide();
         if (!_shownTrayHint)
         {
-            _trayIcon.ShowBalloonTip(2500, "WinSight", "WinSight continue dans la zone de notification.", Forms.ToolTipIcon.Info);
+            _trayIcon.ShowBalloonTip(2500, "WinSight", Text["TrayHintMessage"], Forms.ToolTipIcon.Info);
             _shownTrayHint = true;
         }
     }
@@ -370,6 +433,8 @@ public partial class MainWindow : Window, IDisposable
 
 public sealed record FindingView(string SeverityLabel, string Title, string Detail, ReportItem Item);
 
+public sealed record ReportChoice(string Label, ToolReport Report);
+
 public enum DashboardWindowsAction
 {
     None,
@@ -389,45 +454,44 @@ public sealed record DashboardTool(
 
 public static class DashboardTools
 {
-    public static IReadOnlyList<DashboardTool> All { get; } =
+    private static IReadOnlyList<DashboardTool> _all = Build();
+
+    public static IReadOnlyList<DashboardTool> All => _all;
+
+    public static void Reload() => _all = Build();
+
+    private static IReadOnlyList<DashboardTool> Build() =>
     [
-        new("Vue d’ensemble", "all", "all", "Le contrôle recommandé en un clic",
-            "Vérifie les principaux signaux : démarrage automatique, caméra/micro, connexions, DNS, extensions, hosts et certificats.",
-            "Commencez par les lignes « À vérifier ». Une alerte est un indice : contrôlez le nom, l’emplacement et l’éditeur avant toute action."),
-        new("Démarrage automatique", "persistence", "persistence", "Ce qui se lance avec Windows",
-            "Recherche les programmes, services et réglages capables de revenir à chaque démarrage ou connexion.",
-            "Un élément inconnu ou non signé mérite une vérification. N’effacez pas une entrée système sans sauvegarde ni confirmation."),
-        new("Caméra et microphone", "av", "camera-mic", "Applications ayant utilisé vos capteurs",
-            "Montre les applications enregistrées par Windows comme ayant utilisé la webcam ou le microphone, et celles actives maintenant.",
-            "Si un capteur est actif sans raison, fermez l’application concernée puis vérifiez ses autorisations dans les paramètres de confidentialité."),
-        new("Connexions réseau", "net", "connections", "Programmes connectés à Internet",
-            "Relie les connexions TCP/UDP aux programmes qui les ont ouvertes et à leur signature numérique.",
-            "Une connexion externe n’est pas forcément malveillante. Vérifiez d’abord le programme, son chemin et sa signature."),
-        new("Noms de domaine (DNS)", "dns", "dns", "Sites récemment contactés",
-            "Affiche le cache DNS Windows : les noms de domaine récemment résolus par la machine.",
-            "Le cache DNS indique une résolution, pas nécessairement une visite volontaire. Corrélez avec les connexions et les programmes actifs."),
-        new("Pare-feu Windows", "firewall", "firewall", "Règles réseau actuellement actives",
-            "Inventorie les règles du pare-feu Microsoft Defender. Le blocage automatique WinSight reste désactivé tant que le service WFP sécurisé n’est pas livré.",
-            "Utilisez l’outil Windows pour modifier une règle. Conservez une voie de récupération avant de bloquer un service système.",
-            DashboardWindowsAction.Firewall),
-        new("Processus", "processes", "processes", "Programmes en cours d’exécution",
-            "Liste les processus, leur chemin, leur parent, leur ligne de commande et leur signature.",
-            "Un processus non signé peut être légitime. Ouvrez son emplacement et confirmez sa provenance avant de le terminer.",
-            DashboardWindowsAction.Processes),
-        new("Modules chargés", "modules", "modules", "Bibliothèques utilisées par les programmes",
-            "Recherche les DLL non signées ou non fiables chargées dans les processus accessibles.",
-            "Cette analyse peut être longue. Une DLL inconnue dans un programme signé mérite une investigation, pas une suppression immédiate."),
-        new("Extensions navigateur", "extensions", "extensions", "Extensions avec accès étendu",
-            "Inspecte les extensions Chromium et signale les permissions capables de lire ou modifier de nombreuses pages.",
-            "Désactivez depuis le navigateur les extensions inutiles ou inconnues, puis vérifiez leur éditeur et leur fiche officielle."),
-        new("Certificats de confiance", "certs", "certificates", "Autorités capables de valider le HTTPS",
-            "Recherche les certificats racine présentant des signaux risqués : clé privée locale, signature faible ou clé trop courte.",
-            "Ne supprimez jamais un certificat d’entreprise sans l’avis de votre administrateur. Comparez l’émetteur et l’usage attendu.",
-            DashboardWindowsAction.Certificates),
-        new("Fichier hosts", "hosts", "hosts", "Redirections locales de sites",
-            "Détecte les redirections pouvant détourner un site ou bloquer les services de sécurité et de mise à jour.",
-            "Les bloqueurs de publicité utilisent aussi ce fichier. Vérifiez le domaine et l’adresse avant de modifier quoi que ce soit."),
+        Tool("Overview", "all", "all"),
+        Tool("Persistence", "persistence", "persistence"),
+        Tool("Av", "av", "camera-mic"),
+        Tool("Network", "net", "connections"),
+        Tool("Dns", "dns", "dns"),
+        Tool("Firewall", "firewall", "firewall", DashboardWindowsAction.Firewall),
+        Tool("Processes", "processes", "processes", DashboardWindowsAction.Processes),
+        Tool("Modules", "modules", "modules"),
+        Tool("Extensions", "extensions", "extensions"),
+        Tool("Certificates", "certs", "certificates", DashboardWindowsAction.Certificates),
+        Tool("Hosts", "hosts", "hosts"),
     ];
+
+    private static DashboardTool Tool(
+        string resourceName,
+        string command,
+        string reportName,
+        DashboardWindowsAction windowsAction = DashboardWindowsAction.None)
+    {
+        var text = LocalizationManager.Instance;
+        var prefix = $"Tool{resourceName}";
+        return new DashboardTool(
+            text[$"{prefix}Label"],
+            command,
+            reportName,
+            text[$"{prefix}Short"],
+            text[$"{prefix}Description"],
+            text[$"{prefix}Guidance"],
+            windowsAction);
+    }
 
     public static DashboardTool? ForCommand(string command) =>
         All.FirstOrDefault(tool => tool.Command.Equals(command, StringComparison.OrdinalIgnoreCase));

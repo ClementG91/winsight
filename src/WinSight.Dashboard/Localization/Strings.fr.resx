@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
+  <data name="WindowTitle" xml:space="preserve"><value>WinSight — sécurité Windows</value></data>
+  <data name="AppTagline" xml:space="preserve"><value>Comprendre ce qui se passe sur votre PC, sans télémétrie</value></data>
+  <data name="LocalAnalysis" xml:space="preserve"><value>● Analyse locale</value></data>
+  <data name="LanguageLabel" xml:space="preserve"><value>Langue</value></data>
+  <data name="LanguagePickerAutomation" xml:space="preserve"><value>Langue de l’interface</value></data>
+  <data name="ChooseCheckTitle" xml:space="preserve"><value>Que voulez-vous vérifier ?</value></data>
+  <data name="ChooseCheckSubtitle" xml:space="preserve"><value>Choisissez une analyse. La vue d’ensemble est recommandée pour commencer.</value></data>
+  <data name="ToolPickerAutomation" xml:space="preserve"><value>Type d’analyse</value></data>
+  <data name="FlaggedOnly" xml:space="preserve"><value>Afficher seulement ce qui mérite attention</value></data>
+  <data name="FlaggedOnlyTooltip" xml:space="preserve"><value>Masque les éléments normaux pour réduire le bruit.</value></data>
+  <data name="StartAnalysis" xml:space="preserve"><value>Démarrer l’analyse</value></data>
+  <data name="StartAnalysisAutomation" xml:space="preserve"><value>Démarrer l’analyse de sécurité sélectionnée</value></data>
+  <data name="OpenWindowsTool" xml:space="preserve"><value>Ouvrir l’outil Windows</value></data>
+  <data name="StopAfterStep" xml:space="preserve"><value>Arrêter après cette étape</value></data>
+  <data name="ProgressAutomation" xml:space="preserve"><value>Progression de l’analyse</value></data>
+  <data name="ReadySummary" xml:space="preserve"><value>Prêt. Sélectionnez une analyse puis cliquez sur Démarrer.</value></data>
+  <data name="ReportPickerAutomation" xml:space="preserve"><value>Rapport affiché</value></data>
+  <data name="ResultsAutomation" xml:space="preserve"><value>Résultats de sécurité</value></data>
+  <data name="PriorityHeader" xml:space="preserve"><value>Priorité</value></data>
+  <data name="ObservedItemHeader" xml:space="preserve"><value>Élément observé</value></data>
+  <data name="FindingHeader" xml:space="preserve"><value>Ce que WinSight a trouvé</value></data>
+  <data name="WhatToDo" xml:space="preserve"><value>Que faire ?</value></data>
+  <data name="DefaultGuidance" xml:space="preserve"><value>Une alerte est un indice, pas une preuve d’infection.</value></data>
+  <data name="OpenFile" xml:space="preserve"><value>Voir le fichier</value></data>
+  <data name="CopyDetails" xml:space="preserve"><value>Copier les détails</value></data>
+  <data name="ExportJson" xml:space="preserve"><value>Exporter en JSON</value></data>
+  <data name="ReadOnlyFooter" xml:space="preserve"><value>Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal reste désactivé sans WINSIGHT_VT_KEY.</value></data>
+  <data name="TrayOpen" xml:space="preserve"><value>Ouvrir WinSight</value></data>
+  <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
+  <data name="TrayText" xml:space="preserve"><value>WinSight — sécurité locale</value></data>
+  <data name="TrayHintMessage" xml:space="preserve"><value>WinSight continue dans la zone de notification.</value></data>
+  <data name="ProgressComplete" xml:space="preserve"><value>Analyse terminée.</value></data>
+  <data name="ScanCancelledSummary" xml:space="preserve"><value>Analyse arrêtée proprement entre deux étapes.</value></data>
+  <data name="ProgressCancelled" xml:space="preserve"><value>Analyse arrêtée.</value></data>
+  <data name="InsufficientSummary" xml:space="preserve"><value>Droits insuffisants. Cette analyse nécessite peut-être un lancement en administrateur.</value></data>
+  <data name="ProgressInsufficient" xml:space="preserve"><value>Analyse impossible avec les droits actuels.</value></data>
+  <data name="ScanFailed" xml:space="preserve"><value>L’analyse a échoué : {0}</value></data>
+  <data name="UnexpectedError" xml:space="preserve"><value>Une erreur inattendue est survenue.</value></data>
+  <data name="OverviewPreparing" xml:space="preserve"><value>Préparation de la vue d’ensemble…</value></data>
+  <data name="SingleScan" xml:space="preserve"><value>Analyse « {0} » en cours…</value></data>
+  <data name="ReadingWindows" xml:space="preserve"><value>WinSight lit les informations Windows. Aucune modification n’est effectuée.</value></data>
+  <data name="ProgressFormat" xml:space="preserve"><value>{0}/{1} — {2}</value></data>
+  <data name="StopRequested" xml:space="preserve"><value>Arrêt demandé — l’étape en cours se termine sans être interrompue brutalement…</value></data>
+  <data name="NotableSeverity" xml:space="preserve"><value>À vérifier</value></data>
+  <data name="InfoSeverity" xml:space="preserve"><value>Information</value></data>
+  <data name="ResultsSummary" xml:space="preserve"><value>{0} résultat(s) affiché(s) · {1} à vérifier</value></data>
+  <data name="NoItems" xml:space="preserve"><value>Aucun élément à afficher avec le filtre actuel. Cela ne garantit pas l’absence de menace.</value></data>
+  <data name="SelectFinding" xml:space="preserve"><value>Sélectionnez une ligne pour afficher les actions sûres disponibles.</value></data>
+  <data name="FindingSelectionFormat" xml:space="preserve"><value>{0} — {1}&#xA;{2}</value></data>
+  <data name="Copied" xml:space="preserve"><value>Détails copiés dans le presse-papiers.</value></data>
+  <data name="ExportDialogTitle" xml:space="preserve"><value>Exporter le rapport WinSight</value></data>
+  <data name="JsonFilter" xml:space="preserve"><value>Rapport JSON (*.json)|*.json</value></data>
+  <data name="Exported" xml:space="preserve"><value>Rapport exporté : {0}</value></data>
+  <data name="LocationOpened" xml:space="preserve"><value>Emplacement ouvert dans l’Explorateur.</value></data>
+  <data name="WindowsToolOpened" xml:space="preserve"><value>Outil Windows ouvert.</value></data>
+  <data name="ActionFailed" xml:space="preserve"><value>Action impossible : {0}</value></data>
+
+  <data name="ToolOverviewLabel" xml:space="preserve"><value>Vue d’ensemble</value></data>
+  <data name="ToolOverviewShort" xml:space="preserve"><value>Le contrôle recommandé en un clic</value></data>
+  <data name="ToolOverviewDescription" xml:space="preserve"><value>Vérifie les principaux signaux : démarrage automatique, caméra/micro, connexions, DNS, extensions, hosts et certificats.</value></data>
+  <data name="ToolOverviewGuidance" xml:space="preserve"><value>Commencez par les lignes « À vérifier ». Une alerte est un indice : contrôlez le nom, l’emplacement et l’éditeur avant toute action.</value></data>
+  <data name="ToolPersistenceLabel" xml:space="preserve"><value>Démarrage automatique</value></data>
+  <data name="ToolPersistenceShort" xml:space="preserve"><value>Ce qui se lance avec Windows</value></data>
+  <data name="ToolPersistenceDescription" xml:space="preserve"><value>Recherche les programmes, services et réglages capables de revenir à chaque démarrage ou connexion.</value></data>
+  <data name="ToolPersistenceGuidance" xml:space="preserve"><value>Un élément inconnu ou non signé mérite une vérification. N’effacez pas une entrée système sans sauvegarde ni confirmation.</value></data>
+  <data name="ToolAvLabel" xml:space="preserve"><value>Caméra et microphone</value></data>
+  <data name="ToolAvShort" xml:space="preserve"><value>Applications ayant utilisé vos capteurs</value></data>
+  <data name="ToolAvDescription" xml:space="preserve"><value>Montre les applications enregistrées par Windows comme ayant utilisé la webcam ou le microphone, et celles actives maintenant.</value></data>
+  <data name="ToolAvGuidance" xml:space="preserve"><value>Si un capteur est actif sans raison, fermez l’application concernée puis vérifiez ses autorisations dans les paramètres de confidentialité.</value></data>
+  <data name="ToolNetworkLabel" xml:space="preserve"><value>Connexions réseau</value></data>
+  <data name="ToolNetworkShort" xml:space="preserve"><value>Programmes connectés à Internet</value></data>
+  <data name="ToolNetworkDescription" xml:space="preserve"><value>Relie les connexions TCP/UDP aux programmes qui les ont ouvertes et à leur signature numérique.</value></data>
+  <data name="ToolNetworkGuidance" xml:space="preserve"><value>Une connexion externe n’est pas forcément malveillante. Vérifiez d’abord le programme, son chemin et sa signature.</value></data>
+  <data name="ToolDnsLabel" xml:space="preserve"><value>Noms de domaine (DNS)</value></data>
+  <data name="ToolDnsShort" xml:space="preserve"><value>Sites récemment contactés</value></data>
+  <data name="ToolDnsDescription" xml:space="preserve"><value>Affiche le cache DNS Windows : les noms de domaine récemment résolus par la machine.</value></data>
+  <data name="ToolDnsGuidance" xml:space="preserve"><value>Le cache DNS indique une résolution, pas nécessairement une visite volontaire. Corrélez avec les connexions et les programmes actifs.</value></data>
+  <data name="ToolFirewallLabel" xml:space="preserve"><value>Pare-feu Windows</value></data>
+  <data name="ToolFirewallShort" xml:space="preserve"><value>Règles réseau actuellement actives</value></data>
+  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventorie les règles du pare-feu Microsoft Defender. Le blocage automatique reste désactivé tant que le service WFP sécurisé n’est pas livré.</value></data>
+  <data name="ToolFirewallGuidance" xml:space="preserve"><value>Utilisez l’outil Windows pour modifier une règle. Conservez une voie de récupération avant de bloquer un service système.</value></data>
+  <data name="ToolProcessesLabel" xml:space="preserve"><value>Processus</value></data>
+  <data name="ToolProcessesShort" xml:space="preserve"><value>Programmes en cours d’exécution</value></data>
+  <data name="ToolProcessesDescription" xml:space="preserve"><value>Liste les processus, leur chemin, leur parent, leur ligne de commande et leur signature.</value></data>
+  <data name="ToolProcessesGuidance" xml:space="preserve"><value>Un processus non signé peut être légitime. Ouvrez son emplacement et confirmez sa provenance avant de le terminer.</value></data>
+  <data name="ToolModulesLabel" xml:space="preserve"><value>Modules chargés</value></data>
+  <data name="ToolModulesShort" xml:space="preserve"><value>Bibliothèques utilisées par les programmes</value></data>
+  <data name="ToolModulesDescription" xml:space="preserve"><value>Recherche les DLL non signées ou non fiables chargées dans les processus accessibles.</value></data>
+  <data name="ToolModulesGuidance" xml:space="preserve"><value>Cette analyse peut être longue. Une DLL inconnue dans un programme signé mérite une investigation, pas une suppression immédiate.</value></data>
+  <data name="ToolExtensionsLabel" xml:space="preserve"><value>Extensions navigateur</value></data>
+  <data name="ToolExtensionsShort" xml:space="preserve"><value>Extensions avec accès étendu</value></data>
+  <data name="ToolExtensionsDescription" xml:space="preserve"><value>Inspecte les extensions Chromium et signale les permissions capables de lire ou modifier de nombreuses pages.</value></data>
+  <data name="ToolExtensionsGuidance" xml:space="preserve"><value>Désactivez depuis le navigateur les extensions inutiles ou inconnues, puis vérifiez leur éditeur et leur fiche officielle.</value></data>
+  <data name="ToolCertificatesLabel" xml:space="preserve"><value>Certificats de confiance</value></data>
+  <data name="ToolCertificatesShort" xml:space="preserve"><value>Autorités capables de valider le HTTPS</value></data>
+  <data name="ToolCertificatesDescription" xml:space="preserve"><value>Recherche les certificats racine présentant des signaux risqués : clé privée locale, signature faible ou clé trop courte.</value></data>
+  <data name="ToolCertificatesGuidance" xml:space="preserve"><value>Ne supprimez jamais un certificat d’entreprise sans l’avis de votre administrateur. Comparez l’émetteur et l’usage attendu.</value></data>
+  <data name="ToolHostsLabel" xml:space="preserve"><value>Fichier hosts</value></data>
+  <data name="ToolHostsShort" xml:space="preserve"><value>Redirections locales de sites</value></data>
+  <data name="ToolHostsDescription" xml:space="preserve"><value>Détecte les redirections pouvant détourner un site ou bloquer les services de sécurité et de mise à jour.</value></data>
+  <data name="ToolHostsGuidance" xml:space="preserve"><value>Les bloqueurs de publicité utilisent aussi ce fichier. Vérifiez le domaine et l’adresse avant de modifier quoi que ce soit.</value></data>
+</root>

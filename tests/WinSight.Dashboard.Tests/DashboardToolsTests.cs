@@ -3,6 +3,7 @@ using Xunit;
 
 namespace WinSight.Dashboard.Tests;
 
+[Collection(LocalizationCollection.Name)]
 public sealed class DashboardToolsTests
 {
     [Fact]
