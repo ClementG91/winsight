@@ -87,7 +87,30 @@ finally
         {
             throw "Refusing to clean unexpected path: $resolvedInstallDirectory"
         }
-        Remove-Item -LiteralPath $resolvedInstallDirectory -Recurse -Force
+
+        # Windows Defender or single-file extraction cleanup can retain a just-run
+        # executable for a few hundred milliseconds after the process and Inno
+        # uninstaller exit. Retry the verified temporary path, but still fail if a
+        # lock persists: a production uninstall must not silently leave binaries.
+        $removed = $false
+        for ($attempt = 1; $attempt -le 20; $attempt++)
+        {
+            try
+            {
+                Remove-Item -LiteralPath $resolvedInstallDirectory -Recurse -Force -ErrorAction Stop
+                $removed = -not (Test-Path -LiteralPath $resolvedInstallDirectory)
+                if ($removed) { break }
+            }
+            catch
+            {
+                if ($attempt -eq 20) { throw }
+                Start-Sleep -Milliseconds 500
+            }
+        }
+        if (-not $removed)
+        {
+            throw "Installer cleanup still contains locked files after 10 seconds: $resolvedInstallDirectory"
+        }
     }
 }
 
