@@ -79,10 +79,12 @@ process ids or display names, which are transient or ambiguous.
 1. Done. The named-pipe host, hardened ACL, impersonated-identity authentication,
    dispatcher and audit-only engine are implemented and tested, hosted by a
    least-privilege Windows service worker (`WinSight.FirewallService`) that provisions an
-   ACL-protected policy directory under ProgramData, and surfaced read-only in the
-   dashboard through `FirewallServiceGateway`/`FirewallServiceAdapter` (an "Outbound
-   Firewall" navigation entry that degrades to "service not installed" when the service is
-   absent). What remains is installer/uninstaller registration of the service.
+   ACL-protected policy directory under ProgramData, surfaced read-only in the dashboard
+   through `FirewallServiceGateway`/`FirewallServiceAdapter` (an "Outbound Firewall"
+   navigation entry that degrades to "service not installed"), and shipped as
+   `winsight-firewall-service.exe` with opt-in, elevated `install`/`uninstall` verbs that
+   register a demand-start, LocalSystem, audit-only service through the SCM. The per-user
+   setup never installs it.
 2. WFP engine/session/provider/sublayer interop and audit-only filters. This is the
    first increment that touches real filters and must be developed and validated on an
    isolated Windows VM before it ships.

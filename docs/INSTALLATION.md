@@ -90,6 +90,29 @@ Extract the ZIP to a directory you control, then run `winsight-dashboard.exe`.
 Administrators and automation users can run `winsight.exe --help`. Keep the files
 inside the archive together, including the `_manifest` SBOM directory.
 
+## Optional outbound-firewall service (audit-only)
+
+WinSight ships `winsight-firewall-service.exe`, the Phase 2 outbound-firewall service.
+It is **opt-in and not installed by the per-user setup**, because registering a Windows
+service requires Administrator rights. The service is **audit-only**: it records
+per-application policies but installs no Windows Filtering Platform filter, so your
+network connectivity is never affected.
+
+From an **elevated** (Administrator) console, in the install or extracted directory:
+
+```powershell
+# Register the demand-start, LocalSystem service (audit-only, no filter installed)
+.\winsight-firewall-service.exe install
+
+# Check registration, or remove it
+.\winsight-firewall-service.exe status
+.\winsight-firewall-service.exe uninstall
+```
+
+Once registered, the dashboard's **Outbound Firewall** view changes from "service not
+installed" to the live audit-only status. Enforcement (actually blocking traffic) is a
+separate, later, opt-in step and is not part of this release.
+
 ## Integrity and provenance
 
 Verify a download in PowerShell:
