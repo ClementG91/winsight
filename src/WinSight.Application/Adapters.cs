@@ -34,14 +34,17 @@ public static class Adapters
         new CachingSignatureVerifier(new NativeSignatureVerifier());
 
     /// <summary>Runs one snapshot tool by its canonical CLI name.</summary>
-    public static ToolReport Run(string command, bool flaggedOnly = false)
+    public static ToolReport Run(
+        string command,
+        bool flaggedOnly = false,
+        bool allowNetworkLookups = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
         return command.ToLowerInvariant() switch
         {
-            "persistence" => Persistence(flaggedOnly),
+            "persistence" => Persistence(flaggedOnly, allowNetworkLookups),
             "av" or "avmonitor" => CameraMic(flaggedOnly),
-            "net" or "netmonitor" => Connections(flaggedOnly),
+            "net" or "netmonitor" => Connections(flaggedOnly, allowNetworkLookups),
             "dns" => Dns(flaggedOnly),
             "firewall" or "fw" => Firewall(flaggedOnly),
             "processes" or "ps" => Processes(flaggedOnly),
@@ -60,6 +63,7 @@ public static class Adapters
     public static IReadOnlyList<ToolReport> RunOverview(
         bool flaggedOnly = false,
         IProgress<ScanProgress>? progress = null,
+        bool allowNetworkLookups = true,
         CancellationToken cancellationToken = default)
     {
         var reports = new List<ToolReport>(OverviewCommands.Count);
@@ -68,19 +72,19 @@ public static class Adapters
             cancellationToken.ThrowIfCancellationRequested();
             var command = OverviewCommands[index];
             progress?.Report(new ScanProgress(index, OverviewCommands.Count, command));
-            reports.Add(Run(command, flaggedOnly));
+            reports.Add(Run(command, flaggedOnly, allowNetworkLookups));
             progress?.Report(new ScanProgress(index + 1, OverviewCommands.Count, command));
         }
         return reports;
     }
 
-    public static ToolReport Persistence(bool flaggedOnly)
+    public static ToolReport Persistence(bool flaggedOnly, bool allowNetworkLookups = true)
     {
         var entries = new PersistenceScanner(verifier: SharedVerifier).Scan();
 
         // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
         var vt = VtLookups(entries.Where(e => e.IsSuspicious && e.ImagePath is not null)
-            .Select(e => e.ImagePath!));
+            .Select(e => e.ImagePath!), allowNetworkLookups);
 
         var b = new ToolReport.Builder("persistence");
         foreach (var e in entries.Where(e => !flaggedOnly || e.IsSuspicious)
@@ -111,11 +115,13 @@ public static class Adapters
     // VirusTotal lookups for the given image paths — opt-in (WINSIGHT_VT_KEY) and
     // capped to stay within the free-tier rate limit. Empty when no key is set (the
     // tool stays local-only unless the user provides their own key).
-    private static Dictionary<string, VtVerdict> VtLookups(IEnumerable<string> imagePaths)
+    private static Dictionary<string, VtVerdict> VtLookups(
+        IEnumerable<string> imagePaths,
+        bool allowNetworkLookups)
     {
         var results = new Dictionary<string, VtVerdict>(StringComparer.OrdinalIgnoreCase);
         var apiKey = Environment.GetEnvironmentVariable("WINSIGHT_VT_KEY");
-        if (string.IsNullOrWhiteSpace(apiKey))
+        if (!allowNetworkLookups || string.IsNullOrWhiteSpace(apiKey))
         {
             return results;
         }
@@ -388,13 +394,13 @@ public static class Adapters
         return b.Build($"{records.Count} cached DNS record(s)");
     }
 
-    public static ToolReport Connections(bool flaggedOnly)
+    public static ToolReport Connections(bool flaggedOnly, bool allowNetworkLookups = true)
     {
         var connections = new ConnectionMonitor(SharedVerifier).Snapshot();
 
         // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections.
         var vt = VtLookups(connections.Where(c => c.Noteworthy && c.ImagePath is not null)
-            .Select(c => c.ImagePath!));
+            .Select(c => c.ImagePath!), allowNetworkLookups);
 
         var b = new ToolReport.Builder("connections");
         foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)

@@ -36,6 +36,12 @@ dashboard and CLI.
 Raw paths, process names, command lines and other forensic evidence are preserved
 verbatim even when the interface is translated.
 
+The CLI and dashboard preserve that forensic evidence. MCP is intentionally more
+conservative because an AI client may forward results to a model provider: it starts
+summary-only, bounds item output, redacts user-profile paths and omits command fields
+unless the user enabled the separate sensitive-evidence gate. MCP scans also disable
+VirusTotal regardless of the CLI/dashboard opt-in key.
+
 ## Important limits
 
 - WinSight does not claim to be antivirus or EDR and does not guarantee detection

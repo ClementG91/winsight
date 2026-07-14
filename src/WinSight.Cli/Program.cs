@@ -1,5 +1,6 @@
 using System.Reflection;
 using WinSight.Application;
+using WinSight.Mcp;
 using WinSight.Reporting;
 
 // winsight — the unified suite entry point. One signed binary runs every WinSight
@@ -14,6 +15,7 @@ using WinSight.Reporting;
 //   winsight extensions                 browser extensions + risky permissions
 //   winsight certs                      trusted root CAs + rogue-root signals
 //   winsight hosts                      hosts-file hijack / AV-block detection
+//   winsight mcp                        local read-only MCP stdio server
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight dns --watch                live DNS queries via ETW (Administrator)
 //   winsight ... --flagged              only noteworthy items
@@ -37,6 +39,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight extensions                     browser extensions + risky permissions
           winsight certs                          trusted root CAs + rogue-root signals
           winsight hosts                          hosts-file hijack / AV-block detection
+          winsight mcp                            local read-only MCP stdio server
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
           winsight dns --watch                    live DNS queries via ETW (Administrator)
 
@@ -52,6 +55,12 @@ if (args.Contains("--help") || args.Contains("-h"))
 var json = args.Contains("--json");
 var flaggedOnly = args.Contains("--flagged");
 var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?? "all";
+
+// MCP owns stdout completely: no banner or CLI renderer may run in this mode.
+if (command == "mcp")
+{
+    return await WinSightMcpHost.RunAsync();
+}
 
 // Live camera/mic monitor (OverSight-style) — long-running, prints transitions.
 if ((command is "av" or "avmonitor") && args.Contains("--watch"))

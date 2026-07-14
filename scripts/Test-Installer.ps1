@@ -51,6 +51,12 @@ try
         throw "Expected winsight $Version, got '$actualVersion'."
     }
 
+    & (Join-Path $PSScriptRoot "Test-McpServer.ps1") -ServerPath $cli -Version $Version
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Installed MCP server smoke test failed."
+    }
+
     foreach ($language in @("en", "fr", "es"))
     {
         & $dashboard --language $language --smoke-test

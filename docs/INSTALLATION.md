@@ -38,6 +38,10 @@ does not request elevation. The installer adds Start-menu shortcuts, offers an
 optional desktop shortcut, and registers a normal Windows uninstaller. It does not
 change `PATH`, install a driver or enable firewall enforcement.
 
+The installed `winsight.exe mcp` mode is an on-demand local MCP child process for AI
+clients. The installer does not enable it, add it to startup, create a service or
+open a network port. See [`MCP.md`](MCP.md) before connecting an AI client.
+
 ## Portable archive
 
 Extract the ZIP to a directory you control, then run `winsight-dashboard.exe`.
@@ -49,7 +53,7 @@ inside the archive together, including the `_manifest` SBOM directory.
 Verify a download in PowerShell:
 
 ```powershell
-$artifact = "winsight-v0.6.0-win-x64-setup.exe"
+$artifact = "winsight-v0.7.0-win-x64-setup.exe"
 $expected = (Get-Content "$artifact.sha256").Split()[0]
 $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "WinSight checksum mismatch" }
@@ -64,10 +68,10 @@ protect integrity and provenance, but they are not a substitute for Authenticode
 
 ```powershell
 # Per-user, silent, no automatic launch
-./winsight-v0.6.0-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+./winsight-v0.7.0-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Explicit language: english, french, or spanish
-./winsight-v0.6.0-win-x64-setup.exe /LANG=french
+./winsight-v0.7.0-win-x64-setup.exe /LANG=french
 ```
 
 Use the architecture-specific artifact in deployment tooling. Do not redistribute

@@ -21,6 +21,7 @@ winsight/
     WinSight.Firewall/     # rules + Phase 2 policy contracts
     WinSight.Cli/          # scriptable unified entry point
     WinSight.Dashboard/    # WPF dashboard + system tray
+    WinSight.Mcp/          # local read-only MCP stdio server for AI clients
   tests/                   # pure unit tests + Windows integration smoke tests
   installer/               # least-privilege multilingual Windows installer
   scripts/                 # audited packaging, SBOM and installer validation
@@ -76,6 +77,9 @@ agent.**
   disclosed until then.
 - **Least privilege**: run tools with the minimum rights; elevate only the specific
   operation that needs it.
+- **AI is not an authority boundary**: MCP is local stdio, summary-first and
+  read-only. No model receives a mutation primitive or silently enables network
+  enrichment; sensitive evidence requires an explicit server-side gate.
 
 ## Decisions resolved
 
@@ -85,3 +89,5 @@ agent.**
 4. A pinned .NET SDK defines the build. Native x64 and Arm64 Windows runners execute
    their own packaged binaries and installers; the x64 runner also gates formatting
    and dependency auditing.
+5. The AI integration uses the official MCP C# SDK, pinned to protocol `2025-11-25`,
+   with no HTTP transport. See [`MCP.md`](MCP.md).

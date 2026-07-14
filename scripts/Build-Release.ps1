@@ -73,11 +73,14 @@ foreach ($architecture in $Architectures)
     Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\INSTALLATION.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\DETECTIONS.md") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\MCP.md") -Destination $packageRoot
 
     & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") `
         -Path (Join-Path $packageRoot "winsight.exe") -Architecture $architecture
     & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") `
         -Path (Join-Path $packageRoot "winsight-dashboard.exe") -Architecture $architecture
+    & (Join-Path $PSScriptRoot "Test-McpServer.ps1") `
+        -ServerPath (Join-Path $packageRoot "winsight.exe") -Version $Version
 
     if (-not $SkipSbom)
     {
@@ -128,7 +131,8 @@ foreach ($architecture in $Architectures)
             "README.md",
             "LICENSE",
             "INSTALLATION.md",
-            "DETECTIONS.md"
+            "DETECTIONS.md",
+            "MCP.md"
         )
         if (-not $SkipSbom)
         {

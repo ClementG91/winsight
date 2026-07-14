@@ -83,7 +83,7 @@ public partial class MainWindow : Window, IDisposable
             {
                 var progress = new Progress<ScanProgress>(UpdateProgress);
                 _reports = await Task.Run(
-                    () => Adapters.RunOverview(flaggedOnly, progress, cancellation.Token),
+                    () => Adapters.RunOverview(flaggedOnly, progress, cancellationToken: cancellation.Token),
                     cancellation.Token);
             }
             else

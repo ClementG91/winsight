@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.Processes", "src\W
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.Reporting", "src\WinSight.Reporting\WinSight.Reporting.csproj", "{7036DC6C-ECE8-4FAB-9007-93E1A905D2B3}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.Mcp", "src\WinSight.Mcp\WinSight.Mcp.csproj", "{A1C94A3E-8C2D-4F3A-90A8-CB90D8F07813}"
+EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{14507A7B-7DA9-4E7B-AB05-1332D8A4164A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.AvMonitor.Tests", "tests\WinSight.AvMonitor.Tests\WinSight.AvMonitor.Tests.csproj", "{C06EC399-B844-4745-B078-6FA5F56B4720}"
@@ -58,6 +60,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.Application.Tests", "tests\WinSight.Application.Tests\WinSight.Application.Tests.csproj", "{0DDF1ACD-6C7D-4F24-96FD-19A4661D964C}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.Dashboard.Tests", "tests\WinSight.Dashboard.Tests\WinSight.Dashboard.Tests.csproj", "{9041DE7F-249B-4E89-AC3A-690E8AF20402}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WinSight.Mcp.Tests", "tests\WinSight.Mcp.Tests\WinSight.Mcp.Tests.csproj", "{EC6CEFF2-1E2D-4A51-A26C-176688FA6F5C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -172,6 +176,14 @@ Global
 		{9041DE7F-249B-4E89-AC3A-690E8AF20402}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9041DE7F-249B-4E89-AC3A-690E8AF20402}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9041DE7F-249B-4E89-AC3A-690E8AF20402}.Release|Any CPU.Build.0 = Release|Any CPU
+		{A1C94A3E-8C2D-4F3A-90A8-CB90D8F07813}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{A1C94A3E-8C2D-4F3A-90A8-CB90D8F07813}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{A1C94A3E-8C2D-4F3A-90A8-CB90D8F07813}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{A1C94A3E-8C2D-4F3A-90A8-CB90D8F07813}.Release|Any CPU.Build.0 = Release|Any CPU
+		{EC6CEFF2-1E2D-4A51-A26C-176688FA6F5C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EC6CEFF2-1E2D-4A51-A26C-176688FA6F5C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EC6CEFF2-1E2D-4A51-A26C-176688FA6F5C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EC6CEFF2-1E2D-4A51-A26C-176688FA6F5C}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{4E9DD423-89E1-48C8-8939-0D343328B4A5} = {24AE9D11-8A97-4D20-BC34-7E5EC8335FC1}
@@ -200,5 +212,7 @@ Global
 		{57FB3E96-7C40-4A8B-9315-3432C0CF3FE4} = {24AE9D11-8A97-4D20-BC34-7E5EC8335FC1}
 		{0DDF1ACD-6C7D-4F24-96FD-19A4661D964C} = {14507A7B-7DA9-4E7B-AB05-1332D8A4164A}
 		{9041DE7F-249B-4E89-AC3A-690E8AF20402} = {14507A7B-7DA9-4E7B-AB05-1332D8A4164A}
+		{A1C94A3E-8C2D-4F3A-90A8-CB90D8F07813} = {24AE9D11-8A97-4D20-BC34-7E5EC8335FC1}
+		{EC6CEFF2-1E2D-4A51-A26C-176688FA6F5C} = {14507A7B-7DA9-4E7B-AB05-1332D8A4164A}
 	EndGlobalSection
 EndGlobal

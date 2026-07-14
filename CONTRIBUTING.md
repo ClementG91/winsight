@@ -16,7 +16,7 @@ Contributions of code, tests, docs, and bug reports are all welcome.
 ## Project layout
 
 ```
-src/        tool libraries, shared application layer, CLI and WPF dashboard
+src/        tool libraries, shared application layer, CLI, WPF dashboard and MCP server
 tests/      xUnit unit, integration, frontend and localization tests
 installer/  multilingual Inno Setup definition
 scripts/    dependency audit, packaging and installer validation
@@ -40,14 +40,16 @@ dotnet test winsight.sln -c Release --no-build
 The full release candidate can be reproduced with:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.6.0
+./scripts/Build-Release.ps1 -Version 0.7.0
 ./scripts/Test-Installer.ps1 `
-  -InstallerPath out/release/winsight-v0.6.0-win-x64-setup.exe `
-  -Version 0.6.0 -Architecture x64
+  -InstallerPath out/release/winsight-v0.7.0-win-x64-setup.exe `
+  -Version 0.7.0 -Architecture x64
 ```
 
 CI builds/tests on Windows, audits dependencies, constructs x64 and Arm64 packages,
 and executes each installer plus the trilingual WPF smoke test on a native runner.
+The same lifecycle negotiates with the installed MCP server and verifies that every
+published MCP tool remains read-only and non-destructive.
 **All checks must be green** before a PR is merged or a release is published.
 
 ## Coding standards
@@ -59,6 +61,9 @@ and executes each installer plus the trilingual WPF smoke test on a native runne
   fail-closed reason why it cannot run on one of them.
 - Installer changes must preserve least privilege, clean uninstall and the separation
   between read-only Phase 1 functionality and disabled Phase 2 enforcement.
+- MCP tools must remain local-stdio, bounded and read-only. New evidence fields need
+  an explicit privacy review; never expose a mutation tool merely because a scanner
+  can identify a Windows object.
 - Keep the Phase-1 lexicon: recognition / status / signal — never security theater.
 
 ## Commit & PR process

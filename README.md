@@ -107,7 +107,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.6.0
+./scripts/Build-Release.ps1 -Version 0.7.0
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned
@@ -127,10 +127,17 @@ the packaged application and installer on native x64 and native Arm64 Windows.
 Modular tool libraries are available through the `winsight` CLI (subcommands
 `persistence | av | net | dns | firewall | processes | modules | extensions | certs |
 hosts | all`, `--flagged`, `--json`, `--version`, `--help`)
-and the `winsight-dashboard` WPF/tray application:
+the `winsight-dashboard` WPF/tray application, and a local `winsight mcp` server for
+MCP-compatible AI clients:
 
-Both frontends use the shared `WinSight.Application` orchestration layer; detection
-logic and report semantics are not duplicated in UI code.
+All three surfaces use the shared `WinSight.Application` orchestration layer;
+detection logic and report semantics are not duplicated in UI or protocol code.
+
+The MCP server is local `stdio` only: it opens no network listener and exposes three
+read-only tools plus capability/security resources. Summary-only output is the
+default, evidence is bounded and privacy-redacted, sensitive command lines require a
+server-side opt-in, and network reputation lookup is always disabled for MCP scans.
+See [`docs/MCP.md`](docs/MCP.md) for client configuration and the threat model.
 
 The dashboard is designed for non-technical users: each check explains what it
 observes and what an alert means, the overview reports progress between independent

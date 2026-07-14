@@ -2,6 +2,29 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.7.0 — 2026-07-14
+
+### Local read-only MCP integration
+- Ship a `winsight mcp` mode in the existing native x64 and Arm64 CLI binary,
+  using the official MCP C# SDK and the stable `2025-11-25` protocol over local
+  standard input/output only. No HTTP endpoint, network listener or background MCP
+  service is created, and no third self-contained runtime is duplicated in packages.
+- Expose capability discovery, one-scanner execution and the balanced overview as
+  read-only, idempotent, non-destructive and closed-world tools, plus machine-readable
+  capability and security-model resources.
+- Keep AI disclosure summary-only and noteworthy-only by default. Bound evidence to
+  200 items per report, serialize scans through one execution gate, apply a 90-second
+  safety limit, redact user-profile paths and omit raw command fields.
+- Require both the server-side `WINSIGHT_MCP_ALLOW_SENSITIVE=1` gate and explicit
+  per-call evidence flags before raw paths or command lines can leave the scanner.
+  Disable VirusTotal and every other network-enrichment path for MCP scans even when
+  the parent process has an API key.
+- Add projection/privacy tests and a real MCP subprocess integration test. Extend
+  release packaging and native installer lifecycle tests to negotiate the installed
+  server, inspect every tool annotation and invoke structured capability discovery.
+- Document AI-client configuration, data-flow privacy, interpretation rules and the
+  explicit ban on MCP remediation primitives.
+
 ## v0.6.0 — 2026-07-14
 
 ### Fail-open firewall service foundation

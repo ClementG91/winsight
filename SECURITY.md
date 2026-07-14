@@ -29,8 +29,8 @@ public disclosure. We will credit reporters who wish to be acknowledged.
 
 ## Scope
 
-In scope: all WinSight libraries, CLI, dashboard, packaging scripts, installers and
-GitHub release workflows. Of particular interest:
+In scope: all WinSight libraries, CLI, dashboard, MCP server, packaging scripts,
+installers and GitHub release workflows. Of particular interest:
 
 - Signature-verification bypass (a tampered binary reported as trusted).
 - Privilege or path-handling issues in the scanners.
@@ -39,6 +39,9 @@ GitHub release workflows. Of particular interest:
   behavior, or release-provenance/SBOM inconsistencies.
 - Any scanner code path that unexpectedly modifies user state (analysis is intended
   to be read-only).
+- MCP protocol confusion, stdout injection, unexpected network listeners or lookups,
+  bypasses of evidence limits/redaction/sensitive-field gating, and any AI-exposed
+  mutation primitive.
 
 Third-party dependency vulnerabilities should normally be reported upstream, but a
 WinSight-specific exploitable integration remains in scope. Public release binaries
