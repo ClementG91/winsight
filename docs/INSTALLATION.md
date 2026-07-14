@@ -119,6 +119,12 @@ From an **elevated** (Administrator) console, in the install or extracted direct
 .\winsight-firewall-service.exe wfp-provision
 .\winsight-firewall-service.exe wfp-status
 .\winsight-firewall-service.exe wfp-deprovision
+
+# Add/remove a non-blocking PERMIT filter in the WinSight sublayer. A PERMIT authorizes
+# outbound connects (already the default), so it blocks nothing; it proves the filter
+# interop. Requires wfp-provision first.
+.\winsight-firewall-service.exe wfp-filter-add
+.\winsight-firewall-service.exe wfp-filter-remove
 ```
 
 Once registered, the dashboard's **Outbound Firewall** view changes from "service not

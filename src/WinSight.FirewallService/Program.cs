@@ -24,6 +24,8 @@ return FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.WfpProvision => WfpProvision(),
     FirewallServiceVerb.WfpDeprovision => WfpDeprovision(),
     FirewallServiceVerb.WfpStatus => WfpStatusVerb(),
+    FirewallServiceVerb.WfpFilterAdd => WfpFilterAdd(),
+    FirewallServiceVerb.WfpFilterRemove => WfpFilterRemove(),
     FirewallServiceVerb.Unknown => Usage(),
     _ => RunHost(),
 };
@@ -163,9 +165,9 @@ static int WfpStatusVerb()
 
     try
     {
-        var (provider, sublayer) = WfpProvisioning.Status();
+        var (provider, sublayer, filter) = WfpProvisioning.Status();
         Console.WriteLine(
-            $"WinSight WFP provider: {(provider ? "present" : "absent")}, sublayer: {(sublayer ? "present" : "absent")}.");
+            $"WinSight WFP provider: {(provider ? "present" : "absent")}, sublayer: {(sublayer ? "present" : "absent")}, permit-filter: {(filter ? "present" : "absent")}.");
         return 0;
     }
     catch (Win32Exception ex)
@@ -175,10 +177,54 @@ static int WfpStatusVerb()
     }
 }
 
+static int WfpFilterAdd()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Adding the WFP permit filter requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        WfpProvisioning.AddPermitFilter();
+        Console.WriteLine(
+            "Added a non-blocking PERMIT filter to the WinSight sublayer. It authorizes outbound connects (already the default), so nothing is blocked.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine(
+            $"WFP filter add failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}. Run wfp-provision first.");
+        return 1;
+    }
+}
+
+static int WfpFilterRemove()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("Removing the WFP permit filter requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    try
+    {
+        WfpProvisioning.RemovePermitFilter();
+        Console.WriteLine("Removed the WinSight PERMIT filter.");
+        return 0;
+    }
+    catch (Win32Exception ex)
+    {
+        Console.Error.WriteLine($"WFP filter remove failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        return 1;
+    }
+}
+
 static int Usage()
 {
     Console.Error.WriteLine(
-        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status]");
+        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-provision|wfp-deprovision|wfp-status|wfp-filter-add|wfp-filter-remove]");
     return 2;
 }
 
