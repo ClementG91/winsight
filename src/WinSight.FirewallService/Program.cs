@@ -20,6 +20,7 @@ return FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.Install => Install(),
     FirewallServiceVerb.Uninstall => Uninstall(),
     FirewallServiceVerb.Status => Status(),
+    FirewallServiceVerb.WfpSelfTest => WfpProbe(),
     FirewallServiceVerb.Unknown => Usage(),
     _ => RunHost(),
 };
@@ -85,9 +86,30 @@ static int Status()
     return 0;
 }
 
+static int WfpProbe()
+{
+    if (!FirewallServiceInstaller.IsElevated())
+    {
+        Console.Error.WriteLine("The WFP self-test requires an elevated (Administrator) console.");
+        return 1;
+    }
+
+    var result = WfpSelfTest.Run();
+    if (result.EngineOpened && result.ErrorCode == 0)
+    {
+        Console.WriteLine(
+            $"WFP engine opened. Existing filters visible: {result.FilterCount}. Read-only: no filter, provider or sublayer was added or changed.");
+        return 0;
+    }
+
+    Console.Error.WriteLine(
+        $"WFP self-test failed (engineOpened={result.EngineOpened}, error 0x{result.ErrorCode:X8}). No change was made.");
+    return 1;
+}
+
 static int Usage()
 {
-    Console.Error.WriteLine("Usage: winsight-firewall-service [run|install|uninstall|status]");
+    Console.Error.WriteLine("Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest]");
     return 2;
 }
 
