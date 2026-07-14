@@ -59,8 +59,9 @@ foreach ($architecture in $Architectures)
     $workRoot = Join-Path $outputRoot "work\$rid"
     $cliRoot = Join-Path $workRoot "cli"
     $dashboardRoot = Join-Path $workRoot "dashboard"
+    $serviceRoot = Join-Path $workRoot "service"
     $packageRoot = Join-Path $outputRoot "package\$rid"
-    New-Item -ItemType Directory -Path $cliRoot, $dashboardRoot, $packageRoot -Force | Out-Null
+    New-Item -ItemType Directory -Path $cliRoot, $dashboardRoot, $serviceRoot, $packageRoot -Force | Out-Null
 
     dotnet publish (Join-Path $repoRoot "src\WinSight.Cli\WinSight.Cli.csproj") `
         -c Release -r $rid --self-contained true `
@@ -74,8 +75,15 @@ foreach ($architecture in $Architectures)
         -p:IncludeNativeLibrariesForSelfExtract=true -o $dashboardRoot
     if ($LASTEXITCODE -ne 0) { throw "Dashboard publish failed for $rid." }
 
+    dotnet publish (Join-Path $repoRoot "src\WinSight.FirewallService\WinSight.FirewallService.csproj") `
+        -c Release -r $rid --self-contained true `
+        -p:Version=$Version -p:PublishSingleFile=true `
+        -p:IncludeNativeLibrariesForSelfExtract=true -o $serviceRoot
+    if ($LASTEXITCODE -ne 0) { throw "Firewall service publish failed for $rid." }
+
     Copy-Item -LiteralPath (Join-Path $cliRoot "winsight.exe") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $dashboardRoot "winsight-dashboard.exe") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $serviceRoot "winsight-firewall-service.exe") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "README.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "LICENSE") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\INSTALLATION.md") -Destination $packageRoot
@@ -88,6 +96,8 @@ foreach ($architecture in $Architectures)
         -Path (Join-Path $packageRoot "winsight.exe") -Architecture $architecture
     & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") `
         -Path (Join-Path $packageRoot "winsight-dashboard.exe") -Architecture $architecture
+    & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") `
+        -Path (Join-Path $packageRoot "winsight-firewall-service.exe") -Architecture $architecture
     & (Join-Path $PSScriptRoot "Test-Branding.ps1") `
         -BrandingPath (Join-Path $packageRoot "assets\branding") `
         -ExecutablePaths @(

@@ -4,6 +4,20 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 outbound-firewall service is installable (opt-in, audit-only)
+- Ship `winsight-firewall-service.exe` in both installers and portable archives, with
+  PE-architecture validation for x64 and Arm64. The per-user setup never registers it:
+  installing a Windows service needs Administrator rights, so it stays opt-in.
+- The service executable gains `install`, `uninstall`, `status` and `run` verbs.
+  `install`/`uninstall` require an elevated console and register a demand-start,
+  LocalSystem, audit-only service through the Service Control Manager (advapi32
+  `CreateService`/`DeleteService`). The binary path is stored quoted, so a spaced
+  install directory is registered correctly. The service installs no WFP filter.
+- Once registered, the dashboard's Outbound Firewall view switches from "service not
+  installed" to the live audit-only status. Enforcement remains a separate, later step.
+- Add command-line and binary-path-quoting tests. Verified end to end: the single-file
+  service publishes and its read-only `status` verb queries the SCM correctly.
+
 ### Phase 2 outbound-firewall dashboard view (read-only)
 - Add an "Outbound Firewall" navigation entry that shows the WinSight firewall service
   over the authenticated pipe: whether it is installed, its mode, whether enforcement is
