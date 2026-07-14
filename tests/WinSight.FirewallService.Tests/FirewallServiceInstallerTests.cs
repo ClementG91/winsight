@@ -13,6 +13,9 @@ public sealed class FirewallServiceCommandLineTests
     [InlineData("remove", FirewallServiceVerb.Uninstall)]
     [InlineData("status", FirewallServiceVerb.Status)]
     [InlineData("wfp-selftest", FirewallServiceVerb.WfpSelfTest)]
+    [InlineData("wfp-provision", FirewallServiceVerb.WfpProvision)]
+    [InlineData("wfp-deprovision", FirewallServiceVerb.WfpDeprovision)]
+    [InlineData("wfp-status", FirewallServiceVerb.WfpStatus)]
     [InlineData("bogus", FirewallServiceVerb.Unknown)]
     public void Parse_MapsFirstArgumentToVerb(string arg, FirewallServiceVerb expected) =>
         Assert.Equal(expected, FirewallServiceCommandLine.Parse([arg]));
@@ -44,4 +47,15 @@ public sealed class FirewallServiceInstallerTests
     [Fact]
     public void ServiceName_HasNoWhitespace_ForScmCompatibility() =>
         Assert.DoesNotContain(FirewallServiceInstaller.ServiceName, character => char.IsWhiteSpace(character));
+}
+
+public sealed class WfpProvisioningTests
+{
+    [Fact]
+    public void ProviderAndSublayerKeys_AreStableAndDistinct()
+    {
+        Assert.NotEqual(Guid.Empty, WfpProvisioning.ProviderKey);
+        Assert.NotEqual(Guid.Empty, WfpProvisioning.SublayerKey);
+        Assert.NotEqual(WfpProvisioning.ProviderKey, WfpProvisioning.SublayerKey);
+    }
 }

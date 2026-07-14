@@ -112,6 +112,13 @@ From an **elevated** (Administrator) console, in the install or extracted direct
 # existing filters, then closes. It never adds or changes a filter, so connectivity is
 # untouched. Useful to confirm WFP access before any enforcement work.
 .\winsight-firewall-service.exe wfp-selftest
+
+# Create/remove the WinSight WFP provider and sublayer. These are namespace containers
+# only: they filter no traffic and cannot block a connection. They are non-persistent
+# (a reboot removes them) and exist so future audit-only filters have an owner.
+.\winsight-firewall-service.exe wfp-provision
+.\winsight-firewall-service.exe wfp-status
+.\winsight-firewall-service.exe wfp-deprovision
 ```
 
 Once registered, the dashboard's **Outbound Firewall** view changes from "service not

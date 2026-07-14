@@ -4,6 +4,18 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 WFP provider and sublayer (containers only, no filter)
+- Add `wfp-provision`, `wfp-deprovision` and `wfp-status` verbs to the firewall service.
+  They create and remove the WinSight-owned WFP provider and sublayer, which are
+  namespace containers: they filter no traffic and cannot block a connection. They exist
+  so future audit-only filters have a stable owner.
+- All mutation runs inside a WFP transaction (all-or-nothing) and is idempotent
+  (already-exists / not-found are treated as success). Both objects are non-persistent,
+  so a reboot removes them: the safest default while enforcement is still being validated.
+- Requires elevation. Validated end to end on an isolated VM: the read-only `wfp-selftest`
+  opened the engine and enumerated existing filters, confirming the interop before this
+  mutating (but non-filtering) step.
+
 ### Phase 2 read-only WFP interop probe
 - Add a `wfp-selftest` verb to the firewall service executable. It opens a Windows
   Filtering Platform engine session and counts the existing filters, then closes
