@@ -134,8 +134,12 @@ From an **elevated** (Administrator) console, in the install or extracted direct
 #   C:\pingtest.exe 8.8.8.8      # fails (blocked), while normal ping still works
 #   .\winsight-firewall-service.exe wfp-block-remove
 .\winsight-firewall-service.exe wfp-block-add "C:\full\path\to\app.exe"
-.\winsight-firewall-service.exe wfp-block-remove
+.\winsight-firewall-service.exe wfp-block-status "C:\full\path\to\app.exe"
+.\winsight-firewall-service.exe wfp-block-remove "C:\full\path\to\app.exe"
 ```
+
+Multiple applications can be blocked at once; each is keyed independently by its path, so
+adding or removing one never affects another.
 
 Once registered, the dashboard's **Outbound Firewall** view changes from "service not
 installed" to the live audit-only status. Enforcement (actually blocking traffic) is a

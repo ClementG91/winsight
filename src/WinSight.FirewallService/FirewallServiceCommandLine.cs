@@ -39,6 +39,9 @@ public enum FirewallServiceVerb
     /// <summary>Remove the per-application BLOCK filter.</summary>
     WfpBlockRemove,
 
+    /// <summary>Report whether a given application is currently blocked.</summary>
+    WfpBlockStatus,
+
     /// <summary>Unrecognized verb.</summary>
     Unknown,
 }
@@ -67,6 +70,7 @@ public static class FirewallServiceCommandLine
             "wfp-filter-remove" => FirewallServiceVerb.WfpFilterRemove,
             "wfp-block-add" => FirewallServiceVerb.WfpBlockAdd,
             "wfp-block-remove" => FirewallServiceVerb.WfpBlockRemove,
+            "wfp-block-status" => FirewallServiceVerb.WfpBlockStatus,
             _ => FirewallServiceVerb.Unknown,
         };
     }

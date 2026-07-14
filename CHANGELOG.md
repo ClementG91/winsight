@@ -4,6 +4,20 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 multi-application block and the real WFP engine
+- The per-application outbound block is now multi-app: each blocked application is keyed by
+  a stable, per-path GUID (SHA-256 of the canonical path), so many apps can be blocked at
+  once and adding or removing one never disturbs another. Verified end to end on the VM:
+  a copied `curl.exe` was blocked over both IPv4 and IPv6 while the real `curl.exe` and
+  every other app kept working, then unblocked cleanly.
+- Add `WfpOutboundFirewallEngine`, the real `IOutboundFirewallEngine`: a Block policy
+  installs a per-app block filter, an Allow/Ask policy lifts it, and it idempotently
+  provisions the WinSight provider/sublayer. This is the bridge from the durable policy
+  store to WFP. It is not the shipped default; the service stays audit-only until
+  enforcement is explicitly enabled.
+- CLI: `wfp-block-add <path>` and `wfp-block-remove <path>` are now per-application, plus a
+  new `wfp-block-status <path>`. `wfp-status` reports the containers and audit filter.
+
 ### Phase 2 outbound block now covers IPv6 as well as IPv4
 - Install every WinSight WFP filter (the PERMIT audit filter and the per-application BLOCK
   filter) at BOTH `FWPM_LAYER_ALE_AUTH_CONNECT_V4` and `FWPM_LAYER_ALE_AUTH_CONNECT_V6`.

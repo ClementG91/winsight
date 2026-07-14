@@ -1,5 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace WinSight.FirewallService;
 
@@ -27,12 +29,6 @@ public static partial class WfpProvisioning
 
     /// <summary>Stable identity of the WinSight non-blocking PERMIT audit filter (IPv6).</summary>
     public static readonly Guid PermitFilterKeyV6 = new("d7a9b1e4-5c3a-4b8e-9f21-6c0a7e2d1f34");
-
-    /// <summary>Stable identity of the WinSight per-application BLOCK filter (IPv4).</summary>
-    public static readonly Guid BlockFilterKeyV4 = new("d7a9b1e3-5c3a-4b8e-9f21-6c0a7e2d1f34");
-
-    /// <summary>Stable identity of the WinSight per-application BLOCK filter (IPv6).</summary>
-    public static readonly Guid BlockFilterKeyV6 = new("d7a9b1e5-5c3a-4b8e-9f21-6c0a7e2d1f34");
 
     // The outbound-connect authorization layers. A real outbound firewall MUST cover both
     // IP versions: an app that reaches the network over IPv6 would otherwise bypass an
@@ -165,16 +161,18 @@ public static partial class WfpProvisioning
     }
 
     /// <summary>
-    /// Adds a BLOCK filter that stops outbound connections for a SINGLE application,
-    /// matched by its WFP app id (derived from the executable path). Only that binary is
-    /// affected; every other application keeps connecting normally. The filter is installed
-    /// at BOTH the IPv4 and IPv6 connect layers so the app cannot bypass it over IPv6.
-    /// Replaces any previous WinSight block filter, runs in one transaction, and requires
-    /// the sublayer to exist (run <see cref="Provision"/> first).
+    /// Blocks outbound connections for one application, matched by its WFP app id (derived
+    /// from the executable path). Only that binary is affected; every other application
+    /// keeps connecting normally. The filter is installed at BOTH the IPv4 and IPv6 connect
+    /// layers so the app cannot bypass it over IPv6. Multiple applications can be blocked at
+    /// once, each keyed by a stable per-path GUID, so adding one never disturbs another.
+    /// Idempotent per app, runs in one transaction, and requires the sublayer to exist
+    /// (run <see cref="Provision"/> first).
     /// </summary>
     public static void AddBlockFilter(string executablePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        var (keyV4, keyV6) = BlockFilterKeys(executablePath);
 
         var appId = GetAppId(executablePath);
         try
@@ -184,9 +182,9 @@ public static partial class WfpProvisioning
             {
                 InTransaction(engine, () =>
                 {
-                    // One block target at a time: drop any prior block filters first.
-                    DeleteFilter(engine, BlockFilterKeyV4);
-                    DeleteFilter(engine, BlockFilterKeyV6);
+                    // Replace only THIS app's filters, leaving other blocked apps intact.
+                    DeleteFilter(engine, keyV4);
+                    DeleteFilter(engine, keyV6);
 
                     var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
                     try
@@ -199,9 +197,9 @@ public static partial class WfpProvisioning
                         };
                         Marshal.StructureToPtr(condition, conditionPtr, false);
 
-                        AddFilter(engine, BlockFilterKeyV4, AleAuthConnectV4, FwpActionBlock,
+                        AddFilter(engine, keyV4, AleAuthConnectV4, FwpActionBlock,
                             conditionPtr, 1, BlockFilterName, BlockFilterDescription);
-                        AddFilter(engine, BlockFilterKeyV6, AleAuthConnectV6, FwpActionBlock,
+                        AddFilter(engine, keyV6, AleAuthConnectV6, FwpActionBlock,
                             conditionPtr, 1, BlockFilterName, BlockFilterDescription);
                     }
                     finally
@@ -221,19 +219,69 @@ public static partial class WfpProvisioning
         }
     }
 
-    /// <summary>Removes the per-application BLOCK filter from both IP layers (idempotent).</summary>
-    public static void RemoveBlockFilter()
+    /// <summary>Removes one application's BLOCK filters from both IP layers (idempotent).</summary>
+    public static void RemoveBlockFilter(string executablePath)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        var (keyV4, keyV6) = BlockFilterKeys(executablePath);
+
         var engine = OpenEngine();
         try
         {
-            DeleteFilter(engine, BlockFilterKeyV4);
-            DeleteFilter(engine, BlockFilterKeyV6);
+            DeleteFilter(engine, keyV4);
+            DeleteFilter(engine, keyV6);
         }
         finally
         {
             _ = NativeMethods.FwpmEngineClose0(engine);
         }
+    }
+
+    /// <summary>True when the given application currently has a WinSight block filter.</summary>
+    public static bool IsBlocked(string executablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        var (keyV4, _) = BlockFilterKeys(executablePath);
+
+        var engine = OpenEngine();
+        try
+        {
+            return FilterExists(engine, keyV4);
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    /// <summary>
+    /// Deterministic, per-application filter keys (IPv4 and IPv6) derived from the
+    /// canonical executable path. Stable across runs so a block can be found and removed,
+    /// and distinct per app so blocking one never collides with another.
+    /// </summary>
+    public static (Guid V4, Guid V6) BlockFilterKeys(string executablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        var canonical = CanonicalPath(executablePath);
+        return (DeriveGuid("winsight-block-v4|" + canonical), DeriveGuid("winsight-block-v6|" + canonical));
+    }
+
+    private static string CanonicalPath(string executablePath)
+    {
+        try
+        {
+            return Path.GetFullPath(executablePath).ToLowerInvariant();
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return executablePath.Trim().ToLowerInvariant();
+        }
+    }
+
+    private static Guid DeriveGuid(string seed)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        return new Guid(hash.AsSpan(0, 16));
     }
 
     // Adds one filter to one layer. Conditions (if any) are supplied pre-marshalled by the
@@ -294,8 +342,12 @@ public static partial class WfpProvisioning
         return appId;
     }
 
-    /// <summary>Reports which WinSight WFP objects currently exist.</summary>
-    public static (bool Provider, bool Sublayer, bool PermitFilter, bool BlockFilter) Status()
+    /// <summary>
+    /// Reports the WinSight WFP containers and the audit PERMIT filter. Per-application
+    /// block filters are keyed by path (many can coexist); use <see cref="IsBlocked"/> to
+    /// query a specific application.
+    /// </summary>
+    public static (bool Provider, bool Sublayer, bool PermitFilter) Status()
     {
         var engine = OpenEngine();
         try
@@ -314,10 +366,9 @@ public static partial class WfpProvisioning
                 NativeMethods.FwpmFreeMemory0(ref sublayer);
             }
 
-            // A filter set is "present" when its IPv4 half exists; the V6 half is added
+            // The PERMIT filter is "present" when its IPv4 half exists; the V6 half is added
             // and removed in the same transaction, so the two are always in step.
-            return (providerExists, sublayerExists,
-                FilterExists(engine, PermitFilterKeyV4), FilterExists(engine, BlockFilterKeyV4));
+            return (providerExists, sublayerExists, FilterExists(engine, PermitFilterKeyV4));
         }
         finally
         {
