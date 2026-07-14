@@ -74,6 +74,14 @@ public sealed class OutboundPolicyEvaluatorTests
 
         Assert.Throws<ArgumentException>(() => evaluator.Evaluate(path));
     }
+
+    [Fact]
+    public void Evaluate_DoesNotExpandCallerEnvironmentVariables()
+    {
+        var evaluator = new OutboundPolicyEvaluator([]);
+
+        Assert.Throws<ArgumentException>(() => evaluator.Evaluate(@"%SystemRoot%\System32\app.exe"));
+    }
 }
 
 // Integration test — reads the real Windows Firewall rules on the CI runner.

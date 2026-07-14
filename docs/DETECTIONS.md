@@ -46,9 +46,10 @@ verbatim even when the interface is translated.
 - DNS cache data is historical visibility and does not by itself attribute every
   query to a process. Live DNS ETW needs elevation.
 - Browser coverage is currently Chromium-family; Firefox is not yet covered.
-- Firewall inspection is read-only. Enforcement remains disabled until the
-  service, authenticated IPC, audit mode and recovery path in `WFP_DESIGN.md` are
-  completed and independently safety-tested.
+- Firewall inspection is read-only. The strict protocol framing and fail-open policy
+  store do not enable enforcement; the authenticated service host, WFP audit engine
+  and recovery path in `WFP_DESIGN.md` must still be completed and independently
+  safety-tested.
 - Real-time persistence blocking and ransomware interception require a separately
   signed and safety-reviewed driver and are not shipped.
 - VirusTotal is opt-in, user-keyed and rate-limited. Sending a hash to a third party

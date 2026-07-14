@@ -49,7 +49,7 @@ inside the archive together, including the `_manifest` SBOM directory.
 Verify a download in PowerShell:
 
 ```powershell
-$artifact = "winsight-v0.5.1-win-x64-setup.exe"
+$artifact = "winsight-v0.6.0-win-x64-setup.exe"
 $expected = (Get-Content "$artifact.sha256").Split()[0]
 $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "WinSight checksum mismatch" }
@@ -64,10 +64,10 @@ protect integrity and provenance, but they are not a substitute for Authenticode
 
 ```powershell
 # Per-user, silent, no automatic launch
-./winsight-v0.5.1-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+./winsight-v0.6.0-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Explicit language: english, french, or spanish
-./winsight-v0.5.1-win-x64-setup.exe /LANG=french
+./winsight-v0.6.0-win-x64-setup.exe /LANG=french
 ```
 
 Use the architecture-specific artifact in deployment tooling. Do not redistribute

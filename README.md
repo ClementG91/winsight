@@ -107,7 +107,7 @@ end-to-end on native x64 and native Arm64 Windows runners. To reproduce the comp
 release payload locally:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.5.1
+./scripts/Build-Release.ps1 -Version 0.6.0
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned
@@ -202,9 +202,11 @@ spots are maintained in [`docs/DETECTIONS.md`](docs/DETECTIONS.md). WinSight is 
 triage and visibility tool, not antivirus or EDR; a notable result is evidence to
 investigate rather than proof of malware.
 
-**Current next step:** Phase 2 outbound control. The path-scoped `allow/block/ask`
-policy contracts and privileged-engine boundary are implemented and tested; the
-WFP service, authenticated IPC, audit mode and prompt flow remain. See
+**Current next step:** Phase 2 outbound control. Path-scoped `allow/block/ask`
+contracts, atomic versioned policy storage, fail-open audit recovery and a strict
+bounded IPC framing protocol are implemented and tested. The privileged service
+host, named-pipe ACL/identity authentication, WFP audit engine and prompt flow
+remain. See
 [`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
 signature-performance optimization. Driver-backed BlockBlock/RansomWhere features
 remain deliberately deferred because production drivers require signing and a

@@ -2,6 +2,30 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.6.0 — 2026-07-14
+
+### Fail-open firewall service foundation
+- Add a versioned durable policy store for the future privileged service. Policy
+  paths are canonicalized and deduplicated, counts and file sizes are bounded,
+  unknown or duplicate JSON members are rejected, and enforcement values require an
+  explicit service-side gate.
+- Require literal absolute executable identities across the privilege boundary;
+  environment variables are no longer expanded under the future service account.
+- Persist through a write-through temporary file and atomic same-volume replacement,
+  reject reparse-point storage, and expose a recovery API that converts malformed or
+  inaccessible state into an empty audit-only configuration instead of carrying an
+  old blocking decision forward.
+- Add a strict 64 KiB length-prefixed local protocol for status, policy and emergency
+  disable commands. Validate exact protocol versions, request IDs, command payloads,
+  paths, enum values and response invariants before a future service can act.
+- Add 25 security-focused tests covering round trips, corrupt/future/oversized state,
+  atomic preservation, enforcement gating, duplicate or unknown JSON, truncated and
+  oversized frames, bounded pagination, relative-path rejection and contradictory
+  service status.
+- Keep WFP mutation and the named-pipe host disabled. The protocol codec is not an
+  authentication boundary; the future service must enforce pipe ACLs and verify the
+  impersonated Windows identity before decoding or executing a request.
+
 ## v0.5.1 — 2026-07-14
 
 ### Supported runtime baseline
