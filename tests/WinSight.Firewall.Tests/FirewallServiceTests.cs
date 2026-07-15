@@ -263,6 +263,31 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
     }
 
     [Fact]
+    public async Task RealIdentityAuthorisation_RoundTripsOverPipe()
+    {
+        // Exercises the real DefaultAuthorise path (RunAsClient + IsAuthorisedCaller) with
+        // the real client. This only succeeds when the client requests impersonation, so it
+        // guards against the client silently connecting with an anonymous token, which the
+        // service would deny and the dashboard would surface as "service unavailable".
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, securityFactory: CurrentUserSecurity);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+        var serverTask = server.ServeOnceAsync(cts.Token);
+        var client = new FirewallServiceClient(pipeName);
+        var response = await client.SendAsync(
+            new FirewallCommandRequest(FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus),
+            TimeSpan.FromSeconds(15),
+            cts.Token);
+        await serverTask;
+
+        Assert.True(response.Success);
+        Assert.Equal(FirewallProtocolError.None, response.Error);
+        Assert.NotNull(response.Status);
+    }
+
+    [Fact]
     public async Task UnauthorisedClient_ReceivesUnauthorized()
     {
         var pipeName = UniquePipeName();

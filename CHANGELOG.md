@@ -4,6 +4,17 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 fix: dashboard could not authenticate to the service (impersonation)
+- The pipe client connected without requesting impersonation, so the service's
+  `RunAsClient` identity check saw an anonymous token and denied every request with
+  Unauthorized. The gateway maps that to "service unavailable", so the dashboard showed
+  "service not installed" even when the service was running, and no control worked.
+- `FirewallServiceClient` now connects with `TokenImpersonationLevel.Impersonation`, so the
+  service can verify the caller's real Windows identity. Reproduced end to end against a
+  live console host (GetStatus went from Unauthorized to a real AuditOnly status), and
+  covered by a new regression test that exercises the real authorisation path (the existing
+  tests injected a fake authoriser and so missed it).
+
 ### Phase 2 interactive firewall controls in the dashboard
 - The Outbound Firewall view is now interactive. When the firewall tool has a live status
   and the privileged service answered, a controls bar appears: "Block an app…" (file

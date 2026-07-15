@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Principal;
 
 namespace WinSight.Firewall;
 
@@ -27,11 +28,15 @@ public sealed class FirewallServiceClient : IFirewallServiceClient
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // Impersonation is required so the service can verify the caller's real Windows
+        // identity via RunAsClient. Without it the server sees an anonymous token and
+        // denies the request, which the gateway then reports as an unavailable service.
         await using var client = new NamedPipeClientStream(
             ".",
             _pipeName,
             PipeDirection.InOut,
-            PipeOptions.Asynchronous);
+            PipeOptions.Asynchronous,
+            TokenImpersonationLevel.Impersonation);
 
         try
         {
