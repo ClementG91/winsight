@@ -1,4 +1,17 @@
-# Changelog
+## Unreleased
+
+### Phase 2 fix: unify executable-path canonicalization across the firewall
+- The CLI enforcement path (EnforcementCoordinator.SetPolicyAsync) and the WFP key
+  derivation used their own weaker path normalization, while the IPC dispatcher and the
+  policy store used OutboundPolicyEvaluator.CanonicalPath. A quoted or dot-segmented path
+  could therefore be stored one way but keyed another, orphaning a filter that the next
+  boot re-apply could not reproduce, and could dodge dedup into a duplicate-policy save
+  failure.
+- OutboundPolicyEvaluator.CanonicalPath is now the single canonicalizer (quote-stripped,
+  absolute-required, normalized) used by the store, the dispatcher, the coordinator, and
+  the WFP filter-key derivation. Regression tests cover quoted/relative-segment paths and
+  the coordinator persisting the canonical form.
+
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 

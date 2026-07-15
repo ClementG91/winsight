@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using WinSight.Firewall;
 
 namespace WinSight.FirewallService;
 
@@ -171,10 +172,13 @@ public static partial class WfpProvisioning
     /// </summary>
     public static void AddBlockFilter(string executablePath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
-        var (keyV4, keyV6) = BlockFilterKeys(executablePath);
+        // Canonicalize once so the app id and the derived filter keys are computed from the
+        // exact same path the store persists — otherwise a filter can be installed under a
+        // key the next boot's re-apply cannot reproduce, orphaning it.
+        var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
+        var (keyV4, keyV6) = BlockFilterKeys(path);
 
-        var appId = GetAppId(executablePath);
+        var appId = GetAppId(path);
         try
         {
             var engine = OpenEngine();
@@ -261,21 +265,11 @@ public static partial class WfpProvisioning
     /// </summary>
     public static (Guid V4, Guid V6) BlockFilterKeys(string executablePath)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
-        var canonical = CanonicalPath(executablePath);
-        return (DeriveGuid("winsight-block-v4|" + canonical), DeriveGuid("winsight-block-v6|" + canonical));
-    }
-
-    private static string CanonicalPath(string executablePath)
-    {
-        try
-        {
-            return Path.GetFullPath(executablePath).ToLowerInvariant();
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return executablePath.Trim().ToLowerInvariant();
-        }
+        // Same canonical form as the policy store (quote-stripped, absolute, normalized),
+        // then lower-cased because Windows paths are case-insensitive, so a query and the
+        // stored policy always derive the same key.
+        var seed = OutboundPolicyEvaluator.CanonicalPath(executablePath).ToLowerInvariant();
+        return (DeriveGuid("winsight-block-v4|" + seed), DeriveGuid("winsight-block-v6|" + seed));
     }
 
     private static Guid DeriveGuid(string seed)

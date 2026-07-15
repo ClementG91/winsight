@@ -43,7 +43,13 @@ public sealed class OutboundPolicyEvaluator
             ? action
             : DefaultAction;
 
-    internal static string CanonicalPath(string executablePath)
+    /// <summary>
+    /// The single canonical form for a policy's executable path: quote-stripped, required
+    /// to be absolute, and fully normalized. Shared by the store, the IPC dispatcher, the
+    /// CLI enforcement path, and the WFP key derivation so every layer agrees on identity.
+    /// Throws <see cref="ArgumentException"/> for a blank or non-absolute path.
+    /// </summary>
+    public static string CanonicalPath(string executablePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         var path = executablePath.Trim().Trim('"');
@@ -56,8 +62,13 @@ public sealed class OutboundPolicyEvaluator
 }
 
 /// <summary>
-/// Privileged WFP boundary. The implementation will live in a least-privilege
-/// Windows service; neither the dashboard nor the scanner libraries mutate WFP.
+/// Privileged WFP boundary. The implementation lives in a least-privilege Windows service;
+/// neither the dashboard nor the scanner libraries mutate WFP.
+///
+/// Note on cancellation: the WFP-backed implementation wraps synchronous native RPCs, so it
+/// honours <paramref name="cancellationToken"/> only at entry — a call already in flight
+/// runs to completion. Callers should treat these as short, effectively non-cancellable
+/// operations (they complete in milliseconds) rather than long-running cancellable work.
 /// </summary>
 public interface IOutboundFirewallEngine
 {
