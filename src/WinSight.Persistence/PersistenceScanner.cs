@@ -45,7 +45,6 @@ public sealed class PersistenceScanner
             new CredentialProviderEnumerator(),
             new BrowserHelperObjectEnumerator(),
             new WindowsLoadRunEnumerator(),
-            new ShimDatabaseEnumerator(),
         };
 
     /// <summary>

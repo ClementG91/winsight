@@ -2,6 +2,14 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Detection: drop the shim-database surface (false-positive avoidance)
+- Verification pass on a real machine confirmed the new autostart surfaces are clean:
+  credential providers (21) and browser helper objects (4) all resolved to correctly
+  Authenticode-signed DLLs, none flagged. But an installed application shim is a .sdb file,
+  which is never Authenticode-signed, so the shim-database surface would flag every
+  legitimate installed shim as unsigned/suspicious — a guaranteed false positive. Removed
+  it; the credential-provider, browser-helper-object and Windows Load/Run surfaces stay.
+
 ### Firewall: block feedback now tells you whether it is actually enforcing
 - A block only filters traffic once enforcement is enabled (an elevated action). Blocking
   an app while enforcement was off said "applied" yet nothing happened on the network — the
