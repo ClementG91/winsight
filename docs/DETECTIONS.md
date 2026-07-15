@@ -8,7 +8,7 @@ VirusTotal lookup, analysis stays on the device.
 
 | Area | Evidence and notable signals | User action |
 |---|---|---|
-| Persistence | 18 Windows autostart families, including registry Run keys, services/drivers and `ServiceDll`, scheduled tasks, Winlogon, AppInit, IFEO/SilentProcessExit, WMI subscriptions, startup folders, LSA packages, COM hijacks and screensavers. Images are Authenticode checked. | Inspect details, reveal the validated file location, or open Windows Startup apps. |
+| Persistence | 22 Windows autostart families, including registry Run keys, services/drivers and `ServiceDll`, scheduled tasks, Winlogon, AppInit, IFEO/SilentProcessExit, WMI subscriptions, startup folders, LSA packages, print monitors/providers, credential providers, browser helper objects, Windows Load/Run values, COM hijacks and screensavers. Images are Authenticode checked. | Inspect details, reveal the validated file location, or open Windows Startup apps. |
 | Camera and microphone | Current and historical Capability Access usage; live CLI transitions. | Identify the application and open Windows privacy settings. |
 | Network connections | IPv4/IPv6 TCP and UDP owner, process image and signature; external established connections with unsigned/untrusted owners are notable. | Inspect the executable and open Resource Monitor. |
 | DNS | Resolver-cache records and administrator-only live ETW queries. | Correlate domains with activity and open Windows network settings. |

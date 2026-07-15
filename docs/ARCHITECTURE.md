@@ -40,7 +40,8 @@ Paths, process names, domains and other forensic values are never rewritten.
   `RunOnce`, Scheduled Tasks (Task Scheduler COM / `\Windows\System32\Tasks`),
   Services (`HKLM\SYSTEM\CurrentControlSet\Services`), WMI `__EventFilter` /
   `CommandLineEventConsumer`, startup folders, `Winlogon` (Shell/Userinit),
-  `AppInit_DLLs`, print monitors, drivers. Verdict each via **WinVerifyTrust**
+  `AppInit_DLLs`, print monitors/providers, credential providers, browser helper objects,
+  Windows Load/Run values and drivers. Verdict each via **WinVerifyTrust**
   (Authenticode). This is the same surface Autoruns covers, but OSS and scriptable.
 - **Camera/Mic**, activation signal from ETW providers and the
   `CapabilityAccessManager\ConsentStore\{webcam,microphone}` registry (per-app

@@ -166,13 +166,14 @@ process names, domains and other forensic evidence are never translated or alter
 The language can also be selected explicitly for managed deployments, for example
 `winsight-dashboard --language es` (supported values: `en`, `fr`, `es`).
 
-- **Persistence** (KnockKnock-class), 18 autostart surfaces: Run/RunOnce/RunServices/
+- **Persistence** (KnockKnock-class), 22 autostart surfaces: Run/RunOnce/RunServices/
   Policies\Explorer\Run (HKLM+HKCU × 64/32-bit), Services & drivers (incl. svchost
   `ServiceDll` payloads), Winlogon Shell/Userinit (HKLM+HKCU), Scheduled Tasks (Tasks
   XML), AppInit_DLLs, IFEO debuggers, SilentProcessExit monitors, Active Setup,
   BootExecute, WMI event subscriptions, Startup folders (.lnk-resolved), LSA packages,
-  Print monitors, Netsh helpers, COM hijacks (HKCU CLSID), AppCertDLLs, Time
-  providers, Screensaver, each signature-checked, resilient per-surface scan.
+  Print monitors and providers, Netsh helpers, COM hijacks (HKCU CLSID), AppCertDLLs,
+  Time providers, Screensaver, credential providers, browser helper objects and Windows
+  Load/Run values, each signature-checked, resilient per-surface scan.
 - **Camera/Mic** (OverSight-class), which apps used the webcam/mic and what is live
   now (CapabilityAccessManager ConsentStore), plus real-time `av --watch` alerts the
   instant a device turns on/off.
