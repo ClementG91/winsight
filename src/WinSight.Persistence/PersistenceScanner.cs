@@ -42,6 +42,8 @@ public sealed class PersistenceScanner
             new TimeProviderEnumerator(),
             new ScreensaverEnumerator(),
             new SilentProcessExitEnumerator(),
+            new CredentialProviderEnumerator(),
+            new BrowserHelperObjectEnumerator(),
         };
 
     /// <summary>

@@ -252,6 +252,50 @@ public sealed class SilentProcessExitEnumeratorIntegrationTests
     }
 }
 
+public sealed class CredentialProviderEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new CredentialProviderEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.CredentialProvider, e.Vector);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+            Assert.Contains("Credential Providers", e.Location);
+        });
+    }
+}
+
+public sealed class BrowserHelperObjectEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new BrowserHelperObjectEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.BrowserHelperObject, e.Vector);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+            Assert.Contains("Browser Helper Objects", e.Location);
+        });
+    }
+}
+
+public sealed class DefaultEnumeratorsTests
+{
+    [Fact]
+    public void DefaultEnumerators_IncludeTheNewSurfaces()
+    {
+        var surfaces = PersistenceScanner.DefaultEnumerators().Select(e => e.Surface).ToList();
+        Assert.Contains("Credential providers", surfaces);
+        Assert.Contains("Browser helper objects", surfaces);
+        Assert.Equal(surfaces.Count, surfaces.Distinct().Count());
+    }
+}
+
 public sealed class ServiceEnumeratorIntegrationTests
 {
     [Fact]
