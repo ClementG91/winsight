@@ -2,6 +2,18 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Detection: two new autostart surfaces (credential providers, BHOs)
+- Add CredentialProviderEnumerator: the COM credential providers the logon/lock UI loads
+  (HKLM\...\Authentication\Credential Providers\{CLSID}); a rogue one runs in the trusted
+  logon context and can capture credentials (MITRE T1556-class).
+- Add BrowserHelperObjectEnumerator: Explorer/IE in-process COM add-ins
+  (HKLM\...\Explorer\Browser Helper Objects\{CLSID}, both registry views); a classic
+  injection/persistence spot (MITRE T1176).
+- Each CLSID is resolved to its InprocServer32 DLL via a shared ClsidResolver, so the
+  scanner surfaces the real binary (and its Authenticode verdict), not an opaque GUID.
+  Both are registered in the default scan and localized in en/fr/es. Persistence coverage
+  goes from 18 to 20 surfaces.
+
 ### Scans are now cancellable
 - Thread a CancellationToken through the synchronous scan pipeline: ISignatureVerifier
   (Verify/VerifyMany) and its four implementations, ConnectionMonitor/ProcessLister/

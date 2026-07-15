@@ -215,4 +215,6 @@
   <data name="PersistenceVectorTimeProvider" xml:space="preserve"><value>Time provider</value></data>
   <data name="PersistenceVectorScreensaver" xml:space="preserve"><value>Screensaver</value></data>
   <data name="PersistenceVectorSilentProcessExit" xml:space="preserve"><value>Silent process exit monitor</value></data>
+  <data name="PersistenceVectorCredentialProvider" xml:space="preserve"><value>Credential provider</value></data>
+  <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Browser helper object</value></data>
 </root>

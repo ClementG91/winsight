@@ -23,6 +23,8 @@ public enum AutostartVector
     TimeProvider,
     Screensaver,
     SilentProcessExit,
+    CredentialProvider,
+    BrowserHelperObject,
     // Phase 1.2+: LSA extensions, shims, ...
 }
 
