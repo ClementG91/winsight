@@ -9,12 +9,9 @@ namespace WinSight.Processes;
 /// each image's Authenticode signature, so unsigned/untrusted running code stands out.
 /// Read-only; no admin needed for the basics.
 /// </summary>
-public sealed class ProcessLister
+public sealed class ProcessLister(ISignatureVerifier? verifier = null)
 {
-    private readonly ISignatureVerifier _verifier;
-
-    public ProcessLister(ISignatureVerifier? verifier = null) =>
-        _verifier = verifier ?? new NativeSignatureVerifier();
+    private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
     public IReadOnlyList<ProcessInfo> Snapshot()
     {

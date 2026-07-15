@@ -22,7 +22,8 @@ public sealed record BrowserExtension(
     string Path)
 {
     /// <summary>
-    /// API permissions that grant broad reach over browsing, network or the host,     /// the ones worth reviewing on an unfamiliar extension.
+    /// API permissions that grant broad reach over browsing, network or the host — the ones
+    /// worth reviewing on an unfamiliar extension.
     /// </summary>
     public static readonly IReadOnlySet<string> HighRiskPermissions = new HashSet<string>(
         StringComparer.OrdinalIgnoreCase)
