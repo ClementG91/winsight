@@ -110,6 +110,22 @@ internal static class McpResultProjector
             projected);
     }
 
+    // The user's folder paths are stable for the process lifetime, so the redaction table
+    // is built and length-ordered once (longest key first, so nested paths win) instead of
+    // being rebuilt for every field of every finding.
+    private static readonly (string Path, string Token)[] PathRedactions =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)] = "%LOCALAPPDATA%",
+            [Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)] = "%APPDATA%",
+            [Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)] = "%USERPROFILE%",
+            [Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)] = "%TEMP%",
+        }
+        .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
+        .OrderByDescending(pair => pair.Key.Length)
+        .Select(pair => (pair.Key, pair.Value))
+        .ToArray();
+
     private static string ProtectRequired(string value, bool includeSensitive) =>
         Protect((string?)value, includeSensitive) ?? string.Empty;
 
@@ -120,23 +136,10 @@ internal static class McpResultProjector
             return value;
         }
 
-        var replacements = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            [Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)] = "%LOCALAPPDATA%",
-            [Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)] = "%APPDATA%",
-            [Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)] = "%USERPROFILE%",
-            [Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)] = "%TEMP%",
-        };
-
         var protectedValue = value;
-        foreach (var replacement in replacements
-                     .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
-                     .OrderByDescending(pair => pair.Key.Length))
+        foreach (var (path, token) in PathRedactions)
         {
-            protectedValue = protectedValue.Replace(
-                replacement.Key,
-                replacement.Value,
-                StringComparison.OrdinalIgnoreCase);
+            protectedValue = protectedValue.Replace(path, token, StringComparison.OrdinalIgnoreCase);
         }
         return protectedValue;
     }

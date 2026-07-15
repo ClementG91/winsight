@@ -10,12 +10,9 @@ namespace WinSight.NetMonitor;
 /// that process's Authenticode signature. A reliable, dependency-light first slice;
 /// a later revision swaps netstat for GetExtendedTcpTable (CsWin32) for live events.
 /// </summary>
-public sealed class ConnectionMonitor
+public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
 {
-    private readonly ISignatureVerifier _verifier;
-
-    public ConnectionMonitor(ISignatureVerifier? verifier = null) =>
-        _verifier = verifier ?? new AuthenticodeVerifier();
+    private readonly ISignatureVerifier _verifier = verifier ?? new AuthenticodeVerifier();
 
     public IReadOnlyList<Connection> Snapshot()
     {

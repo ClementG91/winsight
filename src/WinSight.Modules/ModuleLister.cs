@@ -10,12 +10,9 @@ namespace WinSight.Modules;
 /// injected or side-loaded into legitimate processes. Read-only; processes that can't
 /// be opened (protected, cross-bitness, already exited) are skipped, never guessed.
 /// </summary>
-public sealed class ModuleLister
+public sealed class ModuleLister(ISignatureVerifier? verifier = null)
 {
-    private readonly ISignatureVerifier _verifier;
-
-    public ModuleLister(ISignatureVerifier? verifier = null) =>
-        _verifier = verifier ?? new NativeSignatureVerifier();
+    private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
     public IReadOnlyList<LoadedModule> Snapshot()
     {

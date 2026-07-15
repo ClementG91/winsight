@@ -17,16 +17,10 @@ public sealed record DeviceEvent(AvEventKind Kind, DeviceUsage Usage);
 /// <see cref="CapabilityAccessReader"/> on an interval (a driver-free approach).
 /// RegNotifyChangeKeyValue is the future event-driven optimization.
 /// </summary>
-public sealed class CameraMicMonitor
+public sealed class CameraMicMonitor(CapabilityAccessReader? reader = null, TimeSpan? interval = null)
 {
-    private readonly CapabilityAccessReader _reader;
-    private readonly TimeSpan _interval;
-
-    public CameraMicMonitor(CapabilityAccessReader? reader = null, TimeSpan? interval = null)
-    {
-        _reader = reader ?? new CapabilityAccessReader();
-        _interval = interval ?? TimeSpan.FromSeconds(1);
-    }
+    private readonly CapabilityAccessReader _reader = reader ?? new CapabilityAccessReader();
+    private readonly TimeSpan _interval = interval ?? TimeSpan.FromSeconds(1);
 
     /// <summary>
     /// The activation/deactivation events between two snapshots. Pure: an app active

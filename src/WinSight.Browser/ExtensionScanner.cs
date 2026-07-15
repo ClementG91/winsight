@@ -8,17 +8,14 @@ namespace WinSight.Browser;
 /// browser or profile that isn't present is simply absent from the result, never
 /// guessed. Roots are injectable so the manifest parsing is testable without a browser.
 /// </summary>
-public sealed class ExtensionScanner
+public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots = null)
 {
     /// <summary>A browser's on-disk "Extensions" directory to scan.</summary>
     /// <param name="Browser">Friendly browser name for reporting.</param>
     /// <param name="ExtensionsDir">Path containing per-extension-id subdirectories.</param>
     public readonly record struct Root(string Browser, string ExtensionsDir);
 
-    private readonly IReadOnlyList<Root> _roots;
-
-    public ExtensionScanner(IReadOnlyList<Root>? roots = null) =>
-        _roots = roots ?? DefaultWindowsRoots();
+    private readonly IReadOnlyList<Root> _roots = roots ?? DefaultWindowsRoots();
 
     /// <summary>
     /// The standard Chromium-family extension directories under the current user's

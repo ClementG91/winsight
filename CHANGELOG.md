@@ -1,5 +1,15 @@
 ## Unreleased
 
+### Code quality: review polish
+- McpModels.Protect no longer rebuilds and re-sorts the path-redaction table on every
+  field; it is computed once as a static (the user folder paths are process-stable).
+- VirusTotalEnricher.Lookup returns IReadOnlyDictionary, matching the read-only collection
+  convention used everywhere else.
+- Convert six single-assignment constructors to C# 12 primary constructors (ConnectionMonitor,
+  ProcessLister, ModuleLister, HostsReader, CameraMicMonitor, ExtensionScanner).
+- Fix a corrupted doc comment in BrowserExtension.
+
+
 ### Code quality: remove sync-over-async from child-process output reads
 - AuthenticodeVerifier.RunPowerShell and ConnectionMonitor.RunNetstat blocked on
   ReadToEndAsync via GetAwaiter().GetResult(), a pattern the project standards forbid.

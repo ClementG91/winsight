@@ -8,7 +8,7 @@ namespace WinSight.Application;
 /// </summary>
 internal static class VirusTotalEnricher
 {
-    public static Dictionary<string, VtVerdict> Lookup(
+    public static IReadOnlyDictionary<string, VtVerdict> Lookup(
         IEnumerable<string> imagePaths,
         bool allowNetworkLookups,
         CancellationToken cancellationToken)

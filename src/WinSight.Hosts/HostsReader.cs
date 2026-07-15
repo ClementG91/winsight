@@ -5,11 +5,9 @@ namespace WinSight.Hosts;
 /// is a pure static so it can be tested without touching the real file; the default
 /// path resolves the system hosts file.
 /// </summary>
-public sealed class HostsReader
+public sealed class HostsReader(string? path = null)
 {
-    private readonly string _path;
-
-    public HostsReader(string? path = null) => _path = path ?? DefaultPath();
+    private readonly string _path = path ?? DefaultPath();
 
     /// <summary><c>%SystemRoot%\System32\drivers\etc\hosts</c>.</summary>
     public static string DefaultPath()
