@@ -4,6 +4,22 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 interactive firewall controls in the dashboard
+- The Outbound Firewall view is now interactive. When the firewall tool has a live status
+  and the privileged service answered, a controls bar appears: "Block an app…" (file
+  picker), and, for the selected policy row, Allow / Block / Remove, plus an "Emergency
+  disable" kill switch (confirmed) that returns the machine to audit-only and lifts every
+  block. Each action calls the authenticated pipe and re-reads the status so the grid
+  updates immediately; the outcome (applied / unavailable / unauthorized / rejected) is
+  shown localized.
+- Enabling enforcement itself stays out of the unprivileged dashboard: the controls set
+  per-app policy and can emergency-disable, but turning enforcement on remains the elevated
+  service action.
+- Decision logic (policy-row parsing, outcome-to-message mapping) lives in a UI-agnostic
+  `FirewallControlPresenter` in the application layer, unit-tested without WPF. New strings
+  are localized in English, French, and Spanish; the footer no longer claims the dashboard
+  is read-only.
+
 ### Phase 2 dashboard-side write path + async entry point
 - `FirewallServiceGateway` now exposes the policy write path over the authenticated pipe:
   `SetPolicyAsync`, `RemovePolicyAsync`, and `EmergencyDisableAsync`, each returning a

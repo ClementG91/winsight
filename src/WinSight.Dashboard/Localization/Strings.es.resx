@@ -62,7 +62,20 @@
   <data name="OpenFile" xml:space="preserve"><value>Ver archivo</value></data>
   <data name="CopyDetails" xml:space="preserve"><value>Copiar detalles</value></data>
   <data name="ExportJson" xml:space="preserve"><value>Exportar como JSON</value></data>
-  <data name="ReadOnlyFooter" xml:space="preserve"><value>Solo lectura: WinSight nunca elimina ni bloquea automáticamente. VirusTotal es opcional en Ajustes.</value></data>
+  <data name="ReadOnlyFooter" xml:space="preserve"><value>WinSight nunca elimina ni bloquea automáticamente; los cambios del firewall son siempre tu elección explícita. VirusTotal es opcional en Ajustes.</value></data>
+  <data name="FirewallControlsTitle" xml:space="preserve"><value>Controles del firewall</value></data>
+  <data name="FirewallBlockApp" xml:space="preserve"><value>Bloquear una app…</value></data>
+  <data name="FirewallAllowSelected" xml:space="preserve"><value>Permitir</value></data>
+  <data name="FirewallBlockSelected" xml:space="preserve"><value>Bloquear</value></data>
+  <data name="FirewallRemoveSelected" xml:space="preserve"><value>Quitar</value></data>
+  <data name="FirewallEmergencyDisable" xml:space="preserve"><value>Desactivación de emergencia</value></data>
+  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>¿Desactivar la aplicación y levantar todos los bloqueos de WinSight? La máquina vuelve a solo auditoría.</value></data>
+  <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Selecciona una aplicación para bloquear</value></data>
+  <data name="FirewallExeFilter" xml:space="preserve"><value>Ejecutables (*.exe)|*.exe|Todos los archivos (*.*)|*.*</value></data>
+  <data name="FirewallActionApplied" xml:space="preserve"><value>Cambio del firewall aplicado.</value></data>
+  <data name="FirewallActionUnavailable" xml:space="preserve"><value>El servicio de firewall no está disponible. Instálalo e inícialo, luego inténtalo de nuevo.</value></data>
+  <data name="FirewallActionUnauthorized" xml:space="preserve"><value>No tienes autorización para cambiar la política del firewall en esta máquina.</value></data>
+  <data name="FirewallActionRejected" xml:space="preserve"><value>El servicio de firewall rechazó el cambio.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Abrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Salir</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, seguridad local</value></data>

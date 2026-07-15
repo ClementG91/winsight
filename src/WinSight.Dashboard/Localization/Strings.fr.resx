@@ -62,7 +62,20 @@
   <data name="OpenFile" xml:space="preserve"><value>Voir le fichier</value></data>
   <data name="CopyDetails" xml:space="preserve"><value>Copier les détails</value></data>
   <data name="ExportJson" xml:space="preserve"><value>Exporter en JSON</value></data>
-  <data name="ReadOnlyFooter" xml:space="preserve"><value>Lecture seule : WinSight ne supprime ni ne bloque automatiquement. VirusTotal est facultatif dans Paramètres.</value></data>
+  <data name="ReadOnlyFooter" xml:space="preserve"><value>WinSight ne supprime ni ne bloque automatiquement ; les changements de pare-feu sont toujours votre choix explicite. VirusTotal est facultatif dans Paramètres.</value></data>
+  <data name="FirewallControlsTitle" xml:space="preserve"><value>Contrôles du pare-feu</value></data>
+  <data name="FirewallBlockApp" xml:space="preserve"><value>Bloquer une app…</value></data>
+  <data name="FirewallAllowSelected" xml:space="preserve"><value>Autoriser</value></data>
+  <data name="FirewallBlockSelected" xml:space="preserve"><value>Bloquer</value></data>
+  <data name="FirewallRemoveSelected" xml:space="preserve"><value>Retirer</value></data>
+  <data name="FirewallEmergencyDisable" xml:space="preserve"><value>Désactivation d'urgence</value></data>
+  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>Désactiver l'application et lever tous les blocages WinSight ? La machine repasse en audit seul.</value></data>
+  <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Sélectionner une application à bloquer</value></data>
+  <data name="FirewallExeFilter" xml:space="preserve"><value>Exécutables (*.exe)|*.exe|Tous les fichiers (*.*)|*.*</value></data>
+  <data name="FirewallActionApplied" xml:space="preserve"><value>Modification du pare-feu appliquée.</value></data>
+  <data name="FirewallActionUnavailable" xml:space="preserve"><value>Le service pare-feu n'est pas disponible. Installez-le et démarrez-le, puis réessayez.</value></data>
+  <data name="FirewallActionUnauthorized" xml:space="preserve"><value>Vous n'êtes pas autorisé à modifier la politique du pare-feu sur cette machine.</value></data>
+  <data name="FirewallActionRejected" xml:space="preserve"><value>Le service pare-feu a rejeté la modification.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Ouvrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, sécurité locale</value></data>
