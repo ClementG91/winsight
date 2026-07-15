@@ -1,7 +1,7 @@
 # Phase 2, outbound firewall design
 
-Status: contracts, fail-open policy storage and strict IPC framing implemented; no
-service is installed and WFP mutation is not enabled.
+Status: privileged trust-boundary hardening is implemented in code; native SCM, DACL,
+multi-user pipe and WFP behavior still requires isolated-VM validation.
 
 ## Goal
 
@@ -26,6 +26,64 @@ process ids or display names, which are transient or ambiguous.
 
 ## Implemented service foundation
 
+### LocalSystem trust boundary
+
+- Service registration inspects the executable and every existing ancestor immediately
+  before the SCM call. Missing components, reparse points, owners outside the explicit
+  SYSTEM/Administrators policy (TrustedInstaller is accepted only for system ancestors),
+  unprivileged write/create/delete/replace rights, and indeterminate inspection deny the
+  operation with a stable code and redacted message.
+- ACL evaluation is deterministic and follows DACL order: an earlier applicable Deny ACE
+  removes matching dangerous rights before a later Allow is considered, while a later deny
+  cannot revoke rights already allowed. Exact SID and well-known broad-group applicability
+  are resolved directly; arbitrary group expansion is injectable for tests, and unknown
+  membership is never used to turn a dangerous Allow into trust.
+- Inspection produces stable volume/file identities from no-follow handles. The installer
+  revalidates those identities immediately before SCM use and after registration; a
+  mismatch rolls the new registration back. Storage guards similarly bind each load/save
+  to pre-use metadata and post-open/pre-replace identity checks. These checks narrow but
+  do not replace the outstanding adversarial TOCTOU validation in an isolated VM.
+- SCM receives only the canonical path carried by the inspected evidence. Registration is
+  behind a testable SCM boundary; if post-registration revalidation fails, deletion is
+  verified. Every operation after Create, including description configuration, is inside
+  the same checked rollback boundary; the seam makes no assumption that cosmetic setup
+  cannot throw. Successful rollback and rollback failure have distinct stable states.
+- The policy directory is canonically contained beneath ProgramData. Provisioning is
+  separate from inspection; startup and every privileged load/write re-inspect owner,
+  ACL and reparse state. Distrust is distinct from malformed JSON and denies policy I/O
+  before any native WFP backend is constructed or used.
+- Pipe authentication yields one of three capabilities: none, read status/policies, or
+  mutate machine policy. Authenticated local standard users receive read access only.
+  SYSTEM and an elevated Administrator token receive mutation access. Anonymous, guest,
+  network and uninspectable identities are denied.
+- One live service coordinator is the authoritative mutation boundary used by IPC and
+  startup; it serializes policy changes and enforcement transitions. Native WFP creation
+  is lazy and occurs only after a fresh trusted load. CLI mutation verbs are disabled
+  because the current protocol has no privileged transition commands to route safely.
+  The central mode gate prevents adding/applying filters in AuditOnly. The only mutation is
+  idempotent WinSight-owned cleanup during emergency/disable, ordered before AuditOnly is
+  persisted.
+- Enforcement-side policy changes compensate a persistence failure by restoring the prior
+  owned filter state. Enable and startup track successfully applied filters; partial failure
+  removes them in reverse order and persists AuditOnly. Failure of compensation is distinct
+  from the initiating transition failure so operators cannot mistake divergence for a safe
+  rollback.
+- External failures use stable protocol/path codes and fixed messages. They do not expose
+  attacker-controlled paths, ACLs, SIDs, policy JSON, or native exception text.
+- IPC, CLI output and hosted-service logs are independent diagnostic trust boundaries.
+  Hosted services never attach caught exception objects to log records; fixed allowlisted
+  `FW_*` codes preserve observability without allowing providers to serialize nested
+  native or attacker-controlled text.
+- Security codes are locale-invariant. This service surface emits codes rather than new
+  ad-hoc English presentation; user-facing WinSight presentation continues to use the
+  existing EN/FR/ES localization layer. The VM protocol must inspect affected presentation
+  in all three locales without changing the underlying codes.
+
+The following evidence remains blocked pending explicit human execution in an isolated
+Windows VM: real SCM lifecycle and no-call-on-denial observation; owner/DACL and nested
+reparse/TOCTOU cases; standard/elevated/SYSTEM multi-user pipe tokens; WFP enumeration,
+startup recovery and rollback; and IPv4/IPv6/DNS/DHCP/loopback connectivity.
+
 - `FirewallPolicyStore` persists a schema-versioned snapshot through a flushed
   temporary file and atomic same-volume replacement. It canonicalizes and
   deduplicates paths, bounds the file to 1 MiB and 4096 entries, rejects unknown or
@@ -38,9 +96,10 @@ process ids or display names, which are transient or ambiguous.
   capped at 64 KiB. It validates the exact version, non-empty request ID, command
   payload shape, canonical paths, enums and response invariants. Policy listing is
   explicitly paged at no more than 128 entries per frame.
-- `AuditOnlyFirewallEngine` is the default engine and never mutates WFP. It reports
-  `IsSupported = false`, so the service can never present enforcement as active. This
-  keeps the machine's connectivity untouched while enforcement is still being built.
+- `AuditOnlyFirewallEngine` remains a non-mutating test and fallback implementation. The
+  production service authority does not freeze an engine choice at startup: it constructs
+  the native backend lazily only after a fresh trusted load requires enforcement or owned
+  cleanup.
 - `FirewallRequestDispatcher` turns a validated request into an effect against the
   store and engine. An unauthenticated caller only ever receives `Unauthorized`; store
   or engine faults collapse to `InternalFailure` with no exception text on the wire;

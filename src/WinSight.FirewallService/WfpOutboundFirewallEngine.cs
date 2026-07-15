@@ -10,10 +10,10 @@ namespace WinSight.FirewallService;
 /// provisions the WinSight provider/sublayer, so applying a policy is self-contained. Only
 /// the privileged service uses this; it is never wired into the unprivileged dashboard.
 ///
-/// This engine is not the shipped default: the service runs the audit-only engine until
-/// enforcement is explicitly enabled.
+/// The service authority creates this backend lazily, only after trusted storage proves
+/// that enforcement or narrowly scoped WinSight cleanup requires native access.
 /// </summary>
-public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine
+public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine, IWinSightFirewallCleanup
 {
     /// <summary>WFP is available on every supported Windows baseline.</summary>
     public bool IsSupported => true;
@@ -43,5 +43,19 @@ public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine
 
         WfpProvisioning.RemoveBlockFilter(executablePath);
         return Task.CompletedTask;
+    }
+
+    public async Task CleanupWinSightAsync(
+        IReadOnlyList<AppFirewallPolicy> knownPolicies,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(knownPolicies);
+        foreach (var policy in knownPolicies)
+        {
+            await RemoveAsync(policy.ExecutablePath, cancellationToken).ConfigureAwait(false);
+        }
+        cancellationToken.ThrowIfCancellationRequested();
+        WfpProvisioning.RemovePermitFilter();
+        WfpProvisioning.Deprovision();
     }
 }

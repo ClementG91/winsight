@@ -14,6 +14,9 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
 
     private string PolicyPath => Path.Combine(_directory, "policies.json");
 
+    private static FirewallRequestDispatcher Dispatcher(FirewallPolicyStore store, IOutboundFirewallEngine engine) =>
+        new(store, new TestMutationAuthority(store, engine));
+
     private static FirewallCommandRequest Request(
         FirewallCommand command,
         AppFirewallPolicy? policy = null,
@@ -25,7 +28,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     [Fact]
     public async Task DispatchAsync_UnauthorisedCaller_IsAlwaysRejected()
     {
-        var dispatcher = new FirewallRequestDispatcher(new FirewallPolicyStore(PolicyPath), new AuditOnlyFirewallEngine());
+        var dispatcher = Dispatcher(new FirewallPolicyStore(PolicyPath), new AuditOnlyFirewallEngine());
 
         var response = await dispatcher.DispatchAsync(Request(FirewallCommand.GetStatus), callerAuthorised: false);
 
@@ -37,7 +40,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     [Fact]
     public async Task DispatchAsync_GetStatus_EmptyStore_IsAuditOnlyAndNotEnforcing()
     {
-        var dispatcher = new FirewallRequestDispatcher(new FirewallPolicyStore(PolicyPath), new AuditOnlyFirewallEngine());
+        var dispatcher = Dispatcher(new FirewallPolicyStore(PolicyPath), new AuditOnlyFirewallEngine());
 
         var response = await dispatcher.DispatchAsync(Request(FirewallCommand.GetStatus), callerAuthorised: true);
 
@@ -53,14 +56,14 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     {
         var store = new FirewallPolicyStore(PolicyPath);
         var engine = new CountingEngine();
-        var dispatcher = new FirewallRequestDispatcher(store, engine);
+        var dispatcher = Dispatcher(store, engine);
         var policy = new AppFirewallPolicy(@"C:\Program Files\App\app.exe", OutboundAction.Block);
 
         var response = await dispatcher.DispatchAsync(
             Request(FirewallCommand.UpsertPolicy, policy: policy), callerAuthorised: true);
 
         Assert.True(response.Success);
-        Assert.Equal(1, engine.Applied);
+        Assert.Equal(0, engine.Applied);
         var reloaded = await store.LoadAsync();
         Assert.Equal(OutboundFirewallMode.AuditOnly, reloaded.Mode);
         var stored = Assert.Single(reloaded.Policies);
@@ -72,7 +75,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     public async Task DispatchAsync_UpsertPolicy_SamePath_ReplacesInsteadOfDuplicating()
     {
         var store = new FirewallPolicyStore(PolicyPath);
-        var dispatcher = new FirewallRequestDispatcher(store, new AuditOnlyFirewallEngine());
+        var dispatcher = Dispatcher(store, new AuditOnlyFirewallEngine());
         const string path = @"C:\Program Files\App\app.exe";
 
         await dispatcher.DispatchAsync(
@@ -88,11 +91,11 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     }
 
     [Fact]
-    public async Task DispatchAsync_RemovePolicy_DeletesEntryAndNotifiesEngine()
+    public async Task DispatchAsync_RemovePolicy_DeletesEntryWithoutMutatingEngineInAuditOnly()
     {
         var store = new FirewallPolicyStore(PolicyPath);
         var engine = new CountingEngine();
-        var dispatcher = new FirewallRequestDispatcher(store, engine);
+        var dispatcher = Dispatcher(store, engine);
         const string path = @"C:\Program Files\App\app.exe";
         await dispatcher.DispatchAsync(
             Request(FirewallCommand.UpsertPolicy, policy: new AppFirewallPolicy(path, OutboundAction.Block)),
@@ -102,7 +105,8 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
             Request(FirewallCommand.RemovePolicy, executablePath: path), callerAuthorised: true);
 
         Assert.True(response.Success);
-        Assert.True(engine.Removed >= 1);
+        Assert.Equal(0, engine.Applied);
+        Assert.Equal(0, engine.Removed);
         var reloaded = await store.LoadAsync();
         Assert.Empty(reloaded.Policies);
     }
@@ -111,7 +115,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     public async Task DispatchAsync_ListPolicies_PagesDeterministically()
     {
         var store = new FirewallPolicyStore(PolicyPath);
-        var dispatcher = new FirewallRequestDispatcher(store, new AuditOnlyFirewallEngine());
+        var dispatcher = Dispatcher(store, new AuditOnlyFirewallEngine());
         foreach (var name in new[] { "c.exe", "a.exe", "b.exe" })
         {
             await dispatcher.DispatchAsync(
@@ -137,7 +141,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     {
         var store = new FirewallPolicyStore(PolicyPath);
         var engine = new CountingEngine();
-        var dispatcher = new FirewallRequestDispatcher(store, engine);
+        var dispatcher = Dispatcher(store, engine);
         foreach (var name in new[] { "a.exe", "b.exe" })
         {
             await dispatcher.DispatchAsync(
@@ -151,6 +155,74 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         Assert.NotNull(response.Status);
         Assert.Equal(OutboundFirewallMode.AuditOnly, response.Status!.Mode);
         Assert.Equal(2, engine.Removed);
+    }
+
+    [Theory]
+    [InlineData(FirewallCommand.GetStatus, true)]
+    [InlineData(FirewallCommand.ListPolicies, true)]
+    [InlineData(FirewallCommand.UpsertPolicy, false)]
+    [InlineData(FirewallCommand.RemovePolicy, false)]
+    [InlineData(FirewallCommand.EmergencyDisable, false)]
+    public async Task DispatchAsync_ReadCapability_AllowsOnlyReadCommands(FirewallCommand command, bool expectedSuccess)
+    {
+        var store = new FirewallPolicyStore(PolicyPath);
+        var dispatcher = Dispatcher(store, new CountingEngine());
+        var request = command switch
+        {
+            FirewallCommand.ListPolicies => Request(command, offset: 0, limit: 10),
+            FirewallCommand.UpsertPolicy => Request(command,
+                policy: new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Block)),
+            FirewallCommand.RemovePolicy => Request(command, executablePath: @"C:\apps\a.exe"),
+            _ => Request(command),
+        };
+
+        var response = await dispatcher.DispatchAsync(request, FirewallCallerCapability.ReadStatus);
+
+        Assert.Equal(expectedSuccess, response.Success);
+        Assert.Equal(expectedSuccess ? FirewallProtocolError.None : FirewallProtocolError.Unauthorized, response.Error);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_UntrustedStorage_DoesNotReadWriteOrCallEngine()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(PolicyPath, "attacker-controlled-content");
+        var inspections = 0;
+        var store = new FirewallPolicyStore(PolicyPath, storageTrust: () =>
+        {
+            inspections++;
+            return (false, "StorageAclUntrusted");
+        });
+        var engine = new CountingEngine();
+        var dispatcher = Dispatcher(store, engine);
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.UpsertPolicy,
+                policy: new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Block)),
+            FirewallCallerCapability.MutateMachinePolicy);
+
+        Assert.False(response.Success);
+        Assert.Equal(FirewallProtocolError.InternalFailure, response.Error);
+        Assert.True(inspections >= 1);
+        Assert.Equal("attacker-controlled-content", await File.ReadAllTextAsync(PolicyPath));
+        Assert.Equal(0, engine.Applied);
+        Assert.Equal(0, engine.Removed);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_MutationsDelegateToSingleAuthority()
+    {
+        var store = new FirewallPolicyStore(PolicyPath);
+        var authority = new RecordingAuthority();
+        var dispatcher = new FirewallRequestDispatcher(store, authority);
+
+        Assert.True((await dispatcher.DispatchAsync(Request(FirewallCommand.UpsertPolicy,
+            policy: new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Block)), true)).Success);
+        Assert.True((await dispatcher.DispatchAsync(Request(FirewallCommand.RemovePolicy,
+            executablePath: @"C:\apps\a.exe"), true)).Success);
+        Assert.True((await dispatcher.DispatchAsync(Request(FirewallCommand.EmergencyDisable), true)).Success);
+
+        Assert.Equal(["upsert", "remove", "emergency"], authority.Calls);
     }
 
     public void Dispose()
@@ -180,6 +252,63 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
             Removed++;
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class TestMutationAuthority : IFirewallMutationAuthority
+    {
+        private readonly FirewallPolicyStore _store;
+        private readonly IOutboundFirewallEngine _engine;
+
+        public TestMutationAuthority(FirewallPolicyStore store, IOutboundFirewallEngine engine)
+        {
+            _store = store;
+            _engine = engine;
+        }
+
+        public bool EngineSupported => _engine.IsSupported;
+
+        public async Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default)
+        {
+            var configuration = await _store.LoadAsync(cancellationToken);
+            var policies = configuration.Policies
+                .Where(item => !string.Equals(item.ExecutablePath, policy.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                .Append(policy).ToArray();
+            await _store.SaveAsync(configuration with { Policies = policies }, cancellationToken);
+            if (configuration.Mode == OutboundFirewallMode.Enforcement) await _engine.ApplyAsync(policy, cancellationToken);
+        }
+
+        public async Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default)
+        {
+            var configuration = await _store.LoadAsync(cancellationToken);
+            await _store.SaveAsync(configuration with
+            {
+                Policies = configuration.Policies
+                    .Where(item => !string.Equals(item.ExecutablePath, executablePath, StringComparison.OrdinalIgnoreCase))
+                    .ToArray(),
+            }, cancellationToken);
+            if (configuration.Mode == OutboundFirewallMode.Enforcement) await _engine.RemoveAsync(executablePath, cancellationToken);
+        }
+
+        public async Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default)
+        {
+            var configuration = await _store.LoadAsync(cancellationToken);
+            foreach (var policy in configuration.Policies) await _engine.RemoveAsync(policy.ExecutablePath, cancellationToken);
+            var audit = configuration with { Mode = OutboundFirewallMode.AuditOnly };
+            await _store.SaveAsync(audit, cancellationToken);
+            return audit;
+        }
+    }
+
+    private sealed class RecordingAuthority : IFirewallMutationAuthority
+    {
+        public List<string> Calls { get; } = [];
+        public bool EngineSupported => true;
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default)
+        { Calls.Add("upsert"); return Task.CompletedTask; }
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default)
+        { Calls.Add("remove"); return Task.CompletedTask; }
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default)
+        { Calls.Add("emergency"); return Task.FromResult(OutboundFirewallConfiguration.Empty); }
     }
 }
 
@@ -239,7 +368,15 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
     private FirewallConnectionHandler Handler()
     {
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"));
-        return new FirewallConnectionHandler(new FirewallRequestDispatcher(store, new AuditOnlyFirewallEngine()));
+        return new FirewallConnectionHandler(new FirewallRequestDispatcher(store, new ReadOnlyMutationAuthority()));
+    }
+
+    private sealed class ReadOnlyMutationAuthority : IFirewallMutationAuthority
+    {
+        public bool EngineSupported => false;
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     [Fact]

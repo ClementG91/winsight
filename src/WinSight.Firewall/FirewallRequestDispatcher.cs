@@ -16,22 +16,30 @@ namespace WinSight.Firewall;
 public sealed class FirewallRequestDispatcher
 {
     private readonly FirewallPolicyStore _store;
-    private readonly IOutboundFirewallEngine _engine;
+    private readonly IFirewallMutationAuthority _authority;
 
-    public FirewallRequestDispatcher(FirewallPolicyStore store, IOutboundFirewallEngine engine)
+    public FirewallRequestDispatcher(FirewallPolicyStore store, IFirewallMutationAuthority authority)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _authority = authority ?? throw new ArgumentNullException(nameof(authority));
     }
 
     public async Task<FirewallCommandResponse> DispatchAsync(
         FirewallCommandRequest request,
         bool callerAuthorised,
+        CancellationToken cancellationToken = default) =>
+        await DispatchAsync(request, callerAuthorised ? FirewallCallerCapability.MutateMachinePolicy : FirewallCallerCapability.None,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task<FirewallCommandResponse> DispatchAsync(
+        FirewallCommandRequest request,
+        FirewallCallerCapability capability,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        if (!callerAuthorised)
+        if (capability == FirewallCallerCapability.None ||
+            (IsMutation(request.Command) && capability != FirewallCallerCapability.MutateMachinePolicy))
         {
             return Failure(request, FirewallProtocolError.Unauthorized);
         }
@@ -61,10 +69,17 @@ public sealed class FirewallRequestDispatcher
         }
     }
 
+    private static bool IsMutation(FirewallCommand command) => command is
+        FirewallCommand.UpsertPolicy or FirewallCommand.RemovePolicy or FirewallCommand.EmergencyDisable;
+
     private async Task<FirewallCommandResponse> GetStatusAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
         var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
+        if (!load.StorageTrusted)
+        {
+            return Failure(request, FirewallProtocolError.NotSupported);
+        }
         return Success(request) with { Status = DescribeStatus(load.Configuration.Mode) };
     }
 
@@ -75,6 +90,10 @@ public sealed class FirewallRequestDispatcher
         var limit = request.Limit!.Value;
 
         var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
+        if (!load.StorageTrusted)
+        {
+            return Failure(request, FirewallProtocolError.NotSupported);
+        }
         // Deterministic ordering so paging is stable across calls.
         var ordered = load.Configuration.Policies
             .OrderBy(policy => policy.ExecutablePath, StringComparer.OrdinalIgnoreCase)
@@ -90,20 +109,7 @@ public sealed class FirewallRequestDispatcher
     private async Task<FirewallCommandResponse> UpsertPolicyAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
-        var incoming = NormalisePolicy(request.Policy!);
-
-        var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
-        var policies = load.Configuration.Policies
-            .Where(policy => !PathEquals(policy.ExecutablePath, incoming.ExecutablePath))
-            .Append(incoming)
-            .ToList();
-
-        // Audit-only: the choice is persisted but the engine installs nothing. The
-        // persisted mode is preserved and never promoted to enforcement here.
-        await _store.SaveAsync(
-            load.Configuration with { Policies = policies },
-            cancellationToken).ConfigureAwait(false);
-        await _engine.ApplyAsync(incoming, cancellationToken).ConfigureAwait(false);
+        await _authority.UpsertPolicyAsync(NormalisePolicy(request.Policy!), cancellationToken).ConfigureAwait(false);
 
         return Success(request);
     }
@@ -111,17 +117,7 @@ public sealed class FirewallRequestDispatcher
     private async Task<FirewallCommandResponse> RemovePolicyAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
-        var path = OutboundPolicyEvaluator.CanonicalPath(request.ExecutablePath!);
-
-        var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
-        var remaining = load.Configuration.Policies
-            .Where(policy => !PathEquals(policy.ExecutablePath, path))
-            .ToList();
-
-        await _store.SaveAsync(
-            load.Configuration with { Policies = remaining },
-            cancellationToken).ConfigureAwait(false);
-        await _engine.RemoveAsync(path, cancellationToken).ConfigureAwait(false);
+        await _authority.RemovePolicyAsync(request.ExecutablePath!, cancellationToken).ConfigureAwait(false);
 
         return Success(request);
     }
@@ -132,30 +128,19 @@ public sealed class FirewallRequestDispatcher
         // The emergency path always returns the machine to audit-only, whatever the
         // stored mode was, and removes any engine state. It must succeed even from a
         // corrupt store, which LoadOrAuditAsync already guarantees.
-        var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var policy in load.Configuration.Policies)
-        {
-            await _engine.RemoveAsync(policy.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        }
+        var configuration = await _authority.EmergencyDisableAsync(cancellationToken).ConfigureAwait(false);
 
-        await _store.SaveAsync(
-            load.Configuration with { Mode = OutboundFirewallMode.AuditOnly },
-            cancellationToken).ConfigureAwait(false);
-
-        return Success(request) with { Status = DescribeStatus(OutboundFirewallMode.AuditOnly) };
+        return Success(request) with { Status = DescribeStatus(configuration.Mode) };
     }
 
     private FirewallServiceStatus DescribeStatus(OutboundFirewallMode mode)
     {
-        var enforcementEnabled = mode == OutboundFirewallMode.Enforcement && _engine.IsSupported;
-        return new FirewallServiceStatus(mode, _engine.IsSupported, enforcementEnabled);
+        var enforcementEnabled = mode == OutboundFirewallMode.Enforcement && _authority.EngineSupported;
+        return new FirewallServiceStatus(mode, _authority.EngineSupported, enforcementEnabled);
     }
 
     private static AppFirewallPolicy NormalisePolicy(AppFirewallPolicy policy) =>
         policy with { ExecutablePath = OutboundPolicyEvaluator.CanonicalPath(policy.ExecutablePath) };
-
-    private static bool PathEquals(string left, string right) =>
-        string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
     private static FirewallCommandResponse Success(FirewallCommandRequest request) =>
         new(request.ProtocolVersion, request.RequestId, Success: true);

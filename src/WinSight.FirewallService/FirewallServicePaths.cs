@@ -33,6 +33,20 @@ public static class FirewallServicePaths
         return info.FullName;
     }
 
+    public static string ProvisionDefaultDirectory()
+    {
+        var directory = ProvisionDirectory(DefaultDirectory);
+        var trust = InspectDefaultStorage();
+        if (!trust.IsTrusted)
+        {
+            throw new InvalidOperationException($"Policy storage rejected [{trust.Code}]: {trust.Message}");
+        }
+        return directory;
+    }
+
+    public static PathTrustDecision InspectDefaultStorage() =>
+        new WindowsServicePathTrustInspector().InspectPolicyStorage(DefaultDirectory, DefaultPolicyFile);
+
     /// <summary>
     /// Full control for SYSTEM and Administrators only, with inheritance disabled and
     /// no inherited rules preserved.
