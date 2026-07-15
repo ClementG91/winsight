@@ -284,6 +284,38 @@ public sealed class BrowserHelperObjectEnumeratorIntegrationTests
     }
 }
 
+public sealed class WindowsLoadRunEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new WindowsLoadRunEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.WindowsLoadRun, e.Vector);
+            Assert.True(e.Name is "Load" or "Run");
+            Assert.False(string.IsNullOrEmpty(e.Command));
+        });
+    }
+}
+
+public sealed class ShimDatabaseEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new ShimDatabaseEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.ShimDatabase, e.Vector);
+            Assert.Contains("InstalledSDB", e.Location);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+        });
+    }
+}
+
 public sealed class DefaultEnumeratorsTests
 {
     [Fact]
@@ -292,6 +324,8 @@ public sealed class DefaultEnumeratorsTests
         var surfaces = PersistenceScanner.DefaultEnumerators().Select(e => e.Surface).ToList();
         Assert.Contains("Credential providers", surfaces);
         Assert.Contains("Browser helper objects", surfaces);
+        Assert.Contains("Windows Load/Run", surfaces);
+        Assert.Contains("Application shims (sdb)", surfaces);
         Assert.Equal(surfaces.Count, surfaces.Distinct().Count());
     }
 }

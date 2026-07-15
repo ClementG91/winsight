@@ -2,6 +2,14 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Detection: two more autostart surfaces (Windows Load/Run, application shims)
+- Add WindowsLoadRunEnumerator: the legacy Load/Run values under
+  ...\Windows NT\CurrentVersion\Windows (HKLM + HKCU), an old but still-abused logon
+  autostart spot distinct from AppInit_DLLs.
+- Add ShimDatabaseEnumerator: installed application-compatibility shim databases
+  (...\AppCompatFlags\InstalledSDB\{guid} -> DatabasePath); a custom .sdb can inject code
+  into a target at load (MITRE T1546.011). Persistence coverage now spans 22 surfaces.
+
 ### Detection: two new autostart surfaces (credential providers, BHOs)
 - Add CredentialProviderEnumerator: the COM credential providers the logon/lock UI loads
   (HKLM\...\Authentication\Credential Providers\{CLSID}); a rogue one runs in the trusted

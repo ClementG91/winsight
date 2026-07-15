@@ -25,7 +25,9 @@ public enum AutostartVector
     SilentProcessExit,
     CredentialProvider,
     BrowserHelperObject,
-    // Phase 1.2+: LSA extensions, shims, ...
+    WindowsLoadRun,
+    ShimDatabase,
+    // Phase 1.2+: Winsock LSP, shell extensions, ...
 }
 
 /// <summary>A user-facing persistence inspection result, distinct from severity.</summary>
