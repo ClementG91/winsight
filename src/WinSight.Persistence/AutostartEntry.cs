@@ -26,8 +26,11 @@ public enum AutostartVector
     CredentialProvider,
     BrowserHelperObject,
     WindowsLoadRun,
-    ShimDatabase,
     // Phase 1.2+: Winsock LSP, shell extensions, ...
+    // Note: installed shim databases (.sdb) are intentionally NOT enumerated here: a .sdb is
+    // never Authenticode-signed, so the signature model would flag every legitimate shim as
+    // "unsigned/suspicious" (a guaranteed false positive). Revisit only with an info-only,
+    // non-signature presentation.
 }
 
 /// <summary>A user-facing persistence inspection result, distinct from severity.</summary>
