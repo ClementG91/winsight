@@ -52,10 +52,15 @@ public sealed class EnforcementCoordinator
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
 
+        // Canonicalize up front, exactly like the IPC dispatcher does, so the persisted
+        // path, the dedup comparison, and the path handed to the engine all agree — a raw
+        // path here (quotes, relative segments) would otherwise diverge from what the store
+        // saves and strand a filter under a mismatched key.
+        var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
         var configuration = (await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false)).Configuration;
-        var policy = new AppFirewallPolicy(executablePath, action);
+        var policy = new AppFirewallPolicy(path, action);
         var policies = configuration.Policies
-            .Where(existing => !PathEquals(existing.ExecutablePath, executablePath))
+            .Where(existing => !PathEquals(existing.ExecutablePath, path))
             .Append(policy)
             .ToList();
 

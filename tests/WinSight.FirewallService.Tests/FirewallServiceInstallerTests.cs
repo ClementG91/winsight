@@ -94,6 +94,20 @@ public sealed class WfpProvisioningTests
             WfpProvisioning.BlockFilterKeys(@"C:\Apps\A.exe"),
             WfpProvisioning.BlockFilterKeys(@"c:\apps\a.exe"));
     }
+
+    [Fact]
+    public void BlockFilterKeys_CanonicalizeQuotedAndRelativeSegments_SameAsClean()
+    {
+        // Quoted and dot-segmented forms must derive the same key as the clean canonical
+        // path, or a block installed via one form is orphaned when re-applied via another.
+        var clean = WfpProvisioning.BlockFilterKeys(@"C:\apps\a.exe");
+        Assert.Equal(clean, WfpProvisioning.BlockFilterKeys("\"C:\\apps\\a.exe\""));
+        Assert.Equal(clean, WfpProvisioning.BlockFilterKeys(@"C:\apps\.\a.exe"));
+    }
+
+    [Fact]
+    public void BlockFilterKeys_RejectsRelativePath() =>
+        Assert.Throws<ArgumentException>(() => WfpProvisioning.BlockFilterKeys(@"a.exe"));
 }
 
 public sealed class WfpOutboundFirewallEngineTests
@@ -134,6 +148,20 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var stored = Assert.Single((await store.LoadAsync()).Policies);
         Assert.Equal(OutboundAction.Block, stored.Action);
         Assert.Contains(engine.Applied, p => p.Action == OutboundAction.Block);
+    }
+
+    [Fact]
+    public async Task SetPolicy_CanonicalizesPath_SoStoreAndEngineAgree()
+    {
+        var store = Store();
+        var engine = new RecordingEngine();
+        var coordinator = new EnforcementCoordinator(store, engine);
+
+        await coordinator.SetPolicyAsync("\"C:\\apps\\a.exe\"", OutboundAction.Block);
+
+        var stored = Assert.Single((await store.LoadAsync()).Policies);
+        Assert.Equal(@"C:\apps\a.exe", stored.ExecutablePath);
+        Assert.Equal(@"C:\apps\a.exe", Assert.Single(engine.Applied).ExecutablePath);
     }
 
     [Fact]
