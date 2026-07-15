@@ -238,6 +238,11 @@
                                        Foreground="#64748B" FontSize="12" />
                         </StackPanel>
                         <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                            <Button x:Name="BlockOutboundButton" IsEnabled="False" Margin="0,0,10,0" Padding="10,4"
+                                    Background="#B91C1C" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                                    Content="{Binding [BlockOutbound], Source={x:Static local:LocalizationManager.Instance}}"
+                                    ToolTip="{Binding [BlockOutboundTooltip], Source={x:Static local:LocalizationManager.Instance}}"
+                                    Click="BlockOutboundButton_Click" />
                             <Button x:Name="OpenLocationButton"
                                     Content="{Binding [OpenFile], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
                                     Click="OpenLocationButton_Click" />

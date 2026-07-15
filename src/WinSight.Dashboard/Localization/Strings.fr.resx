@@ -77,6 +77,9 @@
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>Le service pare-feu n'est pas disponible. Installez-le et démarrez-le, puis réessayez.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>Vous n'êtes pas autorisé à modifier la politique du pare-feu sur cette machine.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>Le service pare-feu a rejeté la modification.</value></data>
+  <data name="BlockOutbound" xml:space="preserve"><value>Bloquer le trafic sortant</value></data>
+  <data name="BlockOutboundTooltip" xml:space="preserve"><value>Bloquer le trafic réseau sortant de cette application via le pare-feu WinSight.</value></data>
+  <data name="BlockOutboundConfirm" xml:space="preserve"><value>Bloquer tout le trafic réseau sortant de « {0} » ? Effectif une fois l'enforcement du pare-feu activé.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Ouvrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, sécurité locale</value></data>

@@ -77,6 +77,9 @@
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>The firewall service is not available. Install and start it, then try again.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>You are not authorized to change firewall policy on this machine.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>The firewall service rejected the change.</value></data>
+  <data name="BlockOutbound" xml:space="preserve"><value>Block outbound</value></data>
+  <data name="BlockOutboundTooltip" xml:space="preserve"><value>Block this application's outbound network traffic via the WinSight firewall.</value></data>
+  <data name="BlockOutboundConfirm" xml:space="preserve"><value>Block all outbound network traffic for '{0}'? It takes effect once firewall enforcement is enabled.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Open WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, local security</value></data>
