@@ -222,4 +222,5 @@
   <data name="PersistenceVectorCredentialProvider" xml:space="preserve"><value>Credential provider</value></data>
   <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Browser helper object</value></data>
   <data name="PersistenceVectorWindowsLoadRun" xml:space="preserve"><value>Windows Load/Run value</value></data>
+  <data name="PersistenceVectorPrintProvider" xml:space="preserve"><value>Print provider</value></data>
 </root>

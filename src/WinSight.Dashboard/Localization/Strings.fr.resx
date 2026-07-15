@@ -222,4 +222,5 @@
   <data name="PersistenceVectorCredentialProvider" xml:space="preserve"><value>Fournisseur d'identifiants</value></data>
   <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Browser Helper Object (BHO)</value></data>
   <data name="PersistenceVectorWindowsLoadRun" xml:space="preserve"><value>Valeur Windows Load/Run</value></data>
+  <data name="PersistenceVectorPrintProvider" xml:space="preserve"><value>Fournisseur d'impression</value></data>
 </root>
