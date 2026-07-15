@@ -1,5 +1,12 @@
 ## Unreleased
 
+### Phase 2 fix: firewall dashboard controls cannot crash the app
+- The firewall mutation handlers are async void event handlers; an unexpected exception
+  (e.g. a pipe ACL denial surfacing as UnauthorizedAccessException) had no caller to catch
+  it and would tear down the tray app. RunFirewallMutationAsync now nets those and reports
+  a message via the summary line instead, mirroring the rest of the defensive UI.
+
+
 ### Phase 2 fix: unify executable-path canonicalization across the firewall
 - The CLI enforcement path (EnforcementCoordinator.SetPolicyAsync) and the WFP key
   derivation used their own weaker path normalization, while the IPC dispatcher and the
