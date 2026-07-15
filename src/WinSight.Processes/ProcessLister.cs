@@ -13,7 +13,7 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
 {
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
-    public IReadOnlyList<ProcessInfo> Snapshot()
+    public IReadOnlyList<ProcessInfo> Snapshot(CancellationToken cancellationToken = default)
     {
         var raw = new List<(int Pid, string Name, string? Path, int ParentPid, string? Command)>();
         try
@@ -23,6 +23,7 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                 "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine FROM Win32_Process"));
             foreach (ManagementBaseObject o in searcher.Get())
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 using (o)
                 {
                     raw.Add((
@@ -36,16 +37,18 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            return raw.Count == 0 ? Array.Empty<ProcessInfo>() : Build(raw);
+            return raw.Count == 0 ? Array.Empty<ProcessInfo>() : Build(raw, cancellationToken);
         }
-        return Build(raw);
+        return Build(raw, cancellationToken);
     }
 
     private List<ProcessInfo> Build(
-        List<(int Pid, string Name, string? Path, int ParentPid, string? Command)> raw)
+        List<(int Pid, string Name, string? Path, int ParentPid, string? Command)> raw,
+        CancellationToken cancellationToken)
     {
         var verdicts = _verifier.VerifyMany(
-            raw.Where(r => r.Path is not null).Select(r => r.Path!).Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+            raw.Where(r => r.Path is not null).Select(r => r.Path!).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            cancellationToken);
 
         return raw.Select(r => new ProcessInfo(
             r.Pid, r.Name, r.Path, r.ParentPid, r.Command,

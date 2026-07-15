@@ -14,9 +14,9 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
 {
     private readonly ISignatureVerifier _verifier = verifier ?? new AuthenticodeVerifier();
 
-    public IReadOnlyList<Connection> Snapshot()
+    public IReadOnlyList<Connection> Snapshot(CancellationToken cancellationToken = default)
     {
-        var rows = ReadTable();
+        var rows = ReadTable(cancellationToken);
 
         // Resolve each owning process once, then verify every distinct image in one batch.
         var byPid = new Dictionary<int, (string Name, string? Path)>();
@@ -28,7 +28,7 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
             }
         }
         var verdicts = _verifier.VerifyMany(
-            byPid.Values.Where(p => p.Path is not null).Select(p => p.Path!).ToList());
+            byPid.Values.Where(p => p.Path is not null).Select(p => p.Path!).ToList(), cancellationToken);
 
         var connections = new List<Connection>(rows.Count);
         foreach (var r in rows)
@@ -45,7 +45,7 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
 
     // Native IP Helper tables, falling back to netstat parsing only if those entry
     // points are unavailable (very old/locked-down Windows).
-    private static IReadOnlyList<NetstatRow> ReadTable()
+    private static IReadOnlyList<NetstatRow> ReadTable(CancellationToken cancellationToken)
     {
         try
         {
@@ -53,11 +53,11 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
         {
-            return NetstatParser.Parse(RunNetstat());
+            return NetstatParser.Parse(RunNetstat(cancellationToken));
         }
     }
 
-    private static string RunNetstat()
+    private static string RunNetstat(CancellationToken cancellationToken)
     {
         try
         {
@@ -75,6 +75,18 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
             {
                 return string.Empty;
             }
+            // Cancellation kills netstat immediately (closing stdout ends the read).
+            using var registration = cancellationToken.Register(static state =>
+            {
+                try
+                {
+                    ((Process)state!).Kill(entireProcessTree: true);
+                }
+                catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or NotSupportedException)
+                {
+                    // Already exited; the read completes when the pipe closes.
+                }
+            }, p);
             // Drain stdout on a background reader thread + kill-on-timeout: a hung netstat
             // can't deadlock on a full pipe buffer or leave a zombie behind. Fully
             // synchronous (no sync-over-async); the builder is read only after the final

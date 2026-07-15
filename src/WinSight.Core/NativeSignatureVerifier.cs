@@ -23,16 +23,18 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     public NativeSignatureVerifier(ISignatureVerifier? catalogFallback = null) =>
         _catalogFallback = catalogFallback ?? new AuthenticodeVerifier();
 
-    public SignatureVerdict Verify(string path) =>
-        VerifyMany([path]).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
+    public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
+        VerifyMany([path], cancellationToken).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
 
-    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+        IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
     {
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var deferToCatalog = new List<string>();
 
         foreach (var path in paths)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var verdict = VerifyEmbedded(path);
             if (verdict is { } v)
             {
@@ -46,7 +48,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
 
         if (deferToCatalog.Count > 0)
         {
-            foreach (var kv in _catalogFallback.VerifyMany(deferToCatalog))
+            foreach (var kv in _catalogFallback.VerifyMany(deferToCatalog, cancellationToken))
             {
                 results[kv.Key] = kv.Value;
             }

@@ -49,8 +49,8 @@ public static class Adapters
             "net" or "netmonitor" => Connections(flaggedOnly, allowNetworkLookups, cancellationToken),
             "dns" => Dns(flaggedOnly),
             "firewall" or "fw" => Firewall(flaggedOnly),
-            "processes" or "ps" => Processes(flaggedOnly),
-            "modules" or "dll" => Modules(flaggedOnly),
+            "processes" or "ps" => Processes(flaggedOnly, cancellationToken),
+            "modules" or "dll" => Modules(flaggedOnly, cancellationToken),
             "extensions" or "ext" => Extensions(flaggedOnly),
             "certificates" or "certs" => Certificates(flaggedOnly),
             "hosts" => Hosts(flaggedOnly),
@@ -85,7 +85,7 @@ public static class Adapters
         bool allowNetworkLookups = true,
         CancellationToken cancellationToken = default)
     {
-        var entries = new PersistenceScanner(verifier: SharedVerifier).Scan();
+        var entries = new PersistenceScanner(verifier: SharedVerifier).Scan(cancellationToken);
 
         // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
         var vt = VirusTotalEnricher.Lookup(
@@ -207,9 +207,9 @@ public static class Adapters
         return b.Build($"{usages.Count} recorded use(s), {usages.Count(u => u.Active)} live now");
     }
 
-    public static ToolReport Processes(bool flaggedOnly)
+    public static ToolReport Processes(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var procs = new ProcessLister(SharedVerifier).Snapshot();
+        var procs = new ProcessLister(SharedVerifier).Snapshot(cancellationToken);
         var b = new ToolReport.Builder("processes");
         foreach (var p in procs.Where(p => !flaggedOnly || p.Unsigned)
                      .OrderByDescending(p => p.Unsigned).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
@@ -315,9 +315,9 @@ public static class Adapters
         return b.Build($"{extensions.Count} extension(s), {extensions.Count(e => e.HighRisk)} high-risk");
     }
 
-    public static ToolReport Modules(bool flaggedOnly)
+    public static ToolReport Modules(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var modules = new ModuleLister(SharedVerifier).Snapshot();
+        var modules = new ModuleLister(SharedVerifier).Snapshot(cancellationToken);
         var flagged = modules.Where(m => m.Unsigned).ToList();
         var b = new ToolReport.Builder("modules");
         // The security signal is an unsigned/untrusted DLL loaded into a running
@@ -402,7 +402,7 @@ public static class Adapters
         bool allowNetworkLookups = true,
         CancellationToken cancellationToken = default)
     {
-        var connections = new ConnectionMonitor(SharedVerifier).Snapshot();
+        var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
 
         // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections.
         var vt = VirusTotalEnricher.Lookup(

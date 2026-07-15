@@ -48,12 +48,15 @@ public sealed class PersistenceScanner
     /// Enumerates every autostart item across all surfaces, newest-surface-first in
     /// registration order. Enumerator failures are isolated per surface.
     /// </summary>
-    public IReadOnlyList<AutostartEntry> Scan()
+    public IReadOnlyList<AutostartEntry> Scan(CancellationToken cancellationToken = default)
     {
-        // 1. Collect raw autostart records, isolating a failing surface.
+        // 1. Collect raw autostart records, isolating a failing surface. The token is
+        //    checked between surfaces (each is a fast registry/WMI read) and drives the
+        //    signature batch below, so a scan can be aborted promptly.
         var raws = new List<RawAutostart>();
         foreach (var enumerator in _enumerators)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 raws.AddRange(enumerator.Enumerate());
@@ -73,7 +76,8 @@ public sealed class PersistenceScanner
             .ToList();
         var verdicts = _verifier.VerifyMany(
             resolved.Where(x => x.Resolution.ImagePath is not null)
-                .Select(x => x.Resolution.ImagePath!).ToList());
+                .Select(x => x.Resolution.ImagePath!).ToList(),
+            cancellationToken);
 
         // 3. Assemble.
         var results = new List<AutostartEntry>(resolved.Count);
