@@ -4,6 +4,14 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 enforcement survives a reboot (service auto-start)
+- Enabling enforcement now switches the installed service to auto-start, so it launches on
+  boot and reinstalls the (non-persistent) WFP block filters. A firewall that stops
+  enforcing after a reboot is a hole; audit-only leaves the service demand-start.
+  `enforce-disable` returns it to demand-start. Implemented with `ChangeServiceConfig`.
+- Validated on the VM that a service restart re-applies stored blocks; this closes the
+  boot case so the same holds across a reboot while enforcement is enabled.
+
 ### Phase 2 multi-application block and the real WFP engine
 - The per-application outbound block is now multi-app: each blocked application is keyed by
   a stable, per-path GUID (SHA-256 of the canonical path), so many apps can be blocked at
