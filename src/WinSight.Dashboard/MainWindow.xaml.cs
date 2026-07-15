@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using WinSight.Application;
+using WinSight.Firewall;
 using WinSight.Reporting;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window, IDisposable
     private string? _lastScanCommand;
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
+    private bool _firewallServiceAvailable;
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -103,6 +105,7 @@ public partial class MainWindow : Window, IDisposable
                 // Live status over the authenticated pipe (I/O, not a CPU scan). When
                 // the service is not installed this degrades to "unavailable".
                 var view = await _firewallGateway.GetViewAsync(cancellation.Token);
+                _firewallServiceAvailable = view.ServiceAvailable;
                 _reports = [FirewallServiceAdapter.BuildReport(view)];
             }
             else if (tool.Command == "all")
@@ -240,6 +243,14 @@ public partial class MainWindow : Window, IDisposable
     {
         ShowToolExplanation(tool);
         var selection = DashboardReportRouter.Select(tool, _lastScanCommand, _reports);
+
+        // The interactive firewall controls appear only for the firewall tool once a live
+        // status has been read and the privileged service actually answered.
+        var showFirewallControls = tool.Command == FirewallServiceAdapter.ReportTool
+            && selection.Available
+            && _firewallServiceAvailable;
+        FirewallActionsPanel.Visibility = showFirewallControls ? Visibility.Visible : Visibility.Collapsed;
+
         if (!selection.Available)
         {
             _visibleReports = [];
@@ -305,17 +316,26 @@ public partial class MainWindow : Window, IDisposable
         {
             CopyButton.IsEnabled = false;
             OpenLocationButton.IsEnabled = false;
+            SetFirewallRowButtonsEnabled(false);
             SelectedFindingText.Text = string.Empty;
             return;
         }
 
         CopyButton.IsEnabled = true;
         OpenLocationButton.IsEnabled = FindingActions.ExistingAbsolutePath(finding.Item) is not null;
+        SetFirewallRowButtonsEnabled(FirewallControlPresenter.IsPolicyRow(finding.Item));
         SelectedFindingText.Text = Text.Format(
             "FindingSelectionFormat",
             finding.SeverityLabel,
             finding.Title,
             finding.Detail);
+    }
+
+    private void SetFirewallRowButtonsEnabled(bool enabled)
+    {
+        FirewallAllowSelectedButton.IsEnabled = enabled;
+        FirewallBlockSelectedButton.IsEnabled = enabled;
+        FirewallRemoveSelectedButton.IsEnabled = enabled;
     }
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
@@ -389,6 +409,92 @@ public partial class MainWindow : Window, IDisposable
 
         var startInfo = DashboardWindowsActions.StartInfo(action);
         TryUserAction(() => _ = Process.Start(startInfo), Text["WindowsToolOpened"]);
+    }
+
+    private async void FirewallBlockAppButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = Text["FirewallSelectAppTitle"],
+            Filter = Text["FirewallExeFilter"],
+            CheckFileExists = true,
+        };
+        if (dialog.ShowDialog(this) != true)
+        {
+            return;
+        }
+
+        var path = dialog.FileName;
+        await RunFirewallMutationAsync(
+            token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, OutboundAction.Block), token));
+    }
+
+    private async void FirewallAllowSelectedButton_Click(object sender, RoutedEventArgs e) =>
+        await SetSelectedFirewallPolicyAsync(OutboundAction.Allow);
+
+    private async void FirewallBlockSelectedButton_Click(object sender, RoutedEventArgs e) =>
+        await SetSelectedFirewallPolicyAsync(OutboundAction.Block);
+
+    private async void FirewallRemoveSelectedButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SelectedFirewallPath() is not { } path)
+        {
+            return;
+        }
+
+        await RunFirewallMutationAsync(token => _firewallGateway.RemovePolicyAsync(path, token));
+    }
+
+    private async void FirewallEmergencyButton_Click(object sender, RoutedEventArgs e)
+    {
+        var confirm = System.Windows.MessageBox.Show(
+            this,
+            Text["FirewallEmergencyConfirm"],
+            Text["FirewallEmergencyDisable"],
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        await RunFirewallMutationAsync(token => _firewallGateway.EmergencyDisableAsync(token));
+    }
+
+    private async Task SetSelectedFirewallPolicyAsync(OutboundAction action)
+    {
+        if (SelectedFirewallPath() is not { } path)
+        {
+            return;
+        }
+
+        await RunFirewallMutationAsync(
+            token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, action), token));
+    }
+
+    private string? SelectedFirewallPath() =>
+        ResultsGrid.SelectedItem is FindingView finding
+            ? FirewallControlPresenter.PolicyPath(finding.Item)
+            : null;
+
+    private async Task RunFirewallMutationAsync(Func<CancellationToken, Task<FirewallMutationResult>> mutate)
+    {
+        var result = await mutate(CancellationToken.None);
+        SummaryText.Text = Text[FirewallControlPresenter.ResultMessageKey(result)];
+        // Re-read the live status so the grid and controls reflect the change immediately.
+        await RefreshFirewallAsync();
+    }
+
+    private async Task RefreshFirewallAsync()
+    {
+        var view = await _firewallGateway.GetViewAsync(CancellationToken.None);
+        _firewallServiceAvailable = view.ServiceAvailable;
+        _reports = [FirewallServiceAdapter.BuildReport(view)];
+        _lastScanCommand = FirewallServiceAdapter.ReportTool;
+        if (ToolPicker.SelectedItem is DashboardTool tool && tool.Command == FirewallServiceAdapter.ReportTool)
+        {
+            ShowToolContext(tool);
+        }
     }
 
     private void TryUserAction(Action action, string successMessage)
