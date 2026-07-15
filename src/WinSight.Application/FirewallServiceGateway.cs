@@ -19,11 +19,32 @@ public sealed record FirewallServiceView(
         new(false, OutboundFirewallMode.AuditOnly, EnforcementEnabled: false, []);
 }
 
+/// <summary>Outcome of a firewall policy mutation requested from the dashboard side.</summary>
+public enum FirewallMutationResult
+{
+    /// <summary>The service accepted and applied the change.</summary>
+    Applied,
+
+    /// <summary>The service is not installed, not running, or did not reply in time.</summary>
+    ServiceUnavailable,
+
+    /// <summary>The caller's Windows identity is not permitted to change policy.</summary>
+    Unauthorized,
+
+    /// <summary>The service rejected the request (invalid, unsupported, or internal failure).</summary>
+    Rejected,
+}
+
 /// <summary>
-/// Talks to the local firewall service over the authenticated pipe and projects the
-/// reply into a <see cref="FirewallServiceView"/>. It never mutates policy here; the
-/// dashboard is a read-only consumer in this increment. Transport faults (no service,
-/// timeout, malformed reply) collapse to <see cref="FirewallServiceView.Unavailable"/>.
+/// Talks to the local firewall service over the authenticated pipe. It projects a status
+/// read into a <see cref="FirewallServiceView"/>, and requests policy mutations
+/// (set/remove one app, emergency-disable) that the privileged service authorises by the
+/// caller's Windows identity. Transport faults (no service, timeout, malformed reply)
+/// collapse to <see cref="FirewallServiceView.Unavailable"/> or
+/// <see cref="FirewallMutationResult.ServiceUnavailable"/>, so the dashboard never implies
+/// the machine is filtered when it is not. Enabling enforcement itself is not exposed here:
+/// that stays a privileged, out-of-band action, not something the unprivileged dashboard
+/// can trigger.
 /// </summary>
 public sealed class FirewallServiceGateway
 {
@@ -59,6 +80,57 @@ public sealed class FirewallServiceGateway
         catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
         {
             return FirewallServiceView.Unavailable;
+        }
+    }
+
+    /// <summary>Sets one application's policy (allow/block/ask) and asks the service to apply it.</summary>
+    public Task<FirewallMutationResult> SetPolicyAsync(
+        AppFirewallPolicy policy, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        return MutateAsync(
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(),
+                FirewallCommand.UpsertPolicy, Policy: policy),
+            cancellationToken);
+    }
+
+    /// <summary>Removes one application's policy and asks the service to lift any filter.</summary>
+    public Task<FirewallMutationResult> RemovePolicyAsync(
+        string executablePath, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        return MutateAsync(
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(),
+                FirewallCommand.RemovePolicy, ExecutablePath: executablePath),
+            cancellationToken);
+    }
+
+    /// <summary>Returns the machine to audit-only and lifts every filter (fail-safe kill switch).</summary>
+    public Task<FirewallMutationResult> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
+        MutateAsync(
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.EmergencyDisable),
+            cancellationToken);
+
+    private async Task<FirewallMutationResult> MutateAsync(
+        FirewallCommandRequest request, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.Success)
+            {
+                return FirewallMutationResult.Applied;
+            }
+            return response.Error == FirewallProtocolError.Unauthorized
+                ? FirewallMutationResult.Unauthorized
+                : FirewallMutationResult.Rejected;
+        }
+        catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
+        {
+            return FirewallMutationResult.ServiceUnavailable;
         }
     }
 

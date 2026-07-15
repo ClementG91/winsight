@@ -15,28 +15,28 @@ using WinSight.FirewallService;
 //
 // The service is opt-in: the per-user application setup never installs it.
 
-return FirewallServiceCommandLine.Parse(args) switch
+return await (FirewallServiceCommandLine.Parse(args) switch
 {
-    FirewallServiceVerb.Install => Install(),
-    FirewallServiceVerb.Uninstall => Uninstall(),
-    FirewallServiceVerb.Status => Status(),
-    FirewallServiceVerb.WfpSelfTest => WfpProbe(),
-    FirewallServiceVerb.WfpProvision => WfpProvision(),
-    FirewallServiceVerb.WfpDeprovision => WfpDeprovision(),
-    FirewallServiceVerb.WfpStatus => WfpStatusVerb(),
-    FirewallServiceVerb.WfpFilterAdd => WfpFilterAdd(),
-    FirewallServiceVerb.WfpFilterRemove => WfpFilterRemove(),
-    FirewallServiceVerb.WfpBlockAdd => WfpBlockAdd(args),
-    FirewallServiceVerb.WfpBlockRemove => WfpBlockRemove(args),
-    FirewallServiceVerb.WfpBlockStatus => WfpBlockStatus(args),
-    FirewallServiceVerb.EnforceStatus => EnforceStatus(),
-    FirewallServiceVerb.EnforceEnable => EnforceEnable(),
-    FirewallServiceVerb.EnforceDisable => EnforceDisable(),
-    FirewallServiceVerb.BlockApp => SetAppPolicy(args, OutboundAction.Block),
-    FirewallServiceVerb.AllowApp => SetAppPolicy(args, OutboundAction.Allow),
-    FirewallServiceVerb.Unknown => Usage(),
-    _ => RunHost(),
-};
+    FirewallServiceVerb.Install => Task.FromResult(Install()),
+    FirewallServiceVerb.Uninstall => Task.FromResult(Uninstall()),
+    FirewallServiceVerb.Status => Task.FromResult(Status()),
+    FirewallServiceVerb.WfpSelfTest => Task.FromResult(WfpProbe()),
+    FirewallServiceVerb.WfpProvision => Task.FromResult(WfpProvision()),
+    FirewallServiceVerb.WfpDeprovision => Task.FromResult(WfpDeprovision()),
+    FirewallServiceVerb.WfpStatus => Task.FromResult(WfpStatusVerb()),
+    FirewallServiceVerb.WfpFilterAdd => Task.FromResult(WfpFilterAdd()),
+    FirewallServiceVerb.WfpFilterRemove => Task.FromResult(WfpFilterRemove()),
+    FirewallServiceVerb.WfpBlockAdd => Task.FromResult(WfpBlockAdd(args)),
+    FirewallServiceVerb.WfpBlockRemove => Task.FromResult(WfpBlockRemove(args)),
+    FirewallServiceVerb.WfpBlockStatus => Task.FromResult(WfpBlockStatus(args)),
+    FirewallServiceVerb.EnforceStatus => EnforceStatusAsync(),
+    FirewallServiceVerb.EnforceEnable => EnforceEnableAsync(),
+    FirewallServiceVerb.EnforceDisable => EnforceDisableAsync(),
+    FirewallServiceVerb.BlockApp => SetAppPolicyAsync(args, OutboundAction.Block),
+    FirewallServiceVerb.AllowApp => SetAppPolicyAsync(args, OutboundAction.Allow),
+    FirewallServiceVerb.Unknown => Task.FromResult(Usage()),
+    _ => RunHostAsync(),
+}).ConfigureAwait(false);
 
 static int Install()
 {
@@ -312,7 +312,7 @@ static int WfpFilterRemove()
     }
 }
 
-static int EnforceStatus()
+static async Task<int> EnforceStatusAsync()
 {
     if (!FirewallServiceInstaller.IsElevated())
     {
@@ -322,7 +322,7 @@ static int EnforceStatus()
 
     try
     {
-        var mode = CreateCoordinator().GetModeAsync().GetAwaiter().GetResult();
+        var mode = await CreateCoordinator().GetModeAsync().ConfigureAwait(false);
         Console.WriteLine($"Enforcement mode: {mode}.");
         return 0;
     }
@@ -333,7 +333,7 @@ static int EnforceStatus()
     }
 }
 
-static int EnforceEnable()
+static async Task<int> EnforceEnableAsync()
 {
     if (!FirewallServiceInstaller.IsElevated())
     {
@@ -343,7 +343,7 @@ static int EnforceEnable()
 
     try
     {
-        CreateCoordinator().EnableAsync().GetAwaiter().GetResult();
+        await CreateCoordinator().EnableAsync().ConfigureAwait(false);
         // Auto-start so a reboot re-launches the service, which reinstalls the blocks.
         var installed = FirewallServiceInstaller.TrySetAutoStart(autoStart: true);
         Console.WriteLine(installed
@@ -358,7 +358,7 @@ static int EnforceEnable()
     }
 }
 
-static int EnforceDisable()
+static async Task<int> EnforceDisableAsync()
 {
     if (!FirewallServiceInstaller.IsElevated())
     {
@@ -368,7 +368,7 @@ static int EnforceDisable()
 
     try
     {
-        CreateCoordinator().DisableAsync().GetAwaiter().GetResult();
+        await CreateCoordinator().DisableAsync().ConfigureAwait(false);
         // Back to demand-start: no reason to auto-launch a service that enforces nothing.
         _ = FirewallServiceInstaller.TrySetAutoStart(autoStart: false);
         Console.WriteLine("Enforcement disabled. Every WinSight block was lifted and the mode is audit-only.");
@@ -381,7 +381,7 @@ static int EnforceDisable()
     }
 }
 
-static int SetAppPolicy(string[] arguments, OutboundAction action)
+static async Task<int> SetAppPolicyAsync(string[] arguments, OutboundAction action)
 {
     if (!FirewallServiceInstaller.IsElevated())
     {
@@ -396,7 +396,7 @@ static int SetAppPolicy(string[] arguments, OutboundAction action)
 
     try
     {
-        CreateCoordinator().SetPolicyAsync(arguments[1], action).GetAwaiter().GetResult();
+        await CreateCoordinator().SetPolicyAsync(arguments[1], action).ConfigureAwait(false);
         Console.WriteLine($"Policy for '{arguments[1]}' set to {action} and applied.");
         return 0;
     }
@@ -429,7 +429,7 @@ static int Usage()
     return 2;
 }
 
-static int RunHost()
+static async Task<int> RunHostAsync()
 {
     var builder = Host.CreateApplicationBuilder();
 
@@ -452,8 +452,8 @@ static int RunHost()
     // the engine once at startup from the persisted mode. Audit-only stays the default, so
     // a machine only enforces after an explicit enforce-enable.
     var store = new FirewallPolicyStore(policyFile, allowEnforcement: true);
-    var enforcing = store.LoadOrAuditAsync().GetAwaiter().GetResult().Configuration.Mode
-        == OutboundFirewallMode.Enforcement;
+    var loaded = await store.LoadOrAuditAsync().ConfigureAwait(false);
+    var enforcing = loaded.Configuration.Mode == OutboundFirewallMode.Enforcement;
     IOutboundFirewallEngine engine = enforcing
         ? new WfpOutboundFirewallEngine()
         : new AuditOnlyFirewallEngine();
@@ -478,6 +478,6 @@ static int RunHost()
     }
     builder.Services.AddHostedService<FirewallServiceWorker>();
 
-    builder.Build().Run();
+    await builder.Build().RunAsync().ConfigureAwait(false);
     return 0;
 }

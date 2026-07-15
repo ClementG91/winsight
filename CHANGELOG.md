@@ -4,6 +4,16 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ## Unreleased
 
+### Phase 2 dashboard-side write path + async entry point
+- `FirewallServiceGateway` now exposes the policy write path over the authenticated pipe:
+  `SetPolicyAsync`, `RemovePolicyAsync`, and `EmergencyDisableAsync`, each returning a
+  `FirewallMutationResult` (Applied / ServiceUnavailable / Unauthorized / Rejected). The
+  privileged service authorises by Windows identity; enabling enforcement itself stays an
+  out-of-band privileged action, not something the unprivileged dashboard can trigger.
+- Fix the service entry point to be async end to end. The enforcement verbs and host
+  startup previously used `.GetAwaiter().GetResult()`, which the project standards forbid;
+  they now await through an async `Main`, `RunHostAsync`, and async verb handlers.
+
 ### Phase 2 enforcement survives a reboot (service auto-start)
 - Enabling enforcement now switches the installed service to auto-start, so it launches on
   boot and reinstalls the (non-persistent) WFP block filters. A firewall that stops
