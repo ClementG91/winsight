@@ -133,6 +133,53 @@ public static partial class FirewallServiceInstaller
         }
     }
 
+    /// <summary>
+    /// Switches the installed service between auto-start (runs on boot, so enforcement
+    /// survives a reboot) and demand-start. Returns false when the service is not
+    /// installed. A firewall that stops enforcing after a reboot is a hole, so enforcement
+    /// makes the service auto-start.
+    /// </summary>
+    public static bool TrySetAutoStart(bool autoStart)
+    {
+        var manager = NativeMethods.OpenSCManagerW(null, null, ScManagerConnect);
+        if (manager == IntPtr.Zero)
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        try
+        {
+            var service = NativeMethods.OpenServiceW(manager, ServiceName, ServiceChangeConfig);
+            if (service == IntPtr.Zero)
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error == ErrorServiceDoesNotExist)
+                {
+                    return false;
+                }
+                throw new Win32Exception(error);
+            }
+            try
+            {
+                var startType = autoStart ? ServiceAutoStart : ServiceDemandStart;
+                if (!NativeMethods.ChangeServiceConfigW(
+                        service, ServiceNoChange, startType, ServiceNoChange,
+                        null, null, IntPtr.Zero, null, null, null, null))
+                {
+                    throw new Win32Exception(Marshal.GetLastWin32Error());
+                }
+                return true;
+            }
+            finally
+            {
+                NativeMethods.CloseServiceHandle(service);
+            }
+        }
+        finally
+        {
+            NativeMethods.CloseServiceHandle(manager);
+        }
+    }
+
     private static void SetDescription(IntPtr service)
     {
         var descriptionPtr = Marshal.StringToHGlobalUni(Description);
@@ -152,11 +199,14 @@ public static partial class FirewallServiceInstaller
     private const uint ScManagerCreateService = 0x0002;
     private const uint ServiceAllAccess = 0xF01FF;
     private const uint ServiceQueryConfig = 0x0001;
+    private const uint ServiceChangeConfig = 0x0002;
     private const uint ServiceDelete = 0x00010000;
     private const uint ServiceWin32OwnProcess = 0x00000010;
+    private const uint ServiceAutoStart = 0x00000002;
     private const uint ServiceDemandStart = 0x00000003;
     private const uint ServiceErrorNormal = 0x00000001;
     private const uint ServiceConfigDescription = 1;
+    private const uint ServiceNoChange = 0xFFFFFFFF;
     private const int ErrorServiceExists = 1073;
     private const int ErrorServiceDoesNotExist = 1060;
 
@@ -192,5 +242,12 @@ public static partial class FirewallServiceInstaller
         [LibraryImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static partial bool ChangeServiceConfig2W(IntPtr service, uint infoLevel, ref ServiceDescription info);
+
+        [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ChangeServiceConfigW(
+            IntPtr service, uint serviceType, uint startType, uint errorControl,
+            string? binaryPath, string? loadOrderGroup, IntPtr tagId,
+            string? dependencies, string? serviceStartName, string? password, string? displayName);
     }
 }

@@ -344,7 +344,11 @@ static int EnforceEnable()
     try
     {
         CreateCoordinator().EnableAsync().GetAwaiter().GetResult();
-        Console.WriteLine("Enforcement enabled. Stored Block policies are applied, and the service reapplies them on boot.");
+        // Auto-start so a reboot re-launches the service, which reinstalls the blocks.
+        var installed = FirewallServiceInstaller.TrySetAutoStart(autoStart: true);
+        Console.WriteLine(installed
+            ? "Enforcement enabled. Stored Block policies are applied and the service is now auto-start, so blocks survive a reboot."
+            : "Enforcement enabled and applied. Install the service (install) so it auto-starts and reapplies blocks after a reboot.");
         return 0;
     }
     catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
@@ -365,6 +369,8 @@ static int EnforceDisable()
     try
     {
         CreateCoordinator().DisableAsync().GetAwaiter().GetResult();
+        // Back to demand-start: no reason to auto-launch a service that enforces nothing.
+        _ = FirewallServiceInstaller.TrySetAutoStart(autoStart: false);
         Console.WriteLine("Enforcement disabled. Every WinSight block was lifted and the mode is audit-only.");
         return 0;
     }
