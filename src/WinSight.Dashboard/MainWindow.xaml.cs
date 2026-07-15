@@ -277,7 +277,8 @@ public partial class MainWindow : Window, IDisposable
                 item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
                 title,
                 presentation.Detail,
-                item);
+                item,
+                FirewallActionPresenter.BlockableExecutable(report.Tool, item));
         })).ToList();
         ResultsGrid.ItemsSource = findings;
         SummaryText.Text = DashboardResultSummary.Format(
@@ -314,6 +315,7 @@ public partial class MainWindow : Window, IDisposable
         {
             CopyButton.IsEnabled = false;
             OpenLocationButton.IsEnabled = false;
+            BlockOutboundButton.IsEnabled = false;
             SetFirewallRowButtonsEnabled(false);
             SelectedFindingText.Text = string.Empty;
             return;
@@ -321,6 +323,7 @@ public partial class MainWindow : Window, IDisposable
 
         CopyButton.IsEnabled = true;
         OpenLocationButton.IsEnabled = FindingActions.ExistingAbsolutePath(finding.Item) is not null;
+        BlockOutboundButton.IsEnabled = finding.BlockablePath is not null;
         SetFirewallRowButtonsEnabled(FirewallControlPresenter.IsPolicyRow(finding.Item));
         SelectedFindingText.Text = Text.Format(
             "FindingSelectionFormat",
@@ -475,6 +478,37 @@ public partial class MainWindow : Window, IDisposable
             ? FirewallControlPresenter.PolicyPath(finding.Item)
             : null;
 
+    private async void BlockOutboundButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (ResultsGrid.SelectedItem is not FindingView finding || finding.BlockablePath is not { } path)
+        {
+            return;
+        }
+
+        var confirm = System.Windows.MessageBox.Show(
+            this,
+            Text.Format("BlockOutboundConfirm", path),
+            Text["BlockOutbound"],
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            var result = await _firewallGateway.SetPolicyAsync(
+                new AppFirewallPolicy(path, OutboundAction.Block), CancellationToken.None);
+            SummaryText.Text = Text[FirewallControlPresenter.ResultMessageKey(result)];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                     or TimeoutException or InvalidOperationException)
+        {
+            SummaryText.Text = Text.Format("ActionFailed", ex.Message);
+        }
+    }
+
     private async Task RunFirewallMutationAsync(Func<CancellationToken, Task<FirewallMutationResult>> mutate)
     {
         // These run from async void event handlers, so an unexpected exception would have no
@@ -575,4 +609,5 @@ public partial class MainWindow : Window, IDisposable
     }
 }
 
-public sealed record FindingView(string SeverityLabel, string Title, string Detail, ReportItem Item);
+public sealed record FindingView(
+    string SeverityLabel, string Title, string Detail, ReportItem Item, string? BlockablePath = null);

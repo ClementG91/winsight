@@ -2,6 +2,16 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall: block an app's outbound straight from a finding
+- Any finding that owns an on-disk executable (a network connection, a running process, or
+  a persistence entry) now offers a "Block outbound" action that sends a Block policy to the
+  firewall service over the authenticated pipe. This is the observe-then-decide loop of a
+  Little Snitch / LuLu: see what an app is doing, block its network in one click.
+- Which findings qualify is decided by a UI-agnostic FirewallActionPresenter (the tool's
+  image field must resolve to an absolute .exe; DLLs and non-program tools are excluded),
+  unit-tested without a UI. The outcome reuses the existing localized result messages, and
+  the action is localized in en/fr/es.
+
 ### Detection: two more autostart surfaces (Windows Load/Run, application shims)
 - Add WindowsLoadRunEnumerator: the legacy Load/Run values under
   ...\Windows NT\CurrentVersion\Windows (HKLM + HKCU), an old but still-abused logon
