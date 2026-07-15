@@ -64,6 +64,7 @@
   <data name="ExportJson" xml:space="preserve"><value>Exportar como JSON</value></data>
   <data name="ReadOnlyFooter" xml:space="preserve"><value>WinSight nunca elimina ni bloquea automáticamente; los cambios del firewall son siempre tu elección explícita. VirusTotal es opcional en Ajustes.</value></data>
   <data name="FirewallControlsTitle" xml:space="preserve"><value>Controles del firewall</value></data>
+  <data name="FirewallControlsHint" xml:space="preserve"><value>Bloquea una app, o selecciona una fila de política abajo para permitirla, bloquearla o quitarla. Desmarca «Mostrar solo lo que merece atención» para ver todas las políticas.</value></data>
   <data name="FirewallBlockApp" xml:space="preserve"><value>Bloquear una app…</value></data>
   <data name="FirewallAllowSelected" xml:space="preserve"><value>Permitir</value></data>
   <data name="FirewallBlockSelected" xml:space="preserve"><value>Bloquear</value></data>

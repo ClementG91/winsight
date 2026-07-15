@@ -157,29 +157,32 @@
                 </DockPanel>
 
                 <Border x:Name="FirewallActionsPanel" Grid.Row="3" Margin="0,0,0,12" Visibility="Collapsed"
-                        Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="14,10">
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Left" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="#0F172A"
+                        Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="14,12">
+                    <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Foreground="#0F172A"
                                    Text="{Binding [FirewallControlsTitle], Source={x:Static local:LocalizationManager.Instance}}" />
-                        <WrapPanel HorizontalAlignment="Right">
-                            <Button x:Name="FirewallBlockAppButton" Margin="6,3"
+                        <TextBlock x:Name="FirewallControlsHint" Margin="0,3,0,0" FontSize="12" Foreground="#64748B"
+                                   TextWrapping="Wrap"
+                                   Text="{Binding [FirewallControlsHint], Source={x:Static local:LocalizationManager.Instance}}" />
+                        <WrapPanel Margin="0,10,0,0">
+                            <Button x:Name="FirewallBlockAppButton" Margin="0,4,10,4" Padding="12,5" MinWidth="120"
                                     Content="{Binding [FirewallBlockApp], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallBlockAppButton_Click" />
-                            <Button x:Name="FirewallAllowSelectedButton" Margin="6,3" IsEnabled="False"
+                            <Button x:Name="FirewallAllowSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
                                     Content="{Binding [FirewallAllowSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallAllowSelectedButton_Click" />
-                            <Button x:Name="FirewallBlockSelectedButton" Margin="6,3" IsEnabled="False"
+                            <Button x:Name="FirewallBlockSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
                                     Content="{Binding [FirewallBlockSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallBlockSelectedButton_Click" />
-                            <Button x:Name="FirewallRemoveSelectedButton" Margin="6,3" IsEnabled="False"
+                            <Button x:Name="FirewallRemoveSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
                                     Content="{Binding [FirewallRemoveSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallRemoveSelectedButton_Click" />
-                            <Button x:Name="FirewallEmergencyButton" Margin="14,3,6,3" Padding="10,3"
+                            <Button x:Name="FirewallEmergencyButton" Margin="0,4,0,4" Padding="12,5" MinWidth="150"
                                     Background="#B91C1C" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
                                     Content="{Binding [FirewallEmergencyDisable], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallEmergencyButton_Click" />
                         </WrapPanel>
-                    </DockPanel>
+                    </StackPanel>
                 </Border>
 
                 <Border Grid.Row="4" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">

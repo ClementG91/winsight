@@ -64,6 +64,7 @@
   <data name="ExportJson" xml:space="preserve"><value>Exporter en JSON</value></data>
   <data name="ReadOnlyFooter" xml:space="preserve"><value>WinSight ne supprime ni ne bloque automatiquement ; les changements de pare-feu sont toujours votre choix explicite. VirusTotal est facultatif dans Paramètres.</value></data>
   <data name="FirewallControlsTitle" xml:space="preserve"><value>Contrôles du pare-feu</value></data>
+  <data name="FirewallControlsHint" xml:space="preserve"><value>Bloquez une app, ou sélectionnez une ligne de politique ci-dessous pour l'autoriser, la bloquer ou la retirer. Décochez « Afficher seulement ce qui mérite attention » pour voir toutes les politiques.</value></data>
   <data name="FirewallBlockApp" xml:space="preserve"><value>Bloquer une app…</value></data>
   <data name="FirewallAllowSelected" xml:space="preserve"><value>Autoriser</value></data>
   <data name="FirewallBlockSelected" xml:space="preserve"><value>Bloquer</value></data>

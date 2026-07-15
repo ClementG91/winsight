@@ -25,7 +25,6 @@ public partial class MainWindow : Window, IDisposable
     private string? _lastScanCommand;
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
-    private bool _firewallServiceAvailable;
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -105,7 +104,6 @@ public partial class MainWindow : Window, IDisposable
                 // Live status over the authenticated pipe (I/O, not a CPU scan). When
                 // the service is not installed this degrades to "unavailable".
                 var view = await _firewallGateway.GetViewAsync(cancellation.Token);
-                _firewallServiceAvailable = view.ServiceAvailable;
                 _reports = [FirewallServiceAdapter.BuildReport(view)];
             }
             else if (tool.Command == "all")
@@ -244,11 +242,11 @@ public partial class MainWindow : Window, IDisposable
         ShowToolExplanation(tool);
         var selection = DashboardReportRouter.Select(tool, _lastScanCommand, _reports);
 
-        // The interactive firewall controls appear only for the firewall tool once a live
-        // status has been read and the privileged service actually answered.
-        var showFirewallControls = tool.Command == FirewallServiceAdapter.ReportTool
-            && selection.Available
-            && _firewallServiceAvailable;
+        // The interactive firewall controls appear for the firewall tool once a status has
+        // been read (a scan happened). They stay visible even when the service is
+        // unavailable so the user is not left without controls; each action then reports
+        // the "service unavailable" outcome rather than silently doing nothing.
+        var showFirewallControls = tool.Command == FirewallServiceAdapter.ReportTool && selection.Available;
         FirewallActionsPanel.Visibility = showFirewallControls ? Visibility.Visible : Visibility.Collapsed;
 
         if (!selection.Available)
@@ -488,7 +486,6 @@ public partial class MainWindow : Window, IDisposable
     private async Task RefreshFirewallAsync()
     {
         var view = await _firewallGateway.GetViewAsync(CancellationToken.None);
-        _firewallServiceAvailable = view.ServiceAvailable;
         _reports = [FirewallServiceAdapter.BuildReport(view)];
         _lastScanCommand = FirewallServiceAdapter.ReportTool;
         if (ToolPicker.SelectedItem is DashboardTool tool && tool.Command == FirewallServiceAdapter.ReportTool)
