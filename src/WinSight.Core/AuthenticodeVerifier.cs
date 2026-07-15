@@ -197,18 +197,29 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
             CreateNoWindow = true,
         }) ?? throw new InvalidOperationException("powershell did not start");
 
-        // Read asynchronously so a hung PowerShell can't block ReadToEnd forever;
-        // on timeout the process tree is killed (no zombie), which also completes
-        // the read by closing the pipe. stderr is drained (not just redirected) so it
-        // neither leaks to the user's terminal nor deadlocks on a full pipe buffer.
-        var output = p.StandardOutput.ReadToEndAsync();
-        var drainErr = p.StandardError.ReadToEndAsync();
+        // Drain both pipes on background reader threads so a hung PowerShell can't deadlock
+        // on a full pipe buffer; on timeout the process tree is killed (no zombie), which
+        // completes the reads by closing the pipes. This stays fully synchronous (no
+        // sync-over-async), and stderr is drained-and-discarded so it neither leaks to the
+        // user's terminal nor blocks. Only the reader thread writes to the builder, and it
+        // is read only after the final WaitForExit() has flushed those handlers.
+        var stdout = new System.Text.StringBuilder();
+        p.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+            {
+                stdout.AppendLine(e.Data);
+            }
+        };
+        p.ErrorDataReceived += static (_, _) => { };
+        p.BeginOutputReadLine();
+        p.BeginErrorReadLine();
         if (!p.WaitForExit(30_000))
         {
             TryKill(p);
         }
-        _ = drainErr.GetAwaiter().GetResult();
-        return output.GetAwaiter().GetResult();
+        p.WaitForExit();
+        return stdout.ToString();
     }
 
     private static void TryKill(Process p)

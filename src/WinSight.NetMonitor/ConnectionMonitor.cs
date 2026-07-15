@@ -78,9 +78,19 @@ public sealed class ConnectionMonitor
             {
                 return string.Empty;
             }
-            // Async read + kill-on-timeout: a hung netstat can't block ReadToEnd
-            // forever or leave a zombie process behind.
-            var output = p.StandardOutput.ReadToEndAsync();
+            // Drain stdout on a background reader thread + kill-on-timeout: a hung netstat
+            // can't deadlock on a full pipe buffer or leave a zombie behind. Fully
+            // synchronous (no sync-over-async); the builder is read only after the final
+            // WaitForExit() flushes the reader.
+            var stdout = new System.Text.StringBuilder();
+            p.OutputDataReceived += (_, e) =>
+            {
+                if (e.Data is not null)
+                {
+                    stdout.AppendLine(e.Data);
+                }
+            };
+            p.BeginOutputReadLine();
             if (!p.WaitForExit(10_000))
             {
                 try
@@ -93,7 +103,8 @@ public sealed class ConnectionMonitor
                     // Already exited, the read completes either way.
                 }
             }
-            return output.GetAwaiter().GetResult();
+            p.WaitForExit();
+            return stdout.ToString();
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
