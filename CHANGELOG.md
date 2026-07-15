@@ -1,5 +1,12 @@
 ## Unreleased
 
+### Code quality: remove sync-over-async from child-process output reads
+- AuthenticodeVerifier.RunPowerShell and ConnectionMonitor.RunNetstat blocked on
+  ReadToEndAsync via GetAwaiter().GetResult(), a pattern the project standards forbid.
+  Both now drain stdout on a background reader thread (OutputDataReceived +
+  BeginOutputReadLine) and stay fully synchronous, with the same kill-on-timeout safety.
+
+
 ### Phase 2 fix: firewall dashboard controls cannot crash the app
 - The firewall mutation handlers are async void event handlers; an unexpected exception
   (e.g. a pipe ACL denial surfacing as UnauthorizedAccessException) had no caller to catch
