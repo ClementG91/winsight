@@ -477,10 +477,22 @@ public partial class MainWindow : Window, IDisposable
 
     private async Task RunFirewallMutationAsync(Func<CancellationToken, Task<FirewallMutationResult>> mutate)
     {
-        var result = await mutate(CancellationToken.None);
-        SummaryText.Text = Text[FirewallControlPresenter.ResultMessageKey(result)];
-        // Re-read the live status so the grid and controls reflect the change immediately.
-        await RefreshFirewallAsync();
+        // These run from async void event handlers, so an unexpected exception would have no
+        // caller to catch it and would tear down the whole tray app. The gateway already
+        // maps transport faults to a result; this net covers anything else (e.g. a pipe ACL
+        // denial surfacing as UnauthorizedAccessException) with a message instead of a crash.
+        try
+        {
+            var result = await mutate(CancellationToken.None);
+            SummaryText.Text = Text[FirewallControlPresenter.ResultMessageKey(result)];
+            // Re-read the live status so the grid and controls reflect the change immediately.
+            await RefreshFirewallAsync();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                     or TimeoutException or InvalidOperationException)
+        {
+            SummaryText.Text = Text.Format("ActionFailed", ex.Message);
+        }
     }
 
     private async Task RefreshFirewallAsync()
