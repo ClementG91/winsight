@@ -28,10 +28,13 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
     // call ~15-20ms/file), so a chunk is far less likely to hit the timeout under load.
     private const int ScriptCharBudget = 3500;
 
-    public SignatureVerdict Verify(string path) =>
-        VerifyMany([path]).TryGetValue(path, out var v) ? v : _fallback.Verify(path);
+    public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
+        VerifyMany([path], cancellationToken).TryGetValue(path, out var v)
+            ? v
+            : _fallback.Verify(path, cancellationToken);
 
-    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+        IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
     {
         // PowerShell verdicts are keyed by NORMALISED full path, because the Path it
         // echoes may differ in form from the input string. Inputs are matched back the
@@ -45,7 +48,8 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
 
         foreach (var chunk in Chunk(existing))
         {
-            VerifyChunkWithRetry(chunk, byFullPath);
+            cancellationToken.ThrowIfCancellationRequested();
+            VerifyChunkWithRetry(chunk, byFullPath, cancellationToken);
         }
 
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
@@ -53,7 +57,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         {
             results[path] = TryFull(path) is { } full && byFullPath.TryGetValue(full, out var v)
                 ? v
-                : _fallback.Verify(path);
+                : _fallback.Verify(path, cancellationToken);
         }
         return results;
     }
@@ -66,16 +70,18 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
     // Signature returns exactly one object per input path, so ANY missing path means
     // an incomplete run and is retried with a fresh spawn (verdicts are keyed by full
     // path, so an already-resolved path is never destructively re-fetched).
-    private void VerifyChunkWithRetry(IReadOnlyList<string> chunk, Dictionary<string, SignatureVerdict> byFullPath)
+    private void VerifyChunkWithRetry(
+        IReadOnlyList<string> chunk, Dictionary<string, SignatureVerdict> byFullPath, CancellationToken cancellationToken)
     {
         const int maxAttempts = 3;
         var expected = chunk.Select(p => TryFull(p) ?? p).ToList();
 
         for (var attempt = 1; attempt < maxAttempts; attempt++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                ParseInto(RunPowerShell(chunk), byFullPath);
+                ParseInto(RunPowerShell(chunk, cancellationToken), byFullPath);
             }
             catch (Exception ex) when (ex is Win32Exception or InvalidOperationException
                                          or IOException or JsonException)
@@ -89,11 +95,13 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
+
         // Last attempt: take whatever it yields; any still-missing path uses the
         // per-path managed fallback in VerifyMany.
         try
         {
-            ParseInto(RunPowerShell(chunk), byFullPath);
+            ParseInto(RunPowerShell(chunk, cancellationToken), byFullPath);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException
                                      or IOException or JsonException)
@@ -159,7 +167,7 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         _ => SignatureVerdict.Unknown,
     };
 
-    private static string RunPowerShell(IReadOnlyList<string> paths)
+    private static string RunPowerShell(IReadOnlyList<string> paths, CancellationToken cancellationToken)
     {
         // Paths go inside a PowerShell array literal, single-quoted with ' doubled.
         var literals = string.Join(",", paths.Select(p => "'" + p.Replace("'", "''") + "'"));
@@ -196,6 +204,9 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
             UseShellExecute = false,
             CreateNoWindow = true,
         }) ?? throw new InvalidOperationException("powershell did not start");
+
+        // Cancellation kills the child immediately (closing its pipes ends the read).
+        using var registration = cancellationToken.Register(static state => TryKill((Process)state!), p);
 
         // Drain both pipes on background reader threads so a hung PowerShell can't deadlock
         // on a full pipe buffer; on timeout the process tree is killed (no zombie), which

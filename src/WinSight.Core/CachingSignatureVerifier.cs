@@ -35,10 +35,11 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         _maxAge = maxAge ?? TimeSpan.FromMinutes(5);
     }
 
-    public SignatureVerdict Verify(string path) =>
-        VerifyMany([path]).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
+    public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
+        VerifyMany([path], cancellationToken).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
 
-    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+        IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
     {
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var misses = new List<string>();
@@ -57,7 +58,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
 
         if (misses.Count > 0)
         {
-            var fresh = _inner.VerifyMany(misses);
+            var fresh = _inner.VerifyMany(misses, cancellationToken);
             foreach (var path in misses)
             {
                 var verdict = fresh.TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;

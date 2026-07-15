@@ -1,5 +1,18 @@
 ## Unreleased
 
+Step-by-step progress log. Newest first. Every CI-green step lands here.
+
+### Scans are now cancellable
+- Thread a CancellationToken through the synchronous scan pipeline: ISignatureVerifier
+  (Verify/VerifyMany) and its four implementations, ConnectionMonitor/ProcessLister/
+  ModuleLister snapshots, and PersistenceScanner.Scan. Adapters passes the token it
+  already receives down to them.
+- Cancellation kills the netstat and Get-AuthenticodeSignature child processes immediately
+  (via CancellationToken.Register) and is observed at batch/enumeration boundaries, so the
+  dashboard Stop button and the MCP scan timeout now actually abort in-flight work instead
+  of orphaning a background thread. The pipeline stays synchronous by design.
+
+
 ### Code quality: review polish
 - McpModels.Protect no longer rebuilds and re-sorts the path-redaction table on every
   field; it is computed once as a static (the user folder paths are process-stable).
@@ -35,11 +48,6 @@
   absolute-required, normalized) used by the store, the dispatcher, the coordinator, and
   the WFP filter-key derivation. Regression tests cover quoted/relative-segment paths and
   the coordinator persisting the canonical form.
-
-
-Step-by-step progress log. Newest first. Every CI-green step lands here.
-
-## Unreleased
 
 ### Phase 2 fix: dashboard could not authenticate to the service (impersonation)
 - The pipe client connected without requesting impersonation, so the service's

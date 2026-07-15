@@ -27,8 +27,9 @@ public sealed class SignatureVerifier : ISignatureVerifier
     /// </param>
     public SignatureVerifier(bool checkRevocation = false) => _checkRevocation = checkRevocation;
 
-    public SignatureVerdict Verify(string path)
+    public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
             return SignatureVerdict.Missing;
@@ -64,12 +65,13 @@ public sealed class SignatureVerifier : ISignatureVerifier
         }
     }
 
-    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+    public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+        IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
     {
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         foreach (var path in paths)
         {
-            results[path] = Verify(path);
+            results[path] = Verify(path, cancellationToken);
         }
         return results;
     }

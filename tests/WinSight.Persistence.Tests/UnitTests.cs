@@ -169,6 +169,23 @@ public sealed class AuthenticodeVerifierIntegrationTests
     }
 
     [Fact]
+    public void VerifyMany_CancelledToken_Throws()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        Assert.Throws<OperationCanceledException>(
+            () => new NativeSignatureVerifier().VerifyMany(new[] { OsBinary }, cts.Token));
+    }
+
+    [Fact]
+    public void Scan_CancelledToken_Throws()
+    {
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        Assert.Throws<OperationCanceledException>(() => new PersistenceScanner().Scan(cts.Token));
+    }
+
+    [Fact]
     public void VerifyMany_BatchesSignedAndUnsigned()
     {
         var tmp = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.txt");
@@ -274,9 +291,9 @@ public sealed class PersistenceScannerIntegrationTests
 
     private sealed class TrustedStubVerifier : ISignatureVerifier
     {
-        public SignatureVerdict Verify(string path) => new(SignatureState.SignedTrusted, "CN=Test");
+        public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) => new(SignatureState.SignedTrusted, "CN=Test");
 
-        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths) =>
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default) =>
             paths.Distinct(StringComparer.OrdinalIgnoreCase).ToDictionary(
                 path => path,
                 _ => new SignatureVerdict(SignatureState.SignedTrusted, "CN=Test"),
@@ -319,8 +336,8 @@ public sealed class PersistenceScannerResolutionTests
     private sealed class RejectingVerifier : ISignatureVerifier
     {
         public bool Called { get; private set; }
-        public SignatureVerdict Verify(string path) => throw new InvalidOperationException();
-        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+        public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) => throw new InvalidOperationException();
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
         {
             Called = paths.Count > 0;
             return new Dictionary<string, SignatureVerdict>();
@@ -482,9 +499,10 @@ public sealed class CachingSignatureVerifierTests
     {
         public int Calls;
 
-        public SignatureVerdict Verify(string path) => VerifyMany(new[] { path })[path];
+        public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
+            VerifyMany(new[] { path }, cancellationToken)[path];
 
-        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
         {
             Calls += paths.Count;
             return paths.ToDictionary(p => p, _ => SignatureVerdict.Unsigned, StringComparer.OrdinalIgnoreCase);

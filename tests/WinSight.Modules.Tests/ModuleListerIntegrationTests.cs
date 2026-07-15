@@ -36,9 +36,10 @@ public sealed class ModuleListerIntegrationTests
     {
         public bool Called { get; private set; }
 
-        public SignatureVerdict Verify(string path) => SignatureVerdict.Unsigned;
+        public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) => SignatureVerdict.Unsigned;
 
-        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(IReadOnlyCollection<string> paths)
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+            IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
         {
             Called = true;
             var map = new Dictionary<string, SignatureVerdict>(System.StringComparer.OrdinalIgnoreCase);

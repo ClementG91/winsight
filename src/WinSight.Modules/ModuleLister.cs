@@ -14,11 +14,12 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
 {
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
-    public IReadOnlyList<LoadedModule> Snapshot()
+    public IReadOnlyList<LoadedModule> Snapshot(CancellationToken cancellationToken = default)
     {
         var raw = new List<(int Pid, string Proc, string Mod, string? Path)>();
         foreach (var p in Process.GetProcesses())
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 var name = p.ProcessName;
@@ -40,7 +41,8 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
 
         var verdicts = _verifier.VerifyMany(
             raw.Where(r => r.Path is not null).Select(r => r.Path!)
-                .Distinct(StringComparer.OrdinalIgnoreCase).ToList());
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+            cancellationToken);
 
         return raw.Select(r => new LoadedModule(
             r.Pid, r.Proc, r.Mod, r.Path,
