@@ -34,4 +34,26 @@ public sealed class FirewallControlPresenterTests
     [InlineData(FirewallMutationResult.Rejected, "FirewallActionRejected")]
     public void ResultMessageKey_MapsEveryOutcome(FirewallMutationResult result, string expected) =>
         Assert.Equal(expected, FirewallControlPresenter.ResultMessageKey(result));
+
+    [Fact]
+    public void OutcomeMessageKey_AppliedBlockWithoutEnforcement_SignalsNotEnforced() =>
+        Assert.Equal(
+            "FirewallActionAppliedNotEnforced",
+            FirewallControlPresenter.OutcomeMessageKey(
+                FirewallMutationResult.Applied, isBlock: true, enforcementEnabled: false));
+
+    [Theory]
+    [InlineData(true, true)]   // block, enforcing -> plain applied
+    [InlineData(false, false)] // allow, not enforcing -> plain applied
+    public void OutcomeMessageKey_OtherwiseMatchesResultMessage(bool isBlock, bool enforcing) =>
+        Assert.Equal(
+            "FirewallActionApplied",
+            FirewallControlPresenter.OutcomeMessageKey(FirewallMutationResult.Applied, isBlock, enforcing));
+
+    [Fact]
+    public void OutcomeMessageKey_NonAppliedResult_UsesResultMessage() =>
+        Assert.Equal(
+            "FirewallActionUnavailable",
+            FirewallControlPresenter.OutcomeMessageKey(
+                FirewallMutationResult.ServiceUnavailable, isBlock: true, enforcementEnabled: false));
 }

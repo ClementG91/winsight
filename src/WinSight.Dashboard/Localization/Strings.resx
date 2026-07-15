@@ -74,6 +74,7 @@
   <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Select an application to block</value></data>
   <data name="FirewallExeFilter" xml:space="preserve"><value>Executables (*.exe)|*.exe|All files (*.*)|*.*</value></data>
   <data name="FirewallActionApplied" xml:space="preserve"><value>Firewall change applied.</value></data>
+  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Saved. This block filters traffic only once firewall enforcement is enabled (an elevated action).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>The firewall service is not available. Install and start it, then try again.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>You are not authorized to change firewall policy on this machine.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>The firewall service rejected the change.</value></data>

@@ -427,7 +427,8 @@ public partial class MainWindow : Window, IDisposable
 
         var path = dialog.FileName;
         await RunFirewallMutationAsync(
-            token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, OutboundAction.Block), token));
+            token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, OutboundAction.Block), token),
+            isBlock: true);
     }
 
     private async void FirewallAllowSelectedButton_Click(object sender, RoutedEventArgs e) =>
@@ -443,7 +444,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        await RunFirewallMutationAsync(token => _firewallGateway.RemovePolicyAsync(path, token));
+        await RunFirewallMutationAsync(token => _firewallGateway.RemovePolicyAsync(path, token), isBlock: false);
     }
 
     private async void FirewallEmergencyButton_Click(object sender, RoutedEventArgs e)
@@ -459,7 +460,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        await RunFirewallMutationAsync(token => _firewallGateway.EmergencyDisableAsync(token));
+        await RunFirewallMutationAsync(token => _firewallGateway.EmergencyDisableAsync(token), isBlock: false);
     }
 
     private async Task SetSelectedFirewallPolicyAsync(OutboundAction action)
@@ -470,7 +471,8 @@ public partial class MainWindow : Window, IDisposable
         }
 
         await RunFirewallMutationAsync(
-            token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, action), token));
+            token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, action), token),
+            isBlock: action == OutboundAction.Block);
     }
 
     private string? SelectedFirewallPath() =>
@@ -500,7 +502,10 @@ public partial class MainWindow : Window, IDisposable
         {
             var result = await _firewallGateway.SetPolicyAsync(
                 new AppFirewallPolicy(path, OutboundAction.Block), CancellationToken.None);
-            SummaryText.Text = Text[FirewallControlPresenter.ResultMessageKey(result)];
+            // Tell the user whether the block is live or only saved until enforcement is on.
+            var enforcing = result == FirewallMutationResult.Applied
+                && (await _firewallGateway.GetViewAsync(CancellationToken.None)).EnforcementEnabled;
+            SummaryText.Text = Text[FirewallControlPresenter.OutcomeMessageKey(result, isBlock: true, enforcing)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or TimeoutException or InvalidOperationException)
@@ -509,7 +514,8 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
-    private async Task RunFirewallMutationAsync(Func<CancellationToken, Task<FirewallMutationResult>> mutate)
+    private async Task RunFirewallMutationAsync(
+        Func<CancellationToken, Task<FirewallMutationResult>> mutate, bool isBlock)
     {
         // These run from async void event handlers, so an unexpected exception would have no
         // caller to catch it and would tear down the whole tray app. The gateway already
@@ -518,9 +524,11 @@ public partial class MainWindow : Window, IDisposable
         try
         {
             var result = await mutate(CancellationToken.None);
-            SummaryText.Text = Text[FirewallControlPresenter.ResultMessageKey(result)];
-            // Re-read the live status so the grid and controls reflect the change immediately.
-            await RefreshFirewallAsync();
+            // Re-read the live status so the grid and controls reflect the change, then set
+            // the outcome last (the refresh rewrites the summary) with enforcement context.
+            var view = await RefreshFirewallAsync();
+            SummaryText.Text = Text[FirewallControlPresenter.OutcomeMessageKey(
+                result, isBlock, view.EnforcementEnabled)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or TimeoutException or InvalidOperationException)
@@ -529,7 +537,7 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
-    private async Task RefreshFirewallAsync()
+    private async Task<FirewallServiceView> RefreshFirewallAsync()
     {
         var view = await _firewallGateway.GetViewAsync(CancellationToken.None);
         _reports = [FirewallServiceAdapter.BuildReport(view)];
@@ -538,6 +546,7 @@ public partial class MainWindow : Window, IDisposable
         {
             ShowToolContext(tool);
         }
+        return view;
     }
 
     private void TryUserAction(Action action, string successMessage)

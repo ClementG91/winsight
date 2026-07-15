@@ -2,6 +2,15 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall: block feedback now tells you whether it is actually enforcing
+- A block only filters traffic once enforcement is enabled (an elevated action). Blocking
+  an app while enforcement was off said "applied" yet nothing happened on the network — the
+  exact confusion seen during testing. Now a saved-but-not-enforced block reports "Saved. It
+  filters only once enforcement is enabled", across both the firewall controls and the
+  "Block outbound" action, checking the live enforcement state after the change.
+- Logic is in FirewallControlPresenter.OutcomeMessageKey (UI-agnostic, unit-tested);
+  localized in en/fr/es.
+
 ### Firewall: block an app's outbound straight from a finding
 - Any finding that owns an on-disk executable (a network connection, a running process, or
   a persistence entry) now offers a "Block outbound" action that sends a Block policy to the
