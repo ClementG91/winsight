@@ -2,6 +2,14 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Detection: add print providers (verified false-positive-free)
+- Add PrintProviderEnumerator: the DLLs the print spooler (spoolsv, SYSTEM) loads as print
+  providers (...\Control\Print\Providers\{name} -> Name); a rogue one runs as SYSTEM, a
+  documented persistence/privesc vector distinct from print monitors. It follows the proven
+  DLL -> Authenticode model, so unlike the shim surface it cannot false-positive.
+- Verified on a real machine: 2 providers (inetpp.dll, win32spl.dll), both correctly
+  SignedTrusted, neither flagged. Localized en/fr/es.
+
 ### Detection: drop the shim-database surface (false-positive avoidance)
 - Verification pass on a real machine confirmed the new autostart surfaces are clean:
   credential providers (21) and browser helper objects (4) all resolved to correctly

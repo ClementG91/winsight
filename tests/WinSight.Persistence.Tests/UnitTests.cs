@@ -300,6 +300,22 @@ public sealed class WindowsLoadRunEnumeratorIntegrationTests
     }
 }
 
+public sealed class PrintProviderEnumeratorIntegrationTests
+{
+    [Fact]
+    public void Enumerate_DoesNotThrow_AndEntriesAreSane()
+    {
+        var entries = new PrintProviderEnumerator().Enumerate().ToList();
+        Assert.NotNull(entries);
+        Assert.All(entries, e =>
+        {
+            Assert.Equal(AutostartVector.PrintProvider, e.Vector);
+            Assert.Contains("Providers", e.Location);
+            Assert.False(string.IsNullOrEmpty(e.Command));
+        });
+    }
+}
+
 public sealed class DefaultEnumeratorsTests
 {
     [Fact]
@@ -309,6 +325,7 @@ public sealed class DefaultEnumeratorsTests
         Assert.Contains("Credential providers", surfaces);
         Assert.Contains("Browser helper objects", surfaces);
         Assert.Contains("Windows Load/Run", surfaces);
+        Assert.Contains("Print providers", surfaces);
         Assert.Equal(surfaces.Count, surfaces.Distinct().Count());
     }
 }
