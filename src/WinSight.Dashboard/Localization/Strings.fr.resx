@@ -74,6 +74,7 @@
   <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Sélectionner une application à bloquer</value></data>
   <data name="FirewallExeFilter" xml:space="preserve"><value>Exécutables (*.exe)|*.exe|Tous les fichiers (*.*)|*.*</value></data>
   <data name="FirewallActionApplied" xml:space="preserve"><value>Modification du pare-feu appliquée.</value></data>
+  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Enregistré. Ce blocage ne filtre le trafic qu'une fois l'enforcement du pare-feu activé (action élevée).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>Le service pare-feu n'est pas disponible. Installez-le et démarrez-le, puis réessayez.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>Vous n'êtes pas autorisé à modifier la politique du pare-feu sur cette machine.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>Le service pare-feu a rejeté la modification.</value></data>

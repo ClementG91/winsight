@@ -40,6 +40,17 @@ public static class FirewallControlPresenter
         _ => "FirewallActionRejected",
     };
 
+    /// <summary>
+    /// Like <see cref="ResultMessageKey"/>, but a successfully saved BLOCK is reported as
+    /// "saved, not yet enforced" when enforcement is off — a block only filters traffic
+    /// once enforcement is enabled, so the user is told instead of assuming it is live.
+    /// </summary>
+    public static string OutcomeMessageKey(
+        FirewallMutationResult result, bool isBlock, bool enforcementEnabled) =>
+        result == FirewallMutationResult.Applied && isBlock && !enforcementEnabled
+            ? "FirewallActionAppliedNotEnforced"
+            : ResultMessageKey(result);
+
     private static string? Field(ReportItem item, string key) =>
         item.Fields.TryGetValue(key, out var value) ? value : null;
 }

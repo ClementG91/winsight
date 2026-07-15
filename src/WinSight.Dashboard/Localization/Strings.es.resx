@@ -74,6 +74,7 @@
   <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Selecciona una aplicación para bloquear</value></data>
   <data name="FirewallExeFilter" xml:space="preserve"><value>Ejecutables (*.exe)|*.exe|Todos los archivos (*.*)|*.*</value></data>
   <data name="FirewallActionApplied" xml:space="preserve"><value>Cambio del firewall aplicado.</value></data>
+  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Guardado. Este bloqueo solo filtra el tráfico cuando se activa la aplicación del firewall (acción con privilegios).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>El servicio de firewall no está disponible. Instálalo e inícialo, luego inténtalo de nuevo.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>No tienes autorización para cambiar la política del firewall en esta máquina.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>El servicio de firewall rechazó el cambio.</value></data>
