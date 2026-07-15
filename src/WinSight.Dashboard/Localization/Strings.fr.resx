@@ -217,4 +217,6 @@
   <data name="PersistenceVectorSilentProcessExit" xml:space="preserve"><value>Moniteur de sortie silencieuse</value></data>
   <data name="PersistenceVectorCredentialProvider" xml:space="preserve"><value>Fournisseur d'identifiants</value></data>
   <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Browser Helper Object (BHO)</value></data>
+  <data name="PersistenceVectorWindowsLoadRun" xml:space="preserve"><value>Valeur Windows Load/Run</value></data>
+  <data name="PersistenceVectorShimDatabase" xml:space="preserve"><value>Shim d'application (sdb)</value></data>
 </root>
