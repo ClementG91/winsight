@@ -4,8 +4,8 @@
         xmlns:local="clr-namespace:WinSight.Dashboard"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         Title="{Binding [WindowTitle], Source={x:Static local:LocalizationManager.Instance}}"
-        Icon="Assets/winsight-logo.png" Height="780" Width="1220"
-        MinHeight="620" MinWidth="960" Background="#F1F5F9"
+        Icon="Assets/winsight-logo.png" Height="860" Width="1220"
+        MinHeight="680" MinWidth="960" Background="#F1F5F9"
         WindowStartupLocation="CenterScreen">
     <Grid>
         <Grid.RowDefinitions>
@@ -112,16 +112,21 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12" Padding="18">
-                    <DockPanel>
-                        <StackPanel>
-                            <TextBlock x:Name="SelectedToolTitle" FontSize="21" FontWeight="SemiBold" Foreground="#0F172A" />
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                            <TextBlock x:Name="SelectedToolTitle" FontSize="21" FontWeight="SemiBold" Foreground="#0F172A"
+                                       TextWrapping="Wrap" />
                             <TextBlock x:Name="SelectedToolDescription" Margin="0,5,0,0" Foreground="#475569"
-                                       TextWrapping="Wrap" MaxWidth="680" />
+                                       TextWrapping="Wrap" />
                         </StackPanel>
-                        <Button x:Name="WindowsToolButton" DockPanel.Dock="Right"
+                        <Button x:Name="WindowsToolButton" Grid.Column="1" Margin="14,0,0,0" Padding="12,6"
                                 Content="{Binding [OpenWindowsTool], Source={x:Static local:LocalizationManager.Instance}}"
                                 VerticalAlignment="Center" Visibility="Collapsed" Click="WindowsToolButton_Click" />
-                    </DockPanel>
+                    </Grid>
                 </Border>
 
                 <Border x:Name="ProgressPanel" Grid.Row="1" Margin="0,12,0,0" Background="#EFF6FF"
@@ -185,7 +190,7 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="4" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">
+                <Border Grid.Row="4" MinHeight="200" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">
                     <DataGrid x:Name="ResultsGrid" AutoGenerateColumns="False" IsReadOnly="True"
                               CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                               BorderThickness="0" AlternatingRowBackground="#F8FAFC" SelectionMode="Single"
