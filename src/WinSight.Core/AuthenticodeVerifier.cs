@@ -156,10 +156,10 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
         "NotSigned" => SignatureVerdict.Unsigned,
         "HashMismatch" => new SignatureVerdict(SignatureState.SignedUntrusted, signer), // tampered
         "NotTrusted" => new SignatureVerdict(SignatureState.SignedUntrusted, signer),
-        // UnknownError means invalid according to PowerShell's SignatureStatus
-        // contract. Keep any signer evidence and classify it as invalid.
-        "UnknownError" => signer is null
-            ? new SignatureVerdict(SignatureState.SignedUntrusted, null)
+        // UnknownError is not proof that a signature exists. Preserve a non-empty
+        // signer as invalid evidence; otherwise keep the result indeterminate.
+        "UnknownError" => string.IsNullOrWhiteSpace(signer)
+            ? SignatureVerdict.Unknown
             : new SignatureVerdict(SignatureState.SignedUntrusted, signer),
         // Unsupported/incompatible formats and missing output are verification
         // failures, never proof that a file is unsigned.

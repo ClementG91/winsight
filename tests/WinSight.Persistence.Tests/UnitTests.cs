@@ -1,5 +1,8 @@
+using System.Reflection.PortableExecutable;
+
 using WinSight.Core;
 using WinSight.Persistence;
+
 using Xunit;
 
 namespace WinSight.Persistence.Tests;
@@ -156,6 +159,22 @@ public sealed class ScheduledTaskTests
 // Integration tests, run the real pipeline on the Windows CI runner (registry,
 // PowerShell signature batch). They are the first proof the blind-authored code
 // actually FUNCTIONS on Windows, not just compiles.
+internal static class AuthenticodeTestFixture
+{
+    // This proves only that the repository PE has no embedded Authenticode
+    // signature. It makes no claim about a machine-specific catalog signature.
+    public static string RepoPeWithoutEmbeddedAuthenticodeSignature =>
+        typeof(AuthenticodeTestFixture).Assembly.Location;
+
+    public static void AssertRepoPeHasNoEmbeddedAuthenticodeSignature()
+    {
+        using var stream = File.OpenRead(RepoPeWithoutEmbeddedAuthenticodeSignature);
+        using var pe = new PEReader(stream);
+        Assert.NotNull(pe.PEHeaders.PEHeader);
+        Assert.Equal(0, pe.PEHeaders.PEHeader!.CertificateTableDirectory.Size);
+    }
+}
+
 public sealed class AuthenticodeVerifierIntegrationTests
 {
     private static string OsBinary => Path.Combine(Environment.SystemDirectory, "kernel32.dll");
@@ -186,22 +205,15 @@ public sealed class AuthenticodeVerifierIntegrationTests
     }
 
     [Fact]
-    public void VerifyMany_BatchesSignedAndUnsigned()
+    public void VerifyMany_BatchesCatalogSignedAndRepoPeWithoutEmbeddedSignature()
     {
-        var tmp = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.txt");
-        File.WriteAllText(tmp, "not a signed PE");
-        try
-        {
-            var r = new AuthenticodeVerifier().VerifyMany(new[] { OsBinary, tmp });
-            Assert.Equal(SignatureState.SignedTrusted, r[OsBinary].State);
-            // An unsigned file must never read as trusted; it is Unsigned when the
-            // catalog check ran, or Unknown if that check could not complete (load).
-            Assert.Contains(r[tmp].State, new[] { SignatureState.Unsigned, SignatureState.Unknown });
-        }
-        finally
-        {
-            File.Delete(tmp);
-        }
+        AuthenticodeTestFixture.AssertRepoPeHasNoEmbeddedAuthenticodeSignature();
+        var repoPe = AuthenticodeTestFixture.RepoPeWithoutEmbeddedAuthenticodeSignature;
+
+        var r = new AuthenticodeVerifier().VerifyMany(new[] { OsBinary, repoPe });
+
+        Assert.Equal(SignatureState.SignedTrusted, r[OsBinary].State);
+        Assert.Contains(r[repoPe].State, new[] { SignatureState.Unsigned, SignatureState.Unknown });
     }
 }
 
@@ -452,20 +464,31 @@ public sealed class NativeSignatureVerifierTests
     }
 
     [Fact]
-    public void Verify_UnsignedFile_IsNeverTrusted()
+    public void Verify_NonPeFile_IsNeverTrusted()
     {
         var file = Path.Combine(Path.GetTempPath(), $"ws_{Guid.NewGuid():N}.bin");
         File.WriteAllText(file, "not a signed PE");
         try
         {
-            // Unsigned when the catalog check ran, Unknown if it could not (load),             // but never SignedTrusted. That invariant is what actually matters.
+            // Windows builds differ in how WinVerifyTrust classifies arbitrary
+            // non-PE content. The portable invariant is that it is never trusted.
             var state = new NativeSignatureVerifier().Verify(file).State;
-            Assert.Contains(state, new[] { SignatureState.Unsigned, SignatureState.Unknown });
+            Assert.NotEqual(SignatureState.SignedTrusted, state);
         }
         finally
         {
             File.Delete(file);
         }
+    }
+
+    [Fact]
+    public void Verify_RepoPeWithoutEmbeddedAuthenticodeSignature_IsNeverTrusted()
+    {
+        AuthenticodeTestFixture.AssertRepoPeHasNoEmbeddedAuthenticodeSignature();
+        var file = AuthenticodeTestFixture.RepoPeWithoutEmbeddedAuthenticodeSignature;
+
+        var state = new NativeSignatureVerifier().Verify(file).State;
+        Assert.Contains(state, new[] { SignatureState.Unsigned, SignatureState.Unknown });
     }
 }
 
@@ -669,7 +692,6 @@ public sealed class AuthenticodeMapStatusTests
     [InlineData("NotSigned", SignatureState.Unsigned)]
     [InlineData("HashMismatch", SignatureState.SignedUntrusted)] // signed then tampered
     [InlineData("NotTrusted", SignatureState.SignedUntrusted)]
-    [InlineData("UnknownError", SignatureState.SignedUntrusted)]
     [InlineData("NotSupportedFileFormat", SignatureState.Unknown)]
     [InlineData("Incompatible", SignatureState.Unknown)]
     [InlineData(null, SignatureState.Unknown)]
@@ -678,10 +700,22 @@ public sealed class AuthenticodeMapStatusTests
         Assert.Equal(expected, AuthenticodeVerifier.MapStatus(status, "CN=Acme").State);
     }
 
-    [Fact]
-    public void MapStatus_UnknownStatusWithoutSigner_IsInvalidNotUnsigned()
+    [Theory]
+    [InlineData("CN=Acme")]
+    [InlineData("publisher")]
+    public void MapStatus_UnknownErrorWithSigner_IsSignedUntrusted(string signer)
     {
-        Assert.Equal(SignatureState.SignedUntrusted, AuthenticodeVerifier.MapStatus("UnknownError", null).State);
+        Assert.Equal(SignatureState.SignedUntrusted, AuthenticodeVerifier.MapStatus("UnknownError", signer).State);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t")]
+    public void MapStatus_UnknownErrorWithoutSignerEvidence_IsUnknown(string? signer)
+    {
+        Assert.Equal(SignatureState.Unknown, AuthenticodeVerifier.MapStatus("UnknownError", signer).State);
     }
 
     [Fact]
