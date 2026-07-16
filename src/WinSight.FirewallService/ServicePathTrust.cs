@@ -18,6 +18,44 @@ public enum DangerousPathAccess
     Delete = 16, DeleteChildren = 32, ChangePermissions = 64, TakeOwnership = 128,
 }
 
+public static class ServicePathRights
+{
+    /// <summary>
+    /// Translates a raw <see cref="FileSystemRights"/> mask into the dangerous-access flags that would
+    /// let an unprivileged principal tamper with a trusted path component.
+    /// </summary>
+    /// <remarks>
+    /// The composite rights <see cref="FileSystemRights.Modify"/> and <see cref="FileSystemRights.FullControl"/>
+    /// MUST NOT be probed with a bitwise-AND-non-zero test: they include the Read/Execute/Synchronize
+    /// bits, so such a probe reports a harmless Read&amp;Execute grant as writable. Only the atomic
+    /// write/delete/ownership bits are inspected; because Modify and FullControl are supersets that
+    /// contain those atomic bits, a genuine Modify/FullControl grant is still detected.
+    ///
+    /// Windows overloads the write (0x2) and append (0x4) bits by object type. On a file they are
+    /// WriteData/AppendData — overwriting or growing the binary, both dangerous. On a directory they are
+    /// CreateFiles/CreateDirectories. Planting a new file (CreateFiles) enables DLL side-loading, so it
+    /// stays dangerous; but creating a new sub-directory (CreateDirectories) cannot modify, replace, or
+    /// delete an existing protected child — that needs Delete/DeleteChildren, which remain flagged — so
+    /// it is not dangerous. Without this distinction no path under C:\ could ever be trusted, because the
+    /// default C:\ ACL lets authenticated users create sub-directories (how "mkdir C:\foo" works).
+    /// </remarks>
+    public static DangerousPathAccess Map(FileSystemRights rights, bool isDirectory)
+    {
+        var result = DangerousPathAccess.None;
+        // 0x2 — WriteData (file: overwrite) / CreateFiles (directory: plant → DLL side-load). Both dangerous.
+        if ((rights & FileSystemRights.WriteData) != 0)
+            result |= isDirectory ? DangerousPathAccess.CreateFiles : DangerousPathAccess.WriteData;
+        // 0x4 — AppendData (file: grow the binary → dangerous) / CreateDirectories (directory: benign).
+        if ((rights & FileSystemRights.AppendData) != 0 && !isDirectory)
+            result |= DangerousPathAccess.AppendData;
+        if ((rights & FileSystemRights.Delete) != 0) result |= DangerousPathAccess.Delete;
+        if ((rights & FileSystemRights.DeleteSubdirectoriesAndFiles) != 0) result |= DangerousPathAccess.DeleteChildren;
+        if ((rights & FileSystemRights.ChangePermissions) != 0) result |= DangerousPathAccess.ChangePermissions;
+        if ((rights & FileSystemRights.TakeOwnership) != 0) result |= DangerousPathAccess.TakeOwnership;
+        return result;
+    }
+}
+
 public sealed record PathAccessMetadata(
     string PrincipalSid,
     bool IsAllow,
@@ -292,8 +330,13 @@ public sealed partial class WindowsPathMetadataSource : IPathMetadataSource
         var security = directory ? (FileSystemSecurity)new DirectoryInfo(canonicalPath).GetAccessControl() :
             new FileInfo(canonicalPath).GetAccessControl();
         var rules = security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>()
+            // Inherit-only ACEs (PropagationFlags.InheritOnly) are templates that Windows applies to
+            // child objects only; they grant no access to this component itself, so evaluating them
+            // against it would flag phantom rights. Windows' own access check ignores them here too.
+            .Where(rule => (rule.PropagationFlags & PropagationFlags.InheritOnly) == 0)
             .Select(rule => new PathAccessMetadata(rule.IdentityReference.Value,
-                rule.AccessControlType == AccessControlType.Allow, rule.IsInherited, Map(rule.FileSystemRights))).ToArray();
+                rule.AccessControlType == AccessControlType.Allow, rule.IsInherited,
+                ServicePathRights.Map(rule.FileSystemRights, directory))).ToArray();
         var identityAfter = ReadStableIdentity(canonicalPath, directory);
         if (!string.Equals(identityBefore, identityAfter, StringComparison.Ordinal))
             throw new IOException("Path identity changed during metadata inspection.");
@@ -305,20 +348,6 @@ public sealed partial class WindowsPathMetadataSource : IPathMetadataSource
     public string ResolveTrustedInstallerSid() =>
         ((SecurityIdentifier)new NTAccount("NT SERVICE", "TrustedInstaller")
             .Translate(typeof(SecurityIdentifier))).Value;
-
-    private static DangerousPathAccess Map(FileSystemRights rights)
-    {
-        var result = DangerousPathAccess.None;
-        if ((rights & (FileSystemRights.WriteData | FileSystemRights.Modify | FileSystemRights.FullControl)) != 0) result |= DangerousPathAccess.WriteData;
-        if ((rights & FileSystemRights.AppendData) != 0) result |= DangerousPathAccess.AppendData;
-        if ((rights & FileSystemRights.CreateFiles) != 0) result |= DangerousPathAccess.CreateFiles;
-        if ((rights & FileSystemRights.CreateDirectories) != 0) result |= DangerousPathAccess.CreateDirectories;
-        if ((rights & FileSystemRights.Delete) != 0) result |= DangerousPathAccess.Delete;
-        if ((rights & FileSystemRights.DeleteSubdirectoriesAndFiles) != 0) result |= DangerousPathAccess.DeleteChildren;
-        if ((rights & FileSystemRights.ChangePermissions) != 0) result |= DangerousPathAccess.ChangePermissions;
-        if ((rights & FileSystemRights.TakeOwnership) != 0) result |= DangerousPathAccess.TakeOwnership;
-        return result;
-    }
 
     private static string ReadStableIdentity(string path, bool directory)
     {
