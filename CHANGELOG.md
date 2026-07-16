@@ -2,6 +2,33 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall: enforcement can be enabled again — the product can actually filter
+- WinSight could not block anything. `EnforcementCoordinator.EnableAsync` existed, but nothing
+  could reach it: the console verb `enforce-enable` was disabled by the LocalSystem hardening
+  (6d5d908), and the pipe's `IFirewallMutationAuthority` only ever exposed UpsertPolicy,
+  RemovePolicy and EmergencyDisable. The machine had a brake and no accelerator, so it was stuck
+  in audit-only permanently: policies were saved and reported, and never filtered. Verified on a
+  real VM — the dashboard offers only "Emergency disable".
+- This is the "separate, later, explicitly gated increment" the dispatcher documented. Enabling
+  enforcement now goes over the authenticated pipe as `FirewallCommand.EnableEnforcement`, which
+  keeps both invariants that were in tension:
+  - the hardening's invariant — only the SYSTEM service mutates WFP, after validating its trusted
+    storage. The console stays out of the WFP engine; re-enabling the console verb would have
+    reopened exactly the hole 6d5d908 closed.
+  - the original design's invariant — enabling is "not something the unprivileged dashboard can
+    trigger". It is a mutation, so it needs `MutateMachinePolicy`: an elevated administrator or
+    SYSTEM. An unprivileged dashboard holds only `ReadStatus` and is refused. Confirmed on a real
+    VM in both directions: non-elevated dashboard reads the state but is refused the mutation;
+    elevated is accepted.
+- Enforcement is refused outright when the engine cannot filter, rather than persisting a mode
+  that reports as armed while nothing is enforced. That case is now reported as its own outcome
+  ("this machine has no usable filtering engine") instead of collapsing into a generic rejection
+  a user might retry, expecting protection that could never arrive.
+- Dashboard: an "Enable enforcement" button sits next to the emergency disable — accelerator and
+  brake in one place — with a confirmation that states plainly that saved blocks take effect
+  immediately, and a distinct success message for the moment blocks start filtering. Localized
+  en/fr/es. Enabling remains reversible at any time by the existing emergency disable.
+
 ### Firewall service: the service can actually start (provision the whole chain it owns)
 - On a real VM the service failed to start (`sc start` reported 1053, empty event log) and
   `enforce-status` returned `[FW_ENFORCEMENT_STATUS_UNAVAILABLE]`: the storage trust guard refused

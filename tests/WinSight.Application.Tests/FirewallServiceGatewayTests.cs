@@ -99,6 +99,32 @@ public sealed class FirewallServiceGatewayTests
     }
 
     [Fact]
+    public async Task EnableEnforcementAsync_SendsEnableEnforcement()
+    {
+        var client = new CapturingClient(request =>
+            new FirewallCommandResponse(request.ProtocolVersion, request.RequestId, Success: true));
+        var gateway = new FirewallServiceGateway(client);
+
+        var result = await gateway.EnableEnforcementAsync();
+
+        Assert.Equal(FirewallMutationResult.Applied, result);
+        Assert.Equal(FirewallCommand.EnableEnforcement, client.LastRequest!.Command);
+    }
+
+    // A machine that cannot filter must not be reported as a retryable rejection: that would
+    // invite the operator to believe another attempt would protect them.
+    [Fact]
+    public async Task EnableEnforcementAsync_NotSupported_MapsToNotSupported()
+    {
+        var client = new CapturingClient(request =>
+            new FirewallCommandResponse(
+                request.ProtocolVersion, request.RequestId, Success: false, FirewallProtocolError.NotSupported));
+        var gateway = new FirewallServiceGateway(client);
+
+        Assert.Equal(FirewallMutationResult.NotSupported, await gateway.EnableEnforcementAsync());
+    }
+
+    [Fact]
     public async Task Mutation_Unauthorized_MapsToUnauthorized()
     {
         var client = new CapturingClient(request =>

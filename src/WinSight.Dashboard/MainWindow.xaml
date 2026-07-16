@@ -182,6 +182,10 @@
                             <Button x:Name="FirewallRemoveSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
                                     Content="{Binding [FirewallRemoveSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallRemoveSelectedButton_Click" />
+                            <Button x:Name="FirewallEnableEnforcementButton" Margin="0,4,10,4" Padding="12,5" MinWidth="150"
+                                    Background="#15803D" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                                    Content="{Binding [FirewallEnableEnforcement], Source={x:Static local:LocalizationManager.Instance}}"
+                                    Click="FirewallEnableEnforcementButton_Click" />
                             <Button x:Name="FirewallEmergencyButton" Margin="0,4,0,4" Padding="12,5" MinWidth="150"
                                     Background="#B91C1C" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
                                     Content="{Binding [FirewallEmergencyDisable], Source={x:Static local:LocalizationManager.Instance}}"

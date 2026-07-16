@@ -36,9 +36,20 @@ public static class FirewallControlPresenter
         FirewallMutationResult.Applied => "FirewallActionApplied",
         FirewallMutationResult.ServiceUnavailable => "FirewallActionUnavailable",
         FirewallMutationResult.Unauthorized => "FirewallActionUnauthorized",
+        FirewallMutationResult.NotSupported => "FirewallActionNotSupported",
         FirewallMutationResult.Rejected => "FirewallActionRejected",
         _ => "FirewallActionRejected",
     };
+
+    /// <summary>
+    /// The localization key for the outcome of arming the machine. Success is reported
+    /// distinctly from a saved policy: it is the moment stored blocks begin filtering real
+    /// traffic, which is the one state change a user must not have to infer.
+    /// </summary>
+    public static string EnableEnforcementMessageKey(FirewallMutationResult result) =>
+        result == FirewallMutationResult.Applied
+            ? "FirewallEnforcementEnabled"
+            : ResultMessageKey(result);
 
     /// <summary>
     /// Like <see cref="ResultMessageKey"/>, but a successfully saved BLOCK is reported as

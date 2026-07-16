@@ -77,6 +77,10 @@
   <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Enregistré. Ce blocage ne filtre le trafic qu'une fois l'enforcement du pare-feu activé (action élevée).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>Le service pare-feu n'est pas disponible. Installez-le et démarrez-le, puis réessayez.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>Vous n'êtes pas autorisé à modifier la politique du pare-feu sur cette machine.</value></data>
+  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activer l'application</value></data>
+  <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>Commencer à filtrer le trafic sortant maintenant ? Chaque blocage enregistré prend effet immédiatement, et les applications que vous avez bloquées perdent leur accès réseau. La désactivation d'urgence ramène la machine en audit seul à tout moment.</value></data>
+  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>L'application est activée. Les blocages enregistrés filtrent désormais le trafic sortant.</value></data>
+  <data name="FirewallActionNotSupported" xml:space="preserve"><value>Cette machine n'a pas de moteur de filtrage sortant utilisable : l'application ne pourrait rien filtrer. Rien n'a été modifié.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>Le service pare-feu a rejeté la modification.</value></data>
   <data name="BlockOutbound" xml:space="preserve"><value>Bloquer le trafic sortant</value></data>
   <data name="BlockOutboundTooltip" xml:space="preserve"><value>Bloquer le trafic réseau sortant de cette application via le pare-feu WinSight.</value></data>
