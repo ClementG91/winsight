@@ -8,47 +8,6 @@ using WinSight.NetMonitor;
 namespace WinSight.FirewallService;
 
 /// <summary>
-/// Resolves the process behind an outbound connection. Separated so the observer can be tested
-/// without ETW and without spawning processes.
-/// </summary>
-public interface IProcessImageResolver
-{
-    /// <summary>
-    /// The full executable path of <paramref name="processId"/>, or null when it cannot be
-    /// attributed — the process already exited, or it is protected and refuses the query.
-    /// </summary>
-    string? Resolve(int processId);
-}
-
-/// <summary>
-/// Resolves a process id to its executable, deliberately without a cache.
-/// </summary>
-/// <remarks>
-/// Caching by process id looks free and is not: Windows reuses process ids, so a cached entry
-/// eventually names a different program than the one that connected. Every policy here is keyed on
-/// the executable, so a stale hit would let the operator rule on, or be alarmed by, the wrong
-/// application. Paying for a fresh lookup per connection is the cheaper mistake.
-/// </remarks>
-public sealed class ProcessImageResolver : IProcessImageResolver
-{
-    public string? Resolve(int processId)
-    {
-        try
-        {
-            using var process = Process.GetProcessById(processId);
-            return process.MainModule?.FileName;
-        }
-        catch (Exception ex) when (ex is ArgumentException or Win32Exception
-                                     or NotSupportedException or InvalidOperationException)
-        {
-            // Exited between connecting and being asked about, or protected and refusing the
-            // query. Either way there is no honest attribution to make.
-            return null;
-        }
-    }
-}
-
-/// <summary>
 /// Watches outbound connections and records the applications the operator has never ruled on, so
 /// the dashboard can say "this just talked to the internet, allow or block it?".
 /// </summary>
@@ -58,13 +17,15 @@ public sealed class ProcessImageResolver : IProcessImageResolver
 /// decision governs the next one. The alternative — flipping WFP to default-block — needs explicit
 /// permits for DNS, DHCP and system services and takes the machine offline when it is wrong.
 ///
-/// It never crashes the service. The ETW session is privileged and can be refused or lost, and the
-/// pipe endpoint matters more than this feature: a failure is logged once and the observer stops,
-/// leaving the rest of the service running rather than taking it down.
+/// It never crashes the service. The trace session is privileged, and the kernel logger it needs is
+/// a single machine-wide session another tool may already hold; the pipe endpoint matters more than
+/// this feature, so a failure is logged once and the observer stands down, leaving the rest of the
+/// service running.
 ///
 /// Two connections it cannot see, stated plainly because a security tool that hides its blind spots
-/// is worse than one without the feature: a process that exits before it can be resolved, and, once
-/// the log is full, apps beyond the cap. Both are counted rather than dropped in silence.
+/// is worse than one without the feature: one made by a process that started before the session and
+/// never announced its command line, and, once the log is full, apps beyond the cap. Both are
+/// counted rather than dropped in silence.
 /// </remarks>
 public sealed partial class OutboundObserverService : BackgroundService
 {
@@ -72,7 +33,6 @@ public sealed partial class OutboundObserverService : BackgroundService
     private static readonly TimeSpan PolicyRefreshInterval = TimeSpan.FromSeconds(5);
 
     private readonly OutboundConnectionWatcher _watcher;
-    private readonly IProcessImageResolver _resolver;
     private readonly FirewallPolicyStore _store;
     private readonly PendingOutboundLog _log;
     private readonly ILogger<OutboundObserverService> _logger;
@@ -84,21 +44,19 @@ public sealed partial class OutboundObserverService : BackgroundService
 
     public OutboundObserverService(
         OutboundConnectionWatcher watcher,
-        IProcessImageResolver resolver,
         FirewallPolicyStore store,
         PendingOutboundLog log,
         ILogger<OutboundObserverService> logger,
         TimeProvider? time = null)
     {
         _watcher = watcher ?? throw new ArgumentNullException(nameof(watcher));
-        _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _log = log ?? throw new ArgumentNullException(nameof(log));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = time ?? TimeProvider.System;
     }
 
-    /// <summary>Connections that could not be attributed to an executable.</summary>
+    /// <summary>Connections that carried no identity a policy could be keyed on.</summary>
     public int UnattributedConnections => Volatile.Read(ref _unattributed);
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
@@ -137,12 +95,9 @@ public sealed partial class OutboundObserverService : BackgroundService
     {
         ArgumentNullException.ThrowIfNull(connection);
 
-        var path = _resolver.Resolve(connection.ProcessId);
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            Interlocked.Increment(ref _unattributed);
-            return;
-        }
+        // The connection arrives already attributed: the watcher captured the executable when the
+        // kernel announced the process, while it was still alive.
+        var path = connection.ExecutablePath;
 
         // An app the operator already ruled on is not news, and letting it into the log would let
         // routine traffic fill the cap and push genuinely unknown apps out.

@@ -145,16 +145,47 @@ public static class DashboardFindingPresenter
         return new FindingPresentation(text.Format("FirewallRuleTitle", direction, action, name), string.Join("  ", details));
     }
 
-    private static FindingPresentation OutboundFirewall(ReportItem item, LocalizationManager text)
-    {
-        if (Field(item, "kind") == "policy")
+    /// <summary>
+    /// Renders one row of the outbound-firewall report.
+    /// </summary>
+    /// <remarks>
+    /// The dispatch is explicit on kind, and an unrecognised kind falls back to the report's own
+    /// values rather than to the status branch. An earlier version tested kind only for "policy"
+    /// and let everything else fall through: when pending rows arrived they had no "available"
+    /// field, read as unavailable, and every one of them rendered as "the service is not
+    /// installed" while the service was running. A row that is not a status row must never be able
+    /// to speak as one — that is not a cosmetic slip, it is the UI stating the opposite of the
+    /// truth about whether the machine is protected.
+    /// </remarks>
+    private static FindingPresentation OutboundFirewall(ReportItem item, LocalizationManager text) =>
+        Field(item, "kind") switch
         {
-            var action = Field(item, "action");
-            return new FindingPresentation(
-                Field(item, "path") ?? item.Title,
-                text.GetOrFallback($"OutboundAction{action}", action ?? item.Detail));
-        }
+            "policy" => OutboundFirewallPolicy(item, text),
+            "pending" => OutboundFirewallPending(item, text),
+            "status" => OutboundFirewallStatus(item, text),
+            _ => new FindingPresentation(item.Title, item.Detail),
+        };
 
+    private static FindingPresentation OutboundFirewallPolicy(ReportItem item, LocalizationManager text)
+    {
+        var action = Field(item, "action");
+        return new FindingPresentation(
+            Field(item, "path") ?? item.Title,
+            text.GetOrFallback($"OutboundAction{action}", action ?? item.Detail));
+    }
+
+    /// <summary>An app that reached the network with nobody having ruled on it: the row that wants a human.</summary>
+    private static FindingPresentation OutboundFirewallPending(ReportItem item, LocalizationManager text)
+    {
+        var remote = Field(item, "remote") ?? text["UnknownValue"];
+        var observations = Field(item, "observations") ?? "1";
+        return new FindingPresentation(
+            Field(item, "path") ?? item.Title,
+            text.Format("OutboundFirewallPending", remote, observations));
+    }
+
+    private static FindingPresentation OutboundFirewallStatus(ReportItem item, LocalizationManager text)
+    {
         if (!BoolField(item, "available"))
         {
             return new FindingPresentation(text["OutboundFirewallServiceTitle"], text["OutboundFirewallUnavailable"]);

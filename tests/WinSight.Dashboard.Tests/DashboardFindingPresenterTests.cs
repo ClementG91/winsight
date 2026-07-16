@@ -121,6 +121,58 @@ public sealed class DashboardFindingPresenterTests
         });
     }
 
+    // Regression, found on a real machine: a pending row has no "available" field, so an earlier
+    // version fell through to the status branch and rendered every one of them as "the service is
+    // not installed" while the service was running. The UI stated the opposite of the truth about
+    // whether the machine was protected.
+    [Theory]
+    [InlineData("en")]
+    [InlineData("fr")]
+    [InlineData("es")]
+    public void OutboundFirewallPresentation_PendingRow_NeverSpeaksAsAStatusRow(string culture)
+    {
+        WithCulture(culture, text =>
+        {
+            var unavailable = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new() { ["kind"] = "status", ["available"] = "False" }),
+                text).Detail;
+
+            var pending = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Notable, new()
+                {
+                    ["kind"] = "pending",
+                    ["path"] = @"C:\jamaisvu\appinconnue.exe",
+                    ["remote"] = "93.184.216.34:443",
+                    ["observations"] = "3",
+                }),
+                text);
+
+            Assert.Equal(@"C:\jamaisvu\appinconnue.exe", pending.Title);
+            Assert.NotEqual(unavailable, pending.Detail);
+            Assert.Contains("93.184.216.34:443", pending.Detail, StringComparison.Ordinal);
+            Assert.Contains("3", pending.Detail, StringComparison.Ordinal);
+        });
+    }
+
+    // A kind this presenter does not know must fall back to the report's own values. Speaking as a
+    // status row is how the previous defect turned a new row type into a false claim.
+    [Fact]
+    public void OutboundFirewallPresentation_UnknownKind_FallsBackToTheReportsOwnValues()
+    {
+        WithCulture("en", text =>
+        {
+            var result = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new() { ["kind"] = "something-new" }),
+                text);
+
+            Assert.Equal("raw-title", result.Title);
+            Assert.Equal("raw-detail", result.Detail);
+        });
+    }
+
     [Theory]
     [InlineData("en")]
     [InlineData("fr")]
