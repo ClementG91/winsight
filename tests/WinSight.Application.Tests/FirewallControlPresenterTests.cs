@@ -27,6 +27,38 @@ public sealed class FirewallControlPresenterTests
         Assert.Null(FirewallControlPresenter.PolicyPath(Item(("kind", "policy"))));
     }
 
+    // Allow and block apply to a stored policy and to an app still awaiting a decision.
+    [Theory]
+    [InlineData("policy")]
+    [InlineData("pending")]
+    public void ActionablePath_CoversEveryRowARulingApplies(string kind) =>
+        Assert.Equal(
+            @"C:\a.exe",
+            FirewallControlPresenter.ActionablePath(Item(("kind", kind), ("path", @"C:\a.exe"))));
+
+    [Fact]
+    public void ActionablePath_IgnoresARowNoRulingApplies() =>
+        Assert.Null(FirewallControlPresenter.ActionablePath(Item(("kind", "status"), ("path", @"C:\a.exe"))));
+
+    // Removal is not the same question: there is nothing to remove for an app that has no policy
+    // yet, and offering it would promise an action that does nothing.
+    [Fact]
+    public void PolicyPath_DoesNotCoverAnAppThatHasNoPolicyYet()
+    {
+        var pending = Item(("kind", "pending"), ("path", @"C:\a.exe"));
+
+        Assert.Null(FirewallControlPresenter.PolicyPath(pending));
+        Assert.NotNull(FirewallControlPresenter.ActionablePath(pending));
+    }
+
+    [Fact]
+    public void IsPendingRow_RecognisesOnlyAPendingRow()
+    {
+        Assert.True(FirewallControlPresenter.IsPendingRow(Item(("kind", "pending"))));
+        Assert.False(FirewallControlPresenter.IsPendingRow(Item(("kind", "policy"))));
+        Assert.False(FirewallControlPresenter.IsPendingRow(Item(("kind", "status"))));
+    }
+
     [Theory]
     [InlineData(FirewallMutationResult.Applied, "FirewallActionApplied")]
     [InlineData(FirewallMutationResult.ServiceUnavailable, "FirewallActionUnavailable")]

@@ -316,7 +316,7 @@ public partial class MainWindow : Window, IDisposable
             CopyButton.IsEnabled = false;
             OpenLocationButton.IsEnabled = false;
             BlockOutboundButton.IsEnabled = false;
-            SetFirewallRowButtonsEnabled(false);
+            SetFirewallRowButtonsEnabled(canRule: false, canRemove: false);
             SelectedFindingText.Text = string.Empty;
             return;
         }
@@ -324,7 +324,9 @@ public partial class MainWindow : Window, IDisposable
         CopyButton.IsEnabled = true;
         OpenLocationButton.IsEnabled = FindingActions.ExistingAbsolutePath(finding.Item) is not null;
         BlockOutboundButton.IsEnabled = finding.BlockablePath is not null;
-        SetFirewallRowButtonsEnabled(FirewallControlPresenter.IsPolicyRow(finding.Item));
+        SetFirewallRowButtonsEnabled(
+            canRule: FirewallControlPresenter.ActionablePath(finding.Item) is not null,
+            canRemove: FirewallControlPresenter.IsPolicyRow(finding.Item));
         SelectedFindingText.Text = Text.Format(
             "FindingSelectionFormat",
             finding.SeverityLabel,
@@ -332,11 +334,19 @@ public partial class MainWindow : Window, IDisposable
             finding.Detail);
     }
 
-    private void SetFirewallRowButtonsEnabled(bool enabled)
+    /// <param name="canRule">
+    /// Whether an allow or block applies: true for a stored policy and for an app still awaiting a
+    /// decision.
+    /// </param>
+    /// <param name="canRemove">
+    /// Whether removal applies. Only a stored policy can be removed — offering it for an app that
+    /// has no policy yet would promise an action that does nothing.
+    /// </param>
+    private void SetFirewallRowButtonsEnabled(bool canRule, bool canRemove)
     {
-        FirewallAllowSelectedButton.IsEnabled = enabled;
-        FirewallBlockSelectedButton.IsEnabled = enabled;
-        FirewallRemoveSelectedButton.IsEnabled = enabled;
+        FirewallAllowSelectedButton.IsEnabled = canRule;
+        FirewallBlockSelectedButton.IsEnabled = canRule;
+        FirewallRemoveSelectedButton.IsEnabled = canRemove;
     }
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
@@ -486,7 +496,9 @@ public partial class MainWindow : Window, IDisposable
 
     private async Task SetSelectedFirewallPolicyAsync(OutboundAction action)
     {
-        if (SelectedFirewallPath() is not { } path)
+        // Ruling covers a stored policy and an app still awaiting a decision; removal, below, only
+        // covers a stored policy.
+        if (SelectedActionableFirewallPath() is not { } path)
         {
             return;
         }
@@ -495,6 +507,11 @@ public partial class MainWindow : Window, IDisposable
             token => _firewallGateway.SetPolicyAsync(new AppFirewallPolicy(path, action), token),
             isBlock: action == OutboundAction.Block);
     }
+
+    private string? SelectedActionableFirewallPath() =>
+        ResultsGrid.SelectedItem is FindingView finding
+            ? FirewallControlPresenter.ActionablePath(finding.Item)
+            : null;
 
     private string? SelectedFirewallPath() =>
         ResultsGrid.SelectedItem is FindingView finding
