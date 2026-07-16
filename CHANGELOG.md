@@ -2,6 +2,28 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall service: the service can actually start (provision the whole chain it owns)
+- On a real VM the service failed to start (`sc start` reported 1053, empty event log) and
+  `enforce-status` returned `[FW_ENFORCEMENT_STATUS_UNAVAILABLE]`: the storage trust guard refused
+  the very directory the service had just provisioned, so startup returned before signalling the
+  SCM. Two causes, both found against real Windows ACLs:
+  - Only the leaf (`ProgramData\WinSight\firewall`) was hardened. The intermediate
+    `ProgramData\WinSight`, which `Directory.CreateDirectory` creates implicitly, kept ProgramData's
+    inherited ACL (Users get `Write`, and `CREATOR OWNER` materialises into a `FullControl` entry
+    for whoever created it) and stayed owned by the creating user rather than Administrators. The
+    trust inspector was right to refuse it: that owner could delete and recreate the hardened leaf
+    with its own ACL and plant a policy the SYSTEM service reads. Provisioning now creates the
+    chain, then hardens and claims ownership of every component below ProgramData, innermost first
+    (hardening a parent first locks the caller out of creating its child). ProgramData itself and
+    the drive root belong to Windows and are never touched. Existing installs self-repair.
+  - `C:\ProgramData` grants Users `Write`, which on a directory means `CreateFiles`, so the chain
+    was refused whatever we did below it. Adding a new child to a directory cannot modify, replace,
+    or delete the already-existing, independently protected next link — that needs
+    `Delete`/`DeleteChildren`/`ChangePermissions`/`TakeOwnership`, which stay dangerous on every
+    component. Add-child rights are now benign on ancestors and stay dangerous on the leaf and on
+    the directory directly holding it, where a planted sibling (a side-loadable DLL, or the policy
+    file before it exists) actually lands. Callers that do not specify stay fail-closed.
+
 ### Firewall service: fix path-trust so a legitimate install is actually trusted
 - The LocalSystem path-trust inspector (ServicePathTrust) rejected every real install location,
   including `C:\Program Files\...`, so `install` would always print `[FW_INSTALL_FAILED]`. Three

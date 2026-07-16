@@ -111,6 +111,54 @@ public sealed class ServicePathTrustPolicyTests
         Assert.Equal(expected, _policy.Evaluate(component, isLeaf: true, isProductPath: false).Code);
     }
 
+    // Windows grants Users "Write" on ProgramData and "Create folders" on C:\. Adding a new child
+    // there cannot touch the already-existing, independently protected next link of the chain, so
+    // an ancestor that only grants add-child rights stays trusted; otherwise no path on a stock
+    // machine would ever be trustworthy.
+    [Theory]
+    [InlineData(DangerousPathAccess.CreateFiles)]
+    [InlineData(DangerousPathAccess.CreateDirectories)]
+    [InlineData(DangerousPathAccess.CreateFiles | DangerousPathAccess.CreateDirectories)]
+    public void Evaluate_AddChildRightsOnAnAncestor_AreBenign(DangerousPathAccess access)
+    {
+        var component = Component(rules: [new(UserSid, true, true, access)]);
+        Assert.True(_policy.Evaluate(component, isLeaf: false, isProductPath: false, isLeafParent: false).IsTrusted);
+    }
+
+    // But the directory directly holding the leaf is where a planted sibling lands: a side-loadable
+    // DLL next to the service exe, or the policy file itself before it exists.
+    [Theory]
+    [InlineData(DangerousPathAccess.CreateFiles)]
+    [InlineData(DangerousPathAccess.CreateDirectories)]
+    public void Evaluate_AddChildRightsOnTheLeafParent_AreDangerous(DangerousPathAccess access)
+    {
+        var component = Component(rules: [new(UserSid, true, true, access)]);
+        Assert.Equal(PathTrustCode.WritableByUnprivilegedPrincipal,
+            _policy.Evaluate(component, isLeaf: false, isProductPath: false, isLeafParent: true).Code);
+    }
+
+    // Tampering with the existing next link needs these, so they stay fatal wherever they appear.
+    [Theory]
+    [InlineData(DangerousPathAccess.Delete)]
+    [InlineData(DangerousPathAccess.DeleteChildren)]
+    [InlineData(DangerousPathAccess.ChangePermissions)]
+    [InlineData(DangerousPathAccess.TakeOwnership)]
+    public void Evaluate_TamperRightsOnAnAncestor_StayDangerous(DangerousPathAccess access)
+    {
+        var component = Component(rules: [new(UserSid, true, true, access)]);
+        Assert.Equal(PathTrustCode.WritableByUnprivilegedPrincipal,
+            _policy.Evaluate(component, isLeaf: false, isProductPath: false, isLeafParent: false).Code);
+    }
+
+    // A caller that does not say stays fail-closed.
+    [Fact]
+    public void Evaluate_IsLeafParentDefaultsToTheStrictReading()
+    {
+        var component = Component(rules: [new(UserSid, true, true, DangerousPathAccess.CreateFiles)]);
+        Assert.Equal(PathTrustCode.WritableByUnprivilegedPrincipal,
+            _policy.Evaluate(component, isLeaf: false, isProductPath: false).Code);
+    }
+
     [Theory]
     [InlineData(SystemSid)]
     [InlineData(AdministratorsSid)]

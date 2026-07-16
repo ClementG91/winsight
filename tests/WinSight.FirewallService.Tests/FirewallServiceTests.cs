@@ -270,6 +270,67 @@ public sealed class FirewallServicePathsTests : IDisposable
         Assert.True(security.AreAccessRulesProtected);
     }
 
+    // A directory outside ProgramData is not ours to re-own: claiming it would also demand
+    // elevation the caller may not have. It still receives the hardened ACL.
+    [Fact]
+    public void CreateHardenedDirectorySecurity_WithoutOwnershipClaim_LeavesOwnerUnset() =>
+        Assert.Null(FirewallServicePaths.CreateHardenedDirectorySecurity()
+            .GetOwner(typeof(SecurityIdentifier)));
+
+    // Regression: an elevated admin console left the directory owned by the individual user, which
+    // the path-trust inspector refuses, so the service could not start (sc start reported 1053).
+    [Fact]
+    public void CreateHardenedDirectorySecurity_WithOwnershipClaim_OwnerIsAdministrators() =>
+        Assert.Equal(
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            FirewallServicePaths.CreateHardenedDirectorySecurity(claimOwnership: true)
+                .GetOwner(typeof(SecurityIdentifier)));
+
+    // Regression: only the leaf used to be provisioned, so the intermediate directory that
+    // CreateDirectory makes implicitly (ProgramData\WinSight) kept its parent's inherited,
+    // user-writable ACL and stayed owned by whoever created it. The path-trust inspector rightly
+    // refused the whole chain, and the service could not start (sc start reported 1053).
+    [Fact]
+    public void ProvisionedComponents_CoversEveryComponentBelowTheRoot_OutermostFirst() =>
+        Assert.Equal(
+            [Path.Combine(_directory, "WinSight"), Path.Combine(_directory, "WinSight", "firewall")],
+            FirewallServicePaths.ProvisionedComponents(
+                Path.Combine(_directory, "WinSight", "firewall"), _directory));
+
+    // The root belongs to Windows (ProgramData in production): re-ACLing it, or walking past it up
+    // to the drive root, would be catastrophic.
+    [Fact]
+    public void ProvisionedComponents_NeverIncludesTheRootOrAnythingAboveIt()
+    {
+        var components = FirewallServicePaths.ProvisionedComponents(
+            Path.Combine(_directory, "WinSight", "firewall"), _directory);
+
+        Assert.DoesNotContain(Path.TrimEndingDirectorySeparator(_directory), components);
+        Assert.All(components, component =>
+            Assert.StartsWith(_directory + Path.DirectorySeparatorChar, component, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // A directory outside the root is not ours to walk up from: provisioning stops at it.
+    [Fact]
+    public void ProvisionedComponents_OutsideTheRoot_IsThatDirectoryAlone() =>
+        Assert.Equal(
+            [Path.TrimEndingDirectorySeparator(_directory)],
+            FirewallServicePaths.ProvisionedComponents(
+                _directory, Path.Combine(Path.GetTempPath(), $"unrelated-{Guid.NewGuid():N}")));
+
+    [Fact]
+    public void ProvisionedComponents_DefaultPolicyDirectory_IncludesTheProductRootFolder()
+    {
+        var programData = Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData);
+
+        var components = FirewallServicePaths.ProvisionedComponents(
+            FirewallServicePaths.DefaultDirectory, programData);
+
+        Assert.Equal(
+            [Path.Combine(programData, "WinSight"), Path.Combine(programData, "WinSight", "firewall")],
+            components);
+    }
+
     [Fact]
     public void DefaultPolicyFile_IsUnderProgramData()
     {
