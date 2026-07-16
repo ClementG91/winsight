@@ -16,3 +16,8 @@ winsight-*.json
 # LLM-as-a-judge eval runs (prompts, model transcripts and scores are local only)
 evals/out/
 evals/results/
+
+# Local Codex autonomous engineering harness
+/.agent/
+/.codex/
+/AGENTS.md
