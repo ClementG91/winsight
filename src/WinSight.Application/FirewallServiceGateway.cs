@@ -9,14 +9,23 @@ namespace WinSight.Application;
 /// "unavailable, audit-only" instead of surfacing an error, so the dashboard stays
 /// usable and never implies the machine is being filtered when it is not.
 /// </summary>
+/// <param name="Pending">
+/// Applications seen reaching the network that have never been ruled on, newest first.
+/// </param>
+/// <param name="UnrecordedApps">
+/// How many further apps the service could not record. Surfaced rather than dropped so the list is
+/// never presented as complete when it is not.
+/// </param>
 public sealed record FirewallServiceView(
     bool ServiceAvailable,
     OutboundFirewallMode Mode,
     bool EnforcementEnabled,
-    IReadOnlyList<AppFirewallPolicy> Policies)
+    IReadOnlyList<AppFirewallPolicy> Policies,
+    IReadOnlyList<PendingOutboundApp> Pending,
+    int UnrecordedApps = 0)
 {
     public static FirewallServiceView Unavailable { get; } =
-        new(false, OutboundFirewallMode.AuditOnly, EnforcementEnabled: false, []);
+        new(false, OutboundFirewallMode.AuditOnly, EnforcementEnabled: false, [], []);
 }
 
 /// <summary>Outcome of a firewall policy mutation requested from the dashboard side.</summary>
@@ -80,11 +89,14 @@ public sealed class FirewallServiceGateway
             }
 
             var policies = await ListAllAsync(cancellationToken).ConfigureAwait(false);
+            var pending = await ListAllPendingAsync(cancellationToken).ConfigureAwait(false);
             return new FirewallServiceView(
                 ServiceAvailable: true,
                 status.Status.Mode,
                 status.Status.EnforcementEnabled,
-                policies);
+                policies,
+                pending,
+                status.Status.UnrecordedApps);
         }
         catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
         {
@@ -155,6 +167,34 @@ public sealed class FirewallServiceGateway
         {
             return FirewallMutationResult.ServiceUnavailable;
         }
+    }
+
+    private async Task<IReadOnlyList<PendingOutboundApp>> ListAllPendingAsync(CancellationToken cancellationToken)
+    {
+        var all = new List<PendingOutboundApp>();
+        var offset = 0;
+
+        // Bounded for the same reason as the policy list: a misbehaving service that never
+        // advances the offset must not spin the dashboard forever.
+        const int maxPages = (PendingOutboundLog.MaxPendingApps / FirewallProtocolCodec.MaxPoliciesPerMessage) + 4;
+        for (var page = 0; page < maxPages; page++)
+        {
+            var response = await SendAsync(
+                Request(FirewallCommand.ListPending, offset: offset, limit: FirewallProtocolCodec.MaxPoliciesPerMessage),
+                cancellationToken).ConfigureAwait(false);
+            if (!response.Success || response.Pending is null)
+            {
+                break;
+            }
+
+            all.AddRange(response.Pending);
+            if (response.NextOffset is not { } next || next <= offset)
+            {
+                break;
+            }
+            offset = next;
+        }
+        return all;
     }
 
     private async Task<IReadOnlyList<AppFirewallPolicy>> ListAllAsync(CancellationToken cancellationToken)

@@ -260,6 +260,103 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         Assert.False(authority.EnableAttempted);
     }
 
+    // Observing is not mutating: an unprivileged dashboard must be able to see what reached the
+    // network, which is the whole point of telling the operator about it.
+    [Fact]
+    public async Task DispatchAsync_ListPending_IsAvailableToAReadOnlyCaller()
+    {
+        var pending = new PendingOutboundLog();
+        pending.Observe(@"C:\apps\unknown.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(PolicyPath), new RecordingAuthority(), pending);
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.ListPending, offset: 0, limit: 128), FirewallCallerCapability.ReadStatus);
+
+        Assert.True(response.Success);
+        var app = Assert.Single(response.Pending!);
+        Assert.Equal(@"C:\apps\unknown.exe", app.ExecutablePath);
+    }
+
+    // An app the operator already ruled on must never be offered back as a fresh decision.
+    [Fact]
+    public async Task DispatchAsync_ListPending_HidesAnAppThatAlreadyHasAPolicy()
+    {
+        var store = new FirewallPolicyStore(PolicyPath);
+        await store.SaveAsync(OutboundFirewallConfiguration.Empty with
+        {
+            Policies = [new AppFirewallPolicy(@"C:\apps\ruled.exe", OutboundAction.Allow)],
+        });
+        var pending = new PendingOutboundLog();
+        pending.Observe(@"C:\apps\ruled.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        pending.Observe(@"C:\apps\unknown.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        var dispatcher = new FirewallRequestDispatcher(store, new RecordingAuthority(), pending);
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.ListPending, offset: 0, limit: 128), FirewallCallerCapability.ReadStatus);
+
+        var app = Assert.Single(response.Pending!);
+        Assert.Equal(@"C:\apps\unknown.exe", app.ExecutablePath);
+    }
+
+    // Deciding must take the app off the list at once, not leave it there until the observer's
+    // snapshot goes stale and offers the operator a decision they just took.
+    [Fact]
+    public async Task DispatchAsync_UpsertPolicy_StopsTheAppFromBeingPending()
+    {
+        var pending = new PendingOutboundLog();
+        pending.Observe(@"C:\apps\a.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(PolicyPath), new RecordingAuthority(), pending);
+
+        await dispatcher.DispatchAsync(Request(FirewallCommand.UpsertPolicy,
+            policy: new AppFirewallPolicy(@"c:\APPS\A.EXE", OutboundAction.Block)),
+            FirewallCallerCapability.MutateMachinePolicy);
+
+        Assert.Empty(pending.Snapshot());
+    }
+
+    [Fact]
+    public async Task DispatchAsync_ListPending_PagesLikeThePolicyList()
+    {
+        var pending = new PendingOutboundLog();
+        var start = DateTimeOffset.UtcNow;
+        for (var i = 0; i < 5; i++)
+        {
+            pending.Observe($@"C:\apps\a{i}.exe", "1.2.3.4:443", start.AddSeconds(i));
+        }
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(PolicyPath), new RecordingAuthority(), pending);
+
+        var first = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.ListPending, offset: 0, limit: 2), FirewallCallerCapability.ReadStatus);
+        Assert.Equal(2, first.Pending!.Length);
+        Assert.Equal(2, first.NextOffset);
+
+        var last = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.ListPending, offset: 4, limit: 2), FirewallCallerCapability.ReadStatus);
+        Assert.Single(last.Pending!);
+        Assert.Null(last.NextOffset);
+    }
+
+    // The blind spot has to stay visible, or a truncated list reads as a complete one.
+    [Fact]
+    public async Task DispatchAsync_GetStatus_ReportsWhatTheObserverCouldNotRecord()
+    {
+        var pending = new PendingOutboundLog();
+        for (var i = 0; i < PendingOutboundLog.MaxPendingApps + 3; i++)
+        {
+            pending.Observe($@"C:\apps\a{i}.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        }
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(PolicyPath), new RecordingAuthority(), pending);
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.GetStatus), FirewallCallerCapability.ReadStatus);
+
+        Assert.Equal(3, response.Status!.UnrecordedApps);
+    }
+
     [Fact]
     public async Task DispatchAsync_EnableEnforcement_ReportsTheArmedStatusBack()
     {

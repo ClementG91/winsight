@@ -12,5 +12,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Firewall\WinSight.Firewall.csproj" />
+    <!-- The ETW outbound watcher lives with the other live network watchers. -->
+    <ProjectReference Include="..\WinSight.NetMonitor\WinSight.NetMonitor.csproj" />
   </ItemGroup>
 </Project>

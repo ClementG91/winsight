@@ -14,6 +14,7 @@ public enum FirewallCommand
     RemovePolicy = 4,
     EmergencyDisable = 5,
     EnableEnforcement = 6,
+    ListPending = 7,
 }
 
 /// <summary>Stable machine-readable service errors; no exception detail crosses IPC.</summary>
@@ -36,10 +37,16 @@ public sealed record FirewallCommandRequest(
     int? Offset = null,
     int? Limit = null);
 
+/// <param name="UnrecordedApps">
+/// Applications seen reaching the network that could not be recorded because the pending log was
+/// full. Carried so a caller can say "and more were not recorded" rather than present a truncated
+/// list as complete: a tool that hides its own blind spot is worse than one without the feature.
+/// </param>
 public sealed record FirewallServiceStatus(
     OutboundFirewallMode Mode,
     bool EngineSupported,
-    bool EnforcementEnabled);
+    bool EnforcementEnabled,
+    int UnrecordedApps = 0);
 
 public sealed record FirewallCommandResponse(
     int ProtocolVersion,
@@ -48,7 +55,8 @@ public sealed record FirewallCommandResponse(
     FirewallProtocolError Error = FirewallProtocolError.None,
     FirewallServiceStatus? Status = null,
     AppFirewallPolicy[]? Policies = null,
-    int? NextOffset = null);
+    int? NextOffset = null,
+    PendingOutboundApp[]? Pending = null);
 
 /// <summary>An invalid, unsupported or over-sized local protocol frame.</summary>
 public sealed class FirewallProtocolException : IOException
@@ -231,12 +239,13 @@ public static class FirewallProtocolCodec
                 }
                 break;
             case FirewallCommand.ListPolicies:
+            case FirewallCommand.ListPending:
                 if (HasPayload(request)
                     || request.Offset is not >= 0
                     || request.Limit is not > 0 or > MaxPoliciesPerMessage)
                 {
                     throw InvalidFrame(
-                        $"ListPolicies requires an offset and a limit up to {MaxPoliciesPerMessage}.");
+                        $"A list command requires an offset and a limit up to {MaxPoliciesPerMessage}.");
                 }
                 break;
             case FirewallCommand.UpsertPolicy:
@@ -268,22 +277,31 @@ public static class FirewallProtocolCodec
             || (!response.Success
                 && (response.Status is not null
                     || response.Policies is not null
-                    || response.NextOffset is not null)))
+                    || response.NextOffset is not null
+                    || response.Pending is not null)))
         {
             throw InvalidFrame("Protocol response status is inconsistent.");
         }
         if (response.Status is { } status
             && (!Enum.IsDefined(status.Mode)
                 || (status.Mode == OutboundFirewallMode.AuditOnly && status.EnforcementEnabled)
-                || (status.EnforcementEnabled && !status.EngineSupported)))
+                || (status.EnforcementEnabled && !status.EngineSupported)
+                || status.UnrecordedApps < 0))
         {
             throw InvalidFrame("Protocol service status is inconsistent.");
         }
-        if (response.Policies is { Length: > MaxPoliciesPerMessage })
+        if (response.Policies is { Length: > MaxPoliciesPerMessage }
+            || response.Pending is { Length: > MaxPoliciesPerMessage })
         {
-            throw InvalidFrame("Protocol response contains too many policies.");
+            throw InvalidFrame("Protocol response contains too many entries.");
         }
-        if (response.NextOffset is < 0 || (response.NextOffset is not null && response.Policies is null))
+        // A page can carry policies or pending apps, never both: one offset cannot page two lists.
+        if (response.Policies is not null && response.Pending is not null)
+        {
+            throw InvalidFrame("Protocol response mixes two paged lists.");
+        }
+        if (response.NextOffset is < 0
+            || (response.NextOffset is not null && response.Policies is null && response.Pending is null))
         {
             throw InvalidFrame("Protocol response pagination is inconsistent.");
         }
@@ -302,6 +320,37 @@ public static class FirewallProtocolCodec
                 throw InvalidFrame("Protocol response policy paths exceed the message budget.");
             }
         }
+
+        var pendingPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pendingPathBytes = 0;
+        foreach (var app in response.Pending ?? [])
+        {
+            var path = app is null ? null : ValidatePendingApp(app);
+            if (path is null || !pendingPaths.Add(path))
+            {
+                throw InvalidFrame("Protocol response contains an invalid or duplicate pending app.");
+            }
+            pendingPathBytes += Encoding.UTF8.GetByteCount(path);
+            if (pendingPathBytes > MaxPathUtf8BytesPerMessage)
+            {
+                throw InvalidFrame("Protocol response pending paths exceed the message budget.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// A pending app is evidence an operator acts on, so it is held to the same identity rule as a
+    /// policy: the path must canonicalize, because that is what any decision will be keyed on.
+    /// </summary>
+    private static string ValidatePendingApp(PendingOutboundApp app)
+    {
+        if (string.IsNullOrWhiteSpace(app.LastRemote)
+            || app.Observations <= 0
+            || app.LastSeenUtc < app.FirstSeenUtc)
+        {
+            throw InvalidFrame("Protocol pending app is inconsistent.");
+        }
+        return ValidatePath(app.ExecutablePath);
     }
 
     private static void ValidateEnvelope(int version, Guid requestId)

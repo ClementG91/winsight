@@ -18,14 +18,34 @@ public static class FirewallControlPresenter
         return Field(item, "kind") == "policy";
     }
 
+    /// <summary>True when the row is an app seen reaching the network that nobody has ruled on.</summary>
+    public static bool IsPendingRow(ReportItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return Field(item, "kind") == "pending";
+    }
+
     /// <summary>The executable path of a policy row, or null when the item is not a policy.</summary>
     public static string? PolicyPath(ReportItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
-        if (!IsPolicyRow(item))
-        {
-            return null;
-        }
+        return IsPolicyRow(item) ? PathOf(item) : null;
+    }
+
+    /// <summary>
+    /// The executable an allow or block would apply to: a stored policy, or an app still awaiting a
+    /// decision. Distinct from <see cref="PolicyPath"/>, which gates removal — there is nothing to
+    /// remove for an app that has no policy yet, so offering it would promise an action that does
+    /// nothing.
+    /// </summary>
+    public static string? ActionablePath(ReportItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        return IsPolicyRow(item) || IsPendingRow(item) ? PathOf(item) : null;
+    }
+
+    private static string? PathOf(ReportItem item)
+    {
         var path = Field(item, "path");
         return string.IsNullOrWhiteSpace(path) ? null : path;
     }

@@ -22,11 +22,21 @@ public sealed class FirewallRequestDispatcher
 {
     private readonly FirewallPolicyStore _store;
     private readonly IFirewallMutationAuthority _authority;
+    private readonly PendingOutboundLog _pending;
 
-    public FirewallRequestDispatcher(FirewallPolicyStore store, IFirewallMutationAuthority authority)
+    /// <param name="pending">
+    /// The apps observed reaching the network with no policy. Optional because a host that does
+    /// not observe is a valid configuration; an empty log then reports honestly that nothing was
+    /// seen, rather than the command failing.
+    /// </param>
+    public FirewallRequestDispatcher(
+        FirewallPolicyStore store,
+        IFirewallMutationAuthority authority,
+        PendingOutboundLog? pending = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
+        _pending = pending ?? new PendingOutboundLog();
     }
 
     public async Task<FirewallCommandResponse> DispatchAsync(
@@ -55,6 +65,7 @@ public sealed class FirewallRequestDispatcher
             {
                 FirewallCommand.GetStatus => await GetStatusAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.ListPolicies => await ListPoliciesAsync(request, cancellationToken).ConfigureAwait(false),
+                FirewallCommand.ListPending => await ListPendingAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.UpsertPolicy => await UpsertPolicyAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.RemovePolicy => await RemovePolicyAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.EnableEnforcement => await EnableEnforcementAsync(request, cancellationToken).ConfigureAwait(false),
@@ -113,10 +124,48 @@ public sealed class FirewallRequestDispatcher
         return Success(request) with { Policies = page, NextOffset = nextOffset };
     }
 
+    /// <summary>
+    /// The apps seen reaching the network that the operator has never ruled on. Paged like the
+    /// policy list, and for the same reason: a page of long paths would otherwise overrun the
+    /// message budget the codec enforces.
+    /// </summary>
+    private async Task<FirewallCommandResponse> ListPendingAsync(
+        FirewallCommandRequest request, CancellationToken cancellationToken)
+    {
+        var offset = request.Offset!.Value;
+        var limit = request.Limit!.Value;
+
+        var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
+        if (!load.StorageTrusted)
+        {
+            return Failure(request, FirewallProtocolError.NotSupported);
+        }
+
+        // The observer already filters on a snapshot a few seconds old, so an app ruled on just
+        // now could still be in the log. Filtering here too means the operator never sees a
+        // decision they have already taken offered back to them.
+        var ruled = load.Configuration.Policies
+            .Select(policy => policy.ExecutablePath)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ordered = _pending.Snapshot()
+            .Where(app => !ruled.Contains(app.ExecutablePath))
+            .ToList();
+
+        var page = ordered.Skip(offset).Take(limit).ToArray();
+        var consumed = offset + page.Length;
+        int? nextOffset = consumed < ordered.Count ? consumed : null;
+
+        return Success(request) with { Pending = page, NextOffset = nextOffset };
+    }
+
     private async Task<FirewallCommandResponse> UpsertPolicyAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
-        await _authority.UpsertPolicyAsync(NormalisePolicy(request.Policy!), cancellationToken).ConfigureAwait(false);
+        var policy = NormalisePolicy(request.Policy!);
+        await _authority.UpsertPolicyAsync(policy, cancellationToken).ConfigureAwait(false);
+        // Ruled on, so no longer pending: drop it now rather than let it linger until the
+        // observer's snapshot goes stale and offer the operator a decision they just took.
+        _pending.Resolve(policy.ExecutablePath);
 
         return Success(request);
     }
@@ -159,7 +208,10 @@ public sealed class FirewallRequestDispatcher
     private FirewallServiceStatus DescribeStatus(OutboundFirewallMode mode)
     {
         var enforcementEnabled = mode == OutboundFirewallMode.Enforcement && _authority.EngineSupported;
-        return new FirewallServiceStatus(mode, _authority.EngineSupported, enforcementEnabled);
+        // Carrying what the observer could not record keeps the blind spot visible: the dashboard
+        // can say "and more were not recorded" instead of showing a truncated list as complete.
+        return new FirewallServiceStatus(
+            mode, _authority.EngineSupported, enforcementEnabled, _pending.DroppedApps);
     }
 
     private static AppFirewallPolicy NormalisePolicy(AppFirewallPolicy policy) =>

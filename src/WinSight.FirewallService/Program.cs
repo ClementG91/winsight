@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.EventLog;
 using WinSight.Firewall;
 using WinSight.FirewallService;
+using WinSight.NetMonitor;
 
 // WinSight outbound-firewall service host. Least-privilege and audit-only: it hosts the
 // authenticated named-pipe endpoint over the shared library and never mutates WFP.
@@ -533,9 +534,16 @@ static async Task<int> RunHostAsync()
         static () => new WfpOutboundFirewallEngine()));
     builder.Services.AddSingleton<IFirewallMutationAuthority>(sp =>
         sp.GetRequiredService<EnforcementCoordinator>());
+
+    // Shared by the observer that fills it and the dispatcher that serves and prunes it.
+    builder.Services.AddSingleton<PendingOutboundLog>();
+    builder.Services.AddSingleton<OutboundConnectionWatcher>();
+    builder.Services.AddSingleton<IProcessImageResolver, ProcessImageResolver>();
+
     builder.Services.AddSingleton(sp => new FirewallRequestDispatcher(
         sp.GetRequiredService<FirewallPolicyStore>(),
-        sp.GetRequiredService<IFirewallMutationAuthority>()));
+        sp.GetRequiredService<IFirewallMutationAuthority>(),
+        sp.GetRequiredService<PendingOutboundLog>()));
     builder.Services.AddSingleton(sp => new FirewallConnectionHandler(
         sp.GetRequiredService<FirewallRequestDispatcher>()));
     builder.Services.AddSingleton<IFirewallServiceListener>(sp => new NamedPipeFirewallServer(
@@ -546,6 +554,9 @@ static async Task<int> RunHostAsync()
     {
         builder.Services.AddHostedService<EnforcementStartupService>();
     }
+    // Observation is reporting only and runs whatever the mode: telling the operator what reached
+    // the network is worth as much in audit-only, where it is the only thing the tool can do.
+    builder.Services.AddHostedService<OutboundObserverService>();
     builder.Services.AddHostedService<FirewallServiceWorker>();
 
     await builder.Build().RunAsync().ConfigureAwait(false);
