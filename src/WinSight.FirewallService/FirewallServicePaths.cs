@@ -107,7 +107,7 @@ public static class FirewallServicePaths
         var trust = InspectDefaultStorage();
         if (!trust.IsTrusted)
         {
-            throw new InvalidOperationException($"Policy storage rejected [{trust.Code}]: {trust.Message}");
+            throw new PolicyStorageTrustException(trust.Code);
         }
         return directory;
     }
