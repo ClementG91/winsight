@@ -150,6 +150,74 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
         });
     }
 
+    // The reason this type exists: a refusal used to go to stderr, which a Windows service does
+    // not have. The operator saw SCM error 1053 and an empty event log, and nothing said why.
+    [Theory]
+    [InlineData(PathTrustCode.UntrustedOwner)]
+    [InlineData(PathTrustCode.WritableByUnprivilegedPrincipal)]
+    [InlineData(PathTrustCode.OutsideProgramData)]
+    [InlineData(PathTrustCode.ReparsePoint)]
+    [InlineData(PathTrustCode.IdentityChanged)]
+    public void ServiceStartupLog_StorageProvisioningRefused_NamesTheRuleThatRefused(PathTrustCode code)
+    {
+        var logger = new CapturingLogger<ServiceStartupLog>();
+
+        new ServiceStartupLog(logger).StorageProvisioningRefused(code);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Critical, entry.Level);
+        Assert.Contains("[FW_STORAGE_PROVISIONING_FAILED]", entry.Message, StringComparison.Ordinal);
+        Assert.Contains(code.ToString(), entry.Message, StringComparison.Ordinal);
+        Assert.Null(entry.Exception);
+    }
+
+    [Fact]
+    public void ServiceStartupLog_CarriesStableMarkers()
+    {
+        var logger = new CapturingLogger<ServiceStartupLog>();
+        var log = new ServiceStartupLog(logger);
+
+        log.StorageProvisioningFailed();
+        log.StorageUntrusted();
+        log.HostReady(OutboundFirewallMode.AuditOnly);
+
+        Assert.Collection(logger.Entries,
+            entry => Assert.Contains("[FW_STORAGE_PROVISIONING_FAILED]", entry.Message, StringComparison.Ordinal),
+            entry => Assert.Contains("[FW_STORAGE_UNTRUSTED]", entry.Message, StringComparison.Ordinal),
+            entry =>
+            {
+                Assert.Contains("[FW_HOST_READY]", entry.Message, StringComparison.Ordinal);
+                Assert.Contains("AuditOnly", entry.Message, StringComparison.Ordinal);
+            });
+        Assert.All(logger.Entries, entry => Assert.Null(entry.Exception));
+    }
+
+    // A PathTrustCode names which rule refused; it must never become a way to disclose which path
+    // or which principal tripped it. The VM protocol checks the event log for exactly that.
+    [Fact]
+    public void ServiceStartupLog_RefusalDisclosesNoPathOrPrincipal()
+    {
+        var logger = new CapturingLogger<ServiceStartupLog>();
+
+        new ServiceStartupLog(logger).StorageProvisioningRefused(PathTrustCode.UntrustedOwner);
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.False(ContainsSecret(entry.Message));
+        Assert.False(ContainsSecret(entry.StableState));
+        Assert.All(entry.State, pair => Assert.False(ContainsSecret(pair.Value)));
+    }
+
+    // The exception carries the code as data precisely so the code can be logged without the
+    // message, which for a native failure carries paths and SIDs.
+    [Fact]
+    public void PolicyStorageTrustException_CarriesTheCodeAsData_AndStaysCatchableAsInvalidOperation()
+    {
+        var refusal = new PolicyStorageTrustException(PathTrustCode.WritableByUnprivilegedPrincipal);
+
+        Assert.Equal(PathTrustCode.WritableByUnprivilegedPrincipal, refusal.Code);
+        Assert.IsAssignableFrom<InvalidOperationException>(refusal);
+    }
+
     [Fact]
     public void FirewallServiceLoggerMessages_StaticContractHasNoExceptionParameters()
     {
@@ -161,6 +229,22 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             Assert.All(logMethods, method =>
                 Assert.DoesNotContain(method.GetParameters(), parameter => typeof(Exception).IsAssignableFrom(parameter.ParameterType)));
         }
+    }
+
+    // Handing an exception to the logger is how a path or a SID reaches the event log: native
+    // failures carry both in their text. This holds the whole startup surface to that rule, so a
+    // later message cannot quietly reintroduce the leak by taking an Exception parameter.
+    [Fact]
+    public void ServiceStartupLog_ContractTakesNoExceptionParameter()
+    {
+        var logMethods = typeof(ServiceStartupLog)
+            .GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
+            .Where(method => method.DeclaringType == typeof(ServiceStartupLog));
+
+        Assert.NotEmpty(logMethods);
+        Assert.All(logMethods, method =>
+            Assert.DoesNotContain(method.GetParameters(),
+                parameter => typeof(Exception).IsAssignableFrom(parameter.ParameterType)));
     }
 
     private static bool ContainsSecret(string text) =>

@@ -1,6 +1,9 @@
 using System.ComponentModel;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.EventLog;
 using WinSight.Firewall;
 using WinSight.FirewallService;
 
@@ -330,6 +333,15 @@ static async Task<int> EnforceStatusAsync()
         Console.WriteLine($"Enforcement mode: {mode}.");
         return 0;
     }
+    catch (PolicyStorageTrustException refusal)
+    {
+        // Two outputs, two audiences. The marker stays invariant because scripts parse it and
+        // because that sink must never carry variable text. The rule that refused goes through
+        // the structured log instead, which is leak-tested and, for a console run, prints here.
+        StartupLog().StorageProvisioningRefused(refusal.Code);
+        Console.Error.WriteLine("[FW_ENFORCEMENT_STATUS_UNAVAILABLE]");
+        return 1;
+    }
     catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException or InvalidOperationException)
     {
         Console.Error.WriteLine("[FW_ENFORCEMENT_STATUS_UNAVAILABLE]");
@@ -414,6 +426,37 @@ static async Task<int> SetAppPolicyAsync(string[] arguments, OutboundAction acti
     }
 }
 
+/// <summary>
+/// Logging for the refusals that happen before the host is built. A service writes to the event
+/// log, which is where an operator looks after an SCM failure; a human running the host directly
+/// gets the console. AddWindowsService gives the built host the same event-log sink, so a refusal
+/// and a running service report to the same place under the same source name.
+/// </summary>
+/// <summary>
+/// A one-shot startup log for the console verbs. The factory owns the sink, so this leaks it
+/// deliberately for the lifetime of a short-lived verb rather than threading it through; the
+/// host path builds and disposes its own.
+/// </summary>
+static ServiceStartupLog StartupLog() =>
+    new(CreateStartupLoggerFactory().CreateLogger("WinSight.FirewallService.Startup"));
+
+static ILoggerFactory CreateStartupLoggerFactory() =>
+    LoggerFactory.Create(logging =>
+    {
+        if (WindowsServiceHelpers.IsWindowsService())
+        {
+            logging.AddEventLog(new EventLogSettings
+            {
+                SourceName = FirewallServiceInstaller.ServiceName,
+                LogName = "Application",
+            });
+        }
+        else
+        {
+            logging.AddSimpleConsole(options => options.SingleLine = true);
+        }
+    });
+
 static EnforcementCoordinator CreateCoordinator()
 {
     FirewallServicePaths.ProvisionDefaultDirectory();
@@ -442,14 +485,31 @@ static async Task<int> RunHostAsync()
 
     builder.Services.AddWindowsService(options => options.ServiceName = FirewallServiceInstaller.ServiceName);
 
+    // The gate below runs before the host exists, so it cannot use the host's logger, and a
+    // service has no console: writing these refusals to stderr left the operator with SCM error
+    // 1053 and an empty event log. This factory reaches the event log the same way the built
+    // host would, and the console when a human ran the host directly.
+    using var startupLoggerFactory = CreateStartupLoggerFactory();
+    var startupLog = new ServiceStartupLog(startupLoggerFactory.CreateLogger("WinSight.FirewallService.Startup"));
+
     // Provisioning and verification are a mandatory trust boundary. Failure prevents
     // policy access and, crucially, construction of the native WFP backend.
     try
     {
         FirewallServicePaths.ProvisionDefaultDirectory();
     }
+    catch (PolicyStorageTrustException refusal)
+    {
+        // Both sinks, because neither replaces the other: stderr carries the invariant code a
+        // console run and its scripts parse, and the structured log carries the deciding rule to
+        // the event log, which is all a service has. The exception itself reaches neither.
+        startupLog.StorageProvisioningRefused(refusal.Code);
+        Console.Error.WriteLine("[FW_STORAGE_PROVISIONING_FAILED]");
+        return 1;
+    }
     catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
     {
+        startupLog.StorageProvisioningFailed();
         Console.Error.WriteLine("[FW_STORAGE_PROVISIONING_FAILED]");
         return 1;
     }
@@ -460,10 +520,12 @@ static async Task<int> RunHostAsync()
     var loaded = await store.LoadOrAuditAsync().ConfigureAwait(false);
     if (!loaded.StorageTrusted)
     {
+        startupLog.StorageUntrusted();
         Console.Error.WriteLine("[FW_STORAGE_UNTRUSTED]");
         return 1;
     }
     var enforcing = loaded.Configuration.Mode == OutboundFirewallMode.Enforcement;
+    startupLog.HostReady(loaded.Configuration.Mode);
 
     builder.Services.AddSingleton(store);
     builder.Services.AddSingleton(sp => new EnforcementCoordinator(
