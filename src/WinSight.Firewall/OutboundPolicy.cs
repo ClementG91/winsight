@@ -78,3 +78,23 @@ public interface IOutboundFirewallEngine
 
     Task RemoveAsync(string executablePath, CancellationToken cancellationToken = default);
 }
+
+/// <summary>The single serialized authority for machine-policy and WFP mutation.</summary>
+public interface IFirewallMutationAuthority
+{
+    bool EngineSupported { get; }
+
+    Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default);
+
+    Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default);
+
+    Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>Narrow cleanup capability limited to WinSight-owned WFP objects.</summary>
+public interface IWinSightFirewallCleanup
+{
+    Task CleanupWinSightAsync(
+        IReadOnlyList<AppFirewallPolicy> knownPolicies,
+        CancellationToken cancellationToken = default);
+}

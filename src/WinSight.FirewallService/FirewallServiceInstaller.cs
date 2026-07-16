@@ -37,40 +37,76 @@ public static partial class FirewallServiceInstaller
 
     /// <summary>Creates the demand-start, LocalSystem service pointing at this executable.</summary>
     public static void Install(string executablePath)
-    {
-        var binaryPath = BuildBinaryPath(executablePath);
+        => Install(executablePath, new WindowsServicePathTrustInspector(), new WindowsServiceControlManager());
 
-        var manager = NativeMethods.OpenSCManagerW(null, null, ScManagerConnect | ScManagerCreateService);
-        if (manager == IntPtr.Zero)
+    /// <summary>Injectable trust inspection keeps denial tests entirely outside SCM.</summary>
+    public static void Install(string executablePath, IServicePathTrustInspector trustInspector)
+        => Install(executablePath, trustInspector, new WindowsServiceControlManager());
+
+    public static void Install(
+        string executablePath,
+        IServicePathTrustInspector trustInspector,
+        IServiceControlManager serviceControlManager)
+    {
+        ArgumentNullException.ThrowIfNull(trustInspector);
+        ArgumentNullException.ThrowIfNull(serviceControlManager);
+        var evidence = trustInspector.InspectExecutableEvidence(executablePath);
+        if (!evidence.Decision.IsTrusted)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error());
+            throw new InvalidOperationException(
+                $"Service path rejected [{evidence.Decision.Code}]: {evidence.Decision.Message}");
         }
+        var preUse = trustInspector.Revalidate(evidence);
+        if (!preUse.IsTrusted)
+        {
+            throw new InvalidOperationException($"Service path rejected [{preUse.Code}]: {preUse.Message}");
+        }
+        var binaryPath = BuildBinaryPath(evidence.CanonicalPath);
+        using var registration = serviceControlManager.Create(binaryPath);
         try
         {
-            var service = NativeMethods.CreateServiceW(
-                manager, ServiceName, DisplayName, ServiceAllAccess,
-                ServiceWin32OwnProcess, ServiceDemandStart, ServiceErrorNormal,
-                binaryPath, null, IntPtr.Zero, null, null /* LocalSystem */, null);
-            if (service == IntPtr.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                throw error == ErrorServiceExists
-                    ? new InvalidOperationException("The WinSight firewall service is already installed.")
-                    : new Win32Exception(error);
-            }
-            try
-            {
-                SetDescription(service);
-            }
-            finally
-            {
-                NativeMethods.CloseServiceHandle(service);
-            }
+            registration.SetDescription(Description);
         }
-        finally
+        catch (Exception postCreateFailure)
         {
-            NativeMethods.CloseServiceHandle(manager);
+            ThrowAfterCheckedRollback(
+                registration,
+                ServiceInstallTrustCode.PostCreateOperationRolledBack,
+                "Service registration was rolled back after post-create configuration failed.",
+                postCreateFailure);
         }
+        PathTrustDecision postUse;
+        try { postUse = trustInspector.Revalidate(evidence); }
+        catch (Exception)
+        { postUse = PathTrustDecision.Deny(PathTrustCode.InspectionFailed); }
+        if (!postUse.IsTrusted)
+        {
+            ThrowAfterCheckedRollback(
+                registration,
+                ServiceInstallTrustCode.PathChangedRolledBack,
+                $"Service path rejected [{postUse.Code}] and registration was rolled back.");
+        }
+    }
+
+    [System.Diagnostics.CodeAnalysis.DoesNotReturn]
+    private static void ThrowAfterCheckedRollback(
+        IServiceRegistration registration,
+        ServiceInstallTrustCode successCode,
+        string message,
+        Exception? cause = null)
+    {
+        var rolledBack = false;
+        Exception? rollbackFailure = null;
+        try { rolledBack = registration.Delete(); }
+        catch (Exception ex) { rollbackFailure = ex; }
+        if (!rolledBack)
+        {
+            throw new ServiceInstallTrustException(
+                ServiceInstallTrustCode.RollbackFailed,
+                "Service registration rollback failed after a post-create operation.",
+                rollbackFailure ?? cause);
+        }
+        throw new ServiceInstallTrustException(successCode, message, cause);
     }
 
     /// <summary>Deletes the service. Throws if it is not installed.</summary>
@@ -180,9 +216,9 @@ public static partial class FirewallServiceInstaller
         }
     }
 
-    private static void SetDescription(IntPtr service)
+    internal static void SetDescription(IntPtr service, string description)
     {
-        var descriptionPtr = Marshal.StringToHGlobalUni(Description);
+        var descriptionPtr = Marshal.StringToHGlobalUni(description);
         try
         {
             var info = new ServiceDescription { Description = descriptionPtr };
@@ -211,12 +247,12 @@ public static partial class FirewallServiceInstaller
     private const int ErrorServiceDoesNotExist = 1060;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct ServiceDescription
+    internal struct ServiceDescription
     {
         public IntPtr Description;
     }
 
-    private static partial class NativeMethods
+    internal static partial class NativeMethods
     {
         [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         internal static partial IntPtr OpenSCManagerW(string? machineName, string? databaseName, uint access);
@@ -249,5 +285,61 @@ public static partial class FirewallServiceInstaller
             IntPtr service, uint serviceType, uint startType, uint errorControl,
             string? binaryPath, string? loadOrderGroup, IntPtr tagId,
             string? dependencies, string? serviceStartName, string? password, string? displayName);
+    }
+}
+
+public enum ServiceInstallTrustCode
+{
+    PathChangedRolledBack,
+    PostCreateOperationRolledBack,
+    RollbackFailed,
+}
+
+public sealed class ServiceInstallTrustException : InvalidOperationException
+{
+    public ServiceInstallTrustException(ServiceInstallTrustCode code, string message) : base(message) => Code = code;
+    public ServiceInstallTrustException(ServiceInstallTrustCode code, string message, Exception? innerException)
+        : base(message, innerException) => Code = code;
+    public ServiceInstallTrustCode Code { get; }
+}
+
+public interface IServiceRegistration : IDisposable
+{
+    void SetDescription(string description);
+    bool Delete();
+}
+
+public interface IServiceControlManager
+{
+    IServiceRegistration Create(string binaryPath);
+}
+
+internal sealed class WindowsServiceControlManager : IServiceControlManager
+{
+    public IServiceRegistration Create(string binaryPath)
+    {
+        var manager = FirewallServiceInstaller.NativeMethods.OpenSCManagerW(null, null, 0x0001 | 0x0002);
+        if (manager == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            var service = FirewallServiceInstaller.NativeMethods.CreateServiceW(
+                manager, FirewallServiceInstaller.ServiceName, FirewallServiceInstaller.DisplayName, 0xF01FF,
+                0x10, 0x3, 0x1, binaryPath, null, IntPtr.Zero, null, null, null);
+            if (service == IntPtr.Zero)
+            {
+                var error = Marshal.GetLastWin32Error();
+                throw error == 1073 ? new InvalidOperationException("The WinSight firewall service is already installed.") :
+                    new Win32Exception(error);
+            }
+            return new WindowsServiceRegistration(service);
+        }
+        finally { FirewallServiceInstaller.NativeMethods.CloseServiceHandle(manager); }
+    }
+
+    private sealed class WindowsServiceRegistration(IntPtr handle) : IServiceRegistration
+    {
+        public void SetDescription(string description) => FirewallServiceInstaller.SetDescription(handle, description);
+        public bool Delete() => FirewallServiceInstaller.NativeMethods.DeleteService(handle);
+        public void Dispose() => FirewallServiceInstaller.NativeMethods.CloseServiceHandle(handle);
     }
 }

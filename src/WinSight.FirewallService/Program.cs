@@ -21,19 +21,19 @@ return await (FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.Uninstall => Task.FromResult(Uninstall()),
     FirewallServiceVerb.Status => Task.FromResult(Status()),
     FirewallServiceVerb.WfpSelfTest => Task.FromResult(WfpProbe()),
-    FirewallServiceVerb.WfpProvision => Task.FromResult(WfpProvision()),
-    FirewallServiceVerb.WfpDeprovision => Task.FromResult(WfpDeprovision()),
+    FirewallServiceVerb.WfpProvision => Task.FromResult(DisabledLowLevelMutation(WfpProvision)),
+    FirewallServiceVerb.WfpDeprovision => Task.FromResult(DisabledLowLevelMutation(WfpDeprovision)),
     FirewallServiceVerb.WfpStatus => Task.FromResult(WfpStatusVerb()),
-    FirewallServiceVerb.WfpFilterAdd => Task.FromResult(WfpFilterAdd()),
-    FirewallServiceVerb.WfpFilterRemove => Task.FromResult(WfpFilterRemove()),
-    FirewallServiceVerb.WfpBlockAdd => Task.FromResult(WfpBlockAdd(args)),
-    FirewallServiceVerb.WfpBlockRemove => Task.FromResult(WfpBlockRemove(args)),
+    FirewallServiceVerb.WfpFilterAdd => Task.FromResult(DisabledLowLevelMutation(WfpFilterAdd)),
+    FirewallServiceVerb.WfpFilterRemove => Task.FromResult(DisabledLowLevelMutation(WfpFilterRemove)),
+    FirewallServiceVerb.WfpBlockAdd => Task.FromResult(DisabledLowLevelMutation(() => WfpBlockAdd(args))),
+    FirewallServiceVerb.WfpBlockRemove => Task.FromResult(DisabledLowLevelMutation(() => WfpBlockRemove(args))),
     FirewallServiceVerb.WfpBlockStatus => Task.FromResult(WfpBlockStatus(args)),
     FirewallServiceVerb.EnforceStatus => EnforceStatusAsync(),
-    FirewallServiceVerb.EnforceEnable => EnforceEnableAsync(),
-    FirewallServiceVerb.EnforceDisable => EnforceDisableAsync(),
-    FirewallServiceVerb.BlockApp => SetAppPolicyAsync(args, OutboundAction.Block),
-    FirewallServiceVerb.AllowApp => SetAppPolicyAsync(args, OutboundAction.Allow),
+    FirewallServiceVerb.EnforceEnable => Task.FromResult(DisabledLowLevelMutation(() => EnforceEnableAsync().GetAwaiter().GetResult())),
+    FirewallServiceVerb.EnforceDisable => Task.FromResult(DisabledLowLevelMutation(() => EnforceDisableAsync().GetAwaiter().GetResult())),
+    FirewallServiceVerb.BlockApp => Task.FromResult(DisabledLowLevelMutation(() => SetAppPolicyAsync(args, OutboundAction.Block).GetAwaiter().GetResult())),
+    FirewallServiceVerb.AllowApp => Task.FromResult(DisabledLowLevelMutation(() => SetAppPolicyAsync(args, OutboundAction.Allow).GetAwaiter().GetResult())),
     FirewallServiceVerb.Unknown => Task.FromResult(Usage()),
     _ => RunHostAsync(),
 }).ConfigureAwait(false);
@@ -64,9 +64,16 @@ static int Install()
     }
     catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
     {
-        Console.Error.WriteLine($"Install failed: {ex.Message}");
+        Console.Error.WriteLine("[FW_INSTALL_FAILED]");
         return 1;
     }
+}
+
+static int DisabledLowLevelMutation(Func<int> suppressedBackend)
+{
+    ArgumentNullException.ThrowIfNull(suppressedBackend);
+    Console.Error.WriteLine("[FW_DIRECT_MUTATION_DISABLED]");
+    return 1;
 }
 
 static int Uninstall()
@@ -86,7 +93,7 @@ static int Uninstall()
     }
     catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
     {
-        Console.Error.WriteLine($"Uninstall failed: {ex.Message}");
+        Console.Error.WriteLine("[FW_UNINSTALL_FAILED]");
         return 1;
     }
 }
@@ -115,8 +122,7 @@ static int WfpProbe()
         return 0;
     }
 
-    Console.Error.WriteLine(
-        $"WFP self-test failed (engineOpened={result.EngineOpened}, error 0x{result.ErrorCode:X8}). No change was made.");
+    Console.Error.WriteLine("[FW_WFP_READ_FAILED]");
     return 1;
 }
 
@@ -135,9 +141,9 @@ static int WfpProvision()
             "WinSight WFP provider and sublayer created (containers only: no filter, nothing is blocked). Non-persistent: a reboot removes them.");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine($"WFP provision failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        Console.Error.WriteLine("[FW_WFP_MUTATION_FAILED]");
         return 1;
     }
 }
@@ -156,9 +162,9 @@ static int WfpDeprovision()
         Console.WriteLine("WinSight WFP provider and sublayer removed.");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine($"WFP deprovision failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        Console.Error.WriteLine("[FW_WFP_CLEANUP_FAILED]");
         return 1;
     }
 }
@@ -180,9 +186,9 @@ static int WfpStatusVerb()
 
         static string Present(bool value) => value ? "present" : "absent";
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine($"WFP status failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        Console.Error.WriteLine("[FW_WFP_READ_FAILED]");
         return 1;
     }
 }
@@ -203,12 +209,12 @@ static int WfpBlockStatus(string[] arguments)
     try
     {
         var blocked = WfpProvisioning.IsBlocked(arguments[1]);
-        Console.WriteLine($"'{arguments[1]}' is {(blocked ? "blocked" : "not blocked")}.");
+        Console.WriteLine(blocked ? "[FW_APP_BLOCKED]" : "[FW_APP_NOT_BLOCKED]");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine($"WFP block status failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        Console.Error.WriteLine("[FW_WFP_READ_FAILED]");
         return 1;
     }
 }
@@ -230,14 +236,12 @@ static int WfpBlockAdd(string[] arguments)
     try
     {
         WfpProvisioning.AddBlockFilter(executable);
-        Console.WriteLine(
-            $"Blocking outbound connections for '{executable}'. Only that application is affected; everything else keeps working. Run wfp-block-remove to undo.");
+        Console.WriteLine("[FW_APP_BLOCK_APPLIED]");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine(
-            $"WFP block add failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}. Run wfp-provision first, and pass a full executable path.");
+        Console.Error.WriteLine("[FW_WFP_MUTATION_FAILED]");
         return 1;
     }
 }
@@ -258,12 +262,12 @@ static int WfpBlockRemove(string[] arguments)
     try
     {
         WfpProvisioning.RemoveBlockFilter(arguments[1]);
-        Console.WriteLine($"Removed the WinSight block filter for '{arguments[1]}'.");
+        Console.WriteLine("[FW_APP_BLOCK_REMOVED]");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine($"WFP block remove failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        Console.Error.WriteLine("[FW_WFP_CLEANUP_FAILED]");
         return 1;
     }
 }
@@ -283,10 +287,9 @@ static int WfpFilterAdd()
             "Added a non-blocking PERMIT filter to the WinSight sublayer. It authorizes outbound connects (already the default), so nothing is blocked.");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine(
-            $"WFP filter add failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}. Run wfp-provision first.");
+        Console.Error.WriteLine("[FW_WFP_MUTATION_FAILED]");
         return 1;
     }
 }
@@ -305,9 +308,9 @@ static int WfpFilterRemove()
         Console.WriteLine("Removed the WinSight PERMIT filter.");
         return 0;
     }
-    catch (Win32Exception ex)
+    catch (Win32Exception)
     {
-        Console.Error.WriteLine($"WFP filter remove failed (error 0x{ex.NativeErrorCode:X8}): {ex.Message}");
+        Console.Error.WriteLine("[FW_WFP_CLEANUP_FAILED]");
         return 1;
     }
 }
@@ -322,13 +325,14 @@ static async Task<int> EnforceStatusAsync()
 
     try
     {
-        var mode = await CreateCoordinator().GetModeAsync().ConfigureAwait(false);
+        using var coordinator = CreateCoordinator();
+        var mode = await coordinator.GetModeAsync().ConfigureAwait(false);
         Console.WriteLine($"Enforcement mode: {mode}.");
         return 0;
     }
-    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException or InvalidOperationException)
     {
-        Console.Error.WriteLine($"Enforcement status failed: {ex.Message}");
+        Console.Error.WriteLine("[FW_ENFORCEMENT_STATUS_UNAVAILABLE]");
         return 1;
     }
 }
@@ -343,7 +347,8 @@ static async Task<int> EnforceEnableAsync()
 
     try
     {
-        await CreateCoordinator().EnableAsync().ConfigureAwait(false);
+        using var coordinator = CreateCoordinator();
+        await coordinator.EnableAsync().ConfigureAwait(false);
         // Auto-start so a reboot re-launches the service, which reinstalls the blocks.
         var installed = FirewallServiceInstaller.TrySetAutoStart(autoStart: true);
         Console.WriteLine(installed
@@ -351,9 +356,9 @@ static async Task<int> EnforceEnableAsync()
             : "Enforcement enabled and applied. Install the service (install) so it auto-starts and reapplies blocks after a reboot.");
         return 0;
     }
-    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException or InvalidOperationException)
     {
-        Console.Error.WriteLine($"Enable enforcement failed: {ex.Message}");
+        Console.Error.WriteLine("[FW_ENFORCEMENT_TRANSITION_FAILED]");
         return 1;
     }
 }
@@ -368,15 +373,16 @@ static async Task<int> EnforceDisableAsync()
 
     try
     {
-        await CreateCoordinator().DisableAsync().ConfigureAwait(false);
+        using var coordinator = CreateCoordinator();
+        await coordinator.DisableAsync().ConfigureAwait(false);
         // Back to demand-start: no reason to auto-launch a service that enforces nothing.
         _ = FirewallServiceInstaller.TrySetAutoStart(autoStart: false);
         Console.WriteLine("Enforcement disabled. Every WinSight block was lifted and the mode is audit-only.");
         return 0;
     }
-    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException or InvalidOperationException)
     {
-        Console.Error.WriteLine($"Disable enforcement failed: {ex.Message}");
+        Console.Error.WriteLine("[FW_ENFORCEMENT_TRANSITION_FAILED]");
         return 1;
     }
 }
@@ -390,37 +396,38 @@ static async Task<int> SetAppPolicyAsync(string[] arguments, OutboundAction acti
     }
     if (arguments.Length < 2 || string.IsNullOrWhiteSpace(arguments[1]))
     {
-        Console.Error.WriteLine($"Usage: winsight-firewall-service {arguments.FirstOrDefault() ?? "block-app"} <full path to an executable>");
+        Console.Error.WriteLine("[FW_POLICY_USAGE]");
         return 2;
     }
 
     try
     {
-        await CreateCoordinator().SetPolicyAsync(arguments[1], action).ConfigureAwait(false);
-        Console.WriteLine($"Policy for '{arguments[1]}' set to {action} and applied.");
+        using var coordinator = CreateCoordinator();
+        await coordinator.SetPolicyAsync(arguments[1], action).ConfigureAwait(false);
+        Console.WriteLine("[FW_POLICY_APPLIED]");
         return 0;
     }
-    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException)
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException or IOException or InvalidOperationException)
     {
-        Console.Error.WriteLine($"Set policy failed: {ex.Message}");
+        Console.Error.WriteLine("[FW_POLICY_MUTATION_FAILED]");
         return 1;
     }
 }
 
 static EnforcementCoordinator CreateCoordinator()
 {
-    try
-    {
-        FirewallServicePaths.ProvisionDirectory(FirewallServicePaths.DefaultDirectory);
-    }
-    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
-    {
-        Console.Error.WriteLine($"WinSight firewall: could not harden the policy directory ({ex.Message}). Continuing.");
-    }
-
-    var store = new FirewallPolicyStore(FirewallServicePaths.DefaultPolicyFile, allowEnforcement: true);
-    return new EnforcementCoordinator(store, new WfpOutboundFirewallEngine());
+    FirewallServicePaths.ProvisionDefaultDirectory();
+    var store = CreateTrustedStore();
+    return new EnforcementCoordinator(store, static () => new WfpOutboundFirewallEngine());
 }
+
+static FirewallPolicyStore CreateTrustedStore() => new(
+    FirewallServicePaths.DefaultPolicyFile,
+    allowEnforcement: true,
+    storageTrustGuard: new FirewallStorageTrustGuard(
+        new WindowsServicePathTrustInspector(),
+        FirewallServicePaths.DefaultDirectory,
+        FirewallServicePaths.DefaultPolicyFile));
 
 static int Usage()
 {
@@ -435,37 +442,38 @@ static async Task<int> RunHostAsync()
 
     builder.Services.AddWindowsService(options => options.ServiceName = FirewallServiceInstaller.ServiceName);
 
-    // Provision the ACL-protected policy directory. When not elevated (console
-    // debugging) this can fail; the store still works against the path, so log and continue.
-    var policyFile = FirewallServicePaths.DefaultPolicyFile;
+    // Provisioning and verification are a mandatory trust boundary. Failure prevents
+    // policy access and, crucially, construction of the native WFP backend.
     try
     {
-        FirewallServicePaths.ProvisionDirectory(FirewallServicePaths.DefaultDirectory);
+        FirewallServicePaths.ProvisionDefaultDirectory();
     }
-    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
     {
-        Console.Error.WriteLine(
-            $"WinSight firewall: could not harden the policy directory ({ex.Message}). Continuing.");
+        Console.Error.WriteLine("[FW_STORAGE_PROVISIONING_FAILED]");
+        return 1;
     }
 
-    // The service is the privileged gate: it may load and act on Enforcement mode. Decide
-    // the engine once at startup from the persisted mode. Audit-only stays the default, so
-    // a machine only enforces after an explicit enforce-enable.
-    var store = new FirewallPolicyStore(policyFile, allowEnforcement: true);
+    // The service is the privileged gate. Startup reads the mode only after storage trust;
+    // the authority constructs the native backend lazily after its own fresh trusted load.
+    var store = CreateTrustedStore();
     var loaded = await store.LoadOrAuditAsync().ConfigureAwait(false);
+    if (!loaded.StorageTrusted)
+    {
+        Console.Error.WriteLine("[FW_STORAGE_UNTRUSTED]");
+        return 1;
+    }
     var enforcing = loaded.Configuration.Mode == OutboundFirewallMode.Enforcement;
-    IOutboundFirewallEngine engine = enforcing
-        ? new WfpOutboundFirewallEngine()
-        : new AuditOnlyFirewallEngine();
 
     builder.Services.AddSingleton(store);
-    builder.Services.AddSingleton<IOutboundFirewallEngine>(engine);
     builder.Services.AddSingleton(sp => new EnforcementCoordinator(
         sp.GetRequiredService<FirewallPolicyStore>(),
-        sp.GetRequiredService<IOutboundFirewallEngine>()));
+        static () => new WfpOutboundFirewallEngine()));
+    builder.Services.AddSingleton<IFirewallMutationAuthority>(sp =>
+        sp.GetRequiredService<EnforcementCoordinator>());
     builder.Services.AddSingleton(sp => new FirewallRequestDispatcher(
         sp.GetRequiredService<FirewallPolicyStore>(),
-        sp.GetRequiredService<IOutboundFirewallEngine>()));
+        sp.GetRequiredService<IFirewallMutationAuthority>()));
     builder.Services.AddSingleton(sp => new FirewallConnectionHandler(
         sp.GetRequiredService<FirewallRequestDispatcher>()));
     builder.Services.AddSingleton<IFirewallServiceListener>(sp => new NamedPipeFirewallServer(

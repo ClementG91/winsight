@@ -163,6 +163,75 @@ public sealed class PolicyStoreTests : IDisposable
         Assert.Throws<ArgumentException>(() => new FirewallPolicyStore("policies.json"));
     }
 
+    [Fact]
+    public async Task LoadOrAuditAsync_UntrustedStorage_HasStableRedactedDiagnostic()
+    {
+        var store = new FirewallPolicyStore(
+            PolicyPath,
+            storageTrust: () => (false, "StorageInspectionFailed"));
+
+        var result = await store.LoadOrAuditAsync();
+
+        Assert.False(result.StorageTrusted);
+        Assert.True(result.RecoveredToAuditOnly);
+        Assert.Equal("StorageInspectionFailed", result.Diagnostic);
+        Assert.DoesNotContain(PolicyPath, result.Diagnostic, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SaveAsync_TrustIsCheckedBeforeCreatingStorage()
+    {
+        var store = new FirewallPolicyStore(PolicyPath, storageTrust: () => (false, "StorageAclUntrusted"));
+
+        var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() =>
+            store.SaveAsync(OutboundFirewallConfiguration.Empty));
+
+        Assert.Equal("StorageAclUntrusted", exception.Code);
+        Assert.False(Directory.Exists(_directory));
+        Assert.DoesNotContain(PolicyPath, exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task LoadAsync_RevalidatesLeaseAfterOpeningStorage()
+    {
+        Directory.CreateDirectory(_directory);
+        await File.WriteAllTextAsync(PolicyPath, """{"schemaVersion":1,"mode":"AuditOnly","policies":[]}""");
+        var guard = new ScriptedTrustGuard(revalidateTrusted: false);
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+
+        var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() => store.LoadAsync());
+
+        Assert.Equal("StorageIdentityChanged", exception.Code);
+        Assert.Equal(["inspect", "revalidate"], guard.Calls);
+    }
+
+    [Fact]
+    public async Task SaveAsync_ValidatesBeforeIoBeforeReplaceAndAfterReplace()
+    {
+        var guard = new ScriptedTrustGuard(revalidateTrusted: true);
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+
+        await store.SaveAsync(OutboundFirewallConfiguration.Empty);
+
+        Assert.Equal(["inspect", "revalidate", "inspect"], guard.Calls);
+        Assert.True(File.Exists(PolicyPath));
+    }
+
+    private sealed class ScriptedTrustGuard(bool revalidateTrusted) : IFirewallStorageTrustGuard
+    {
+        public List<string> Calls { get; } = [];
+        public FirewallStorageTrustLease Inspect()
+        {
+            Calls.Add("inspect");
+            return new(true, "Trusted", new object());
+        }
+        public FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease)
+        {
+            Calls.Add("revalidate");
+            return new(revalidateTrusted, revalidateTrusted ? "Trusted" : "StorageIdentityChanged", lease.Evidence);
+        }
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_directory))

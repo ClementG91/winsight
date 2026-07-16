@@ -20,6 +20,13 @@ public sealed class FirewallConnectionHandler
     public async Task HandleAsync(
         Stream stream,
         bool callerAuthorised,
+        CancellationToken cancellationToken = default) =>
+        await HandleAsync(stream, callerAuthorised ? FirewallCallerCapability.MutateMachinePolicy : FirewallCallerCapability.None,
+            cancellationToken).ConfigureAwait(false);
+
+    public async Task HandleAsync(
+        Stream stream,
+        FirewallCallerCapability capability,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -36,7 +43,7 @@ public sealed class FirewallConnectionHandler
             return;
         }
 
-        var response = await _dispatcher.DispatchAsync(request, callerAuthorised, cancellationToken)
+        var response = await _dispatcher.DispatchAsync(request, capability, cancellationToken)
             .ConfigureAwait(false);
 
         try

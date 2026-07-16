@@ -14,11 +14,16 @@ public sealed partial class FirewallServiceWorker : BackgroundService
 {
     private readonly IFirewallServiceListener _listener;
     private readonly ILogger<FirewallServiceWorker> _logger;
+    private readonly IHostApplicationLifetime? _applicationLifetime;
 
-    public FirewallServiceWorker(IFirewallServiceListener listener, ILogger<FirewallServiceWorker> logger)
+    public FirewallServiceWorker(
+        IFirewallServiceListener listener,
+        ILogger<FirewallServiceWorker> logger,
+        IHostApplicationLifetime? applicationLifetime = null)
     {
         _listener = listener ?? throw new ArgumentNullException(nameof(listener));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _applicationLifetime = applicationLifetime;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -32,10 +37,10 @@ public sealed partial class FirewallServiceWorker : BackgroundService
         {
             // Normal shutdown.
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            LogListenerFault(ex);
-            throw;
+            LogListenerFault();
+            _applicationLifetime?.StopApplication();
         }
         finally
         {
@@ -44,12 +49,12 @@ public sealed partial class FirewallServiceWorker : BackgroundService
     }
 
     [LoggerMessage(Level = LogLevel.Information,
-        Message = "WinSight firewall service listening (audit-only, no WFP mutation).")]
+        Message = "[FW_PIPE_LISTENING] WinSight firewall service listening.")]
     private partial void LogListening();
 
-    [LoggerMessage(Level = LogLevel.Error, Message = "The firewall listener stopped unexpectedly.")]
-    private partial void LogListenerFault(Exception exception);
+    [LoggerMessage(Level = LogLevel.Error, Message = "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly.")]
+    private partial void LogListenerFault();
 
-    [LoggerMessage(Level = LogLevel.Information, Message = "WinSight firewall service stopped.")]
+    [LoggerMessage(Level = LogLevel.Information, Message = "[FW_SERVICE_STOPPED] WinSight firewall service stopped.")]
     private partial void LogStopped();
 }

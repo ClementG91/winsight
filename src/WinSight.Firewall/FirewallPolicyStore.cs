@@ -27,7 +27,24 @@ public sealed record OutboundFirewallConfiguration(
 public sealed record FirewallPolicyLoadResult(
     OutboundFirewallConfiguration Configuration,
     bool RecoveredToAuditOnly,
-    string? Diagnostic = null);
+    string? Diagnostic = null,
+    bool StorageTrusted = true);
+
+public sealed class FirewallStorageTrustException : IOException
+{
+    public FirewallStorageTrustException(string code)
+        : base("Privileged firewall storage is not trusted.") => Code = code;
+
+    public string Code { get; }
+}
+
+public sealed record FirewallStorageTrustLease(bool Trusted, string Code, object? Evidence = null);
+
+public interface IFirewallStorageTrustGuard
+{
+    FirewallStorageTrustLease Inspect();
+    FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease);
+}
 
 /// <summary>
 /// Durable JSON policy storage for the future privileged service. Writes use a
@@ -60,8 +77,14 @@ public sealed class FirewallPolicyStore
 
     private readonly string _path;
     private readonly bool _allowEnforcement;
+    private readonly Func<(bool Trusted, string Code)>? _storageTrust;
+    private readonly IFirewallStorageTrustGuard? _storageTrustGuard;
 
-    public FirewallPolicyStore(string path, bool allowEnforcement = false)
+    public FirewallPolicyStore(
+        string path,
+        bool allowEnforcement = false,
+        Func<(bool Trusted, string Code)>? storageTrust = null,
+        IFirewallStorageTrustGuard? storageTrustGuard = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         if (!Path.IsPathFullyQualified(path))
@@ -71,11 +94,14 @@ public sealed class FirewallPolicyStore
 
         _path = Path.GetFullPath(path);
         _allowEnforcement = allowEnforcement;
+        _storageTrust = storageTrust;
+        _storageTrustGuard = storageTrustGuard;
     }
 
     public async Task<OutboundFirewallConfiguration> LoadAsync(
         CancellationToken cancellationToken = default)
     {
+        var trustLease = DemandTrustedStorage();
         FileAttributes attributes;
         try
         {
@@ -83,6 +109,7 @@ public sealed class FirewallPolicyStore
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
+            RevalidateTrustedStorage(trustLease);
             return OutboundFirewallConfiguration.Empty;
         }
 
@@ -96,6 +123,7 @@ public sealed class FirewallPolicyStore
                 Share = FileShare.Read,
                 Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
             });
+        RevalidateTrustedStorage(trustLease);
         if (stream.Length is <= 0 or > MaxFileBytes)
         {
             throw new InvalidDataException(
@@ -131,10 +159,12 @@ public sealed class FirewallPolicyStore
         }
         catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
         {
+            var storageTrusted = ex is not FirewallStorageTrustException;
             return new FirewallPolicyLoadResult(
                 OutboundFirewallConfiguration.Empty,
                 RecoveredToAuditOnly: true,
-                ex.Message);
+                storageTrusted ? "PolicyContentInvalid" : ((FirewallStorageTrustException)ex).Code,
+                storageTrusted);
         }
     }
 
@@ -143,6 +173,7 @@ public sealed class FirewallPolicyStore
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+        var trustLease = DemandTrustedStorage();
         var validated = Validate(new PolicyDocument(
             CurrentSchemaVersion,
             configuration.Mode,
@@ -189,7 +220,9 @@ public sealed class FirewallPolicyStore
             }
 
             cancellationToken.ThrowIfCancellationRequested();
+            RevalidateTrustedStorage(trustLease);
             File.Move(temporaryPath, _path, overwrite: true);
+            _ = DemandTrustedStorage();
         }
         finally
         {
@@ -199,6 +232,42 @@ public sealed class FirewallPolicyStore
             }
         }
     }
+
+    private FirewallStorageTrustLease DemandTrustedStorage()
+    {
+        if (_storageTrustGuard is not null)
+        {
+            var lease = _storageTrustGuard.Inspect();
+            Demand(lease);
+            return lease;
+        }
+        if (_storageTrust is null)
+        {
+            return new(true, "StorageTrustNotConfigured");
+        }
+        var decision = _storageTrust();
+        if (!decision.Trusted)
+        {
+            throw new FirewallStorageTrustException(NormalizeCode(decision.Code));
+        }
+        return new(true, NormalizeCode(decision.Code));
+    }
+
+    private void RevalidateTrustedStorage(FirewallStorageTrustLease lease)
+    {
+        if (_storageTrustGuard is not null)
+        {
+            Demand(_storageTrustGuard.Revalidate(lease));
+        }
+    }
+
+    private static void Demand(FirewallStorageTrustLease lease)
+    {
+        if (!lease.Trusted) throw new FirewallStorageTrustException(NormalizeCode(lease.Code));
+    }
+
+    private static string NormalizeCode(string? code) =>
+        string.IsNullOrWhiteSpace(code) ? "StorageInspectionFailed" : code;
 
     private OutboundFirewallConfiguration Validate(PolicyDocument document)
     {

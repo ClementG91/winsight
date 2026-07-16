@@ -17,7 +17,7 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
 {
     private readonly FirewallConnectionHandler _handler;
     private readonly string _pipeName;
-    private readonly Func<NamedPipeServerStream, bool> _authorise;
+    private readonly Func<NamedPipeServerStream, FirewallCallerCapability> _authorise;
     private readonly Func<PipeSecurity> _securityFactory;
 
     /// <param name="handler">The exchange handler wrapping the dispatcher.</param>
@@ -34,11 +34,14 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
         FirewallConnectionHandler handler,
         string? pipeName = null,
         Func<NamedPipeServerStream, bool>? authorise = null,
-        Func<PipeSecurity>? securityFactory = null)
+        Func<PipeSecurity>? securityFactory = null,
+        Func<NamedPipeServerStream, FirewallCallerCapability>? capabilityAuthorise = null)
     {
         _handler = handler ?? throw new ArgumentNullException(nameof(handler));
         _pipeName = string.IsNullOrWhiteSpace(pipeName) ? FirewallServiceSecurity.DefaultPipeName : pipeName;
-        _authorise = authorise ?? DefaultAuthorise;
+        _authorise = capabilityAuthorise ?? (authorise is null
+            ? DefaultAuthorise
+            : server => authorise(server) ? FirewallCallerCapability.MutateMachinePolicy : FirewallCallerCapability.None);
         _securityFactory = securityFactory ?? FirewallServiceSecurity.CreateHardenedSecurity;
     }
 
@@ -81,8 +84,8 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
 
         await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
 
-        var authorised = _authorise(server);
-        await _handler.HandleAsync(server, authorised, cancellationToken).ConfigureAwait(false);
+        var capability = _authorise(server);
+        await _handler.HandleAsync(server, capability, cancellationToken).ConfigureAwait(false);
 
         if (server.IsConnected)
         {
@@ -90,22 +93,22 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
         }
     }
 
-    private static bool DefaultAuthorise(NamedPipeServerStream server)
+    private static FirewallCallerCapability DefaultAuthorise(NamedPipeServerStream server)
     {
         try
         {
-            var authorised = false;
+            var capability = FirewallCallerCapability.None;
             server.RunAsClient(() =>
             {
                 using var identity = WindowsIdentity.GetCurrent();
-                authorised = FirewallServiceSecurity.IsAuthorisedCaller(identity);
+                capability = FirewallServiceSecurity.GetCallerCapability(identity);
             });
-            return authorised;
+            return capability;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
             // Fail closed: if the client identity cannot be established, deny.
-            return false;
+            return FirewallCallerCapability.None;
         }
     }
 }

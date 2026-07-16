@@ -49,13 +49,32 @@ public static class FirewallServiceSecurity
     /// Fails closed: a null or unauthenticated identity is never authorised.
     /// </summary>
     public static bool IsAuthorisedCaller(WindowsIdentity? identity)
+        => GetCallerCapability(identity) != FirewallCallerCapability.None;
+
+    public static FirewallCallerCapability GetCallerCapability(WindowsIdentity? identity)
     {
         if (identity is null || !identity.IsAuthenticated || identity.IsAnonymous || identity.IsGuest)
         {
-            return false;
+            return FirewallCallerCapability.None;
         }
-
-        // An authenticated identity must carry a user SID to be actionable.
-        return identity.User is not null;
+        if (identity.User is null || identity.Groups?.Contains(
+                new SecurityIdentifier(WellKnownSidType.NetworkSid, null)) == true)
+        {
+            return FirewallCallerCapability.None;
+        }
+        if (identity.User.IsWellKnown(WellKnownSidType.LocalSystemSid))
+        {
+            return FirewallCallerCapability.MutateMachinePolicy;
+        }
+        return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator)
+            ? FirewallCallerCapability.MutateMachinePolicy
+            : FirewallCallerCapability.ReadStatus;
     }
+}
+
+public enum FirewallCallerCapability
+{
+    None,
+    ReadStatus,
+    MutateMachinePolicy,
 }
