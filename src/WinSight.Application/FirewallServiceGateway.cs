@@ -31,7 +31,15 @@ public enum FirewallMutationResult
     /// <summary>The caller's Windows identity is not permitted to change policy.</summary>
     Unauthorized,
 
-    /// <summary>The service rejected the request (invalid, unsupported, or internal failure).</summary>
+    /// <summary>
+    /// The machine cannot do what was asked — it has no usable outbound engine, so
+    /// enforcement could never filter. Distinct from <see cref="Rejected"/> because telling
+    /// an operator "rejected" when the real answer is "this machine cannot filter at all"
+    /// invites them to believe a retry would protect them.
+    /// </summary>
+    NotSupported,
+
+    /// <summary>The service rejected the request (invalid or internal failure).</summary>
     Rejected,
 }
 
@@ -42,9 +50,10 @@ public enum FirewallMutationResult
 /// caller's Windows identity. Transport faults (no service, timeout, malformed reply)
 /// collapse to <see cref="FirewallServiceView.Unavailable"/> or
 /// <see cref="FirewallMutationResult.ServiceUnavailable"/>, so the dashboard never implies
-/// the machine is filtered when it is not. Enabling enforcement itself is not exposed here:
-/// that stays a privileged, out-of-band action, not something the unprivileged dashboard
-/// can trigger.
+/// the machine is filtered when it is not. Enabling enforcement is requested here too, but
+/// the request is only a request: the privileged service performs the WFP mutation and
+/// authorises it by the caller's Windows identity, so an unprivileged dashboard is refused
+/// and only an elevated one can arm the machine.
 /// </summary>
 public sealed class FirewallServiceGateway
 {
@@ -107,6 +116,17 @@ public sealed class FirewallServiceGateway
             cancellationToken);
     }
 
+    /// <summary>
+    /// Arms the machine: promotes it to enforcement so the stored blocks start filtering.
+    /// The service refuses this unless the caller is elevated, and refuses it outright when
+    /// the machine has no usable engine, so a success here means traffic really is filtered.
+    /// </summary>
+    public Task<FirewallMutationResult> EnableEnforcementAsync(CancellationToken cancellationToken = default) =>
+        MutateAsync(
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.EnableEnforcement),
+            cancellationToken);
+
     /// <summary>Returns the machine to audit-only and lifts every filter (fail-safe kill switch).</summary>
     public Task<FirewallMutationResult> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
         MutateAsync(
@@ -124,9 +144,12 @@ public sealed class FirewallServiceGateway
             {
                 return FirewallMutationResult.Applied;
             }
-            return response.Error == FirewallProtocolError.Unauthorized
-                ? FirewallMutationResult.Unauthorized
-                : FirewallMutationResult.Rejected;
+            return response.Error switch
+            {
+                FirewallProtocolError.Unauthorized => FirewallMutationResult.Unauthorized,
+                FirewallProtocolError.NotSupported => FirewallMutationResult.NotSupported,
+                _ => FirewallMutationResult.Rejected,
+            };
         }
         catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
         {

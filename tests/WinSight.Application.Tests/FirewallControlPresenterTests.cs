@@ -31,9 +31,28 @@ public sealed class FirewallControlPresenterTests
     [InlineData(FirewallMutationResult.Applied, "FirewallActionApplied")]
     [InlineData(FirewallMutationResult.ServiceUnavailable, "FirewallActionUnavailable")]
     [InlineData(FirewallMutationResult.Unauthorized, "FirewallActionUnauthorized")]
+    [InlineData(FirewallMutationResult.NotSupported, "FirewallActionNotSupported")]
     [InlineData(FirewallMutationResult.Rejected, "FirewallActionRejected")]
     public void ResultMessageKey_MapsEveryOutcome(FirewallMutationResult result, string expected) =>
         Assert.Equal(expected, FirewallControlPresenter.ResultMessageKey(result));
+
+    // Arming the machine is the moment saved blocks start cutting traffic, so it gets its own
+    // message rather than the generic "change applied".
+    [Fact]
+    public void EnableEnforcementMessageKey_Applied_AnnouncesThatBlocksAreNowFiltering() =>
+        Assert.Equal(
+            "FirewallEnforcementEnabled",
+            FirewallControlPresenter.EnableEnforcementMessageKey(FirewallMutationResult.Applied));
+
+    // "This machine cannot filter" must never read as a generic rejection the user might retry.
+    [Theory]
+    [InlineData(FirewallMutationResult.NotSupported, "FirewallActionNotSupported")]
+    [InlineData(FirewallMutationResult.Unauthorized, "FirewallActionUnauthorized")]
+    [InlineData(FirewallMutationResult.ServiceUnavailable, "FirewallActionUnavailable")]
+    [InlineData(FirewallMutationResult.Rejected, "FirewallActionRejected")]
+    public void EnableEnforcementMessageKey_Failure_KeepsTheSpecificReason(
+        FirewallMutationResult result, string expected) =>
+        Assert.Equal(expected, FirewallControlPresenter.EnableEnforcementMessageKey(result));
 
     [Fact]
     public void OutcomeMessageKey_AppliedBlockWithoutEnforcement_SignalsNotEnforced() =>

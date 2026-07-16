@@ -13,6 +13,7 @@ public enum FirewallCommand
     UpsertPolicy = 3,
     RemovePolicy = 4,
     EmergencyDisable = 5,
+    EnableEnforcement = 6,
 }
 
 /// <summary>Stable machine-readable service errors; no exception detail crosses IPC.</summary>
@@ -223,6 +224,7 @@ public static class FirewallProtocolCodec
         {
             case FirewallCommand.GetStatus:
             case FirewallCommand.EmergencyDisable:
+            case FirewallCommand.EnableEnforcement:
                 if (HasPayload(request) || HasPaging(request))
                 {
                     throw InvalidFrame("Protocol command contains an unexpected payload.");

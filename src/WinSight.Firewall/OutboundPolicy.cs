@@ -88,6 +88,16 @@ public interface IFirewallMutationAuthority
 
     Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Promotes the machine to enforcement and applies every stored block. Enforcement is
+    /// default-permit: with no stored block this changes no traffic, and each block then
+    /// filters exactly the app the operator named. A partial apply rolls back, so the call
+    /// either reaches enforcement with every block live or leaves the previous state intact.
+    /// Callers must refuse this when the engine is unsupported rather than persist a mode
+    /// that filters nothing, which would read as protection that is not there.
+    /// </summary>
+    Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default);
+
     Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default);
 }
 

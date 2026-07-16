@@ -447,6 +447,27 @@ public partial class MainWindow : Window, IDisposable
         await RunFirewallMutationAsync(token => _firewallGateway.RemovePolicyAsync(path, token), isBlock: false);
     }
 
+    private async void FirewallEnableEnforcementButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Arming is the one action that starts cutting real traffic, so it is confirmed and
+        // named for what it does. The service refuses it unless this dashboard is elevated.
+        var confirm = System.Windows.MessageBox.Show(
+            this,
+            Text["FirewallEnableEnforcementConfirm"],
+            Text["FirewallEnableEnforcement"],
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        await RunFirewallMutationAsync(
+            token => _firewallGateway.EnableEnforcementAsync(token),
+            isBlock: false,
+            messageKey: FirewallControlPresenter.EnableEnforcementMessageKey);
+    }
+
     private async void FirewallEmergencyButton_Click(object sender, RoutedEventArgs e)
     {
         var confirm = System.Windows.MessageBox.Show(
@@ -515,7 +536,9 @@ public partial class MainWindow : Window, IDisposable
     }
 
     private async Task RunFirewallMutationAsync(
-        Func<CancellationToken, Task<FirewallMutationResult>> mutate, bool isBlock)
+        Func<CancellationToken, Task<FirewallMutationResult>> mutate,
+        bool isBlock,
+        Func<FirewallMutationResult, string>? messageKey = null)
     {
         // These run from async void event handlers, so an unexpected exception would have no
         // caller to catch it and would tear down the whole tray app. The gateway already
@@ -527,8 +550,9 @@ public partial class MainWindow : Window, IDisposable
             // Re-read the live status so the grid and controls reflect the change, then set
             // the outcome last (the refresh rewrites the summary) with enforcement context.
             var view = await RefreshFirewallAsync();
-            SummaryText.Text = Text[FirewallControlPresenter.OutcomeMessageKey(
-                result, isBlock, view.EnforcementEnabled)];
+            SummaryText.Text = Text[messageKey is null
+                ? FirewallControlPresenter.OutcomeMessageKey(result, isBlock, view.EnforcementEnabled)
+                : messageKey(result)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or TimeoutException or InvalidOperationException)

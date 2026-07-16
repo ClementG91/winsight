@@ -220,9 +220,57 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
             policy: new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Block)), true)).Success);
         Assert.True((await dispatcher.DispatchAsync(Request(FirewallCommand.RemovePolicy,
             executablePath: @"C:\apps\a.exe"), true)).Success);
+        Assert.True((await dispatcher.DispatchAsync(Request(FirewallCommand.EnableEnforcement), true)).Success);
         Assert.True((await dispatcher.DispatchAsync(Request(FirewallCommand.EmergencyDisable), true)).Success);
 
-        Assert.Equal(["upsert", "remove", "emergency"], authority.Calls);
+        Assert.Equal(["upsert", "remove", "enable", "emergency"], authority.Calls);
+    }
+
+    // Arming the machine is a mutation: an unprivileged dashboard holds ReadStatus, which lets
+    // it observe the firewall but must never let it start filtering traffic.
+    [Theory]
+    [InlineData(FirewallCallerCapability.ReadStatus)]
+    [InlineData(FirewallCallerCapability.None)]
+    public async Task DispatchAsync_EnableEnforcement_WithoutMutateCapability_IsUnauthorisedAndDoesNotArm(
+        FirewallCallerCapability capability)
+    {
+        var authority = new RecordingAuthority();
+        var dispatcher = new FirewallRequestDispatcher(new FirewallPolicyStore(PolicyPath), authority);
+
+        var response = await dispatcher.DispatchAsync(Request(FirewallCommand.EnableEnforcement), capability);
+
+        Assert.False(response.Success);
+        Assert.Equal(FirewallProtocolError.Unauthorized, response.Error);
+        Assert.Empty(authority.Calls);
+    }
+
+    // Persisting Enforcement on a machine that cannot filter would read as protection that is
+    // not there, so the request is refused before the authority is ever asked.
+    [Fact]
+    public async Task DispatchAsync_EnableEnforcement_WithoutUsableEngine_IsNotSupportedAndDoesNotArm()
+    {
+        var authority = new UnsupportedEngineAuthority();
+        var dispatcher = new FirewallRequestDispatcher(new FirewallPolicyStore(PolicyPath), authority);
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.EnableEnforcement), FirewallCallerCapability.MutateMachinePolicy);
+
+        Assert.False(response.Success);
+        Assert.Equal(FirewallProtocolError.NotSupported, response.Error);
+        Assert.False(authority.EnableAttempted);
+    }
+
+    [Fact]
+    public async Task DispatchAsync_EnableEnforcement_ReportsTheArmedStatusBack()
+    {
+        var dispatcher = new FirewallRequestDispatcher(new FirewallPolicyStore(PolicyPath), new RecordingAuthority());
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.EnableEnforcement), FirewallCallerCapability.MutateMachinePolicy);
+
+        Assert.True(response.Success);
+        Assert.Equal(OutboundFirewallMode.Enforcement, response.Status!.Mode);
+        Assert.True(response.Status.EnforcementEnabled);
     }
 
     public void Dispose()
@@ -289,6 +337,18 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
             if (configuration.Mode == OutboundFirewallMode.Enforcement) await _engine.RemoveAsync(executablePath, cancellationToken);
         }
 
+        public async Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default)
+        {
+            var configuration = await _store.LoadAsync(cancellationToken);
+            var enforcing = configuration with { Mode = OutboundFirewallMode.Enforcement };
+            await _store.SaveAsync(enforcing, cancellationToken);
+            foreach (var policy in configuration.Policies.Where(policy => policy.Action == OutboundAction.Block))
+            {
+                await _engine.ApplyAsync(policy, cancellationToken);
+            }
+            return enforcing;
+        }
+
         public async Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default)
         {
             var configuration = await _store.LoadAsync(cancellationToken);
@@ -307,8 +367,30 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         { Calls.Add("upsert"); return Task.CompletedTask; }
         public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default)
         { Calls.Add("remove"); return Task.CompletedTask; }
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default)
+        {
+            Calls.Add("enable");
+            return Task.FromResult(OutboundFirewallConfiguration.Empty with { Mode = OutboundFirewallMode.Enforcement });
+        }
         public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default)
         { Calls.Add("emergency"); return Task.FromResult(OutboundFirewallConfiguration.Empty); }
+    }
+
+    private sealed class UnsupportedEngineAuthority : IFirewallMutationAuthority
+    {
+        public bool EnableAttempted { get; private set; }
+        public bool EngineSupported => false;
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default)
+        {
+            EnableAttempted = true;
+            return Task.FromResult(OutboundFirewallConfiguration.Empty with { Mode = OutboundFirewallMode.Enforcement });
+        }
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
     }
 }
 
@@ -376,6 +458,7 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         public bool EngineSupported => false;
         public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 

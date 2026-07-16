@@ -77,6 +77,10 @@
   <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Saved. This block filters traffic only once firewall enforcement is enabled (an elevated action).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>The firewall service is not available. Install and start it, then try again.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>You are not authorized to change firewall policy on this machine.</value></data>
+  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Enable enforcement</value></data>
+  <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>Start filtering outbound traffic now? Every saved block takes effect immediately, and the apps you blocked lose their network access. Emergency disable returns the machine to audit-only at any time.</value></data>
+  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>Enforcement is on. Saved blocks are now filtering outbound traffic.</value></data>
+  <data name="FirewallActionNotSupported" xml:space="preserve"><value>This machine has no usable outbound filtering engine, so enforcement could not filter anything. Nothing was changed.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>The firewall service rejected the change.</value></data>
   <data name="BlockOutbound" xml:space="preserve"><value>Block outbound</value></data>
   <data name="BlockOutboundTooltip" xml:space="preserve"><value>Block this application's outbound network traffic via the WinSight firewall.</value></data>

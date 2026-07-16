@@ -10,8 +10,13 @@ namespace WinSight.Firewall;
 /// - An unauthenticated/unauthorised caller only ever receives <see cref="FirewallProtocolError.Unauthorized"/>.
 /// - Store and engine failures collapse to <see cref="FirewallProtocolError.InternalFailure"/>;
 ///   no exception text ever crosses IPC.
-/// - The dispatcher never promotes the persisted mode to enforcement. Enabling
-///   enforcement is a separate, later, explicitly gated increment.
+/// - Promoting the persisted mode to enforcement is a mutation, so it needs
+///   <see cref="FirewallCallerCapability.MutateMachinePolicy"/>: an elevated administrator or
+///   SYSTEM. A caller holding only <see cref="FirewallCallerCapability.ReadStatus"/> — which is
+///   what an unprivileged dashboard gets — can observe the machine but never arm it. The
+///   privileged service, not the caller, performs the WFP mutation.
+/// - Enforcement is refused outright when the engine cannot filter, rather than persisting a
+///   mode that reports as armed while nothing is enforced.
 /// </summary>
 public sealed class FirewallRequestDispatcher
 {
@@ -52,6 +57,7 @@ public sealed class FirewallRequestDispatcher
                 FirewallCommand.ListPolicies => await ListPoliciesAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.UpsertPolicy => await UpsertPolicyAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.RemovePolicy => await RemovePolicyAsync(request, cancellationToken).ConfigureAwait(false),
+                FirewallCommand.EnableEnforcement => await EnableEnforcementAsync(request, cancellationToken).ConfigureAwait(false),
                 FirewallCommand.EmergencyDisable => await EmergencyDisableAsync(request, cancellationToken).ConfigureAwait(false),
                 _ => Failure(request, FirewallProtocolError.InvalidRequest),
             };
@@ -70,7 +76,8 @@ public sealed class FirewallRequestDispatcher
     }
 
     private static bool IsMutation(FirewallCommand command) => command is
-        FirewallCommand.UpsertPolicy or FirewallCommand.RemovePolicy or FirewallCommand.EmergencyDisable;
+        FirewallCommand.UpsertPolicy or FirewallCommand.RemovePolicy or
+        FirewallCommand.EnableEnforcement or FirewallCommand.EmergencyDisable;
 
     private async Task<FirewallCommandResponse> GetStatusAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
@@ -120,6 +127,22 @@ public sealed class FirewallRequestDispatcher
         await _authority.RemovePolicyAsync(request.ExecutablePath!, cancellationToken).ConfigureAwait(false);
 
         return Success(request);
+    }
+
+    private async Task<FirewallCommandResponse> EnableEnforcementAsync(
+        FirewallCommandRequest request, CancellationToken cancellationToken)
+    {
+        // Arming a machine whose engine cannot filter would persist Enforcement while every
+        // stored block stays inert. The status would then read "audit-only" for a mode that
+        // says otherwise, and the operator would believe the blocks are live. Refuse instead.
+        if (!_authority.EngineSupported)
+        {
+            return Failure(request, FirewallProtocolError.NotSupported);
+        }
+
+        var configuration = await _authority.EnableEnforcementAsync(cancellationToken).ConfigureAwait(false);
+
+        return Success(request) with { Status = DescribeStatus(configuration.Mode) };
     }
 
     private async Task<FirewallCommandResponse> EmergencyDisableAsync(

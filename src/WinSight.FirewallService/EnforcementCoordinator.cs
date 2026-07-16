@@ -183,13 +183,18 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         return result;
     }
 
-    public async Task EnableAsync(CancellationToken cancellationToken = default)
+    public async Task EnableAsync(CancellationToken cancellationToken = default) =>
+        _ = await EnableEnforcementAsync(cancellationToken).ConfigureAwait(false);
+
+    public async Task<OutboundFirewallConfiguration> EnableEnforcementAsync(
+        CancellationToken cancellationToken = default)
     {
+        var result = OutboundFirewallConfiguration.Empty;
         await LockedAsync(async () =>
         {
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
-            await _store.SaveAsync(configuration with { Mode = OutboundFirewallMode.Enforcement }, cancellationToken)
-                .ConfigureAwait(false);
+            var enforcing = configuration with { Mode = OutboundFirewallMode.Enforcement };
+            await _store.SaveAsync(enforcing, cancellationToken).ConfigureAwait(false);
             IOutboundFirewallEngine? engine = null;
             var applied = new List<AppFirewallPolicy>();
             try
@@ -208,7 +213,9 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
                 if (applyFailure is OperationCanceledException) throw;
                 throw new FirewallTransitionException("EnableApplyFailed", applyFailure);
             }
+            result = enforcing;
         }, cancellationToken).ConfigureAwait(false);
+        return result;
     }
 
     public async Task DisableAsync(CancellationToken cancellationToken = default) =>

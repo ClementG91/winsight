@@ -77,6 +77,10 @@
   <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Guardado. Este bloqueo solo filtra el tráfico cuando se activa la aplicación del firewall (acción con privilegios).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>El servicio de firewall no está disponible. Instálalo e inícialo, luego inténtalo de nuevo.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>No tienes autorización para cambiar la política del firewall en esta máquina.</value></data>
+  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activar la aplicación</value></data>
+  <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>¿Empezar a filtrar el tráfico saliente ahora? Cada bloqueo guardado surte efecto de inmediato y las aplicaciones que bloqueó pierden su acceso a la red. La desactivación de emergencia devuelve la máquina a solo auditoría en cualquier momento.</value></data>
+  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>La aplicación está activada. Los bloqueos guardados ya filtran el tráfico saliente.</value></data>
+  <data name="FirewallActionNotSupported" xml:space="preserve"><value>Esta máquina no tiene un motor de filtrado saliente utilizable, por lo que la aplicación no podría filtrar nada. No se cambió nada.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>El servicio de firewall rechazó el cambio.</value></data>
   <data name="BlockOutbound" xml:space="preserve"><value>Bloquear tráfico saliente</value></data>
   <data name="BlockOutboundTooltip" xml:space="preserve"><value>Bloquear el tráfico de red saliente de esta aplicación mediante el firewall de WinSight.</value></data>
