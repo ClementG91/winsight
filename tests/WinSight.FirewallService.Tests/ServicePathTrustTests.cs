@@ -1,7 +1,80 @@
+using System.Security.AccessControl;
 using WinSight.FirewallService;
 using Xunit;
 
 namespace WinSight.FirewallService.Tests;
+
+public sealed class ServicePathRightsTests
+{
+    // Regression for the composite-mask defect: Modify/FullControl share the Read/Execute bits, so a
+    // bitwise-AND-non-zero probe against them mis-classified a plain Read&Execute grant as writable.
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Map_ReadAndExecute_IsNotDangerous(bool isDirectory) =>
+        Assert.Equal(DangerousPathAccess.None,
+            ServicePathRights.Map(FileSystemRights.ReadAndExecute, isDirectory));
+
+    [Theory]
+    [InlineData(FileSystemRights.Read)]
+    [InlineData(FileSystemRights.ReadAndExecute)]
+    [InlineData(FileSystemRights.ListDirectory | FileSystemRights.Traverse | FileSystemRights.ReadAttributes)]
+    public void Map_ReadOnlyRights_AreNeverDangerous(FileSystemRights rights)
+    {
+        Assert.Equal(DangerousPathAccess.None, ServicePathRights.Map(rights, isDirectory: true));
+        Assert.Equal(DangerousPathAccess.None, ServicePathRights.Map(rights, isDirectory: false));
+    }
+
+    // A genuine Modify/FullControl grant must still be detected via the atomic bits it contains.
+    [Fact]
+    public void Map_Modify_OnFile_FlagsWriteData() =>
+        Assert.True(ServicePathRights.Map(FileSystemRights.Modify, isDirectory: false)
+            .HasFlag(DangerousPathAccess.WriteData));
+
+    [Fact]
+    public void Map_FullControl_OnFile_FlagsWriteAndDeleteAndOwnership()
+    {
+        var mapped = ServicePathRights.Map(FileSystemRights.FullControl, isDirectory: false);
+        Assert.True(mapped.HasFlag(DangerousPathAccess.WriteData));
+        Assert.True(mapped.HasFlag(DangerousPathAccess.Delete));
+        Assert.True(mapped.HasFlag(DangerousPathAccess.ChangePermissions));
+        Assert.True(mapped.HasFlag(DangerousPathAccess.TakeOwnership));
+    }
+
+    // CreateDirectories == AppendData (0x4): benign on a directory (adding a sub-directory cannot
+    // tamper with an existing protected child) but dangerous on a file (appending grows the binary).
+    [Fact]
+    public void Map_CreateDirectories_OnDirectory_IsBenign() =>
+        Assert.Equal(DangerousPathAccess.None,
+            ServicePathRights.Map(FileSystemRights.CreateDirectories, isDirectory: true));
+
+    [Fact]
+    public void Map_AppendData_OnFile_IsDangerous() =>
+        Assert.Equal(DangerousPathAccess.AppendData,
+            ServicePathRights.Map(FileSystemRights.AppendData, isDirectory: false));
+
+    // CreateFiles == WriteData (0x2): planting a file in a directory enables DLL side-loading.
+    [Fact]
+    public void Map_CreateFiles_OnDirectory_IsDangerous() =>
+        Assert.Equal(DangerousPathAccess.CreateFiles,
+            ServicePathRights.Map(FileSystemRights.CreateFiles, isDirectory: true));
+
+    [Fact]
+    public void Map_WriteData_OnFile_IsDangerous() =>
+        Assert.Equal(DangerousPathAccess.WriteData,
+            ServicePathRights.Map(FileSystemRights.WriteData, isDirectory: false));
+
+    [Theory]
+    [InlineData(FileSystemRights.Delete, DangerousPathAccess.Delete)]
+    [InlineData(FileSystemRights.DeleteSubdirectoriesAndFiles, DangerousPathAccess.DeleteChildren)]
+    [InlineData(FileSystemRights.ChangePermissions, DangerousPathAccess.ChangePermissions)]
+    [InlineData(FileSystemRights.TakeOwnership, DangerousPathAccess.TakeOwnership)]
+    public void Map_TamperRights_AreDangerousOnAnyType(FileSystemRights rights, DangerousPathAccess expected)
+    {
+        Assert.Equal(expected, ServicePathRights.Map(rights, isDirectory: true));
+        Assert.Equal(expected, ServicePathRights.Map(rights, isDirectory: false));
+    }
+}
 
 public sealed class ServicePathTrustPolicyTests
 {

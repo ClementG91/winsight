@@ -2,6 +2,27 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall service: fix path-trust so a legitimate install is actually trusted
+- The LocalSystem path-trust inspector (ServicePathTrust) rejected every real install location,
+  including `C:\Program Files\...`, so `install` would always print `[FW_INSTALL_FAILED]`. Three
+  defects in the raw ACL -> trust translation, none reachable by the mocked unit tests, surfaced
+  only against real Windows ACLs (verified on a real machine):
+  - Composite-mask bug: probing `rights & (WriteData | Modify | FullControl)` flagged a plain
+    Read&Execute grant as writable, because `Modify`/`FullControl` share the Read/Execute bits.
+    Now only the atomic write/delete/ownership bits are tested; `Modify`/`FullControl` are still
+    caught because they contain those bits.
+  - Inherit-only ACEs (`PropagationFlags.InheritOnly`), which grant nothing on the component
+    itself, were counted against it. They are now excluded, matching Windows' own access check.
+  - `CreateDirectories` on a directory (the default `C:\` right that lets any user `mkdir C:\foo`)
+    was treated as fatal, so no path under `C:\` could ever be trusted. Creating a *new*
+    sub-directory cannot tamper with an existing protected child (that needs `Delete`/
+    `DeleteChildren`, still flagged), so it is no longer dangerous on directories; on a file the
+    same 0x4 bit is `AppendData` (grows the binary) and stays dangerous.
+- Extracted the translation into a pure, unit-tested `ServicePathRights.Map(rights, isDirectory)`.
+  Verified on a real machine: the `C:\ -> Program Files` ancestor chain and an Administrators-owned
+  leaf are now Trusted, while user-writable paths stay Denied. The strict owner rule (a service exe
+  owned by TrustedInstaller is not a valid leaf) is unchanged.
+
 ### Detection: add print providers (verified false-positive-free)
 - Add PrintProviderEnumerator: the DLLs the print spooler (spoolsv, SYSTEM) loads as print
   providers (...\Control\Print\Providers\{name} -> Name); a rogue one runs as SYSTEM, a
