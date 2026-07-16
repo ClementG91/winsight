@@ -156,6 +156,7 @@
   <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>Pare-feu sortant WinSight</value></data>
   <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service non installé. WinSight ne filtre pas votre trafic sortant ; les analyses restent locales et en lecture seule.</value></data>
   <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Installé, audit seul. Les politiques sont enregistrées mais rien n’est bloqué.</value></data>
+  <data name="OutboundFirewallPending" xml:space="preserve"><value>A joint {0}, {1} connexion(s). Vous n’avez jamais autorisé ni bloqué cette application.</value></data>
   <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Installé et applique les politiques par application.</value></data>
   <data name="OutboundActionAllow" xml:space="preserve"><value>Autoriser</value></data>
   <data name="OutboundActionBlock" xml:space="preserve"><value>Bloquer</value></data>

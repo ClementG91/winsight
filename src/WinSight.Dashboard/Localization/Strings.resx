@@ -156,6 +156,7 @@
   <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>WinSight outbound firewall</value></data>
   <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service not installed. WinSight is not filtering your outbound traffic; scans stay local and read-only.</value></data>
   <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Installed, audit-only. Policies are recorded but nothing is blocked.</value></data>
+  <data name="OutboundFirewallPending" xml:space="preserve"><value>Reached {0}, {1} connection(s). You have never allowed or blocked this app.</value></data>
   <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Installed and enforcing per-application policies.</value></data>
   <data name="OutboundActionAllow" xml:space="preserve"><value>Allow</value></data>
   <data name="OutboundActionBlock" xml:space="preserve"><value>Block</value></data>

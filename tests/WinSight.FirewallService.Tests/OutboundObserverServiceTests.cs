@@ -19,9 +19,9 @@ public sealed class OutboundObserverServiceTests : IDisposable
     public void OnConnection_RecordsAnAppWithNoPolicy()
     {
         var log = new PendingOutboundLog();
-        var observer = Observer(log, new StubResolver { [4242] = @"C:\apps\unknown.exe" });
+        var observer = Observer(log);
 
-        observer.OnConnection(new OutboundConnectionEvent(4242, "93.184.216.34", 443));
+        observer.OnConnection(Connection(@"C:\apps\unknown.exe", "93.184.216.34", 443));
 
         var app = Assert.Single(log.Snapshot());
         Assert.Equal(@"C:\apps\unknown.exe", app.ExecutablePath);
@@ -41,59 +41,26 @@ public sealed class OutboundObserverServiceTests : IDisposable
             Policies = [new AppFirewallPolicy(@"C:\apps\known.exe", action)],
         });
         var log = new PendingOutboundLog();
-        var observer = Observer(log, new StubResolver { [7] = @"C:\apps\known.exe" }, store);
+        var observer = Observer(log, store);
 
-        observer.OnConnection(new OutboundConnectionEvent(7, "93.184.216.34", 443));
-
-        Assert.Empty(log.Snapshot());
-    }
-
-    // A process that exits between connecting and being asked about cannot be attributed. Counting
-    // it is the difference between a known blind spot and a silent one.
-    [Fact]
-    public void OnConnection_CountsWhatItCannotAttribute_RatherThanGuessing()
-    {
-        var log = new PendingOutboundLog();
-        var observer = Observer(log, new StubResolver());
-
-        observer.OnConnection(new OutboundConnectionEvent(999, "93.184.216.34", 443));
+        observer.OnConnection(Connection(@"C:\apps\known.exe", "93.184.216.34", 443));
 
         Assert.Empty(log.Snapshot());
-        Assert.Equal(1, observer.UnattributedConnections);
     }
 
     [Fact]
     public void OnConnection_CountsAPathNoPolicyCouldBeKeyedOn()
     {
         var log = new PendingOutboundLog();
-        var observer = Observer(log, new StubResolver { [7] = "not-absolute.exe" });
+        var observer = Observer(log);
 
-        observer.OnConnection(new OutboundConnectionEvent(7, "93.184.216.34", 443));
+        observer.OnConnection(Connection("not-absolute.exe", "93.184.216.34", 443));
 
         Assert.Empty(log.Snapshot());
         Assert.Equal(1, observer.UnattributedConnections);
     }
 
-    // The resolver must be asked every time: Windows reuses process ids, so a cached answer
-    // eventually names a different program than the one that connected.
-    [Fact]
-    public void OnConnection_ResolvesEveryConnection_SoAReusedProcessIdCannotMisattribute()
-    {
-        var log = new PendingOutboundLog();
-        var resolver = new StubResolver { [100] = @"C:\apps\first.exe" };
-        var observer = Observer(log, resolver);
-
-        observer.OnConnection(new OutboundConnectionEvent(100, "1.2.3.4", 443));
-        resolver[100] = @"C:\apps\second.exe";   // the id was reused by another program
-        observer.OnConnection(new OutboundConnectionEvent(100, "1.2.3.4", 443));
-
-        Assert.Equal(2, resolver.Calls);
-        Assert.Equal(
-            [@"C:\apps\first.exe", @"C:\apps\second.exe"],
-            log.Snapshot().Select(app => app.ExecutablePath).OrderBy(path => path, StringComparer.Ordinal));
-    }
-
-    // The snapshot is reused for a few seconds so file IO stays off the ETW callback path; a
+    // The snapshot is reused for a few seconds so file IO stays off the trace callback path; a
     // decision taken meanwhile must still be picked up once it goes stale.
     [Fact]
     public async Task OnConnection_PicksUpADecisionAfterTheSnapshotGoesStale()
@@ -101,9 +68,9 @@ public sealed class OutboundObserverServiceTests : IDisposable
         var log = new PendingOutboundLog();
         var store = new FirewallPolicyStore(PolicyPath);
         var time = new TestClock(new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero));
-        var observer = Observer(log, new StubResolver { [7] = @"C:\apps\a.exe" }, store, time);
+        var observer = Observer(log, store, time);
 
-        observer.OnConnection(new OutboundConnectionEvent(7, "1.2.3.4", 443));
+        observer.OnConnection(Connection(@"C:\apps\a.exe", "1.2.3.4", 443));
         Assert.Single(log.Snapshot());
 
         await store.SaveAsync(OutboundFirewallConfiguration.Empty with
@@ -113,30 +80,33 @@ public sealed class OutboundObserverServiceTests : IDisposable
         log.Resolve(@"C:\apps\a.exe");
         time.Advance(TimeSpan.FromSeconds(30));
 
-        observer.OnConnection(new OutboundConnectionEvent(7, "1.2.3.4", 443));
+        observer.OnConnection(Connection(@"C:\apps\a.exe", "1.2.3.4", 443));
 
         Assert.Empty(log.Snapshot());
     }
 
-    private OutboundObserverService Observer(
-        PendingOutboundLog log,
-        IProcessImageResolver resolver,
-        FirewallPolicyStore? store = null,
-        TimeProvider? time = null) =>
-        new(new OutboundConnectionWatcher(), resolver, store ?? new FirewallPolicyStore(PolicyPath), log,
-            NullLogger<OutboundObserverService>.Instance, time);
-
-    private sealed class StubResolver : IProcessImageResolver
+    [Fact]
+    public void OnConnection_CountsOneAppOnce_HoweverOftenItConnects()
     {
-        private readonly Dictionary<int, string> _paths = [];
-        public int Calls { get; private set; }
-        public string this[int pid] { set => _paths[pid] = value; }
-        public string? Resolve(int processId)
+        var log = new PendingOutboundLog();
+        var observer = Observer(log);
+
+        for (var i = 0; i < 5; i++)
         {
-            Calls++;
-            return _paths.GetValueOrDefault(processId);
+            observer.OnConnection(Connection(@"C:\apps\a.exe", "1.2.3.4", 443 + i));
         }
+
+        var app = Assert.Single(log.Snapshot());
+        Assert.Equal(5, app.Observations);
     }
+
+    private static OutboundConnectionEvent Connection(string path, string address, int port) =>
+        new(4242, path, address, port);
+
+    private OutboundObserverService Observer(
+        PendingOutboundLog log, FirewallPolicyStore? store = null, TimeProvider? time = null) =>
+        new(new OutboundConnectionWatcher(), store ?? new FirewallPolicyStore(PolicyPath), log,
+            NullLogger<OutboundObserverService>.Instance, time);
 
     // TimeProvider is in the BCL and abstract, so controlling the clock costs a few lines rather
     // than a test-only package.

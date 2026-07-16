@@ -1,56 +1,61 @@
+using Microsoft.Diagnostics.Tracing.Parsers;
+using Microsoft.Diagnostics.Tracing.Parsers.Kernel;
 using Microsoft.Diagnostics.Tracing.Session;
 
 namespace WinSight.NetMonitor;
 
-/// <summary>An outbound connection attempt observed via ETW, as it happens.</summary>
+/// <summary>An outbound connection attempt observed via ETW, already attributed to its program.</summary>
 /// <param name="ProcessId">The process that reached out.</param>
+/// <param name="ExecutablePath">That process's executable, the identity a policy is keyed on.</param>
 /// <param name="RemoteAddress">The destination address.</param>
 /// <param name="RemotePort">The destination port.</param>
-public sealed record OutboundConnectionEvent(int ProcessId, string RemoteAddress, int RemotePort)
+public sealed record OutboundConnectionEvent(
+    int ProcessId,
+    string ExecutablePath,
+    string RemoteAddress,
+    int RemotePort)
 {
     /// <summary>The destination as an operator reads it.</summary>
     public string Remote => $"{RemoteAddress}:{RemotePort}";
 }
 
 /// <summary>
-/// Real-time visibility of outbound connection attempts via an ETW session on the
-/// Microsoft-Windows-Kernel-Network provider: every time a process reaches out, as it happens.
-/// Requires Administrator (creating an ETW session is privileged); the caller surfaces that. The
+/// Reports outbound connections as they happen, each already attributed to the program that made
+/// it. Requires Administrator (a kernel trace session is privileged); the caller surfaces that. The
 /// session is stopped cleanly on cancellation.
 /// </summary>
 /// <remarks>
-/// The event shape here was read off a live machine rather than inferred, because two details are
-/// easy to get wrong and neither fails loudly:
+/// <b>Why the kernel session.</b> The obvious provider, Microsoft-Windows-Kernel-Network, reports
+/// connections but not who made them: it carries a process id, and nothing else. Turning that id
+/// into an executable meant asking the operating system after the fact, which does not work —
+/// ETW delivers a second or more late, and a program that reaches out and exits immediately, which
+/// is precisely the interesting case, is already gone. That version reported nothing at all,
+/// silently, and every unit test passed. The kernel session solves it at the source: process start
+/// carries the command line, so the path is captured while the process is alive, and connections
+/// arrive on the same ordered stream already attributed. Its network events are also decoded
+/// properly, rather than as a packed address integer and a port in network byte order that reads
+/// negative.
 ///
-/// <b>Only <see cref="ConnectionAttemptedId"/> is outbound.</b> The same task also emits
-/// <c>Connectionaccepted</c> (id 15) for <em>inbound</em> connections. Matching on the word
-/// "connect", or on the task alone, silently reports every inbound connection as if the local
-/// process had reached out.
-///
-/// <b>The process is in the payload, not the header.</b> These events are emitted from whatever
-/// context the stack happens to be in, so <c>TraceEvent.ProcessID</c> is not the connecting
-/// process; the <c>PID</c> field is. Reading the header would attribute connections to the wrong
-/// program, which for a tool whose whole job is attribution is the worst possible failure.
-///
-/// The provider does not split IPv4 and IPv6 into separate opcodes — <c>daddr</c> carries either
-/// family — so one id covers both.
+/// <b>Why its own session, not the NT Kernel Logger.</b> The kernel events used to be reachable
+/// only through one machine-wide session, which would have meant taking a resource other tools
+/// need and failing whenever something else held it. Windows 8 lifted that: a privately named
+/// session can enable the same providers, and several may coexist. Verified on a live machine —
+/// this watcher collected process and connection events normally while the NT Kernel Logger was
+/// already held by something else. WinSight therefore never competes for it.
 /// </remarks>
 public sealed class OutboundConnectionWatcher
 {
-    private const string KernelNetworkProvider = "Microsoft-Windows-Kernel-Network";
-
-    /// <summary>KERNEL_NETWORK_TASK_TCPIP/Connectionattempted, the outbound connect.</summary>
-    private const int ConnectionAttemptedId = 12;
-
     /// <summary>
-    /// Opens the ETW session and invokes <paramref name="onEvent"/> for each outbound connection
-    /// attempt until cancelled. Blocking; run on its own thread. Throws
+    /// Opens the trace session and invokes <paramref name="onEvent"/> for each attributed outbound
+    /// connection until cancelled. Blocking; run on its own thread. Throws
     /// UnauthorizedAccessException when not elevated.
     /// </summary>
     public void Watch(Action<OutboundConnectionEvent> onEvent, CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(onEvent);
 
+        var index = new ProcessPathIndex();
+        // A private name, so WinSight never takes the shared NT Kernel Logger from another tool.
         using var session = new TraceEventSession($"WinSight-Outbound-{Environment.ProcessId}");
         using var stop = token.Register(() =>
         {
@@ -64,41 +69,40 @@ public sealed class OutboundConnectionWatcher
             }
         });
 
-        session.EnableProvider(KernelNetworkProvider);
-        session.Source.Dynamic.All += data =>
-        {
-            if ((int)data.ID != ConnectionAttemptedId)
-            {
-                return;
-            }
-            if (TryRead(data.PayloadByName("PID"), out var pid) &&
-                data.PayloadByName("daddr") is { } address &&
-                TryRead(data.PayloadByName("dport"), out var port))
-            {
-                var remote = Convert.ToString(address, System.Globalization.CultureInfo.InvariantCulture);
-                if (!string.IsNullOrWhiteSpace(remote))
-                {
-                    onEvent(new OutboundConnectionEvent(pid, remote, port));
-                }
-            }
-        };
-        session.Source.Process(); // blocks until the session is stopped
-    }
+        // Process gives the command line the attribution depends on; NetworkTCPIP gives the
+        // connections. One session, so the two arrive in order and a connection is never seen
+        // before the process that made it.
+        session.EnableKernelProvider(
+            KernelTraceEventParser.Keywords.Process | KernelTraceEventParser.Keywords.NetworkTCPIP);
 
-    private static bool TryRead(object? value, out int result)
-    {
-        result = value switch
+        // The start group covers processes already running when the session opens, not just new
+        // ones, so a long-lived program's connections are attributed from the first event.
+        session.Source.Kernel.ProcessStartGroup += process =>
         {
-            int i => i,
-            uint u => (int)u,
-            long l => (int)l,
-            ulong ul => (int)ul,
-            ushort s => s,
-            short s => s,
-            byte b => b,
-            string text when int.TryParse(text, System.Globalization.CultureInfo.InvariantCulture, out var n) => n,
-            _ => -1,
+            var path = ProcessCommandLine.ExtractExecutablePath(process.CommandLine, process.ImageFileName);
+            if (path is not null)
+            {
+                index.Started(process.ProcessID, path);
+            }
         };
-        return result >= 0;
+        session.Source.Kernel.ProcessStop += process =>
+        {
+            index.Stopped(process.ProcessID, process.TimeStamp.ToUniversalTime());
+            index.Prune(process.TimeStamp.ToUniversalTime());
+        };
+
+        session.Source.Kernel.TcpIpConnect += connect =>
+        {
+            // Unattributed means the process started before this session and never told us its
+            // command line. Reporting it with a made-up identity would be worse than staying quiet:
+            // every policy is keyed on the executable.
+            if (index.Resolve(connect.ProcessID) is { } path)
+            {
+                onEvent(new OutboundConnectionEvent(
+                    connect.ProcessID, path, connect.daddr.ToString(), connect.dport));
+            }
+        };
+
+        session.Source.Process(); // blocks until the session is stopped
     }
 }
