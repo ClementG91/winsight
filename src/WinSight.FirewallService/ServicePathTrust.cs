@@ -148,7 +148,12 @@ public sealed class ServicePathTrustPolicy
         _applicability = applicability ?? new ConservativePrincipalApplicability();
     }
 
-    public PathTrustDecision Evaluate(PathComponentMetadata component, bool isLeaf, bool isProductPath)
+    /// <param name="isLeafParent">
+    /// Whether this component is the directory that directly holds the inspected leaf. Defaults to
+    /// the strict reading, so a caller that does not know stays fail-closed.
+    /// </param>
+    public PathTrustDecision Evaluate(
+        PathComponentMetadata component, bool isLeaf, bool isProductPath, bool isLeafParent = true)
     {
         if (!component.Exists) return PathTrustDecision.Deny(PathTrustCode.MissingComponent);
         if (component.IsReparsePoint) return PathTrustDecision.Deny(PathTrustCode.ReparsePoint);
@@ -157,13 +162,26 @@ public sealed class ServicePathTrustPolicy
             (SidEquals(component.OwnerSid, _trustedInstallerSid) && !isLeaf && !isProductPath);
         if (!trustedOwner) return PathTrustDecision.Deny(PathTrustCode.UntrustedOwner);
         if (component.AccessRules is null) return PathTrustDecision.Deny(PathTrustCode.InspectionFailed);
+
+        // On a directory that merely contains the next link of the chain, the right to add a child
+        // cannot modify, replace, or delete that already-existing, independently protected link:
+        // doing so needs Delete/DeleteChildren/ChangePermissions/TakeOwnership, which stay dangerous
+        // on every component. Only the directory directly holding the leaf keeps add-child
+        // dangerous, because a principal who can create files beside the leaf can plant a
+        // side-loadable DLL, or the policy file itself when it does not exist yet. Windows grants
+        // Users "Write" on ProgramData and "Create folders" on C:\, so treating add-child as fatal
+        // on every ancestor leaves no trustworthy path on a stock machine.
+        var benign = isLeaf || isLeafParent
+            ? DangerousPathAccess.None
+            : DangerousPathAccess.CreateFiles | DangerousPathAccess.CreateDirectories;
+
         for (var allowIndex = 0; allowIndex < component.AccessRules.Count; allowIndex++)
         {
             var rule = component.AccessRules[allowIndex];
             if (string.IsNullOrWhiteSpace(rule.PrincipalSid)) return PathTrustDecision.Deny(PathTrustCode.InspectionFailed);
             if (!rule.IsAllow || rule.DangerousAccess == DangerousPathAccess.None || IsPrivileged(rule.PrincipalSid))
                 continue;
-            var effective = rule.DangerousAccess;
+            var effective = rule.DangerousAccess & ~benign;
             // Windows evaluates the ordered DACL. Only an earlier applicable deny can
             // neutralize an allow; a later deny cannot revoke already granted rights.
             for (var denyIndex = 0; denyIndex < allowIndex && effective != DangerousPathAccess.None; denyIndex++)
@@ -246,6 +264,7 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
                 new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null).Value,
                 new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null).Value,
                 _metadata.ResolveTrustedInstallerSid());
+            var leafParent = Path.GetDirectoryName(evidence.CanonicalPath);
             foreach (var pair in evidence.Components)
             {
                 var fresh = _metadata.Read(pair.Key);
@@ -255,7 +274,8 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
                     return PathTrustDecision.Deny(PathTrustCode.IdentityChanged);
                 var decision = policy.Evaluate(fresh,
                     pair.Key.Equals(evidence.CanonicalPath, StringComparison.OrdinalIgnoreCase),
-                    evidence.ProductRoot is not null && IsContained(evidence.ProductRoot, pair.Key));
+                    evidence.ProductRoot is not null && IsContained(evidence.ProductRoot, pair.Key),
+                    IsLeafParent(pair.Key, leafParent));
                 if (!decision.IsTrusted) return decision;
             }
             return PathTrustDecision.Allow();
@@ -278,12 +298,14 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
                 _metadata.ResolveTrustedInstallerSid());
             var identities = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var metadata = new Dictionary<string, PathComponentMetadata>(StringComparer.OrdinalIgnoreCase);
+            var leafParent = Path.GetDirectoryName(canonical);
             foreach (var componentPath in components)
             {
                 var component = _metadata.Read(componentPath);
                 var decision = policy.Evaluate(component,
                     componentPath.Equals(canonical, StringComparison.OrdinalIgnoreCase),
-                    productRoot is not null && IsContained(productRoot, componentPath));
+                    productRoot is not null && IsContained(productRoot, componentPath),
+                    IsLeafParent(componentPath, leafParent));
                 if (!decision.IsTrusted) return new(decision, canonical, identities, metadata, productRoot);
                 if (string.IsNullOrWhiteSpace(component.StableIdentity)) return Denied(canonical, PathTrustCode.InspectionFailed);
                 identities.Add(componentPath, component.StableIdentity);
@@ -295,6 +317,9 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SystemException)
         { return Denied(string.Empty, PathTrustCode.InspectionFailed); }
     }
+
+    private static bool IsLeafParent(string componentPath, string? leafParent) =>
+        leafParent is not null && componentPath.Equals(leafParent, StringComparison.OrdinalIgnoreCase);
 
     private static PathTrustEvidence Denied(string path, PathTrustCode code) =>
         new(PathTrustDecision.Deny(code), path, new Dictionary<string, string>());
