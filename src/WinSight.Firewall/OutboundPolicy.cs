@@ -14,7 +14,7 @@ public enum OutboundAction
 /// </summary>
 public sealed record AppFirewallPolicy(string ExecutablePath, OutboundAction Action, bool Enabled = true);
 
-/// <summary>Pure policy lookup shared by the future service, prompt UI and tests.</summary>
+/// <summary>Pure policy lookup shared by the firewall service, prompt UI and tests.</summary>
 public sealed class OutboundPolicyEvaluator
 {
     private readonly Dictionary<string, OutboundAction> _policies;
@@ -84,6 +84,25 @@ public interface IFirewallMutationAuthority
 {
     bool EngineSupported { get; }
 
+    /// <summary>
+    /// Runtime truth for this service lifetime. This is never inferred from the persisted mode:
+    /// after a failed startup or transition it remains <see cref="FirewallEnforcementState.Degraded"/>
+    /// until an explicit successful recovery transition.
+    /// </summary>
+    FirewallEnforcementState EffectiveState => FirewallEnforcementState.AuditOnly;
+
+    /// <summary>
+    /// Reads the requested durable mode and runtime enforcement state as one coherent
+    /// observation. Implementations which own transitions must take this snapshot under the
+    /// same serialization boundary as mutations. The conservative default preserves source
+    /// compatibility for non-production authorities and never claims filtering is active.
+    /// </summary>
+    Task<FirewallRuntimeStatus> GetRuntimeStatusAsync(CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FirewallRuntimeStatus(
+            OutboundFirewallMode.AuditOnly,
+            EngineSupported,
+            FirewallEnforcementState.AuditOnly));
+
     Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default);
 
     Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default);
@@ -101,10 +120,15 @@ public interface IFirewallMutationAuthority
     Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default);
 }
 
-/// <summary>Narrow cleanup capability limited to WinSight-owned WFP objects.</summary>
-public interface IWinSightFirewallCleanup
+/// <summary>
+/// A coherent service-side observation. <see cref="EffectiveState"/> is runtime proof, not a
+/// restatement of <see cref="Mode"/>; callers must only present filtering as active when it is
+/// <see cref="FirewallEnforcementState.Active"/>.
+/// </summary>
+public sealed record FirewallRuntimeStatus(
+    OutboundFirewallMode Mode,
+    bool EngineSupported,
+    FirewallEnforcementState EffectiveState)
 {
-    Task CleanupWinSightAsync(
-        IReadOnlyList<AppFirewallPolicy> knownPolicies,
-        CancellationToken cancellationToken = default);
+    public bool EnforcementEnabled => EffectiveState == FirewallEnforcementState.Active;
 }

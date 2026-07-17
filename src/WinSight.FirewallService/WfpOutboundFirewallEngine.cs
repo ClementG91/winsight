@@ -3,6 +3,26 @@ using WinSight.Firewall;
 namespace WinSight.FirewallService;
 
 /// <summary>
+/// The mandatory service-side WFP truth boundary. Implementations reconcile from the
+/// complete desired policy set, verify the complete native state, and remove every
+/// WinSight-owned object without relying on policy-store paths.
+/// </summary>
+public interface IWinSightWfpReconciler
+{
+    bool IsSupported { get; }
+
+    Task ReconcileExactAsync(
+        IReadOnlyList<AppFirewallPolicy> policies,
+        CancellationToken cancellationToken = default);
+
+    Task<bool> VerifyExactAsync(
+        IReadOnlyList<AppFirewallPolicy> policies,
+        CancellationToken cancellationToken = default);
+
+    Task CleanupAllAsync(CancellationToken cancellationToken = default);
+}
+
+/// <summary>
 /// The real WFP-backed outbound firewall engine. It maps per-application policies to WFP
 /// filters: a <see cref="OutboundAction.Block"/> policy installs a per-app block filter
 /// (IPv4 and IPv6), while <see cref="OutboundAction.Allow"/> and
@@ -13,7 +33,7 @@ namespace WinSight.FirewallService;
 /// The service authority creates this backend lazily, only after trusted storage proves
 /// that enforcement or narrowly scoped WinSight cleanup requires native access.
 /// </summary>
-public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine, IWinSightFirewallCleanup
+public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine, IWinSightWfpReconciler
 {
     /// <summary>WFP is available on every supported Windows baseline.</summary>
     public bool IsSupported => true;
@@ -23,9 +43,9 @@ public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine, IWinSig
         ArgumentNullException.ThrowIfNull(policy);
         cancellationToken.ThrowIfCancellationRequested();
 
-        WfpProvisioning.Provision();
-        if (policy.Action == OutboundAction.Block)
+        if (policy.Enabled && policy.Action == OutboundAction.Block)
         {
+            WfpProvisioning.Provision();
             WfpProvisioning.AddBlockFilter(policy.ExecutablePath);
         }
         else
@@ -45,17 +65,29 @@ public sealed class WfpOutboundFirewallEngine : IOutboundFirewallEngine, IWinSig
         return Task.CompletedTask;
     }
 
-    public async Task CleanupWinSightAsync(
-        IReadOnlyList<AppFirewallPolicy> knownPolicies,
+    public Task ReconcileExactAsync(
+        IReadOnlyList<AppFirewallPolicy> policies,
         CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(knownPolicies);
-        foreach (var policy in knownPolicies)
-        {
-            await RemoveAsync(policy.ExecutablePath, cancellationToken).ConfigureAwait(false);
-        }
+        ArgumentNullException.ThrowIfNull(policies);
         cancellationToken.ThrowIfCancellationRequested();
-        WfpProvisioning.RemovePermitFilter();
-        WfpProvisioning.Deprovision();
+        WfpProvisioning.ReconcileExact(policies);
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> VerifyExactAsync(
+        IReadOnlyList<AppFirewallPolicy> policies,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(policies);
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(WfpProvisioning.VerifyExact(policies));
+    }
+
+    public Task CleanupAllAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        WfpProvisioning.CleanupAll();
+        return Task.CompletedTask;
     }
 }

@@ -68,13 +68,29 @@ public sealed class FirewallControlPresenterTests
     public void ResultMessageKey_MapsEveryOutcome(FirewallMutationResult result, string expected) =>
         Assert.Equal(expected, FirewallControlPresenter.ResultMessageKey(result));
 
-    // Arming the machine is the moment saved blocks start cutting traffic, so it gets its own
-    // message rather than the generic "change applied".
+    // An IPC acknowledgement is not runtime proof. Without a post-mutation status snapshot,
+    // the UI must not say that traffic is being filtered.
     [Fact]
-    public void EnableEnforcementMessageKey_Applied_AnnouncesThatBlocksAreNowFiltering() =>
+    public void EnableEnforcementMessageKey_AppliedWithoutObservedState_DoesNotClaimFiltering() =>
+        Assert.Equal(
+            "FirewallEnforcementNotActive",
+            FirewallControlPresenter.EnableEnforcementMessageKey(FirewallMutationResult.Applied));
+
+    [Fact]
+    public void EnableEnforcementMessageKey_Applied_AnnouncesFilteringOnlyForObservedActiveState() =>
         Assert.Equal(
             "FirewallEnforcementEnabled",
-            FirewallControlPresenter.EnableEnforcementMessageKey(FirewallMutationResult.Applied));
+            FirewallControlPresenter.EnableEnforcementMessageKey(
+                FirewallMutationResult.Applied, FirewallEnforcementState.Active));
+
+    [Theory]
+    [InlineData(FirewallEnforcementState.AuditOnly)]
+    [InlineData(FirewallEnforcementState.Degraded)]
+    public void EnableEnforcementMessageKey_AppliedWithoutActiveRuntimeState_DoesNotClaimFiltering(
+        FirewallEnforcementState state) =>
+        Assert.Equal(
+            "FirewallEnforcementNotActive",
+            FirewallControlPresenter.EnableEnforcementMessageKey(FirewallMutationResult.Applied, state));
 
     // "This machine cannot filter" must never read as a generic rejection the user might retry.
     [Theory]

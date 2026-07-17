@@ -95,9 +95,9 @@ public sealed class DashboardFindingPresenterTests
     }
 
     [Theory]
-    [InlineData("en", "Service not installed", "Block")]
-    [InlineData("fr", "Service non installé", "Bloquer")]
-    [InlineData("es", "Servicio no instalado", "Bloquear")]
+    [InlineData("en", "Firewall service unavailable", "Block")]
+    [InlineData("fr", "Service de pare-feu indisponible", "Bloquer")]
+    [InlineData("es", "Servicio de firewall no disponible", "Bloquear")]
     public void OutboundFirewallPresentation_LocalizesStatusAndAction(
         string culture,
         string expectedUnavailable,
@@ -118,6 +118,125 @@ public sealed class DashboardFindingPresenterTests
             var policyResult = DashboardFindingPresenter.Present("outbound-firewall", policy, text);
             Assert.Equal(@"C:\apps\a.exe", policyResult.Title);
             Assert.Equal(expectedBlock, policyResult.Detail);
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "disabled")]
+    [InlineData("fr", "désactiv")]
+    [InlineData("es", "desactiv")]
+    public void OutboundFirewallPresentation_DisabledPolicyIsExplicitAndLocalized(
+        string culture,
+        string expectedDisabledStem)
+    {
+        WithCulture(culture, text =>
+        {
+            var disabled = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new()
+                {
+                    ["kind"] = "policy",
+                    ["path"] = @"C:\apps\disabled.exe",
+                    ["action"] = "Block",
+                    ["enabled"] = "False",
+                }),
+                text);
+            var enabled = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new()
+                {
+                    ["kind"] = "policy",
+                    ["path"] = @"C:\apps\disabled.exe",
+                    ["action"] = "Block",
+                    ["enabled"] = "True",
+                }),
+                text);
+
+            Assert.NotEqual(enabled.Detail, disabled.Detail);
+            Assert.Contains(expectedDisabledStem, disabled.Detail, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "enforcement is degraded")]
+    [InlineData("fr", "filtrage dégradé")]
+    [InlineData("es", "filtrado degradado")]
+    public void OutboundFirewallPresentation_DegradedRuntimeIsLocalizedAndNeverClaimedActive(
+        string culture, string expectedDetail)
+    {
+        WithCulture(culture, text =>
+        {
+            var result = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new()
+                {
+                    ["kind"] = "status",
+                    ["available"] = "True",
+                    ["mode"] = "Enforcement",
+                    ["enforcement"] = "False",
+                    ["effectiveState"] = "Degraded",
+                }),
+                text);
+
+            Assert.Contains(expectedDetail, result.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("enforcement is active", result.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("filtrage actif", result.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("filtrado activo", result.Detail, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "Service endpoint reachable and enforcing")]
+    [InlineData("fr", "Point de service accessible ; le filtrage")]
+    [InlineData("es", "Punto de servicio accesible; el filtrado")]
+    public void OutboundFirewallPresentation_OnlyObservedActiveRuntimeUsesTheLocalizedActiveMessage(
+        string culture, string expectedDetail)
+    {
+        WithCulture(culture, text =>
+        {
+            var active = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new()
+                {
+                    ["kind"] = "status",
+                    ["available"] = "True",
+                    ["mode"] = "Enforcement",
+                    ["enforcement"] = "True",
+                    ["effectiveState"] = "Active",
+                }),
+                text);
+            var desiredOnly = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new()
+                {
+                    ["kind"] = "status",
+                    ["available"] = "True",
+                    ["mode"] = "Enforcement",
+                    ["enforcement"] = "False",
+                    ["effectiveState"] = "AuditOnly",
+                }),
+                text);
+
+            Assert.Contains(expectedDetail, active.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(expectedDetail, desiredOnly.Detail, StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "not installed")]
+    [InlineData("fr", "non installé")]
+    [InlineData("es", "no instalado")]
+    public void OutboundFirewallPresentation_UnavailablePipeDoesNotInventInstallationState(
+        string culture, string forbiddenPhrase)
+    {
+        WithCulture(culture, text =>
+        {
+            var result = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Info, new() { ["kind"] = "status", ["available"] = "False" }),
+                text);
+
+            Assert.DoesNotContain(forbiddenPhrase, result.Detail, StringComparison.OrdinalIgnoreCase);
         });
     }
 

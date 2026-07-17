@@ -1,11 +1,10 @@
 namespace WinSight.Firewall;
 
 /// <summary>
-/// The default Phase 2 engine: it never mutates the Windows Filtering Platform. Policy
-/// decisions are recorded and persisted, but no filter is installed, so a machine can
-/// never lose connectivity through WinSight while enforcement is still being built and
-/// independently safety-tested. <see cref="IsSupported"/> is deliberately false, which
-/// makes the dispatcher refuse to report enforcement as active.
+/// Non-mutating fallback and test engine. It records no native effect and can never prove
+/// filtering. Production service composition uses the WFP-backed engine only behind the
+/// trusted, serialized authority; this fallback remains useful where native filtering is
+/// deliberately unavailable.
 /// </summary>
 public sealed class AuditOnlyFirewallEngine : IOutboundFirewallEngine
 {

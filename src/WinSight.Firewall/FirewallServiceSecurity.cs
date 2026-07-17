@@ -16,7 +16,7 @@ public static class FirewallServiceSecurity
     public const string DefaultPipeName = @"WinSight\firewall";
 
     /// <summary>
-    /// A hardened <see cref="PipeSecurity"/>: full control for SYSTEM and the local
+    /// A hardened <see cref="PipeSecurity"/> explicitly owned by SYSTEM: full control for SYSTEM and the local
     /// Administrators group, read/write for interactive local users so the unprivileged
     /// dashboard can connect, and an explicit deny for network logons so the pipe is
     /// never reachable remotely. Anonymous and everyone-style access is never granted.
@@ -30,6 +30,7 @@ public static class FirewallServiceSecurity
         var interactive = new SecurityIdentifier(WellKnownSidType.InteractiveSid, null);
         var network = new SecurityIdentifier(WellKnownSidType.NetworkSid, null);
 
+        security.SetOwner(system);
         security.AddAccessRule(new PipeAccessRule(system, PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(administrators, PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(

@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using WinSight.Firewall;
 using Xunit;
 
@@ -271,7 +272,9 @@ public sealed class FirewallProtocolTests
                 OutboundFirewallMode.AuditOnly,
                 EngineSupported: true,
                 EnforcementEnabled: false),
-            Policies: [new AppFirewallPolicy(@"C:\app.exe", OutboundAction.Ask)]);
+            Policies: [new AppFirewallPolicy(@"C:\app.exe", OutboundAction.Ask)],
+            SnapshotVersion: new string('A', 64),
+            SnapshotCount: 1);
         await using var stream = new MemoryStream();
 
         await FirewallProtocolCodec.WriteResponseAsync(stream, response);
@@ -306,6 +309,45 @@ public sealed class FirewallProtocolTests
             () => FirewallProtocolCodec.ReadRequestAsync(stream));
 
         Assert.Contains("truncated", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadResponseAsync_ZeroByteEof_IsTheOnlyTypedLegacyCloseSignal()
+    {
+        await using var stream = new MemoryStream();
+
+        var exception = await Assert.ThrowsAsync<FirewallLegacyPeerClosedException>(
+            () => FirewallProtocolCodec.ReadResponseAsync(stream));
+
+        Assert.Equal(FirewallLegacyPeerClosedException.FixedMessage, exception.Message);
+    }
+
+    [Fact]
+    public async Task ReadResponseAsync_PartialHeader_IsMalformedNotLegacy()
+    {
+        await using var stream = new MemoryStream([0x01]);
+
+        var exception = await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.ReadResponseAsync(stream));
+
+        Assert.Equal(FirewallProtocolError.InvalidRequest, exception.Error);
+        Assert.Contains("header", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ReadResponseAsync_PartialPayload_IsMalformedNotLegacy()
+    {
+        var frame = new byte[6];
+        BitConverter.GetBytes(10).CopyTo(frame, 0);
+        frame[4] = (byte)'{';
+        frame[5] = (byte)'"';
+        await using var stream = new MemoryStream(frame);
+
+        var exception = await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.ReadResponseAsync(stream));
+
+        Assert.Equal(FirewallProtocolError.InvalidRequest, exception.Error);
+        Assert.Contains("payload", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -380,6 +422,97 @@ public sealed class FirewallProtocolTests
     }
 
     [Theory]
+    [InlineData(0, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")]
+    [InlineData(1, null)]
+    public async Task V3ListRequest_RequiresSnapshotOnlyOnContinuation(int offset, string? snapshotVersion)
+    {
+        var request = new FirewallCommandRequest(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            FirewallCommand.ListPolicies,
+            Offset: offset,
+            Limit: 1,
+            SnapshotVersion: snapshotVersion);
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.WriteRequestAsync(stream, request));
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Theory]
+    [InlineData(FirewallProtocolCodec.LegacyVersion)]
+    [InlineData(FirewallProtocolCodec.RuntimeProofVersion)]
+    public async Task LegacyListRequest_RejectsSnapshotToken(int version)
+    {
+        var request = new FirewallCommandRequest(
+            version,
+            Guid.NewGuid(),
+            FirewallCommand.ListPolicies,
+            Offset: 1,
+            Limit: 1,
+            SnapshotVersion: new string('A', 64));
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.WriteRequestAsync(stream, request));
+    }
+
+    [Theory]
+    [InlineData(null, 1)]
+    [InlineData("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", null)]
+    [InlineData("not-a-digest", 1)]
+    public async Task V3ListResponse_RequiresStrictDigestAndCount(string? snapshotVersion, int? snapshotCount)
+    {
+        var response = new FirewallCommandResponse(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            Success: true,
+            Policies: [new AppFirewallPolicy(@"C:\app.exe", OutboundAction.Ask)],
+            SnapshotVersion: snapshotVersion,
+            SnapshotCount: snapshotCount);
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.WriteResponseAsync(stream, response));
+        Assert.Empty(stream.ToArray());
+    }
+
+    [Theory]
+    [InlineData(FirewallProtocolCodec.LegacyVersion)]
+    [InlineData(FirewallProtocolCodec.RuntimeProofVersion)]
+    public async Task LegacyListResponse_RejectsContinuationMetadata(int version)
+    {
+        var response = new FirewallCommandResponse(
+            version,
+            Guid.NewGuid(),
+            Success: true,
+            Policies: [new AppFirewallPolicy(@"C:\app.exe", OutboundAction.Ask)],
+            NextOffset: 1);
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.WriteResponseAsync(stream, response));
+    }
+
+    [Fact]
+    public async Task SnapshotChanged_IsAValidPayloadFreeV3FailureOnly()
+    {
+        var v3 = new FirewallCommandResponse(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            Success: false,
+            Error: FirewallProtocolError.SnapshotChanged);
+        await using var accepted = new MemoryStream();
+        await FirewallProtocolCodec.WriteResponseAsync(accepted, v3);
+
+        var v2 = v3 with { ProtocolVersion = FirewallProtocolCodec.RuntimeProofVersion };
+        await using var rejected = new MemoryStream();
+        await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.WriteResponseAsync(rejected, v2));
+    }
+
+    [Theory]
     [InlineData("app.exe")]
     [InlineData(".\\app.exe")]
     public async Task WriteRequestAsync_RejectsRelativeRemovalPath(string path)
@@ -410,6 +543,92 @@ public sealed class FirewallProtocolTests
 
         await Assert.ThrowsAsync<FirewallProtocolException>(
             () => FirewallProtocolCodec.WriteResponseAsync(stream, response));
+    }
+
+    [Theory]
+    [InlineData(OutboundFirewallMode.Enforcement, true, FirewallEnforcementState.Degraded)]
+    [InlineData(OutboundFirewallMode.AuditOnly, false, FirewallEnforcementState.Active)]
+    public async Task WriteResponseAsync_RejectsStatusThatClaimsActiveWithoutAnActiveRuntimeState(
+        OutboundFirewallMode mode, bool enforcementEnabled, FirewallEnforcementState effectiveState)
+    {
+        var response = new FirewallCommandResponse(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            Success: true,
+            Status: new FirewallServiceStatus(
+                mode,
+                EngineSupported: true,
+                EnforcementEnabled: enforcementEnabled,
+                EffectiveState: effectiveState));
+        await using var stream = new MemoryStream();
+
+        await Assert.ThrowsAsync<FirewallProtocolException>(
+            () => FirewallProtocolCodec.WriteResponseAsync(stream, response));
+    }
+
+    [Fact]
+    public async Task Response_RoundTripsDegradedPersistedEnforcementWithoutClaimingItIsActive()
+    {
+        var response = new FirewallCommandResponse(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            Success: true,
+            Status: new FirewallServiceStatus(
+                OutboundFirewallMode.Enforcement,
+                EngineSupported: true,
+                EnforcementEnabled: false,
+                EffectiveState: FirewallEnforcementState.Degraded));
+        await using var stream = new MemoryStream();
+
+        await FirewallProtocolCodec.WriteResponseAsync(stream, response);
+        stream.Position = 0;
+        var decoded = await FirewallProtocolCodec.ReadResponseAsync(stream);
+
+        Assert.Equal(OutboundFirewallMode.Enforcement, decoded.Status!.Mode);
+        Assert.False(decoded.Status.EnforcementEnabled);
+        Assert.Equal(FirewallEnforcementState.Degraded, decoded.Status.EffectiveState);
+    }
+
+    [Theory]
+    [InlineData(FirewallEnforcementState.Active, "Enforcement", true, FirewallEnforcementState.Degraded)]
+    [InlineData(FirewallEnforcementState.Degraded, "AuditOnly", false, FirewallEnforcementState.AuditOnly)]
+    [InlineData(FirewallEnforcementState.AuditOnly, "AuditOnly", false, FirewallEnforcementState.AuditOnly)]
+    public async Task Response_V1Wire_ClaimsEnforcementOnlyForObservedActiveRuntime(
+        FirewallEnforcementState effectiveState,
+        string expectedWireMode,
+        bool expectedWireEnabled,
+        FirewallEnforcementState expectedDecodedState)
+    {
+        var response = new FirewallCommandResponse(
+            FirewallProtocolCodec.LegacyVersion,
+            Guid.NewGuid(),
+            Success: true,
+            Status: new FirewallServiceStatus(
+                OutboundFirewallMode.Enforcement,
+                EngineSupported: true,
+                EnforcementEnabled: effectiveState == FirewallEnforcementState.Active,
+                EffectiveState: effectiveState));
+        await using var stream = new MemoryStream();
+
+        await FirewallProtocolCodec.WriteResponseAsync(stream, response);
+
+        var frame = stream.ToArray();
+        var json = Encoding.UTF8.GetString(frame, sizeof(int), frame.Length - sizeof(int));
+        Assert.DoesNotContain("effectiveState", json, StringComparison.Ordinal);
+        using var document = JsonDocument.Parse(json);
+        var wireStatus = document.RootElement.GetProperty("status");
+        Assert.Equal(expectedWireMode, wireStatus.GetProperty("mode").GetString());
+        Assert.Equal(expectedWireEnabled, wireStatus.GetProperty("enforcementEnabled").GetBoolean());
+
+        stream.Position = 0;
+        var decoded = await FirewallProtocolCodec.ReadResponseAsync(stream);
+
+        Assert.Equal(FirewallProtocolCodec.LegacyVersion, decoded.ProtocolVersion);
+        Assert.Equal(
+            expectedWireEnabled ? OutboundFirewallMode.Enforcement : OutboundFirewallMode.AuditOnly,
+            decoded.Status!.Mode);
+        Assert.False(decoded.Status.EnforcementEnabled);
+        Assert.Equal(expectedDecodedState, decoded.Status.EffectiveState);
     }
 
     [Fact]

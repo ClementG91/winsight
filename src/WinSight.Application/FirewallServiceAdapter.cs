@@ -26,13 +26,14 @@ public static class FirewallServiceAdapter
         builder.Add(
             Severity.Info,
             "service",
-            view.ServiceAvailable ? view.Mode.ToString() : "not installed",
+            view.ServiceAvailable ? view.EffectiveState.ToString() : "Unavailable",
             new Dictionary<string, string?>
             {
                 ["kind"] = "status",
                 ["available"] = view.ServiceAvailable.ToString(),
                 ["mode"] = view.Mode.ToString(),
                 ["enforcement"] = view.EnforcementEnabled.ToString(),
+                ["effectiveState"] = view.EffectiveState.ToString(),
                 ["unrecorded"] = view.UnrecordedApps.ToString(System.Globalization.CultureInfo.InvariantCulture),
             });
 
@@ -67,12 +68,14 @@ public static class FirewallServiceAdapter
                     ["kind"] = "policy",
                     ["path"] = policy.ExecutablePath,
                     ["action"] = policy.Action.ToString(),
+                    ["enabled"] = policy.Enabled.ToString(),
                 });
         }
 
-        var summary = view.ServiceAvailable
-            ? $"{view.Mode}, {view.Policies.Count} policy(ies), {view.Pending.Count} awaiting a decision"
-            : "service not installed";
+        // Summary is a protocol-facing invariant, not dashboard presentation. The dashboard
+        // localizes status from the structured fields above; keeping this bounded avoids adding
+        // an English-only sentence to an otherwise localized user surface.
+        var summary = view.ServiceAvailable ? view.EffectiveState.ToString() : "Unavailable";
         return builder.Build(summary);
     }
 }

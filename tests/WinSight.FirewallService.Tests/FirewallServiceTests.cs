@@ -96,7 +96,7 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"), allowEnforcement: true);
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
             [new AppFirewallPolicy(@"C:\attacker\secret.exe", OutboundAction.Block)]));
-        var coordinator = new EnforcementCoordinator(store, new NativeFailureEngine());
+        var coordinator = TestEnforcementCoordinator.Create(store, new NativeFailureEngine());
         var logger = new CapturingLogger<EnforcementStartupService>();
         var service = new EnforcementStartupService(coordinator, logger);
 
@@ -122,11 +122,55 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
 
         AssertInvariantEntries(logger.Entries,
         [
-            "[FW_PIPE_LISTENING] WinSight firewall service listening.",
             "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly.",
             "[FW_SERVICE_STOPPED] WinSight firewall service stopped.",
         ]);
         Assert.Equal(1, lifetime.StopCalls);
+    }
+
+    [Fact]
+    public async Task Worker_LogsListeningOnlyAfterEndpointReadiness()
+    {
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var listener = new DelayedReadyListener();
+        using var worker = new FirewallServiceWorker(listener, logger);
+
+        await worker.StartAsync(CancellationToken.None);
+        await listener.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Empty(logger.Entries);
+
+        listener.MarkReady();
+        await logger.Logged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(
+            "[FW_PIPE_LISTENING] WinSight firewall service listening.",
+            Assert.Single(logger.Entries).Message);
+
+        await worker.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ListenerFaultBeforeReadiness_NeverClaimsListeningAndUsesFixedRedactedLog()
+    {
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        using var worker = new FirewallServiceWorker(new ReadinessFailingListener(), logger, lifetime);
+
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(
+        [
+            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly.",
+            "[FW_SERVICE_STOPPED] WinSight firewall service stopped.",
+        ], logger.Entries.Select(entry => entry.Message));
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("LISTENING", StringComparison.Ordinal));
+        Assert.All(logger.Entries, entry =>
+        {
+            Assert.Null(entry.Exception);
+            Assert.False(ContainsSecret(entry.Message));
+            Assert.False(ContainsSecret(entry.StableState));
+        });
     }
 
     private static void AssertInvariantEntries(IReadOnlyList<CapturedLogEntry> entries, string[] expectedTemplates)
@@ -274,6 +318,27 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             throw new Win32Exception(5, @"native detail C:\attacker\secret.exe S-1-5-21-666");
     }
 
+    private sealed class ReadinessFailingListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Ready => _ready.Task;
+        public Task RunAsync(CancellationToken cancellationToken) =>
+            throw new Win32Exception(5, @"native detail C:\attacker\secret.exe S-1-5-21-666");
+    }
+
+    private sealed class DelayedReadyListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task Ready => _ready.Task;
+        public void MarkReady() => _ready.TrySetResult();
+        public async Task RunAsync(CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+    }
+
     private sealed class RecordingLifetime : IHostApplicationLifetime
     {
         public TaskCompletionSource Stopping { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -287,6 +352,7 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
     private sealed class CapturingLogger<T> : ILogger<T>
     {
         public List<CapturedLogEntry> Entries { get; } = [];
+        public TaskCompletionSource Logged { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
@@ -303,6 +369,7 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             structured.TryGetValue("{OriginalFormat}", out var originalFormat);
             Entries.Add(new(logLevel, formatter(state, exception), exception, structured,
                 originalFormat ?? stableState, stableState));
+            Logged.TrySetResult();
         }
     }
 

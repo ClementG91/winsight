@@ -2,6 +2,58 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall WFP runtime truth is reconciled, not cached
+- The LocalSystem coordinator now requires a complete-state WFP reconciler. Each enforcement
+  transition enumerates all native filters, removes every object linked to WinSight's provider
+  or sublayer, recreates exactly the enabled block policies for IPv4 and IPv6 in one transaction,
+  and verifies provider, sublayer, filter keys, layers, actions and app-id conditions before
+  publishing `Active`. Disabled policies never create or preserve a filter.
+- Authenticated status re-verifies the actual native inventory while holding the transition
+  lock. Missing, extra, malformed or unreadable WFP state becomes `Degraded`; emergency and
+  AuditOnly startup cleanup no longer depend on policy-store paths and therefore remove orphans.
+- Client connect, request write and response read are independently bounded. The dashboard
+  obtains status again after assembling paged collections and builds its protection state from
+  that final response, preventing a stale `Active` view. Real BFE restart, external removal,
+  orphan cleanup and x64/Arm64 behavior remain blocked on the isolated-VM protocol.
+
+### Firewall IPC v3 and reboot-safe authority transaction
+- Protocol v3 binds each policy and pending-app page to an uppercase SHA-256 identity and
+  total count of the complete, deterministically ordered collection. Every continuation
+  repeats that identity; snapshot drift, duplicates, omissions and inconsistent terminal
+  counts fail closed. v1/v2 return one complete page or `NotSupported`, never an unsafe
+  partial view. Negotiation probes v3, v2 and v1 in order and descends only after an
+  authenticated zero-byte close.
+- The service start type is now inside the coordinator's serialized authority boundary.
+  Startup and enable require SCM auto-start before WFP can become Active; failed enable
+  rolls filters, durable intent and SCM back to AuditOnly/demand-start. Emergency disable
+  removes filters, persists AuditOnly, then restores demand-start; an SCM failure remains
+  visible as Degraded and never reapplies a block.
+- `status` treats only SCM error 1060 as absence, while every other query error is a stable
+  failure. `enforce-status` labels storage as persisted desired mode and leaves effective
+  runtime unknown; only authenticated IPC can report effective state. Product and EN/FR/ES
+  guidance now direct operators to verify SCM registration, running state and LocalSystem
+  identity without claiming those gates have passed.
+
+### Firewall IPC: authenticate both ends and preserve runtime truth across upgrades
+- The dashboard now proves that the connected named-pipe object is owned by LocalSystem
+  before it writes any request. The service explicitly assigns that owner, reserves the
+  first pipe instance for its lifetime, and does not announce `FW_PIPE_LISTENING` until
+  the reservation succeeds. A name collision therefore stops the listener with a stable,
+  redacted failure instead of allowing an interactive-user pipe squatter to impersonate
+  active filtering.
+- Replies are accepted only when both request id and protocol version match the request.
+  Peer authentication or correlation failure is fixed-message, fail-closed, and never
+  triggers legacy negotiation. The v1 wire shape remains strict, but a new service now
+  projects enforcement to v1 only while the effective runtime state is `Active`; degraded
+  desired enforcement is projected as audit-only so an older dashboard cannot silently lie.
+- One reserved server instance is reused between clients. Separate bounded deadlines evict
+  peers that never send a request or never read a response, while the service-side policy/WFP
+  transition between those I/O operations keeps its independent service-lifetime cancellation.
+- English, French and Spanish presentation now says the pipe endpoint is reachable rather
+  than claiming SCM installation, and emergency confirmation consistently names firewall
+  filtering. Native LocalSystem ownership, two-account squatting, SCM and WFP qualification
+  remains blocked on explicit human execution of the isolated-VM protocol.
+
 ### Firewall: enforcement can be enabled again — the product can actually filter
 - WinSight could not block anything. `EnforcementCoordinator.EnableAsync` existed, but nothing
   could reach it: the console verb `enforce-enable` was disabled by the LocalSystem hardening

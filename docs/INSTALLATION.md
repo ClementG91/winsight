@@ -90,18 +90,19 @@ Extract the ZIP to a directory you control, then run `winsight-dashboard.exe`.
 Administrators and automation users can run `winsight.exe --help`. Keep the files
 inside the archive together, including the `_manifest` SBOM directory.
 
-## Optional outbound-firewall service (audit-only)
+## Optional outbound-firewall service
 
-WinSight ships `winsight-firewall-service.exe`, the Phase 2 outbound-firewall service.
-It is **opt-in and not installed by the per-user setup**, because registering a Windows
-service requires Administrator rights. The service is **audit-only**: it records
-per-application policies but installs no Windows Filtering Platform filter, so your
-network connectivity is never affected.
+WinSight ships `winsight-firewall-service.exe`, an opt-in LocalSystem service that is
+**not installed by the per-user setup**. Registering it requires Administrator rights.
+It starts in audit-only mode. An elevated operator may then enable per-application WFP
+filtering through the dashboard's authenticated IPC flow; the dashboard reports desired
+mode separately from effective runtime state and claims filtering only after the running
+service proves every stored block was applied.
 
 From an **elevated** (Administrator) console, in the install or extracted directory:
 
 ```powershell
-# Register the demand-start, LocalSystem service (audit-only, no filter installed)
+# Register the demand-start, LocalSystem service (initially audit-only)
 .\winsight-firewall-service.exe install
 
 # Check registration, or remove it
@@ -113,37 +114,25 @@ From an **elevated** (Administrator) console, in the install or extracted direct
 # untouched. Useful to confirm WFP access before any enforcement work.
 .\winsight-firewall-service.exe wfp-selftest
 
-# Create/remove the WinSight WFP provider and sublayer. These are namespace containers
-# only: they filter no traffic and cannot block a connection. They are non-persistent
-# (a reboot removes them) and exist so future audit-only filters have an owner.
-.\winsight-firewall-service.exe wfp-provision
+# Read-only native state queries remain available.
 .\winsight-firewall-service.exe wfp-status
-.\winsight-firewall-service.exe wfp-deprovision
-
-# Add/remove a non-blocking PERMIT filter in the WinSight sublayer. A PERMIT authorizes
-# outbound connects (already the default), so it blocks nothing; it proves the filter
-# interop. Requires wfp-provision first.
-.\winsight-firewall-service.exe wfp-filter-add
-.\winsight-firewall-service.exe wfp-filter-remove
-
-# Block ONE application's outbound connections, matched by executable path. Only that
-# binary is affected; every other app keeps working. Requires wfp-provision first.
-# Test it safely with a copy of a harmless tool, e.g.:
-#   Copy-Item C:\Windows\System32\ping.exe C:\pingtest.exe
-#   .\winsight-firewall-service.exe wfp-block-add C:\pingtest.exe
-#   C:\pingtest.exe 8.8.8.8      # fails (blocked), while normal ping still works
-#   .\winsight-firewall-service.exe wfp-block-remove
-.\winsight-firewall-service.exe wfp-block-add "C:\full\path\to\app.exe"
 .\winsight-firewall-service.exe wfp-block-status "C:\full\path\to\app.exe"
-.\winsight-firewall-service.exe wfp-block-remove "C:\full\path\to\app.exe"
+
+# This reads durable intent only; it cannot prove the running WFP state.
+.\winsight-firewall-service.exe enforce-status
 ```
 
-Multiple applications can be blocked at once; each is keyed independently by its path, so
-adding or removing one never affects another.
+Direct mutation aliases such as `wfp-provision`, `wfp-filter-add`, `wfp-block-add`,
+`enforce-enable`, `enforce-disable`, `block-app` and `allow-app` are intentionally
+disabled with `[FW_DIRECT_MUTATION_DISABLED]`. They cannot bypass service authorization.
+Set policies, enable enforcement and use emergency disable only through the dashboard;
+the LocalSystem service authenticates the caller and performs the serialized storage,
+SCM start-mode and WFP transaction.
 
-Once registered, the dashboard's **Outbound Firewall** view changes from "service not
-installed" to the live audit-only status. Enforcement (actually blocking traffic) is a
-separate, later, opt-in step and is not part of this release.
+Before trusting a status, independently verify the SCM registration, running state and
+LocalSystem identity. Pipe reachability is not proof that a service is installed. Native
+SCM, multi-user IPC, DACL and WFP behavior still requires the isolated-VM protocol; local
+unit tests do not qualify this feature for production.
 
 ## Integrity and provenance
 

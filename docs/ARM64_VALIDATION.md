@@ -59,7 +59,7 @@ $svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
 sc.exe qc WinSightFirewall | Select-String BINARY_PATH_NAME
 sc.exe start WinSightFirewall ; Start-Sleep 5
 sc.exe query WinSightFirewall        # expect: STATE : 4 RUNNING
-& $svc enforce-status                # expect: Enforcement mode: AuditOnly.
+& $svc enforce-status                # expect: persisted desired AuditOnly; effective runtime unknown
 ```
 
 Then confirm a user-writable path is refused — this is the path-trust boundary:
@@ -96,7 +96,7 @@ Now, in an **elevated** dashboard: *Outbound firewall* → *Start analysis* → 
 `C:\curltest\curl.exe` → then *Enable enforcement* and confirm.
 
 ```powershell
-& $svc enforce-status                          # expect: Enforcement mode: Enforcement.
+& $svc enforce-status                          # expect: persisted desired Enforcement; effective runtime unknown
 & $svc wfp-status                              # expect: provider: present, sublayer: present
 & $svc wfp-block-status C:\curltest\curl.exe   # expect: [FW_APP_BLOCKED]
 
@@ -115,7 +115,7 @@ is not app-scoped and that is a bug.
 Dashboard → *Emergency disable*.
 
 ```powershell
-& $svc enforce-status   # expect: AuditOnly
+& $svc enforce-status   # expect: persisted desired AuditOnly; effective runtime unknown
 & $svc wfp-status       # expect: provider: absent, sublayer: absent  (WFP state cleaned up)
 C:\curltest\curl.exe -s -o NUL -w "http=%{http_code}`n" --max-time 20 https://example.com  # expect 200
 ```

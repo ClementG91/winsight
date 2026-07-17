@@ -66,10 +66,22 @@ public static class FirewallControlPresenter
     /// distinctly from a saved policy: it is the moment stored blocks begin filtering real
     /// traffic, which is the one state change a user must not have to infer.
     /// </summary>
-    public static string EnableEnforcementMessageKey(FirewallMutationResult result) =>
-        result == FirewallMutationResult.Applied
+    public static string EnableEnforcementMessageKey(
+        FirewallMutationResult result,
+        FirewallEnforcementState observedState) =>
+        result == FirewallMutationResult.Applied && observedState == FirewallEnforcementState.Active
             ? "FirewallEnforcementEnabled"
-            : ResultMessageKey(result);
+            : result == FirewallMutationResult.Applied
+                ? "FirewallEnforcementNotActive"
+                : ResultMessageKey(result);
+
+    /// <summary>
+    /// Compatibility overload for callers that did not observe a runtime status. It is
+    /// intentionally conservative: without an observed <c>Active</c> state, UI must not say
+    /// filtering started.
+    /// </summary>
+    public static string EnableEnforcementMessageKey(FirewallMutationResult result) =>
+        EnableEnforcementMessageKey(result, FirewallEnforcementState.Degraded);
 
     /// <summary>
     /// Like <see cref="ResultMessageKey"/>, but a successfully saved BLOCK is reported as

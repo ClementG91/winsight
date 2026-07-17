@@ -11,29 +11,79 @@ namespace WinSight.FirewallService;
 public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDisposable, IAsyncDisposable
 {
     private readonly FirewallPolicyStore _store;
-    private readonly Func<IOutboundFirewallEngine> _engineFactory;
+    private readonly Func<IWinSightWfpReconciler> _reconcilerFactory;
+    private readonly IFirewallServiceStartModeController _startMode;
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly object _lifetimeLock = new();
     private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _disposeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-    private IOutboundFirewallEngine? _engine;
+    private IWinSightWfpReconciler? _reconciler;
     private int _outstanding;
     private bool _stopping;
     private bool _disposed;
+    private int _effectiveState = (int)FirewallEnforcementState.AuditOnly;
 
-    public EnforcementCoordinator(FirewallPolicyStore store, IOutboundFirewallEngine engine)
-        : this(store, () => engine)
+    public EnforcementCoordinator(
+        FirewallPolicyStore store,
+        IWinSightWfpReconciler reconciler,
+        IFirewallServiceStartModeController startMode)
+        : this(store, () => reconciler, startMode)
     {
-        ArgumentNullException.ThrowIfNull(engine);
+        ArgumentNullException.ThrowIfNull(reconciler);
     }
 
-    public EnforcementCoordinator(FirewallPolicyStore store, Func<IOutboundFirewallEngine> engineFactory)
+    public EnforcementCoordinator(
+        FirewallPolicyStore store,
+        Func<IWinSightWfpReconciler> reconcilerFactory,
+        IFirewallServiceStartModeController startMode)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
-        _engineFactory = engineFactory ?? throw new ArgumentNullException(nameof(engineFactory));
+        _reconcilerFactory = reconcilerFactory ?? throw new ArgumentNullException(nameof(reconcilerFactory));
+        _startMode = startMode ?? throw new ArgumentNullException(nameof(startMode));
     }
 
     public bool EngineSupported => true;
+
+    public FirewallEnforcementState EffectiveState =>
+        (FirewallEnforcementState)Volatile.Read(ref _effectiveState);
+
+    /// <summary>
+    /// Takes the durable requested mode and runtime proof under the transition lock. This avoids
+    /// constructing an impossible IPC status from a pre-transition mode and post-transition
+    /// effective state (or the reverse) while enable/disable is in flight.
+    /// </summary>
+    public async Task<FirewallRuntimeStatus> GetRuntimeStatusAsync(
+        CancellationToken cancellationToken = default)
+    {
+        FirewallRuntimeStatus? result = null;
+        await LockedAsync(async () =>
+        {
+            var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
+            var state = EffectiveState;
+            if (state == FirewallEnforcementState.Active)
+            {
+                try
+                {
+                    var exact = await GetReconcilerAfterTrust()
+                        .VerifyExactAsync(configuration.Policies, cancellationToken).ConfigureAwait(false);
+                    if (!exact)
+                    {
+                        SetEffectiveState(FirewallEnforcementState.Degraded);
+                        state = FirewallEnforcementState.Degraded;
+                    }
+                }
+                catch (Exception verificationFailure) when (
+                    IsTransitionFailure(verificationFailure)
+                    && !cancellationToken.IsCancellationRequested)
+                {
+                    SetEffectiveState(FirewallEnforcementState.Degraded);
+                    state = FirewallEnforcementState.Degraded;
+                }
+            }
+            result = new FirewallRuntimeStatus(configuration.Mode, EngineSupported, state);
+        }, cancellationToken).ConfigureAwait(false);
+        return result!;
+    }
 
     public Task SetPolicyAsync(string executablePath, OutboundAction action, CancellationToken cancellationToken = default) =>
         UpsertPolicyAsync(new AppFirewallPolicy(executablePath, action), cancellationToken);
@@ -42,7 +92,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
     {
         ArgumentNullException.ThrowIfNull(policy);
         var path = OutboundPolicyEvaluator.CanonicalPath(policy.ExecutablePath);
-        await LockedAsync(async () =>
+        await LockedTransitionAsync(async () =>
         {
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
             var normalized = policy with { ExecutablePath = path };
@@ -51,18 +101,17 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
                 .Append(normalized).ToList();
             if (configuration.Mode == OutboundFirewallMode.Enforcement)
             {
-                var engine = GetEngineAfterTrust();
-                var previous = configuration.Policies.FirstOrDefault(existing => PathEquals(existing.ExecutablePath, path));
+                var reconciler = GetReconcilerAfterTrust();
                 try
                 {
-                    await engine.ApplyAsync(normalized, cancellationToken).ConfigureAwait(false);
+                    await ReconcileAndVerifyAsync(reconciler, policies, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception applyFailure) when (IsTransitionFailure(applyFailure))
                 {
                     try
                     {
-                        if (previous is null) await engine.RemoveAsync(path, CancellationToken.None).ConfigureAwait(false);
-                        else await engine.ApplyAsync(previous, CancellationToken.None).ConfigureAwait(false);
+                        await ReconcileAndVerifyAsync(
+                            reconciler, configuration.Policies, CancellationToken.None).ConfigureAwait(false);
                     }
                     catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
                     {
@@ -79,8 +128,8 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
                 {
                     try
                     {
-                        if (previous is null) await engine.RemoveAsync(path, CancellationToken.None).ConfigureAwait(false);
-                        else await engine.ApplyAsync(previous, CancellationToken.None).ConfigureAwait(false);
+                        await ReconcileAndVerifyAsync(
+                            reconciler, configuration.Policies, CancellationToken.None).ConfigureAwait(false);
                     }
                     catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
                     {
@@ -98,23 +147,23 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
     public async Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default)
     {
         var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
-        await LockedAsync(async () =>
+        await LockedTransitionAsync(async () =>
         {
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
             var remaining = configuration.Policies.Where(policy => !PathEquals(policy.ExecutablePath, path)).ToList();
             if (configuration.Mode == OutboundFirewallMode.Enforcement)
             {
-                var engine = GetEngineAfterTrust();
-                var previous = configuration.Policies.FirstOrDefault(policy => PathEquals(policy.ExecutablePath, path));
+                var reconciler = GetReconcilerAfterTrust();
                 try
                 {
-                    await engine.RemoveAsync(path, cancellationToken).ConfigureAwait(false);
+                    await ReconcileAndVerifyAsync(reconciler, remaining, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception removeFailure) when (IsTransitionFailure(removeFailure))
                 {
                     try
                     {
-                        if (previous is not null) await engine.ApplyAsync(previous, CancellationToken.None).ConfigureAwait(false);
+                        await ReconcileAndVerifyAsync(
+                            reconciler, configuration.Policies, CancellationToken.None).ConfigureAwait(false);
                     }
                     catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
                     {
@@ -131,7 +180,8 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
                 {
                     try
                     {
-                        if (previous is not null) await engine.ApplyAsync(previous, CancellationToken.None).ConfigureAwait(false);
+                        await ReconcileAndVerifyAsync(
+                            reconciler, configuration.Policies, CancellationToken.None).ConfigureAwait(false);
                     }
                     catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
                     {
@@ -148,25 +198,30 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
 
     public async Task ApplyBlocksAsync(CancellationToken cancellationToken = default)
     {
-        await LockedAsync(async () =>
+        await LockedTransitionAsync(async () =>
         {
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
-            if (configuration.Mode != OutboundFirewallMode.Enforcement) return;
-            IOutboundFirewallEngine? engine = null;
-            var applied = new List<AppFirewallPolicy>();
+            if (configuration.Mode != OutboundFirewallMode.Enforcement)
+            {
+                await GetReconcilerAfterTrust().CleanupAllAsync(cancellationToken).ConfigureAwait(false);
+                SetEffectiveState(FirewallEnforcementState.AuditOnly);
+                return;
+            }
+            IWinSightWfpReconciler? reconciler = null;
             try
             {
-                engine = GetEngineAfterTrust();
-                foreach (var policy in configuration.Policies.Where(policy => policy.Action == OutboundAction.Block))
-                {
-                    applied.Add(policy);
-                    await engine.ApplyAsync(policy, cancellationToken).ConfigureAwait(false);
-                }
+                reconciler = GetReconcilerAfterTrust();
+                // Boot persistence is part of the same serialized authority transition as WFP.
+                // A failure also drives the complete owned namespace through cleanup.
+                _startMode.SetAutomatic();
+                await ReconcileAndVerifyAsync(
+                    reconciler, configuration.Policies, cancellationToken).ConfigureAwait(false);
+                SetEffectiveState(FirewallEnforcementState.Active);
             }
             catch (Exception applyFailure) when (IsTransitionFailure(applyFailure))
             {
-                await RollbackPartialApplyAsync(
-                    engine, applied, configuration, applyFailure, "StartupApplyRollbackFailed").ConfigureAwait(false);
+                await RollbackToAuditOnlyAsync(
+                    reconciler, configuration, applyFailure, "StartupApplyRollbackFailed").ConfigureAwait(false);
                 if (applyFailure is OperationCanceledException) throw;
                 throw new FirewallTransitionException("StartupApplyFailed", applyFailure);
             }
@@ -190,29 +245,49 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         CancellationToken cancellationToken = default)
     {
         var result = OutboundFirewallConfiguration.Empty;
-        await LockedAsync(async () =>
+        await LockedTransitionAsync(async () =>
         {
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
             var enforcing = configuration with { Mode = OutboundFirewallMode.Enforcement };
-            await _store.SaveAsync(enforcing, cancellationToken).ConfigureAwait(false);
-            IOutboundFirewallEngine? engine = null;
-            var applied = new List<AppFirewallPolicy>();
+            // Auto-start is established first: reporting Active while the service remains
+            // demand-start would silently lose enforcement after reboot.
+            var reconciler = GetReconcilerAfterTrust();
             try
             {
-                engine = GetEngineAfterTrust();
-                foreach (var policy in configuration.Policies.Where(policy => policy.Action == OutboundAction.Block))
-                {
-                    applied.Add(policy);
-                    await engine.ApplyAsync(policy, cancellationToken).ConfigureAwait(false);
-                }
+                _startMode.SetAutomatic();
+            }
+            catch (Exception startModeFailure) when (IsTransitionFailure(startModeFailure))
+            {
+                await RollbackEnableAsync(
+                    reconciler, configuration, startModeFailure, "EnableStartModeRollbackFailed")
+                    .ConfigureAwait(false);
+                throw new FirewallTransitionException("EnableStartModeFailed", startModeFailure);
+            }
+            try
+            {
+                await _store.SaveAsync(enforcing, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception persistenceFailure) when (IsTransitionFailure(persistenceFailure))
+            {
+                await RollbackEnableAsync(
+                    null, configuration, persistenceFailure, "EnablePersistenceRollbackFailed")
+                    .ConfigureAwait(false);
+                if (persistenceFailure is OperationCanceledException) throw;
+                throw new FirewallTransitionException("EnablePersistenceFailed", persistenceFailure);
+            }
+            try
+            {
+                await ReconcileAndVerifyAsync(
+                    reconciler, enforcing.Policies, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception applyFailure) when (IsTransitionFailure(applyFailure))
             {
-                await RollbackPartialApplyAsync(
-                    engine, applied, configuration, applyFailure, "EnableRollbackFailed").ConfigureAwait(false);
+                await RollbackEnableAsync(
+                    reconciler, configuration, applyFailure, "EnableRollbackFailed").ConfigureAwait(false);
                 if (applyFailure is OperationCanceledException) throw;
                 throw new FirewallTransitionException("EnableApplyFailed", applyFailure);
             }
+            SetEffectiveState(FirewallEnforcementState.Active);
             result = enforcing;
         }, cancellationToken).ConfigureAwait(false);
         return result;
@@ -225,28 +300,18 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         CancellationToken cancellationToken = default)
     {
         var result = OutboundFirewallConfiguration.Empty;
-        await LockedAsync(async () =>
+        await LockedTransitionAsync(async () =>
         {
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
-            var engine = GetEngineAfterTrust();
+            var reconciler = GetReconcilerAfterTrust();
             try
             {
-                if (engine is IWinSightFirewallCleanup cleanup)
-                {
-                    await cleanup.CleanupWinSightAsync(configuration.Policies, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    foreach (var policy in configuration.Policies)
-                    {
-                        await engine.RemoveAsync(policy.ExecutablePath, cancellationToken).ConfigureAwait(false);
-                    }
-                }
+                await reconciler.CleanupAllAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (Exception cleanupFailure) when (IsTransitionFailure(cleanupFailure))
             {
                 await RestoreEnforcementOrThrowAsync(
-                    engine, configuration, cleanupFailure, "EmergencyCleanupRollbackFailed").ConfigureAwait(false);
+                    reconciler, configuration, cleanupFailure, "EmergencyCleanupRollbackFailed").ConfigureAwait(false);
                 if (cleanupFailure is OperationCanceledException) throw;
                 throw new FirewallTransitionException("EmergencyCleanupFailed", cleanupFailure);
             }
@@ -258,16 +323,20 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
             catch (Exception saveFailure) when (IsTransitionFailure(saveFailure))
             {
                 await RestoreEnforcementOrThrowAsync(
-                    engine, configuration, saveFailure, "EmergencyPersistenceRollbackFailed").ConfigureAwait(false);
+                    reconciler, configuration, saveFailure, "EmergencyPersistenceRollbackFailed").ConfigureAwait(false);
                 if (saveFailure is OperationCanceledException) throw;
                 throw new FirewallTransitionException("EmergencyPersistenceFailed", saveFailure);
             }
+            // At this point filters are gone and AuditOnly is durable. If SCM refuses demand-start,
+            // fail and publish Degraded, but never reapply filters or restore Enforcement intent.
+            SetEffectiveState(FirewallEnforcementState.AuditOnly);
+            _startMode.SetDemandStart();
         }, cancellationToken).ConfigureAwait(false);
         return result;
     }
 
     private static async Task RestoreEnforcementOrThrowAsync(
-        IOutboundFirewallEngine engine,
+        IWinSightWfpReconciler reconciler,
         OutboundFirewallConfiguration configuration,
         Exception cause,
         string rollbackCode)
@@ -275,10 +344,8 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         if (configuration.Mode != OutboundFirewallMode.Enforcement) return;
         try
         {
-            foreach (var policy in configuration.Policies.Where(policy => policy.Action == OutboundAction.Block))
-            {
-                await engine.ApplyAsync(policy, CancellationToken.None).ConfigureAwait(false);
-            }
+            await ReconcileAndVerifyAsync(
+                reconciler, configuration.Policies, CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
         {
@@ -286,34 +353,74 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         }
     }
 
-    private IOutboundFirewallEngine GetEngineAfterTrust() => _engine ??= _engineFactory();
+    private IWinSightWfpReconciler GetReconcilerAfterTrust() =>
+        _reconciler ??= _reconcilerFactory()
+            ?? throw new InvalidOperationException("The WFP reconciler factory returned null.");
 
-    private async Task RollbackPartialApplyAsync(
-        IOutboundFirewallEngine? engine,
-        IReadOnlyList<AppFirewallPolicy> applied,
+    private async Task RollbackToAuditOnlyAsync(
+        IWinSightWfpReconciler? reconciler,
         OutboundFirewallConfiguration original,
         Exception cause,
         string rollbackCode)
     {
+        var failures = new List<Exception>();
         try
         {
-            if (engine is not null)
-            {
-                foreach (var policy in applied.Reverse())
-                    await engine.RemoveAsync(policy.ExecutablePath, CancellationToken.None).ConfigureAwait(false);
-            }
+            await (reconciler ?? GetReconcilerAfterTrust())
+                .CleanupAllAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
+        {
+            failures.Add(rollbackFailure);
+        }
+        try
+        {
             await _store.SaveAsync(original with { Mode = OutboundFirewallMode.AuditOnly }, CancellationToken.None)
                 .ConfigureAwait(false);
         }
         catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
         {
-            throw RollbackFailed(rollbackCode, cause, rollbackFailure);
+            failures.Add(rollbackFailure);
+        }
+        try
+        {
+            _startMode.SetDemandStart();
+        }
+        catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
+        {
+            failures.Add(rollbackFailure);
+        }
+        if (failures.Count != 0)
+        {
+            throw RollbackFailed(rollbackCode, cause, new AggregateException(failures));
+        }
+    }
+
+    private async Task RollbackEnableAsync(
+        IWinSightWfpReconciler? reconciler,
+        OutboundFirewallConfiguration original,
+        Exception cause,
+        string rollbackCode) =>
+        await RollbackToAuditOnlyAsync(reconciler, original, cause, rollbackCode).ConfigureAwait(false);
+
+    private static async Task ReconcileAndVerifyAsync(
+        IWinSightWfpReconciler reconciler,
+        IReadOnlyList<AppFirewallPolicy> policies,
+        CancellationToken cancellationToken)
+    {
+        await reconciler.ReconcileExactAsync(policies, cancellationToken).ConfigureAwait(false);
+        if (!await reconciler.VerifyExactAsync(policies, cancellationToken).ConfigureAwait(false))
+        {
+            throw new InvalidOperationException("The reconciled WFP state could not be proven exact.");
         }
     }
 
     private static bool IsTransitionFailure(Exception exception) => exception is
         Win32Exception or IOException or UnauthorizedAccessException or InvalidDataException or
         InvalidOperationException or OperationCanceledException;
+
+    private void SetEffectiveState(FirewallEnforcementState state) =>
+        Volatile.Write(ref _effectiveState, (int)state);
 
     private static FirewallTransitionException RollbackFailed(string code, Exception cause, Exception rollback) =>
         new(code, new AggregateException(cause, rollback));
@@ -351,6 +458,22 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         }
     }
 
+    private Task LockedTransitionAsync(Func<Task> action, CancellationToken cancellationToken) =>
+        LockedAsync(async () =>
+        {
+            try
+            {
+                await action().ConfigureAwait(false);
+            }
+            catch (Exception failure) when (IsTransitionFailure(failure))
+            {
+                // This write must occur before LockedAsync releases _transition. Otherwise a
+                // queued status read can acquire the lock and publish stale Active/AuditOnly.
+                SetEffectiveState(FirewallEnforcementState.Degraded);
+                throw;
+            }
+        }, cancellationToken);
+
     private static bool PathEquals(string left, string right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
 
@@ -376,8 +499,9 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         }
         try
         {
-            if (_engine is IAsyncDisposable asyncEngine) await asyncEngine.DisposeAsync().ConfigureAwait(false);
-            else (_engine as IDisposable)?.Dispose();
+            if (_reconciler is IAsyncDisposable asyncReconciler)
+                await asyncReconciler.DisposeAsync().ConfigureAwait(false);
+            else (_reconciler as IDisposable)?.Dispose();
             lock (_lifetimeLock)
             {
                 _disposed = true;

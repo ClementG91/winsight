@@ -113,6 +113,116 @@ public sealed class LocalizationTests
     }
 
     [Theory]
+    [InlineData(
+        "fr",
+        "Le filtrage est activé. Les blocages enregistrés filtrent désormais le trafic sortant.",
+        "La demande est terminée, mais aucun filtrage actif n'a été observé. Vérifiez l'état du pare-feu avant de vous fier aux blocages enregistrés.")]
+    [InlineData(
+        "es",
+        "El filtrado está activado. Los bloqueos guardados ya filtran el tráfico saliente.",
+        "La solicitud terminó, pero no se observó filtrado activo. Compruebe el estado del firewall antes de confiar en los bloqueos guardados.")]
+    public void FirewallRuntimeTruthfulness_UsesCorrectFrenchAndSpanishWording(
+        string culture,
+        string expectedActive,
+        string expectedNotActive)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            Assert.Equal(expectedActive, localization["FirewallEnforcementEnabled"]);
+            Assert.Equal(expectedNotActive, localization["FirewallEnforcementNotActive"]);
+        }
+        finally
+        {
+            localization.SetCulture(original);
+        }
+    }
+
+    [Theory]
+    [InlineData(
+        "en",
+        "Turn off outbound filtering and lift every WinSight block? The machine returns to audit-only.",
+        "Service endpoint reachable; audit-only. Policies are recorded but nothing is blocked.",
+        "Service endpoint reachable and enforcing per-application policies.")]
+    [InlineData(
+        "fr",
+        "Désactiver le filtrage et lever tous les blocages WinSight ? La machine repasse en audit seul.",
+        "Point de service accessible, audit seul. Les politiques sont enregistrées mais rien n’est bloqué.",
+        "Point de service accessible ; le filtrage par application est actif.")]
+    [InlineData(
+        "es",
+        "¿Desactivar el filtrado y levantar todos los bloqueos de WinSight? La máquina vuelve a solo auditoría.",
+        "Punto de servicio accesible, solo auditoría. Las políticas se registran pero no se bloquea nada.",
+        "Punto de servicio accesible; el filtrado por aplicación está activo.")]
+    public void FirewallTrustBoundaryText_UsesFilteringAndReachabilitySemantics(
+        string culture,
+        string expectedEmergencyConfirmation,
+        string expectedAuditOnly,
+        string expectedEnforcing)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            Assert.Equal(expectedEmergencyConfirmation, localization["FirewallEmergencyConfirm"]);
+            Assert.Equal(expectedAuditOnly, localization["OutboundFirewallAuditOnly"]);
+            Assert.Equal(expectedEnforcing, localization["OutboundFirewallEnforcing"]);
+            Assert.DoesNotContain("installed", localization["OutboundFirewallAuditOnly"], StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("installé", localization["OutboundFirewallAuditOnly"], StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("instalado", localization["OutboundFirewallAuditOnly"], StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            localization.SetCulture(original);
+        }
+    }
+
+    [Theory]
+    [InlineData("en", "requested mode", "effective runtime state", "service registration", "LocalSystem", "degraded", "installation")]
+    [InlineData("fr", "mode demandé", "état effectif", "enregistrement du service", "LocalSystem", "dégradé", "installation")]
+    [InlineData("es", "modo solicitado", "estado efectivo", "registro del servicio", "LocalSystem", "degradado", "instalacion")]
+    public void FirewallGuidance_DistinguishesDesiredRuntimeAndWindowsTrustChecks(
+        string culture,
+        string desired,
+        string effective,
+        string registration,
+        string localSystem,
+        string degraded,
+        string installation)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            var description = localization["ToolOutboundFirewallDescription"];
+            var guidance = localization["ToolOutboundFirewallGuidance"];
+            var unavailable = localization["OutboundFirewallUnavailable"];
+
+            Assert.Contains(desired, description, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(effective, description, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(registration, guidance, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(localSystem, guidance, StringComparison.Ordinal);
+            Assert.Contains(degraded, guidance, StringComparison.OrdinalIgnoreCase);
+            var plainUnavailable = RemoveDiacritics(unavailable);
+            Assert.Contains(installation, plainUnavailable, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("verif", plainUnavailable, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            localization.SetCulture(original);
+        }
+    }
+
+    private static string RemoveDiacritics(string value) => string.Concat(
+        value.Normalize(System.Text.NormalizationForm.FormD)
+            .Where(character => System.Globalization.CharUnicodeInfo.GetUnicodeCategory(character)
+                != System.Globalization.UnicodeCategory.NonSpacingMark));
+
+    [Theory]
     [InlineData("en", "1 result shown · 1 needs attention", "2 results shown · 2 need attention")]
     [InlineData("fr", "1 résultat affiché · 1 à vérifier", "2 résultats affichés · 2 à vérifier")]
     [InlineData("es", "1 resultado mostrado · 1 requiere atención", "2 resultados mostrados · 2 requieren atención")]

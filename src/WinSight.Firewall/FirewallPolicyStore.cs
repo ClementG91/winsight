@@ -47,7 +47,7 @@ public interface IFirewallStorageTrustGuard
 }
 
 /// <summary>
-/// Durable JSON policy storage for the future privileged service. Writes use a
+/// Durable JSON policy storage for the privileged firewall service. Writes use a
 /// flushed temporary file in the destination directory followed by an atomic
 /// same-volume replacement. The service must place this file in a service-owned,
 /// ACL-protected directory; the dashboard must access it only through authenticated

@@ -82,10 +82,12 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
 - DNS cache data is historical visibility and does not by itself attribute every
   query to a process. Live DNS ETW needs elevation.
 - Browser coverage is currently Chromium-family; Firefox is not yet covered.
-- Firewall inspection is read-only. The strict protocol framing and fail-open policy
-  store do not enable enforcement; the authenticated service host, WFP audit engine
-  and recovery path in `WFP_DESIGN.md` must still be completed and independently
-  safety-tested.
+- Defender Firewall inventory is read-only. The separate opt-in LocalSystem service can
+  enforce stored per-application outbound policies only through authenticated IPC and an
+  explicit elevated transition. Direct WFP mutation aliases are disabled. Desired mode is
+  not runtime proof: the dashboard reports filtering only from the service's effective
+  `Active` state. Native SCM, IPC, DACL and WFP behavior remains unqualified until the
+  isolated-VM protocol passes.
 - Real-time persistence blocking and ransomware interception require a separately
   signed and safety-reviewed driver and are not shipped.
 - VirusTotal is opt-in and user-keyed. WinSight enforces Community ceilings across
