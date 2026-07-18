@@ -1,22 +1,26 @@
 using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+
+[assembly: InternalsVisibleTo("WinSight.FirewallService.Tests")]
 
 namespace WinSight.FirewallService;
 
 /// <summary>
 /// Registers and removes the WinSight firewall Windows service through the Service
 /// Control Manager. Installation is an explicit, elevated, opt-in step: the per-user
-/// application setup never installs it, and the installed service is demand-start and
-/// audit-only (it installs no WFP filter). The SCM stores the binary path verbatim, so
-/// a spaced install directory is quoted correctly and cannot be re-parsed by a shell.
+/// application setup never installs it, and the installed service is demand-start.
+/// Enforcement requires an explicit privileged transition and is reported separately
+/// from the desired persisted mode. The SCM stores the binary path verbatim, so a
+/// spaced install directory is quoted correctly and cannot be re-parsed by a shell.
 /// </summary>
 public static partial class FirewallServiceInstaller
 {
     public const string ServiceName = "WinSightFirewall";
     public const string DisplayName = "WinSight Firewall";
     public const string Description =
-        "Audit-only outbound firewall policy service for WinSight. Installs no WFP filter.";
+        "WinSight opt-in outbound firewall service with separate desired and effective runtime state.";
 
     /// <summary>
     /// The SCM binary path: the quoted executable plus the run verb, as one string the
@@ -156,10 +160,8 @@ public static partial class FirewallServiceInstaller
         try
         {
             var service = NativeMethods.OpenServiceW(manager, ServiceName, ServiceQueryConfig);
-            if (service == IntPtr.Zero)
-            {
-                return false;
-            }
+            var installed = InterpretServiceQueryResult(service, Marshal.GetLastWin32Error());
+            if (!installed) return false;
             NativeMethods.CloseServiceHandle(service);
             return true;
         }
@@ -169,13 +171,19 @@ public static partial class FirewallServiceInstaller
         }
     }
 
+    internal static bool InterpretServiceQueryResult(IntPtr service, int error)
+    {
+        if (service != IntPtr.Zero) return true;
+        if (error == ErrorServiceDoesNotExist) return false;
+        throw new Win32Exception(error);
+    }
+
     /// <summary>
     /// Switches the installed service between auto-start (runs on boot, so enforcement
-    /// survives a reboot) and demand-start. Returns false when the service is not
-    /// installed. A firewall that stops enforcing after a reboot is a hole, so enforcement
-    /// makes the service auto-start.
+    /// survives a reboot) and demand-start. Absence or any other SCM failure is an error:
+    /// start mode is part of the serialized enforcement transaction, never best effort.
     /// </summary>
-    public static bool TrySetAutoStart(bool autoStart)
+    public static void SetStartMode(bool autoStart)
     {
         var manager = NativeMethods.OpenSCManagerW(null, null, ScManagerConnect);
         if (manager == IntPtr.Zero)
@@ -188,10 +196,6 @@ public static partial class FirewallServiceInstaller
             if (service == IntPtr.Zero)
             {
                 var error = Marshal.GetLastWin32Error();
-                if (error == ErrorServiceDoesNotExist)
-                {
-                    return false;
-                }
                 throw new Win32Exception(error);
             }
             try
@@ -203,7 +207,6 @@ public static partial class FirewallServiceInstaller
                 {
                     throw new Win32Exception(Marshal.GetLastWin32Error());
                 }
-                return true;
             }
             finally
             {
@@ -216,14 +219,30 @@ public static partial class FirewallServiceInstaller
         }
     }
 
-    internal static void SetDescription(IntPtr service, string description)
+    internal delegate bool ChangeServiceDescription(
+        IntPtr service,
+        uint infoLevel,
+        ref ServiceDescription info);
+
+    internal static void SetDescription(IntPtr service, string description) =>
+        SetDescription(service, description, NativeMethods.ChangeServiceConfig2W, Marshal.GetLastWin32Error);
+
+    internal static void SetDescription(
+        IntPtr service,
+        string description,
+        ChangeServiceDescription changeDescription,
+        Func<int> getLastError)
     {
+        ArgumentNullException.ThrowIfNull(changeDescription);
+        ArgumentNullException.ThrowIfNull(getLastError);
         var descriptionPtr = Marshal.StringToHGlobalUni(description);
         try
         {
             var info = new ServiceDescription { Description = descriptionPtr };
-            // Best-effort: a failure to set the cosmetic description never fails install.
-            NativeMethods.ChangeServiceConfig2W(service, ServiceConfigDescription, ref info);
+            if (!changeDescription(service, ServiceConfigDescription, ref info))
+            {
+                throw new Win32Exception(getLastError());
+            }
         }
         finally
         {
@@ -286,6 +305,20 @@ public static partial class FirewallServiceInstaller
             string? binaryPath, string? loadOrderGroup, IntPtr tagId,
             string? dependencies, string? serviceStartName, string? password, string? displayName);
     }
+}
+
+/// <summary>SCM start-mode boundary injected into the serialized enforcement authority.</summary>
+public interface IFirewallServiceStartModeController
+{
+    void SetAutomatic();
+    void SetDemandStart();
+}
+
+/// <summary>Production SCM start-mode controller. Every native false return throws.</summary>
+public sealed class WindowsFirewallServiceStartModeController : IFirewallServiceStartModeController
+{
+    public void SetAutomatic() => FirewallServiceInstaller.SetStartMode(autoStart: true);
+    public void SetDemandStart() => FirewallServiceInstaller.SetStartMode(autoStart: false);
 }
 
 public enum ServiceInstallTrustCode

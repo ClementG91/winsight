@@ -70,7 +70,7 @@
   <data name="FirewallBlockSelected" xml:space="preserve"><value>Block</value></data>
   <data name="FirewallRemoveSelected" xml:space="preserve"><value>Remove</value></data>
   <data name="FirewallEmergencyDisable" xml:space="preserve"><value>Emergency disable</value></data>
-  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>Turn off enforcement and lift every WinSight block? The machine returns to audit-only.</value></data>
+  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>Turn off outbound filtering and lift every WinSight block? The machine returns to audit-only.</value></data>
   <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Select an application to block</value></data>
   <data name="FirewallExeFilter" xml:space="preserve"><value>Executables (*.exe)|*.exe|All files (*.*)|*.*</value></data>
   <data name="FirewallActionApplied" xml:space="preserve"><value>Firewall change applied.</value></data>
@@ -80,6 +80,7 @@
   <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Enable enforcement</value></data>
   <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>Start filtering outbound traffic now? Every saved block takes effect immediately, and the apps you blocked lose their network access. Emergency disable returns the machine to audit-only at any time.</value></data>
   <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>Enforcement is on. Saved blocks are now filtering outbound traffic.</value></data>
+  <data name="FirewallEnforcementNotActive" xml:space="preserve"><value>The request completed, but active filtering was not observed. Check the firewall status before relying on saved blocks.</value></data>
   <data name="FirewallActionNotSupported" xml:space="preserve"><value>This machine has no usable outbound filtering engine, so enforcement could not filter anything. Nothing was changed.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>The firewall service rejected the change.</value></data>
   <data name="BlockOutbound" xml:space="preserve"><value>Block outbound</value></data>
@@ -147,20 +148,22 @@
   <data name="ToolDnsGuidance" xml:space="preserve"><value>A DNS entry records a lookup, not necessarily an intentional visit. Correlate it with connections and active programs.</value></data>
   <data name="ToolFirewallLabel" xml:space="preserve"><value>Windows Firewall</value></data>
   <data name="ToolFirewallShort" xml:space="preserve"><value>Currently active network rules</value></data>
-  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventories Microsoft Defender Firewall rules. Automatic blocking stays disabled until the secured WFP service is delivered.</value></data>
+  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventories Microsoft Defender Firewall rules without changing them. Per-application filtering is controlled separately by the opt-in outbound service.</value></data>
   <data name="ToolFirewallGuidance" xml:space="preserve"><value>Use the Windows tool to change a rule. Keep a recovery path before blocking a system service.</value></data>
   <data name="ToolOutboundFirewallLabel" xml:space="preserve"><value>Outbound Firewall</value></data>
-  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Per-app outbound control (audit-only)</value></data>
-  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>The WinSight outbound-firewall service: whether it is installed, its mode, and the stored per-application policies. It is audit-only and installs no filter yet.</value></data>
-  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Nothing is blocked. Enforcement is a later, opt-in step. An emergency disable returns to audit-only at any time.</value></data>
+  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Per-app outbound filtering control</value></data>
+  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>The WinSight outbound-firewall service reports its requested mode, effective runtime state, and stored per-application policies.</value></data>
+  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Before trusting firewall status, verify the service registration, running state, and LocalSystem identity in Windows. Saved policies filter only after an elevated user enables enforcement; degraded enforcement never reports a block as active.</value></data>
   <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>WinSight outbound firewall</value></data>
-  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service not installed. WinSight is not filtering your outbound traffic; scans stay local and read-only.</value></data>
-  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Installed, audit-only. Policies are recorded but nothing is blocked.</value></data>
+  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Firewall service unavailable. Its installation state could not be verified, and WinSight is not reporting outbound filtering as active.</value></data>
+  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Service endpoint reachable; audit-only. Policies are recorded but nothing is blocked.</value></data>
   <data name="OutboundFirewallPending" xml:space="preserve"><value>Reached {0}, {1} connection(s). You have never allowed or blocked this app.</value></data>
-  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Installed and enforcing per-application policies.</value></data>
+  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Service endpoint reachable and enforcing per-application policies.</value></data>
+  <data name="OutboundFirewallDegraded" xml:space="preserve"><value>Service reachable, but enforcement is degraded. Saved blocks are not reported as active.</value></data>
   <data name="OutboundActionAllow" xml:space="preserve"><value>Allow</value></data>
   <data name="OutboundActionBlock" xml:space="preserve"><value>Block</value></data>
   <data name="OutboundActionAsk" xml:space="preserve"><value>Ask</value></data>
+  <data name="OutboundActionDisabled" xml:space="preserve"><value>{0} (disabled, not filtering)</value></data>
   <data name="ToolProcessesLabel" xml:space="preserve"><value>Processes</value></data>
   <data name="ToolProcessesShort" xml:space="preserve"><value>Programs currently running</value></data>
   <data name="ToolProcessesDescription" xml:space="preserve"><value>Lists processes, their paths, parents, command lines and signatures.</value></data>

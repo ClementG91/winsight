@@ -7,7 +7,8 @@ namespace WinSight.FirewallService;
 /// <summary>
 /// At service start, re-applies the stored Block policies to WFP. WinSight's WFP filters
 /// are non-persistent (removed on reboot), so the service reinstalls them on every boot
-/// when enforcement is enabled. The host registers it only after a trusted persisted
+/// at service startup. Enforcement rebuilds and verifies the exact enabled-block set;
+/// AuditOnly removes all WinSight-owned WFP objects. The host registers it only after trusted
 /// Enforcement mode is observed; the coordinator revalidates storage before use. A failure is logged and never
 /// crashes the service, so the pipe endpoint still comes up.
 /// </summary>

@@ -18,25 +18,25 @@ public enum FirewallServiceVerb
     /// <summary>Read-only WFP interop probe (opens the engine, counts filters, changes nothing).</summary>
     WfpSelfTest,
 
-    /// <summary>Create the WinSight WFP provider and sublayer (containers only, no filter).</summary>
+    /// <summary>Disabled compatibility alias; direct WFP mutation is refused.</summary>
     WfpProvision,
 
-    /// <summary>Remove the WinSight WFP provider and sublayer.</summary>
+    /// <summary>Disabled compatibility alias; direct WFP mutation is refused.</summary>
     WfpDeprovision,
 
     /// <summary>Report whether the WinSight WFP provider and sublayer exist.</summary>
     WfpStatus,
 
-    /// <summary>Add a non-blocking PERMIT filter to the WinSight sublayer (blocks nothing).</summary>
+    /// <summary>Disabled compatibility alias; direct WFP mutation is refused.</summary>
     WfpFilterAdd,
 
-    /// <summary>Remove the non-blocking PERMIT filter.</summary>
+    /// <summary>Disabled compatibility alias; direct WFP mutation is refused.</summary>
     WfpFilterRemove,
 
-    /// <summary>Block one application's outbound connections (matched by executable path).</summary>
+    /// <summary>Disabled compatibility alias; policy mutation must use authenticated IPC.</summary>
     WfpBlockAdd,
 
-    /// <summary>Remove the per-application BLOCK filter.</summary>
+    /// <summary>Disabled compatibility alias; policy mutation must use authenticated IPC.</summary>
     WfpBlockRemove,
 
     /// <summary>Report whether a given application is currently blocked.</summary>
@@ -45,16 +45,16 @@ public enum FirewallServiceVerb
     /// <summary>Report the persisted enforcement mode.</summary>
     EnforceStatus,
 
-    /// <summary>Enable enforcement: persist it and apply every stored Block policy.</summary>
+    /// <summary>Disabled compatibility alias; enforcement mutation must use authenticated IPC.</summary>
     EnforceEnable,
 
-    /// <summary>Disable enforcement: lift every filter, then persist audit-only.</summary>
+    /// <summary>Disabled compatibility alias; enforcement mutation must use authenticated IPC.</summary>
     EnforceDisable,
 
-    /// <summary>Persist and apply a Block decision for one application.</summary>
+    /// <summary>Disabled compatibility alias; policy mutation must use authenticated IPC.</summary>
     BlockApp,
 
-    /// <summary>Persist and apply an Allow decision for one application.</summary>
+    /// <summary>Disabled compatibility alias; policy mutation must use authenticated IPC.</summary>
     AllowApp,
 
     /// <summary>Unrecognized verb.</summary>

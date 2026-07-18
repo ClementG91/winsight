@@ -7,8 +7,8 @@ namespace WinSight.FirewallService;
 /// <summary>
 /// Hosts the firewall command listener for the lifetime of the Windows service. It runs
 /// the listener until the host requests shutdown; a listener fault is logged and stops
-/// the service cleanly rather than crashing it. This worker performs no WFP mutation:
-/// the shipped service is audit-only.
+/// the service cleanly rather than crashing it. Explicit privileged WFP transitions are
+/// handled behind the listener by the service-side coordinator.
 /// </summary>
 public sealed partial class FirewallServiceWorker : BackgroundService
 {
@@ -28,10 +28,22 @@ public sealed partial class FirewallServiceWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        LogListening();
         try
         {
-            await _listener.RunAsync(stoppingToken).ConfigureAwait(false);
+            var listenerTask = _listener.RunAsync(stoppingToken);
+            if (_listener is IFirewallServiceReadiness readiness)
+            {
+                var completed = await Task.WhenAny(listenerTask, readiness.Ready)
+                    .ConfigureAwait(false);
+                if (completed == listenerTask)
+                {
+                    await listenerTask.ConfigureAwait(false);
+                    return;
+                }
+            }
+
+            LogListening();
+            await listenerTask.ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {

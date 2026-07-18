@@ -182,8 +182,15 @@ The language can also be selected explicitly for managed deployments, for exampl
   signature; flags external, established, unsigned owners.
 - **DNS** (DNSMonitor-class), recently resolved domains from the resolver cache, plus
   real-time `dns --watch` (live ETW queries, Administrator).
-- **Firewall** (LuLu-class, read-only), lists Windows Defender Firewall rules
-  (`winsight firewall`). An enforcing per-app firewall is a later phase.
+- **Firewall** (LuLu-class) combines a read-only inventory of Microsoft Defender
+  Firewall rules (`winsight firewall`) with an opt-in per-application outbound service.
+  An elevated administrator can explicitly enable or emergency-disable filtering; the
+  dashboard reports requested mode separately from observed runtime state and says
+  filtering is active only when the LocalSystem service freshly enumerates WFP and confirms
+  the exact enabled-block set (with no missing or extra WinSight filter). Disabled policies
+  remain visible but create no filter. The named-pipe client authenticates the LocalSystem-owned endpoint before
+  sending a request. Native SCM, multi-user IPC, DACL and WFP behavior still requires the
+  documented isolated-VM validation before production qualification.
 - **Processes** (TaskExplorer-class), every running process with its image path,
   parent, command line and Authenticode signature (`winsight processes` / `ps`);
   flags unsigned or untrusted running images. Read-only.
@@ -235,11 +242,12 @@ spots are maintained in [`docs/DETECTIONS.md`](docs/DETECTIONS.md). WinSight is 
 triage and visibility tool, not antivirus or EDR; a notable result is evidence to
 investigate rather than proof of malware.
 
-**Current next step:** Phase 2 outbound control. Path-scoped `allow/block/ask`
-contracts, atomic versioned policy storage, fail-open audit recovery and a strict
-bounded IPC framing protocol are implemented and tested. The privileged service
-host, named-pipe ACL/identity authentication, WFP audit engine and prompt flow
-remain. See
+**Current qualification work:** Phase 2 outbound control has path-scoped
+`allow/block/ask` policies, a LocalSystem mutation authority, authenticated named-pipe
+IPC and an opt-in WFP engine. Protocol v3 binds every paginated list to a complete
+snapshot; SCM boot persistence and desired/effective state are part of the serialized
+transition. Direct mutation CLI aliases are disabled. Real SCM, multi-user IPC, DACL,
+WFP and Arm64 behavior still requires the isolated-VM gates before production use. See
 [`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
 signature-performance optimization. Driver-backed BlockBlock/RansomWhere features
 remain deliberately deferred because production drivers require signing and a

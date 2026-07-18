@@ -70,21 +70,22 @@
   <data name="FirewallBlockSelected" xml:space="preserve"><value>Bloquer</value></data>
   <data name="FirewallRemoveSelected" xml:space="preserve"><value>Retirer</value></data>
   <data name="FirewallEmergencyDisable" xml:space="preserve"><value>Désactivation d'urgence</value></data>
-  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>Désactiver l'application et lever tous les blocages WinSight ? La machine repasse en audit seul.</value></data>
+  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>Désactiver le filtrage et lever tous les blocages WinSight ? La machine repasse en audit seul.</value></data>
   <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Sélectionner une application à bloquer</value></data>
   <data name="FirewallExeFilter" xml:space="preserve"><value>Exécutables (*.exe)|*.exe|Tous les fichiers (*.*)|*.*</value></data>
   <data name="FirewallActionApplied" xml:space="preserve"><value>Modification du pare-feu appliquée.</value></data>
-  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Enregistré. Ce blocage ne filtre le trafic qu'une fois l'enforcement du pare-feu activé (action élevée).</value></data>
+  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Enregistré. Ce blocage ne filtre le trafic qu'une fois le filtrage du pare-feu activé (action élevée).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>Le service pare-feu n'est pas disponible. Installez-le et démarrez-le, puis réessayez.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>Vous n'êtes pas autorisé à modifier la politique du pare-feu sur cette machine.</value></data>
-  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activer l'application</value></data>
+  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activer le filtrage</value></data>
   <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>Commencer à filtrer le trafic sortant maintenant ? Chaque blocage enregistré prend effet immédiatement, et les applications que vous avez bloquées perdent leur accès réseau. La désactivation d'urgence ramène la machine en audit seul à tout moment.</value></data>
-  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>L'application est activée. Les blocages enregistrés filtrent désormais le trafic sortant.</value></data>
-  <data name="FirewallActionNotSupported" xml:space="preserve"><value>Cette machine n'a pas de moteur de filtrage sortant utilisable : l'application ne pourrait rien filtrer. Rien n'a été modifié.</value></data>
+  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>Le filtrage est activé. Les blocages enregistrés filtrent désormais le trafic sortant.</value></data>
+  <data name="FirewallEnforcementNotActive" xml:space="preserve"><value>La demande est terminée, mais aucun filtrage actif n'a été observé. Vérifiez l'état du pare-feu avant de vous fier aux blocages enregistrés.</value></data>
+  <data name="FirewallActionNotSupported" xml:space="preserve"><value>Cette machine n'a pas de moteur de filtrage sortant utilisable : le filtrage ne peut pas être activé. Rien n'a été modifié.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>Le service pare-feu a rejeté la modification.</value></data>
   <data name="BlockOutbound" xml:space="preserve"><value>Bloquer le trafic sortant</value></data>
   <data name="BlockOutboundTooltip" xml:space="preserve"><value>Bloquer le trafic réseau sortant de cette application via le pare-feu WinSight.</value></data>
-  <data name="BlockOutboundConfirm" xml:space="preserve"><value>Bloquer tout le trafic réseau sortant de « {0} » ? Effectif une fois l'enforcement du pare-feu activé.</value></data>
+  <data name="BlockOutboundConfirm" xml:space="preserve"><value>Bloquer tout le trafic réseau sortant de « {0} » ? Effectif une fois le filtrage du pare-feu activé.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Ouvrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, sécurité locale</value></data>
@@ -147,20 +148,22 @@
   <data name="ToolDnsGuidance" xml:space="preserve"><value>Le cache DNS indique une résolution, pas nécessairement une visite volontaire. Corrélez avec les connexions et les programmes actifs.</value></data>
   <data name="ToolFirewallLabel" xml:space="preserve"><value>Pare-feu Windows</value></data>
   <data name="ToolFirewallShort" xml:space="preserve"><value>Règles réseau actuellement actives</value></data>
-  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventorie les règles du pare-feu Microsoft Defender. Le blocage automatique reste désactivé tant que le service WFP sécurisé n’est pas livré.</value></data>
+  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventorie les règles du pare-feu Microsoft Defender sans les modifier. Le filtrage par application est contrôlé séparément par le service sortant facultatif.</value></data>
   <data name="ToolFirewallGuidance" xml:space="preserve"><value>Utilisez l’outil Windows pour modifier une règle. Conservez une voie de récupération avant de bloquer un service système.</value></data>
   <data name="ToolOutboundFirewallLabel" xml:space="preserve"><value>Pare-feu sortant</value></data>
-  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Contrôle sortant par application (audit seul)</value></data>
-  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>Le service de pare-feu sortant WinSight : s’il est installé, son mode et les politiques par application enregistrées. Il est en audit seul et n’installe encore aucun filtre.</value></data>
-  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Rien n’est bloqué. L’application des règles est une étape ultérieure et facultative. Une désactivation d’urgence revient à l’audit seul à tout moment.</value></data>
+  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Contrôle du filtrage sortant par application</value></data>
+  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>Le service de pare-feu sortant WinSight indique le mode demandé, l’état effectif à l’exécution et les politiques enregistrées par application.</value></data>
+  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Avant de vous fier à l’état du pare-feu, vérifiez dans Windows l’enregistrement du service, son exécution et son identité LocalSystem. Les politiques ne filtrent qu’après activation par un utilisateur élevé ; un filtrage dégradé ne signale jamais un blocage comme actif.</value></data>
   <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>Pare-feu sortant WinSight</value></data>
-  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service non installé. WinSight ne filtre pas votre trafic sortant ; les analyses restent locales et en lecture seule.</value></data>
-  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Installé, audit seul. Les politiques sont enregistrées mais rien n’est bloqué.</value></data>
+  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Service de pare-feu indisponible. Son état d’installation n’a pas pu être vérifié et WinSight ne signale aucun filtrage sortant actif.</value></data>
+  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Point de service accessible, audit seul. Les politiques sont enregistrées mais rien n’est bloqué.</value></data>
   <data name="OutboundFirewallPending" xml:space="preserve"><value>A joint {0}, {1} connexion(s). Vous n’avez jamais autorisé ni bloqué cette application.</value></data>
-  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Installé et applique les politiques par application.</value></data>
+  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Point de service accessible ; le filtrage par application est actif.</value></data>
+  <data name="OutboundFirewallDegraded" xml:space="preserve"><value>Service accessible, mais filtrage dégradé. Les blocages enregistrés ne sont pas signalés comme actifs.</value></data>
   <data name="OutboundActionAllow" xml:space="preserve"><value>Autoriser</value></data>
   <data name="OutboundActionBlock" xml:space="preserve"><value>Bloquer</value></data>
   <data name="OutboundActionAsk" xml:space="preserve"><value>Demander</value></data>
+  <data name="OutboundActionDisabled" xml:space="preserve"><value>{0} (désactivé, ne filtre pas)</value></data>
   <data name="ToolProcessesLabel" xml:space="preserve"><value>Processus</value></data>
   <data name="ToolProcessesShort" xml:space="preserve"><value>Programmes en cours d’exécution</value></data>
   <data name="ToolProcessesDescription" xml:space="preserve"><value>Liste les processus, leur chemin, leur parent, leur ligne de commande et leur signature.</value></data>
