@@ -10,14 +10,18 @@ namespace WinSight.FirewallService;
 /// </summary>
 public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDisposable, IAsyncDisposable
 {
+    private static readonly TimeSpan DefaultStatusVerificationTimeout = TimeSpan.FromSeconds(1);
+
     private readonly FirewallPolicyStore _store;
     private readonly Func<IWinSightWfpReconciler> _reconcilerFactory;
     private readonly IFirewallServiceStartModeController _startMode;
+    private readonly TimeSpan _statusVerificationTimeout;
     private readonly SemaphoreSlim _transition = new(1, 1);
     private readonly object _lifetimeLock = new();
     private readonly TaskCompletionSource _drained = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _disposeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IWinSightWfpReconciler? _reconciler;
+    private Task<bool>? _runtimeVerification;
     private int _outstanding;
     private bool _stopping;
     private bool _disposed;
@@ -26,8 +30,9 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
     public EnforcementCoordinator(
         FirewallPolicyStore store,
         IWinSightWfpReconciler reconciler,
-        IFirewallServiceStartModeController startMode)
-        : this(store, () => reconciler, startMode)
+        IFirewallServiceStartModeController startMode,
+        TimeSpan? statusVerificationTimeout = null)
+        : this(store, () => reconciler, startMode, statusVerificationTimeout)
     {
         ArgumentNullException.ThrowIfNull(reconciler);
     }
@@ -35,11 +40,14 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
     public EnforcementCoordinator(
         FirewallPolicyStore store,
         Func<IWinSightWfpReconciler> reconcilerFactory,
-        IFirewallServiceStartModeController startMode)
+        IFirewallServiceStartModeController startMode,
+        TimeSpan? statusVerificationTimeout = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _reconcilerFactory = reconcilerFactory ?? throw new ArgumentNullException(nameof(reconcilerFactory));
         _startMode = startMode ?? throw new ArgumentNullException(nameof(startMode));
+        _statusVerificationTimeout = ValidateStatusVerificationTimeout(
+            statusVerificationTimeout ?? DefaultStatusVerificationTimeout);
     }
 
     public bool EngineSupported => true;
@@ -62,22 +70,23 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
             var state = EffectiveState;
             if (state == FirewallEnforcementState.Active)
             {
+                var exactlyVerified = false;
                 try
                 {
-                    var exact = await GetReconcilerAfterTrust()
-                        .VerifyExactAsync(configuration.Policies, cancellationToken).ConfigureAwait(false);
-                    if (!exact)
+                    exactlyVerified = await VerifyRuntimeStatusAsync(
+                        GetReconcilerAfterTrust(), configuration.Policies, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                finally
+                {
+                    // Exact success is the only exit which may leave Active observable. This
+                    // invariant is independent of exception type and mutable cancellation state;
+                    // any original failure continues to propagate after the fail-closed write.
+                    if (!exactlyVerified)
                     {
                         SetEffectiveState(FirewallEnforcementState.Degraded);
                         state = FirewallEnforcementState.Degraded;
                     }
-                }
-                catch (Exception verificationFailure) when (
-                    IsTransitionFailure(verificationFailure)
-                    && !cancellationToken.IsCancellationRequested)
-                {
-                    SetEffectiveState(FirewallEnforcementState.Degraded);
-                    state = FirewallEnforcementState.Degraded;
                 }
             }
             result = new FirewallRuntimeStatus(configuration.Mode, EngineSupported, state);
@@ -415,6 +424,81 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         }
     }
 
+    private async Task<bool> VerifyRuntimeStatusAsync(
+        IWinSightWfpReconciler reconciler,
+        IReadOnlyList<AppFirewallPolicy> policies,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var deadline = new CancellationTokenSource(_statusVerificationTimeout);
+        using var verificationCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken, deadline.Token);
+        var verificationToken = verificationCancellation.Token;
+
+        // The production verifier enters synchronous WFP P/Invoke before returning its Task.
+        // Invoke it on the thread pool so even that synchronous portion cannot retain the
+        // coordinator lock past the deadline. A native call cannot be forcefully aborted, so a
+        // timed-out read may finish in the background. VerifyExactAsync is read-only, its late
+        // result is deliberately ignored, and Active is downgraded before the lock is released.
+        // This permits a later serialized transition to recover without replaying or timing out
+        // any mutation.
+        Task<bool> verification;
+        lock (_lifetimeLock)
+        {
+            // A timed-out native read can be unabortable. Until it completes, fail closed
+            // without starting another worker so recovery/status cycles cannot accumulate
+            // detached reads against the shared reconciler.
+            if (_runtimeVerification is { IsCompleted: false })
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return false;
+            }
+
+            verification = Task.Run(
+                () => reconciler.VerifyExactAsync(policies, verificationToken),
+                CancellationToken.None);
+            _runtimeVerification = verification;
+        }
+        TrackRuntimeVerification(verification);
+        try
+        {
+            return await verification.WaitAsync(verificationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (
+            deadline.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw;
+        }
+    }
+
+    private void TrackRuntimeVerification(Task<bool> verification) =>
+        _ = verification.ContinueWith(
+            completed =>
+            {
+                // Observe a late failure because the status request may already have timed out.
+                _ = completed.Exception;
+                lock (_lifetimeLock)
+                {
+                    if (ReferenceEquals(_runtimeVerification, completed))
+                        _runtimeVerification = null;
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
+    private static TimeSpan ValidateStatusVerificationTimeout(TimeSpan timeout) =>
+        timeout > TimeSpan.Zero && timeout <= TimeSpan.FromMinutes(1)
+            ? timeout
+            : throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                "The status verification timeout must be greater than zero and no more than one minute.");
+
     private static bool IsTransitionFailure(Exception exception) => exception is
         Win32Exception or IOException or UnauthorizedAccessException or InvalidDataException or
         InvalidOperationException or OperationCanceledException;
@@ -485,7 +569,6 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         bool disposeOwner;
         lock (_lifetimeLock)
         {
-            if (_disposed) return;
             disposeOwner = !_stopping;
             _stopping = true;
             if (_outstanding == 0) _drained.TrySetResult();
@@ -499,21 +582,73 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
         }
         try
         {
-            if (_reconciler is IAsyncDisposable asyncReconciler)
-                await asyncReconciler.DisposeAsync().ConfigureAwait(false);
-            else (_reconciler as IDisposable)?.Dispose();
+            IWinSightWfpReconciler? reconciler;
+            Task<bool>? unfinishedVerification;
             lock (_lifetimeLock)
             {
-                _disposed = true;
+                reconciler = _reconciler;
+                _reconciler = null;
+                unfinishedVerification = _runtimeVerification is { IsCompleted: false }
+                    ? _runtimeVerification
+                    : null;
+                _runtimeVerification = null;
                 _transition.Dispose();
             }
+
+            if (reconciler is not null)
+            {
+                if (unfinishedVerification is null)
+                {
+                    await DisposeReconcilerAsync(reconciler).ConfigureAwait(false);
+                }
+                else
+                {
+                    // The native read cannot be safely aborted or awaited without making service
+                    // shutdown unbounded. Transfer sole reconciler ownership to a completion task;
+                    // it disposes only after the read ends, while DisposeAsync returns promptly.
+                    _ = DisposeReconcilerAfterVerificationAsync(unfinishedVerification, reconciler);
+                }
+            }
+            lock (_lifetimeLock) _disposed = true;
             _disposeCompleted.TrySetResult();
         }
         catch (Exception ex)
         {
+            lock (_lifetimeLock) _disposed = true;
             _disposeCompleted.TrySetException(ex);
             throw;
         }
+    }
+
+    private static async Task DisposeReconcilerAfterVerificationAsync(
+        Task verification,
+        IWinSightWfpReconciler reconciler)
+    {
+        try
+        {
+            await verification.ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // A late verification failure is already fail-closed and must not prevent disposal.
+        }
+
+        try
+        {
+            await DisposeReconcilerAsync(reconciler).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // DisposeAsync has already returned after transferring ownership. Observe any late
+            // disposal failure so it cannot become an unobserved task exception.
+        }
+    }
+
+    private static async ValueTask DisposeReconcilerAsync(IWinSightWfpReconciler reconciler)
+    {
+        if (reconciler is IAsyncDisposable asyncReconciler)
+            await asyncReconciler.DisposeAsync().ConfigureAwait(false);
+        else (reconciler as IDisposable)?.Dispose();
     }
 }
 
