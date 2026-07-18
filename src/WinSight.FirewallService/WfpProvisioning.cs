@@ -73,6 +73,14 @@ public static partial class WfpProvisioning
     // value is a byte blob, so this must be 12 or WFP rejects the condition.
     private const uint FwpByteBlobType = 12;
     private const uint FwpMatchEqual = 0;
+
+    // FWPM_FILTER_FLAG_INDEXED = 0x40. WFP sets this itself, not the caller, on any filter it
+    // decides to index for fast matching — which it always does for an app-id condition. A block
+    // filter therefore reads back with Flags = 0x40, never 0. Confirmed on a live machine: the
+    // filters apply and block correctly, yet a "Flags == 0" check would reject them, so the exact
+    // check must mask this flag or it turns every real enforcement into a false "degraded".
+    private const uint FwpmFilterFlagIndexed = 0x00000040;
+
     private const uint InventoryBatchSize = 256;
     private const int MaxInventoryFilters = 65_536;
 
@@ -574,7 +582,7 @@ public static partial class WfpProvisioning
         filter.ProviderKey == ProviderKey
         && filter.SubLayerKey == SublayerKey
         && filter.LayerKey == expected.LayerKey
-        && filter.Flags == 0
+        && FilterFlagsAreClean(filter.Flags)
         && filter.ActionType == FwpActionBlock
         && filter.ConditionCount == 1
         && filter.Condition is { } condition
@@ -583,6 +591,15 @@ public static partial class WfpProvisioning
         && condition.Type == FwpByteBlobType
         && condition.Value is not null
         && condition.Value.AsSpan().SequenceEqual(expected.AppId);
+
+    /// <summary>
+    /// True when a filter carries no flag WinSight did not intend. The INDEXED flag is masked out
+    /// because WFP sets it itself on any app-id filter, so a real, correctly-applied block reads
+    /// back with it; requiring Flags == 0 rejected every genuine enforcement and reported it as a
+    /// false "degraded", confirmed on a live machine. Every other flag — PERSISTENT, BOOTTIME,
+    /// DISABLED — stays disqualifying, since WinSight never creates such a filter.
+    /// </summary>
+    internal static bool FilterFlagsAreClean(uint flags) => (flags & ~FwpmFilterFlagIndexed) == 0;
 
     private static void DeleteAllOwnedFilters(IntPtr engine)
     {

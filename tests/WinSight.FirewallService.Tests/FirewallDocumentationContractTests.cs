@@ -86,7 +86,25 @@ public sealed class FirewallDocumentationContractTests
         Assert.Contains("condition.Type == FwpByteBlobType", source, StringComparison.Ordinal);
         Assert.Contains("condition.Value.AsSpan().SequenceEqual(expected.AppId)", source,
             StringComparison.Ordinal);
+
+        // Regression: the exact-shape check must mask the INDEXED flag WFP sets on its own, not
+        // require Flags == 0. On a live machine, "filter.Flags == 0" rejected every real block and
+        // turned working enforcement into a false "degraded" with a protection-destroying rollback.
+        Assert.Contains("FilterFlagsAreClean(filter.Flags)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("filter.Flags == 0", source, StringComparison.Ordinal);
     }
+
+    // WFP sets FWPM_FILTER_FLAG_INDEXED (0x40) on any app-id filter itself, so a correctly applied
+    // block reads back with it. It must be accepted; every other flag stays disqualifying because
+    // WinSight never creates a persistent, boot-time or disabled filter.
+    [Theory]
+    [InlineData(0x00u, true)]   // no flags
+    [InlineData(0x40u, true)]   // INDEXED, set by WFP — the one that broke enforcement
+    [InlineData(0x01u, false)]  // PERSISTENT — never created by WinSight
+    [InlineData(0x02u, false)]  // BOOTTIME
+    [InlineData(0x41u, false)]  // INDEXED + PERSISTENT: the extra flag still disqualifies
+    public void FilterFlagsAreClean_AcceptsOnlyTheIndexFlagWfpSetsItself(uint flags, bool expected) =>
+        Assert.Equal(expected, WfpProvisioning.FilterFlagsAreClean(flags));
 
     private static string Read(params string[] segments) =>
         File.ReadAllText(Path.Combine([RepositoryRoot, .. segments]));

@@ -2,6 +2,17 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Firewall enforcement verification must mask the INDEXED flag WFP sets itself
+- The exact-inventory verification required a block filter to read back with `Flags == 0`, but WFP
+  sets `FWPM_FILTER_FLAG_INDEXED` (0x40) on any app-id filter on its own. Every genuine block
+  therefore failed verification, which the coordinator treated as an apply failure: it rolled back,
+  removed the filters, and reported `Degraded`. Enforcement never survived enabling — or a reboot —
+  yet the whole unit suite passed. Confirmed on a real VM: `VerifyExact` returned false while the
+  copied `curl.exe` was demonstrably blocked (http 000) and the System32 copy still reached the
+  network (http 200). The check now masks the INDEXED flag and keeps every other flag
+  disqualifying. Re-validated end-to-end on the VM: enable reports `Active`, the blocked app is cut
+  and the unblocked one passes, emergency disable restores connectivity.
+
 ### Firewall WFP runtime truth is reconciled, not cached
 - The LocalSystem coordinator now requires a complete-state WFP reconciler. Each enforcement
   transition enumerates all native filters, removes every object linked to WinSight's provider
