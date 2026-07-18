@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace WinSight.Firewall;
 
-/// <summary>Commands accepted by the future local firewall service.</summary>
+/// <summary>Commands accepted by the local firewall service.</summary>
 public enum FirewallCommand
 {
     GetStatus = 1,
@@ -26,6 +26,19 @@ public enum FirewallProtocolError
     Unauthorized,
     NotSupported,
     InternalFailure,
+    SnapshotChanged,
+}
+
+/// <summary>
+/// Effective enforcement state observed by the running privileged service. This is deliberately
+/// independent of the durable desired mode: persisted <c>Enforcement</c> does not mean that WFP
+/// filters were successfully applied during this service lifetime.
+/// </summary>
+public enum FirewallEnforcementState
+{
+    AuditOnly,
+    Active,
+    Degraded,
 }
 
 public sealed record FirewallCommandRequest(
@@ -35,7 +48,8 @@ public sealed record FirewallCommandRequest(
     AppFirewallPolicy? Policy = null,
     string? ExecutablePath = null,
     int? Offset = null,
-    int? Limit = null);
+    int? Limit = null,
+    string? SnapshotVersion = null);
 
 /// <param name="UnrecordedApps">
 /// Applications seen reaching the network that could not be recorded because the pending log was
@@ -46,7 +60,8 @@ public sealed record FirewallServiceStatus(
     OutboundFirewallMode Mode,
     bool EngineSupported,
     bool EnforcementEnabled,
-    int UnrecordedApps = 0);
+    int UnrecordedApps = 0,
+    FirewallEnforcementState EffectiveState = FirewallEnforcementState.AuditOnly);
 
 public sealed record FirewallCommandResponse(
     int ProtocolVersion,
@@ -56,7 +71,9 @@ public sealed record FirewallCommandResponse(
     FirewallServiceStatus? Status = null,
     AppFirewallPolicy[]? Policies = null,
     int? NextOffset = null,
-    PendingOutboundApp[]? Pending = null);
+    PendingOutboundApp[]? Pending = null,
+    string? SnapshotVersion = null,
+    int? SnapshotCount = null);
 
 /// <summary>An invalid, unsupported or over-sized local protocol frame.</summary>
 public sealed class FirewallProtocolException : IOException
@@ -74,14 +91,51 @@ public sealed class FirewallProtocolException : IOException
 }
 
 /// <summary>
-/// Strict length-prefixed JSON framing for authenticated local IPC. This codec
-/// deliberately does not authenticate a caller: the named-pipe host must use a
-/// restrictive ACL and validate the impersonated Windows identity before decoding
-/// or executing any command.
+/// The connected peer could not be proven to be the expected LocalSystem service, or
+/// its response was not bound to the request that was sent. The message is deliberately
+/// fixed: ownership and protocol details must not cross the dashboard boundary.
+/// </summary>
+public sealed class FirewallPeerValidationException : IOException
+{
+    public const string FixedMessage = "The WinSight firewall service peer could not be validated.";
+
+    public FirewallPeerValidationException()
+        : base(FixedMessage)
+    {
+    }
+}
+
+/// <summary>
+/// An authenticated peer closed a version probe before writing any response byte. This
+/// is the only legacy-service signal that permits a read-only v1 retry; partial, malformed
+/// or timed-out responses remain failures and must never trigger protocol downgrade.
+/// </summary>
+public sealed class FirewallLegacyPeerClosedException : IOException
+{
+    public const string FixedMessage =
+        "The WinSight firewall service closed the protocol probe without a response.";
+
+    public FirewallLegacyPeerClosedException()
+        : base(FixedMessage)
+    {
+    }
+}
+
+/// <summary>
+/// Strict length-prefixed JSON framing for authenticated local IPC. This codec does
+/// not authenticate either peer: the client must prove the connected pipe owner is
+/// LocalSystem, while the host must use a restrictive ACL and validate the impersonated
+/// Windows identity before decoding or executing any command.
 /// </summary>
 public static class FirewallProtocolCodec
 {
-    public const int CurrentVersion = 1;
+    /// <summary>
+    /// Version 3 binds every paginated page to one complete immutable snapshot. Version 2 carries
+    /// runtime enforcement proof and version 1 remains conservative for staged upgrades.
+    /// </summary>
+    public const int CurrentVersion = 3;
+    public const int RuntimeProofVersion = 2;
+    public const int LegacyVersion = 1;
     public const int MaxMessageBytes = 64 * 1024;
     public const int MaxPoliciesPerMessage = 128;
     public const int MaxPathUtf8BytesPerMessage = 32 * 1024;
@@ -99,6 +153,7 @@ public static class FirewallProtocolCodec
         {
             new JsonStringEnumConverter<FirewallCommand>(),
             new JsonStringEnumConverter<FirewallProtocolError>(),
+            new JsonStringEnumConverter<FirewallEnforcementState>(),
             new JsonStringEnumConverter<OutboundFirewallMode>(),
             new JsonStringEnumConverter<OutboundAction>(),
         },
@@ -130,18 +185,57 @@ public static class FirewallProtocolCodec
         CancellationToken cancellationToken = default)
     {
         ValidateResponse(response);
-        return WriteFrameAsync(stream, response, cancellationToken);
+        // Version 1 clients reject unmapped JSON members. Never send effectiveState to one:
+        // legacy protocol has no runtime proof and must remain conservative at the new client.
+        return response.ProtocolVersion switch
+        {
+            LegacyVersion => WriteFrameAsync(stream, LegacyResponse.From(response), cancellationToken),
+            RuntimeProofVersion => WriteFrameAsync(stream, RuntimeProofResponse.From(response), cancellationToken),
+            _ => WriteFrameAsync(stream, response, cancellationToken),
+        };
     }
 
     public static async Task<FirewallCommandResponse> ReadResponseAsync(
         Stream stream,
         CancellationToken cancellationToken = default)
     {
-        var response = await ReadFrameAsync<FirewallCommandResponse>(
+        var frame = await ReadFrameAsync<JsonElement>(
             stream,
-            cancellationToken).ConfigureAwait(false);
+            cancellationToken,
+            classifyEmptyResponse: true).ConfigureAwait(false);
+        var version = ReadProtocolVersion(frame);
+        var response = version switch
+        {
+            LegacyVersion => LegacyResponse.ToCurrent(Deserialize<LegacyResponse>(frame)),
+            RuntimeProofVersion => RuntimeProofResponse.ToCurrent(Deserialize<RuntimeProofResponse>(frame)),
+            _ => Deserialize<FirewallCommandResponse>(frame),
+        };
         ValidateResponse(response);
         return response;
+    }
+
+    private static int ReadProtocolVersion(JsonElement frame)
+    {
+        if (frame.ValueKind != JsonValueKind.Object
+            || !frame.TryGetProperty("protocolVersion", out var version)
+            || !version.TryGetInt32(out var value))
+        {
+            throw InvalidFrame("Protocol response version is invalid.");
+        }
+        return value;
+    }
+
+    private static T Deserialize<T>(JsonElement frame)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(frame.GetRawText(), SerializerOptions)
+                ?? throw InvalidFrame("Protocol message is empty.");
+        }
+        catch (JsonException ex)
+        {
+            throw InvalidFrame("Protocol message is not valid strict JSON.", ex);
+        }
     }
 
     private static async Task WriteFrameAsync<T>(
@@ -172,7 +266,8 @@ public static class FirewallProtocolCodec
 
     private static async Task<T> ReadFrameAsync<T>(
         Stream stream,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool classifyEmptyResponse = false)
     {
         ArgumentNullException.ThrowIfNull(stream);
         if (!stream.CanRead)
@@ -183,7 +278,21 @@ public static class FirewallProtocolCodec
         var header = new byte[sizeof(int)];
         try
         {
-            await stream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
+            var firstByteCount = await stream.ReadAsync(
+                header.AsMemory(0, 1), cancellationToken).ConfigureAwait(false);
+            if (firstByteCount == 0)
+            {
+                if (classifyEmptyResponse)
+                {
+                    throw new FirewallLegacyPeerClosedException();
+                }
+                throw new EndOfStreamException();
+            }
+            await stream.ReadExactlyAsync(header.AsMemory(1), cancellationToken).ConfigureAwait(false);
+        }
+        catch (FirewallLegacyPeerClosedException)
+        {
+            throw;
         }
         catch (EndOfStreamException ex)
         {
@@ -242,7 +351,11 @@ public static class FirewallProtocolCodec
             case FirewallCommand.ListPending:
                 if (HasPayload(request)
                     || request.Offset is not >= 0
-                    || request.Limit is not > 0 or > MaxPoliciesPerMessage)
+                    || request.Limit is not > 0 or > MaxPoliciesPerMessage
+                    || (request.ProtocolVersion == CurrentVersion
+                        && ((request.Offset == 0 && request.SnapshotVersion is not null)
+                            || (request.Offset > 0 && !IsSnapshotVersion(request.SnapshotVersion))))
+                    || (request.ProtocolVersion != CurrentVersion && request.SnapshotVersion is not null))
                 {
                     throw InvalidFrame(
                         $"A list command requires an offset and a limit up to {MaxPoliciesPerMessage}.");
@@ -272,20 +385,29 @@ public static class FirewallProtocolCodec
         ArgumentNullException.ThrowIfNull(response);
         ValidateEnvelope(response.ProtocolVersion, response.RequestId);
         if (!Enum.IsDefined(response.Error)
+            || (response.Error == FirewallProtocolError.SnapshotChanged
+                && response.ProtocolVersion != CurrentVersion)
             || (response.Success && response.Error != FirewallProtocolError.None)
             || (!response.Success && response.Error == FirewallProtocolError.None)
             || (!response.Success
                 && (response.Status is not null
                     || response.Policies is not null
                     || response.NextOffset is not null
-                    || response.Pending is not null)))
+                    || response.Pending is not null
+                    || response.SnapshotVersion is not null
+                    || response.SnapshotCount is not null)))
         {
             throw InvalidFrame("Protocol response status is inconsistent.");
         }
         if (response.Status is { } status
             && (!Enum.IsDefined(status.Mode)
+                || !Enum.IsDefined(status.EffectiveState)
                 || (status.Mode == OutboundFirewallMode.AuditOnly && status.EnforcementEnabled)
-                || (status.EnforcementEnabled && !status.EngineSupported)
+                || (status.EnforcementEnabled && (!status.EngineSupported
+                    || status.EffectiveState != FirewallEnforcementState.Active))
+                || (status.EffectiveState == FirewallEnforcementState.Active
+                    && (status.Mode != OutboundFirewallMode.Enforcement
+                        || !status.EnforcementEnabled))
                 || status.UnrecordedApps < 0))
         {
             throw InvalidFrame("Protocol service status is inconsistent.");
@@ -304,6 +426,25 @@ public static class FirewallProtocolCodec
             || (response.NextOffset is not null && response.Policies is null && response.Pending is null))
         {
             throw InvalidFrame("Protocol response pagination is inconsistent.");
+        }
+        var hasList = response.Policies is not null || response.Pending is not null;
+        if (response.ProtocolVersion == CurrentVersion)
+        {
+            if (hasList
+                && (!IsSnapshotVersion(response.SnapshotVersion)
+                    || response.SnapshotCount is not >= 0
+                    || response.SnapshotCount < (response.Policies?.Length ?? response.Pending?.Length ?? 0)
+                    || response.NextOffset > response.SnapshotCount)
+                || (!hasList && (response.SnapshotVersion is not null || response.SnapshotCount is not null)))
+            {
+                throw InvalidFrame("Protocol snapshot pagination is inconsistent.");
+            }
+        }
+        else if (response.SnapshotVersion is not null
+                 || response.SnapshotCount is not null
+                 || response.NextOffset is not null)
+        {
+            throw InvalidFrame("Legacy protocol response contains unsupported pagination metadata.");
         }
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var totalPathBytes = 0;
@@ -355,7 +496,7 @@ public static class FirewallProtocolCodec
 
     private static void ValidateEnvelope(int version, Guid requestId)
     {
-        if (version != CurrentVersion)
+        if (version is not LegacyVersion and not RuntimeProofVersion and not CurrentVersion)
         {
             throw new FirewallProtocolException(
                 FirewallProtocolError.UnsupportedVersion,
@@ -371,7 +512,11 @@ public static class FirewallProtocolCodec
         request.Policy is not null || request.ExecutablePath is not null;
 
     private static bool HasPaging(FirewallCommandRequest request) =>
-        request.Offset is not null || request.Limit is not null;
+        request.Offset is not null || request.Limit is not null || request.SnapshotVersion is not null;
+
+    public static bool IsSnapshotVersion(string? value) =>
+        value is { Length: 64 } && value.All(character =>
+            character is >= '0' and <= '9' or >= 'A' and <= 'F');
 
     private static string ValidatePolicy(AppFirewallPolicy policy)
     {
@@ -408,4 +553,76 @@ public static class FirewallProtocolCodec
 
     private static FirewallProtocolException InvalidFrame(string message, Exception innerException) =>
         new(FirewallProtocolError.InvalidRequest, message, innerException);
+
+    // Deliberately private wire DTOs: protocol v1 did not define effectiveState, and keeping it
+    // absent is required for already-deployed strict v1 dashboards.
+    private sealed record LegacyStatus(
+        OutboundFirewallMode Mode,
+        bool EngineSupported,
+        bool EnforcementEnabled,
+        int UnrecordedApps = 0);
+
+    private sealed record LegacyResponse(
+        int ProtocolVersion,
+        Guid RequestId,
+        bool Success,
+        FirewallProtocolError Error = FirewallProtocolError.None,
+        LegacyStatus? Status = null,
+        AppFirewallPolicy[]? Policies = null,
+        int? NextOffset = null,
+        PendingOutboundApp[]? Pending = null)
+    {
+        public static LegacyResponse From(FirewallCommandResponse response)
+        {
+            var status = response.Status;
+            var active = status?.EffectiveState == FirewallEnforcementState.Active;
+            return new(response.ProtocolVersion, response.RequestId, response.Success, response.Error,
+                status is not null
+                    ? new LegacyStatus(
+                        active ? OutboundFirewallMode.Enforcement : OutboundFirewallMode.AuditOnly,
+                        status.EngineSupported,
+                        EnforcementEnabled: active,
+                        status.UnrecordedApps)
+                    : null,
+                response.Policies, response.NextOffset, response.Pending);
+        }
+
+        public static FirewallCommandResponse ToCurrent(LegacyResponse response) =>
+            new(response.ProtocolVersion, response.RequestId, response.Success, response.Error,
+                response.Status is { } status
+                    // A v1 service only reported desired enforcement. Its reply is deliberately
+                    // projected as degraded: a v2 presentation must not claim live filters
+                    // without v2 runtime proof.
+                    ? new FirewallServiceStatus(
+                        status.Mode,
+                        status.EngineSupported,
+                        EnforcementEnabled: false,
+                        UnrecordedApps: status.UnrecordedApps,
+                        EffectiveState: status.Mode == OutboundFirewallMode.Enforcement
+                            ? FirewallEnforcementState.Degraded
+                            : FirewallEnforcementState.AuditOnly)
+                    : null,
+                response.Policies, response.NextOffset, response.Pending);
+    }
+
+    // Protocol v2 carries effective runtime proof but predates snapshot-bound pagination. A
+    // dedicated DTO keeps v3 members absent for strict independently upgraded v2 peers.
+    private sealed record RuntimeProofResponse(
+        int ProtocolVersion,
+        Guid RequestId,
+        bool Success,
+        FirewallProtocolError Error = FirewallProtocolError.None,
+        FirewallServiceStatus? Status = null,
+        AppFirewallPolicy[]? Policies = null,
+        int? NextOffset = null,
+        PendingOutboundApp[]? Pending = null)
+    {
+        public static RuntimeProofResponse From(FirewallCommandResponse response) =>
+            new(response.ProtocolVersion, response.RequestId, response.Success, response.Error,
+                response.Status, response.Policies, response.NextOffset, response.Pending);
+
+        public static FirewallCommandResponse ToCurrent(RuntimeProofResponse response) =>
+            new(response.ProtocolVersion, response.RequestId, response.Success, response.Error,
+                response.Status, response.Policies, response.NextOffset, response.Pending);
+    }
 }

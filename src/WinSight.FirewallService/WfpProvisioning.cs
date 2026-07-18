@@ -10,7 +10,7 @@ namespace WinSight.FirewallService;
 /// Creates and removes the WinSight-owned Windows Filtering Platform provider and
 /// sublayer. These are namespace CONTAINERS only: a provider and a sublayer filter no
 /// traffic by themselves, so provisioning them cannot block or affect any connection.
-/// They are the ownership scope under which audit-only filters will later live.
+/// They are the ownership scope under which WinSight audit and enforcement filters live.
 ///
 /// Everything runs inside a WFP transaction so it is all-or-nothing, and both objects
 /// are non-persistent (flags = 0): a reboot removes them automatically, which is the
@@ -41,10 +41,10 @@ public static partial class WfpProvisioning
     private static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
 
     private const string ProviderName = "WinSight";
-    private const string ProviderDescription = "WinSight outbound firewall provider (audit-only).";
+    private const string ProviderDescription = "WinSight-owned outbound firewall provider.";
     private const string SublayerName = "WinSight outbound";
     private const string SublayerDescription =
-        "WinSight outbound firewall sublayer (audit-only, no filter installed).";
+        "WinSight-owned outbound firewall filter sublayer.";
 
     private const string PermitFilterName = "WinSight audit permit";
     private const string PermitFilterDescription =
@@ -73,6 +73,16 @@ public static partial class WfpProvisioning
     // value is a byte blob, so this must be 12 or WFP rejects the condition.
     private const uint FwpByteBlobType = 12;
     private const uint FwpMatchEqual = 0;
+
+    // FWPM_FILTER_FLAG_INDEXED = 0x40. WFP sets this itself, not the caller, on any filter it
+    // decides to index for fast matching — which it always does for an app-id condition. A block
+    // filter therefore reads back with Flags = 0x40, never 0. Confirmed on a live machine: the
+    // filters apply and block correctly, yet a "Flags == 0" check would reject them, so the exact
+    // check must mask this flag or it turns every real enforcement into a false "degraded".
+    private const uint FwpmFilterFlagIndexed = 0x00000040;
+
+    private const uint InventoryBatchSize = 256;
+    private const int MaxInventoryFilters = 65_536;
 
     /// <summary>Creates the provider and sublayer (idempotent). Installs no filter.</summary>
     public static void Provision()
@@ -178,48 +188,120 @@ public static partial class WfpProvisioning
         var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
         var (keyV4, keyV6) = BlockFilterKeys(path);
 
-        var appId = GetAppId(path);
+        var engine = OpenEngine();
         try
         {
-            var engine = OpenEngine();
-            try
+            InTransaction(engine, () =>
             {
-                InTransaction(engine, () =>
-                {
-                    // Replace only THIS app's filters, leaving other blocked apps intact.
-                    DeleteFilter(engine, keyV4);
-                    DeleteFilter(engine, keyV6);
-
-                    var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
-                    try
-                    {
-                        var condition = new FwpmFilterCondition0
-                        {
-                            FieldKey = AleAppIdCondition,
-                            MatchType = FwpMatchEqual,
-                            ConditionValue = new FwpConditionValue0 { Type = FwpByteBlobType, Value = appId },
-                        };
-                        Marshal.StructureToPtr(condition, conditionPtr, false);
-
-                        AddFilter(engine, keyV4, AleAuthConnectV4, FwpActionBlock,
-                            conditionPtr, 1, BlockFilterName, BlockFilterDescription);
-                        AddFilter(engine, keyV6, AleAuthConnectV6, FwpActionBlock,
-                            conditionPtr, 1, BlockFilterName, BlockFilterDescription);
-                    }
-                    finally
-                    {
-                        Marshal.FreeHGlobal(conditionPtr);
-                    }
-                });
-            }
-            finally
-            {
-                _ = NativeMethods.FwpmEngineClose0(engine);
-            }
+                // Replace only THIS app's filters, leaving other blocked apps intact.
+                DeleteFilter(engine, keyV4);
+                DeleteFilter(engine, keyV6);
+                AddBlockFilters(engine, path, keyV4, keyV6);
+            });
         }
         finally
         {
-            NativeMethods.FwpmFreeMemory0(ref appId);
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    /// <summary>
+    /// Replaces the complete WinSight WFP namespace in one transaction. Inventory is
+    /// obtained by enumerating the whole engine and selecting objects linked to either
+    /// WinSight's provider or sublayer; policy-store paths are never used for cleanup.
+    /// Only enabled block policies are recreated, at both outbound-connect layers.
+    /// </summary>
+    public static void ReconcileExact(IReadOnlyList<AppFirewallPolicy> policies)
+    {
+        ArgumentNullException.ThrowIfNull(policies);
+        var desired = DesiredBlocks(policies);
+        var engine = OpenEngine();
+        try
+        {
+            InTransaction(engine, () =>
+            {
+                DeleteAllOwnedFilters(engine);
+                DeleteSublayer(engine);
+                DeleteProvider(engine);
+                AddProvider(engine);
+                AddSublayer(engine);
+                foreach (var block in desired)
+                {
+                    AddBlockFilters(engine, block.Path, block.KeyV4, block.KeyV6);
+                }
+            });
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    /// <summary>
+    /// Reads the actual provider, sublayer and every filter, and accepts only the exact
+    /// enabled-block set and shape produced by <see cref="ReconcileExact"/>. Missing,
+    /// extra, malformed or unreadable native state fails closed.
+    /// </summary>
+    public static bool VerifyExact(IReadOnlyList<AppFirewallPolicy> policies)
+    {
+        ArgumentNullException.ThrowIfNull(policies);
+        var desired = DesiredBlocks(policies);
+        var expected = new Dictionary<Guid, ExpectedFilter>();
+        foreach (var block in desired)
+        {
+            var appId = GetAppIdBytes(block.Path);
+            if (!expected.TryAdd(block.KeyV4, new ExpectedFilter(AleAuthConnectV4, appId))
+                || !expected.TryAdd(block.KeyV6, new ExpectedFilter(AleAuthConnectV6, appId)))
+            {
+                return false;
+            }
+        }
+
+        var engine = OpenEngine();
+        try
+        {
+            if (!ProviderHasExactShape(engine) || !SublayerHasExactShape(engine))
+            {
+                return false;
+            }
+
+            var owned = EnumerateOwnedFilters(engine);
+            if (owned.Count != expected.Count)
+            {
+                return false;
+            }
+            foreach (var filter in owned)
+            {
+                if (!expected.TryGetValue(filter.FilterKey, out var expectedFilter)
+                    || !FilterHasExactShape(filter, expectedFilter))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    /// <summary>Removes every WinSight-owned filter and container in one transaction.</summary>
+    public static void CleanupAll()
+    {
+        var engine = OpenEngine();
+        try
+        {
+            InTransaction(engine, () =>
+            {
+                DeleteAllOwnedFilters(engine);
+                DeleteSublayer(engine);
+                DeleteProvider(engine);
+            });
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
         }
     }
 
@@ -277,6 +359,289 @@ public static partial class WfpProvisioning
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
         return new Guid(hash.AsSpan(0, 16));
     }
+
+    private static List<DesiredBlock> DesiredBlocks(IReadOnlyList<AppFirewallPolicy> policies)
+    {
+        var result = new List<DesiredBlock>();
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var policy in policies)
+        {
+            ArgumentNullException.ThrowIfNull(policy);
+            if (!policy.Enabled || policy.Action != OutboundAction.Block)
+            {
+                continue;
+            }
+            var path = OutboundPolicyEvaluator.CanonicalPath(policy.ExecutablePath);
+            if (!paths.Add(path))
+            {
+                throw new InvalidDataException("The desired WFP policy set contains a duplicate path.");
+            }
+            var (keyV4, keyV6) = BlockFilterKeys(path);
+            result.Add(new DesiredBlock(path, keyV4, keyV6));
+        }
+        return result;
+    }
+
+    private static void AddBlockFilters(IntPtr engine, string path, Guid keyV4, Guid keyV6)
+    {
+        var appId = GetAppId(path);
+        try
+        {
+            var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
+            try
+            {
+                var condition = new FwpmFilterCondition0
+                {
+                    FieldKey = AleAppIdCondition,
+                    MatchType = FwpMatchEqual,
+                    ConditionValue = new FwpConditionValue0 { Type = FwpByteBlobType, Value = appId },
+                };
+                Marshal.StructureToPtr(condition, conditionPtr, false);
+                AddFilter(engine, keyV4, AleAuthConnectV4, FwpActionBlock,
+                    conditionPtr, 1, BlockFilterName, BlockFilterDescription);
+                AddFilter(engine, keyV6, AleAuthConnectV6, FwpActionBlock,
+                    conditionPtr, 1, BlockFilterName, BlockFilterDescription);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(conditionPtr);
+            }
+        }
+        finally
+        {
+            NativeMethods.FwpmFreeMemory0(ref appId);
+        }
+    }
+
+    private static byte[] GetAppIdBytes(string path)
+    {
+        var appId = GetAppId(path);
+        try
+        {
+            var blob = Marshal.PtrToStructure<FwpByteBlob>(appId);
+            if (blob.Size == 0 || blob.Data == IntPtr.Zero
+                || blob.Size > FirewallProtocolCodec.MaxPathUtf8BytesPerMessage)
+            {
+                throw new InvalidDataException("WFP returned an invalid application identifier.");
+            }
+            var bytes = new byte[checked((int)blob.Size)];
+            Marshal.Copy(blob.Data, bytes, 0, bytes.Length);
+            return bytes;
+        }
+        finally
+        {
+            NativeMethods.FwpmFreeMemory0(ref appId);
+        }
+    }
+
+    private static bool ProviderHasExactShape(IntPtr engine)
+    {
+        var key = ProviderKey;
+        var result = NativeMethods.FwpmProviderGetByKey0(engine, ref key, out var pointer);
+        if (result == FwpEProviderNotFound)
+        {
+            return false;
+        }
+        if (result != 0)
+        {
+            throw new Win32Exception((int)result);
+        }
+        try
+        {
+            var provider = Marshal.PtrToStructure<FwpmProvider0>(pointer);
+            return provider.ProviderKey == ProviderKey && provider.Flags == 0;
+        }
+        finally
+        {
+            NativeMethods.FwpmFreeMemory0(ref pointer);
+        }
+    }
+
+    private static bool SublayerHasExactShape(IntPtr engine)
+    {
+        var key = SublayerKey;
+        var result = NativeMethods.FwpmSubLayerGetByKey0(engine, ref key, out var pointer);
+        if (result == FwpESublayerNotFound)
+        {
+            return false;
+        }
+        if (result != 0)
+        {
+            throw new Win32Exception((int)result);
+        }
+        try
+        {
+            var sublayer = Marshal.PtrToStructure<FwpmSublayer0>(pointer);
+            return sublayer.SubLayerKey == SublayerKey
+                && sublayer.Flags == 0
+                && sublayer.ProviderKey != IntPtr.Zero
+                && Marshal.PtrToStructure<Guid>(sublayer.ProviderKey) == ProviderKey;
+        }
+        finally
+        {
+            NativeMethods.FwpmFreeMemory0(ref pointer);
+        }
+    }
+
+    private static List<OwnedFilter> EnumerateOwnedFilters(IntPtr engine)
+    {
+        var create = NativeMethods.FwpmFilterCreateEnumHandle0(engine, IntPtr.Zero, out var enumHandle);
+        if (create != 0)
+        {
+            throw new Win32Exception((int)create);
+        }
+
+        var result = new List<OwnedFilter>();
+        var enumerated = 0;
+        try
+        {
+            while (true)
+            {
+                var enumerate = NativeMethods.FwpmFilterEnum0(
+                    engine, enumHandle, InventoryBatchSize, out var entries, out var count);
+                if (enumerate != 0)
+                {
+                    throw new Win32Exception((int)enumerate);
+                }
+                try
+                {
+                    enumerated = checked(enumerated + checked((int)count));
+                    if (enumerated > MaxInventoryFilters)
+                    {
+                        throw new InvalidDataException("The WFP inventory exceeds its safety bound.");
+                    }
+                    for (uint index = 0; index < count; index++)
+                    {
+                        var filterPointer = Marshal.ReadIntPtr(entries, checked((int)index * IntPtr.Size));
+                        if (filterPointer == IntPtr.Zero)
+                        {
+                            throw new InvalidDataException("WFP returned an invalid filter inventory entry.");
+                        }
+                        var filter = Marshal.PtrToStructure<FwpmFilter0>(filterPointer);
+                        var providerKey = filter.ProviderKey == IntPtr.Zero
+                            ? (Guid?)null
+                            : Marshal.PtrToStructure<Guid>(filter.ProviderKey);
+                        if (providerKey == ProviderKey || filter.SubLayerKey == SublayerKey)
+                        {
+                            result.Add(CopyOwnedFilter(filter, providerKey));
+                        }
+                    }
+                }
+                finally
+                {
+                    if (entries != IntPtr.Zero)
+                    {
+                        NativeMethods.FwpmFreeMemory0(ref entries);
+                    }
+                }
+                if (count == 0)
+                {
+                    break;
+                }
+            }
+        }
+        catch
+        {
+            _ = NativeMethods.FwpmFilterDestroyEnumHandle0(engine, enumHandle);
+            throw;
+        }
+        var destroy = NativeMethods.FwpmFilterDestroyEnumHandle0(engine, enumHandle);
+        if (destroy != 0)
+        {
+            throw new Win32Exception((int)destroy);
+        }
+        return result;
+    }
+
+    private static OwnedFilter CopyOwnedFilter(FwpmFilter0 filter, Guid? providerKey)
+    {
+        FilterCondition? condition = null;
+        if (filter.NumFilterConditions == 1 && filter.FilterCondition != IntPtr.Zero)
+        {
+            var native = Marshal.PtrToStructure<FwpmFilterCondition0>(filter.FilterCondition);
+            byte[]? value = null;
+            if (native.ConditionValue.Type == FwpByteBlobType && native.ConditionValue.Value != IntPtr.Zero)
+            {
+                var blob = Marshal.PtrToStructure<FwpByteBlob>(native.ConditionValue.Value);
+                if (blob.Size > 0 && blob.Data != IntPtr.Zero
+                    && blob.Size <= FirewallProtocolCodec.MaxPathUtf8BytesPerMessage)
+                {
+                    value = new byte[checked((int)blob.Size)];
+                    Marshal.Copy(blob.Data, value, 0, value.Length);
+                }
+            }
+            condition = new FilterCondition(
+                native.FieldKey, native.MatchType, native.ConditionValue.Type, value);
+        }
+        return new OwnedFilter(
+            filter.FilterKey, providerKey, filter.LayerKey, filter.SubLayerKey,
+            filter.Flags, filter.Action.Type, filter.NumFilterConditions, condition);
+    }
+
+    private static bool FilterHasExactShape(OwnedFilter filter, ExpectedFilter expected) =>
+        filter.ProviderKey == ProviderKey
+        && filter.SubLayerKey == SublayerKey
+        && filter.LayerKey == expected.LayerKey
+        && FilterFlagsAreClean(filter.Flags)
+        && filter.ActionType == FwpActionBlock
+        && filter.ConditionCount == 1
+        && filter.Condition is { } condition
+        && condition.FieldKey == AleAppIdCondition
+        && condition.MatchType == FwpMatchEqual
+        && condition.Type == FwpByteBlobType
+        && condition.Value is not null
+        && condition.Value.AsSpan().SequenceEqual(expected.AppId);
+
+    /// <summary>
+    /// True when a filter carries no flag WinSight did not intend. The INDEXED flag is masked out
+    /// because WFP sets it itself on any app-id filter, so a real, correctly-applied block reads
+    /// back with it; requiring Flags == 0 rejected every genuine enforcement and reported it as a
+    /// false "degraded", confirmed on a live machine. Every other flag — PERSISTENT, BOOTTIME,
+    /// DISABLED — stays disqualifying, since WinSight never creates such a filter.
+    /// </summary>
+    internal static bool FilterFlagsAreClean(uint flags) => (flags & ~FwpmFilterFlagIndexed) == 0;
+
+    private static void DeleteAllOwnedFilters(IntPtr engine)
+    {
+        foreach (var filter in EnumerateOwnedFilters(engine))
+        {
+            var key = filter.FilterKey;
+            DeleteFilter(engine, key);
+        }
+    }
+
+    private static void DeleteSublayer(IntPtr engine)
+    {
+        var key = SublayerKey;
+        var result = NativeMethods.FwpmSubLayerDeleteByKey0(engine, ref key);
+        if (result is not 0 and not FwpESublayerNotFound)
+        {
+            throw new Win32Exception((int)result);
+        }
+    }
+
+    private static void DeleteProvider(IntPtr engine)
+    {
+        var key = ProviderKey;
+        var result = NativeMethods.FwpmProviderDeleteByKey0(engine, ref key);
+        if (result is not 0 and not FwpEProviderNotFound)
+        {
+            throw new Win32Exception((int)result);
+        }
+    }
+
+    private sealed record DesiredBlock(string Path, Guid KeyV4, Guid KeyV6);
+    private sealed record ExpectedFilter(Guid LayerKey, byte[] AppId);
+    private sealed record FilterCondition(Guid FieldKey, uint MatchType, uint Type, byte[]? Value);
+    private sealed record OwnedFilter(
+        Guid FilterKey,
+        Guid? ProviderKey,
+        Guid LayerKey,
+        Guid SubLayerKey,
+        uint Flags,
+        uint ActionType,
+        uint ConditionCount,
+        FilterCondition? Condition);
 
     // Adds one filter to one layer. Conditions (if any) are supplied pre-marshalled by the
     // caller so the same app-id blob can back both the IPv4 and IPv6 filters.
@@ -609,6 +974,21 @@ public static partial class WfpProvisioning
 
         [LibraryImport("fwpuclnt.dll")]
         internal static partial uint FwpmFilterGetByKey0(IntPtr engineHandle, ref Guid key, out IntPtr filter);
+
+        [LibraryImport("fwpuclnt.dll")]
+        internal static partial uint FwpmFilterCreateEnumHandle0(
+            IntPtr engineHandle, IntPtr enumTemplate, out IntPtr enumHandle);
+
+        [LibraryImport("fwpuclnt.dll")]
+        internal static partial uint FwpmFilterEnum0(
+            IntPtr engineHandle,
+            IntPtr enumHandle,
+            uint numEntriesRequested,
+            out IntPtr entries,
+            out uint numEntriesReturned);
+
+        [LibraryImport("fwpuclnt.dll")]
+        internal static partial uint FwpmFilterDestroyEnumHandle0(IntPtr engineHandle, IntPtr enumHandle);
 
         [LibraryImport("fwpuclnt.dll", StringMarshalling = StringMarshalling.Utf16)]
         internal static partial uint FwpmGetAppIdFromFileName0(string fileName, out IntPtr appId);

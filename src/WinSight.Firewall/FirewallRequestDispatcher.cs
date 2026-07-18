@@ -93,12 +93,16 @@ public sealed class FirewallRequestDispatcher
     private async Task<FirewallCommandResponse> GetStatusAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
-        var load = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
-        if (!load.StorageTrusted)
+        FirewallRuntimeStatus status;
+        try
+        {
+            status = await _authority.GetRuntimeStatusAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (FirewallStorageTrustException)
         {
             return Failure(request, FirewallProtocolError.NotSupported);
         }
-        return Success(request) with { Status = DescribeStatus(load.Configuration.Mode) };
+        return Success(request) with { Status = DescribeStatus(status) };
     }
 
     private async Task<FirewallCommandResponse> ListPoliciesAsync(
@@ -115,13 +119,38 @@ public sealed class FirewallRequestDispatcher
         // Deterministic ordering so paging is stable across calls.
         var ordered = load.Configuration.Policies
             .OrderBy(policy => policy.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(policy => policy.ExecutablePath, StringComparer.Ordinal)
             .ToList();
+
+        if (request.ProtocolVersion != FirewallProtocolCodec.CurrentVersion)
+        {
+            return offset != 0 || ordered.Count > limit
+                ? Failure(request, FirewallProtocolError.NotSupported)
+                : Success(request) with { Policies = ordered.ToArray() };
+        }
+
+        var snapshotVersion = FirewallSnapshotVersion.ForPolicies(ordered);
+        if (offset > 0 && !string.Equals(
+                request.SnapshotVersion, snapshotVersion, StringComparison.Ordinal))
+        {
+            return Failure(request, FirewallProtocolError.SnapshotChanged);
+        }
+        if (offset > ordered.Count)
+        {
+            return Failure(request, FirewallProtocolError.InvalidRequest);
+        }
 
         var page = ordered.Skip(offset).Take(limit).ToArray();
         var consumed = offset + page.Length;
         int? nextOffset = consumed < ordered.Count ? consumed : null;
 
-        return Success(request) with { Policies = page, NextOffset = nextOffset };
+        return Success(request) with
+        {
+            Policies = page,
+            NextOffset = nextOffset,
+            SnapshotVersion = snapshotVersion,
+            SnapshotCount = ordered.Count,
+        };
     }
 
     /// <summary>
@@ -149,13 +178,40 @@ public sealed class FirewallRequestDispatcher
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var ordered = _pending.Snapshot()
             .Where(app => !ruled.Contains(app.ExecutablePath))
+            .OrderByDescending(app => app.LastSeenUtc)
+            .ThenBy(app => app.ExecutablePath, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(app => app.ExecutablePath, StringComparer.Ordinal)
             .ToList();
+
+        if (request.ProtocolVersion != FirewallProtocolCodec.CurrentVersion)
+        {
+            return offset != 0 || ordered.Count > limit
+                ? Failure(request, FirewallProtocolError.NotSupported)
+                : Success(request) with { Pending = ordered.ToArray() };
+        }
+
+        var snapshotVersion = FirewallSnapshotVersion.ForPending(ordered);
+        if (offset > 0 && !string.Equals(
+                request.SnapshotVersion, snapshotVersion, StringComparison.Ordinal))
+        {
+            return Failure(request, FirewallProtocolError.SnapshotChanged);
+        }
+        if (offset > ordered.Count)
+        {
+            return Failure(request, FirewallProtocolError.InvalidRequest);
+        }
 
         var page = ordered.Skip(offset).Take(limit).ToArray();
         var consumed = offset + page.Length;
         int? nextOffset = consumed < ordered.Count ? consumed : null;
 
-        return Success(request) with { Pending = page, NextOffset = nextOffset };
+        return Success(request) with
+        {
+            Pending = page,
+            NextOffset = nextOffset,
+            SnapshotVersion = snapshotVersion,
+            SnapshotCount = ordered.Count,
+        };
     }
 
     private async Task<FirewallCommandResponse> UpsertPolicyAsync(
@@ -191,7 +247,7 @@ public sealed class FirewallRequestDispatcher
 
         var configuration = await _authority.EnableEnforcementAsync(cancellationToken).ConfigureAwait(false);
 
-        return Success(request) with { Status = DescribeStatus(configuration.Mode) };
+        return Success(request) with { Status = await DescribeStatusAsync(cancellationToken).ConfigureAwait(false) };
     }
 
     private async Task<FirewallCommandResponse> EmergencyDisableAsync(
@@ -202,16 +258,26 @@ public sealed class FirewallRequestDispatcher
         // corrupt store, which LoadOrAuditAsync already guarantees.
         var configuration = await _authority.EmergencyDisableAsync(cancellationToken).ConfigureAwait(false);
 
-        return Success(request) with { Status = DescribeStatus(configuration.Mode) };
+        return Success(request) with { Status = await DescribeStatusAsync(cancellationToken).ConfigureAwait(false) };
     }
 
-    private FirewallServiceStatus DescribeStatus(OutboundFirewallMode mode)
+    private async Task<FirewallServiceStatus> DescribeStatusAsync(CancellationToken cancellationToken)
     {
-        var enforcementEnabled = mode == OutboundFirewallMode.Enforcement && _authority.EngineSupported;
+        var status = await _authority.GetRuntimeStatusAsync(cancellationToken).ConfigureAwait(false);
+        return DescribeStatus(status);
+    }
+
+    private FirewallServiceStatus DescribeStatus(FirewallRuntimeStatus status)
+    {
+        // The desired durable mode says what the service should attempt after a restart. It is
+        // not evidence that native filters were applied. Only the serialized authority can
+        // attest an active runtime state.
+        var enforcementEnabled = status.EnforcementEnabled;
         // Carrying what the observer could not record keeps the blind spot visible: the dashboard
         // can say "and more were not recorded" instead of showing a truncated list as complete.
         return new FirewallServiceStatus(
-            mode, _authority.EngineSupported, enforcementEnabled, _pending.DroppedApps);
+            status.Mode, status.EngineSupported, enforcementEnabled, _pending.DroppedApps,
+            status.EffectiveState);
     }
 
     private static AppFirewallPolicy NormalisePolicy(AppFirewallPolicy policy) =>

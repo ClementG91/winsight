@@ -70,21 +70,22 @@
   <data name="FirewallBlockSelected" xml:space="preserve"><value>Bloquear</value></data>
   <data name="FirewallRemoveSelected" xml:space="preserve"><value>Quitar</value></data>
   <data name="FirewallEmergencyDisable" xml:space="preserve"><value>Desactivación de emergencia</value></data>
-  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>¿Desactivar la aplicación y levantar todos los bloqueos de WinSight? La máquina vuelve a solo auditoría.</value></data>
+  <data name="FirewallEmergencyConfirm" xml:space="preserve"><value>¿Desactivar el filtrado y levantar todos los bloqueos de WinSight? La máquina vuelve a solo auditoría.</value></data>
   <data name="FirewallSelectAppTitle" xml:space="preserve"><value>Selecciona una aplicación para bloquear</value></data>
   <data name="FirewallExeFilter" xml:space="preserve"><value>Ejecutables (*.exe)|*.exe|Todos los archivos (*.*)|*.*</value></data>
   <data name="FirewallActionApplied" xml:space="preserve"><value>Cambio del firewall aplicado.</value></data>
-  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Guardado. Este bloqueo solo filtra el tráfico cuando se activa la aplicación del firewall (acción con privilegios).</value></data>
+  <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Guardado. Este bloqueo solo filtra el tráfico cuando se activa el filtrado del firewall (acción con privilegios).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>El servicio de firewall no está disponible. Instálalo e inícialo, luego inténtalo de nuevo.</value></data>
   <data name="FirewallActionUnauthorized" xml:space="preserve"><value>No tienes autorización para cambiar la política del firewall en esta máquina.</value></data>
-  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activar la aplicación</value></data>
+  <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activar el filtrado</value></data>
   <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>¿Empezar a filtrar el tráfico saliente ahora? Cada bloqueo guardado surte efecto de inmediato y las aplicaciones que bloqueó pierden su acceso a la red. La desactivación de emergencia devuelve la máquina a solo auditoría en cualquier momento.</value></data>
-  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>La aplicación está activada. Los bloqueos guardados ya filtran el tráfico saliente.</value></data>
-  <data name="FirewallActionNotSupported" xml:space="preserve"><value>Esta máquina no tiene un motor de filtrado saliente utilizable, por lo que la aplicación no podría filtrar nada. No se cambió nada.</value></data>
+  <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>El filtrado está activado. Los bloqueos guardados ya filtran el tráfico saliente.</value></data>
+  <data name="FirewallEnforcementNotActive" xml:space="preserve"><value>La solicitud terminó, pero no se observó filtrado activo. Compruebe el estado del firewall antes de confiar en los bloqueos guardados.</value></data>
+  <data name="FirewallActionNotSupported" xml:space="preserve"><value>Esta máquina no tiene un motor de filtrado saliente utilizable, por lo que el filtrado no se puede activar. No se cambió nada.</value></data>
   <data name="FirewallActionRejected" xml:space="preserve"><value>El servicio de firewall rechazó el cambio.</value></data>
   <data name="BlockOutbound" xml:space="preserve"><value>Bloquear tráfico saliente</value></data>
   <data name="BlockOutboundTooltip" xml:space="preserve"><value>Bloquear el tráfico de red saliente de esta aplicación mediante el firewall de WinSight.</value></data>
-  <data name="BlockOutboundConfirm" xml:space="preserve"><value>¿Bloquear todo el tráfico de red saliente de «{0}»? Se aplica cuando la aplicación del firewall está activada.</value></data>
+  <data name="BlockOutboundConfirm" xml:space="preserve"><value>¿Bloquear todo el tráfico de red saliente de «{0}»? Se aplica cuando el filtrado del firewall está activado.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Abrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Salir</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, seguridad local</value></data>
@@ -147,20 +148,22 @@
   <data name="ToolDnsGuidance" xml:space="preserve"><value>Una entrada DNS registra una consulta, no necesariamente una visita intencionada. Relaciónala con conexiones y programas activos.</value></data>
   <data name="ToolFirewallLabel" xml:space="preserve"><value>Firewall de Windows</value></data>
   <data name="ToolFirewallShort" xml:space="preserve"><value>Reglas de red activas actualmente</value></data>
-  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventaría las reglas del Firewall de Microsoft Defender. El bloqueo automático sigue desactivado hasta entregar el servicio WFP seguro.</value></data>
+  <data name="ToolFirewallDescription" xml:space="preserve"><value>Inventaría las reglas del Firewall de Microsoft Defender sin modificarlas. El filtrado por aplicación se controla por separado mediante el servicio de salida opcional.</value></data>
   <data name="ToolFirewallGuidance" xml:space="preserve"><value>Usa la herramienta de Windows para cambiar una regla. Conserva una vía de recuperación antes de bloquear un servicio del sistema.</value></data>
   <data name="ToolOutboundFirewallLabel" xml:space="preserve"><value>Firewall de salida</value></data>
-  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Control de salida por aplicación (solo auditoría)</value></data>
-  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>El servicio de firewall de salida de WinSight: si está instalado, su modo y las políticas por aplicación guardadas. Es solo de auditoría y todavía no instala ningún filtro.</value></data>
-  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>No se bloquea nada. La aplicación de reglas es un paso posterior y opcional. Una desactivación de emergencia vuelve a solo auditoría en cualquier momento.</value></data>
+  <data name="ToolOutboundFirewallShort" xml:space="preserve"><value>Control del filtrado saliente por aplicación</value></data>
+  <data name="ToolOutboundFirewallDescription" xml:space="preserve"><value>El servicio de firewall de salida de WinSight informa del modo solicitado, el estado efectivo en tiempo de ejecución y las políticas guardadas por aplicación.</value></data>
+  <data name="ToolOutboundFirewallGuidance" xml:space="preserve"><value>Antes de confiar en el estado del firewall, verifica en Windows el registro del servicio, que esté en ejecución y su identidad LocalSystem. Las políticas solo filtran tras la activación por un usuario elevado; el filtrado degradado nunca informa un bloqueo como activo.</value></data>
   <data name="OutboundFirewallServiceTitle" xml:space="preserve"><value>Firewall de salida WinSight</value></data>
-  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Servicio no instalado. WinSight no filtra tu tráfico saliente; los análisis siguen siendo locales y de solo lectura.</value></data>
-  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Instalado, solo auditoría. Las políticas se registran pero no se bloquea nada.</value></data>
+  <data name="OutboundFirewallUnavailable" xml:space="preserve"><value>Servicio de firewall no disponible. No se pudo verificar su estado de instalación y WinSight no informa de filtrado saliente activo.</value></data>
+  <data name="OutboundFirewallAuditOnly" xml:space="preserve"><value>Punto de servicio accesible, solo auditoría. Las políticas se registran pero no se bloquea nada.</value></data>
   <data name="OutboundFirewallPending" xml:space="preserve"><value>Contactó {0}, {1} conexión(es). Nunca ha permitido ni bloqueado esta aplicación.</value></data>
-  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Instalado y aplicando políticas por aplicación.</value></data>
+  <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Punto de servicio accesible; el filtrado por aplicación está activo.</value></data>
+  <data name="OutboundFirewallDegraded" xml:space="preserve"><value>Servicio accesible, pero filtrado degradado. Los bloqueos guardados no se informan como activos.</value></data>
   <data name="OutboundActionAllow" xml:space="preserve"><value>Permitir</value></data>
   <data name="OutboundActionBlock" xml:space="preserve"><value>Bloquear</value></data>
   <data name="OutboundActionAsk" xml:space="preserve"><value>Preguntar</value></data>
+  <data name="OutboundActionDisabled" xml:space="preserve"><value>{0} (desactivado, no filtra)</value></data>
   <data name="ToolProcessesLabel" xml:space="preserve"><value>Procesos</value></data>
   <data name="ToolProcessesShort" xml:space="preserve"><value>Programas en ejecución</value></data>
   <data name="ToolProcessesDescription" xml:space="preserve"><value>Enumera procesos, rutas, procesos padre, líneas de comandos y firmas.</value></data>

@@ -10,3 +10,12 @@ public interface IFirewallServiceListener
     /// <summary>Accepts and serves connections until <paramref name="cancellationToken"/> fires.</summary>
     Task RunAsync(CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Optional readiness boundary for listeners that must reserve an OS-owned endpoint
+/// before the service may announce that it is listening.
+/// </summary>
+public interface IFirewallServiceReadiness
+{
+    Task Ready { get; }
+}
