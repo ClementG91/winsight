@@ -555,7 +555,7 @@ public partial class MainWindow : Window, IDisposable
     private async Task RunFirewallMutationAsync(
         Func<CancellationToken, Task<FirewallMutationResult>> mutate,
         bool isBlock,
-        Func<FirewallMutationResult, string>? messageKey = null)
+        Func<FirewallMutationResult, FirewallEnforcementState, string>? messageKey = null)
     {
         // These run from async void event handlers, so an unexpected exception would have no
         // caller to catch it and would tear down the whole tray app. The gateway already
@@ -569,7 +569,7 @@ public partial class MainWindow : Window, IDisposable
             var view = await RefreshFirewallAsync();
             SummaryText.Text = Text[messageKey is null
                 ? FirewallControlPresenter.OutcomeMessageKey(result, isBlock, view.EnforcementEnabled)
-                : messageKey(result)];
+                : messageKey(result, view.EffectiveState)];
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or TimeoutException or InvalidOperationException)

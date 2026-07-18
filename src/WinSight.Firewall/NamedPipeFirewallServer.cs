@@ -10,15 +10,22 @@ namespace WinSight.Firewall;
 /// connection at a time. The privileged service owns this host; the dashboard is a
 /// client and never mutates policy directly.
 ///
-/// This host performs no WFP mutation. It is the Phase 2 increment-1 transport around
-/// the audit-only dispatcher; enabling enforcement is separate, later and gated.
+/// This host performs no WFP mutation itself. Explicit privileged transitions are
+/// dispatched to the single service-side enforcement coordinator.
 /// </summary>
-public sealed class NamedPipeFirewallServer : IFirewallServiceListener
+public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewallServiceReadiness
 {
+    private static readonly TimeSpan DefaultRequestReadTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan DefaultResponseWriteTimeout = TimeSpan.FromSeconds(5);
+
     private readonly FirewallConnectionHandler _handler;
     private readonly string _pipeName;
     private readonly Func<NamedPipeServerStream, FirewallCallerCapability> _authorise;
     private readonly Func<PipeSecurity> _securityFactory;
+    private readonly TimeSpan _requestReadTimeout;
+    private readonly TimeSpan _responseWriteTimeout;
+    private readonly TaskCompletionSource _ready =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <param name="handler">The exchange handler wrapping the dispatcher.</param>
     /// <param name="pipeName">Pipe name; defaults to the WinSight firewall pipe.</param>
@@ -35,7 +42,9 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
         string? pipeName = null,
         Func<NamedPipeServerStream, bool>? authorise = null,
         Func<PipeSecurity>? securityFactory = null,
-        Func<NamedPipeServerStream, FirewallCallerCapability>? capabilityAuthorise = null)
+        Func<NamedPipeServerStream, FirewallCallerCapability>? capabilityAuthorise = null,
+        TimeSpan? requestReadTimeout = null,
+        TimeSpan? responseWriteTimeout = null)
     {
         _handler = handler ?? throw new ArgumentNullException(nameof(handler));
         _pipeName = string.IsNullOrWhiteSpace(pipeName) ? FirewallServiceSecurity.DefaultPipeName : pipeName;
@@ -43,18 +52,25 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
             ? DefaultAuthorise
             : server => authorise(server) ? FirewallCallerCapability.MutateMachinePolicy : FirewallCallerCapability.None);
         _securityFactory = securityFactory ?? FirewallServiceSecurity.CreateHardenedSecurity;
+        _requestReadTimeout = ValidateTimeout(requestReadTimeout ?? DefaultRequestReadTimeout);
+        _responseWriteTimeout = ValidateTimeout(responseWriteTimeout ?? DefaultResponseWriteTimeout);
     }
+
+    public Task Ready => _ready.Task;
 
     /// <summary>Accepts connections until cancelled. Per-connection faults are isolated.</summary>
     public async Task RunAsync(CancellationToken cancellationToken)
     {
+        await using var server = CreateServer();
+        _ready.TrySetResult();
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
             {
-                await ServeOnceAsync(cancellationToken).ConfigureAwait(false);
+                await ServeConnectedClientAsync(server, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 return;
             }
@@ -71,27 +87,52 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener
     /// </summary>
     public async Task ServeOnceAsync(CancellationToken cancellationToken)
     {
+        await using var server = CreateServer();
+        await ServeConnectedClientAsync(server, cancellationToken).ConfigureAwait(false);
+    }
+
+    private NamedPipeServerStream CreateServer()
+    {
         var security = _securityFactory();
-        await using var server = NamedPipeServerStreamAcl.Create(
+        return NamedPipeServerStreamAcl.Create(
             _pipeName,
             PipeDirection.InOut,
             maxNumberOfServerInstances: 1,
             PipeTransmissionMode.Byte,
-            PipeOptions.Asynchronous,
+            PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance,
             inBufferSize: 0,
             outBufferSize: 0,
             security);
+    }
 
+    private async Task ServeConnectedClientAsync(
+        NamedPipeServerStream server,
+        CancellationToken cancellationToken)
+    {
         await server.WaitForConnectionAsync(cancellationToken).ConfigureAwait(false);
-
-        var capability = _authorise(server);
-        await _handler.HandleAsync(server, capability, cancellationToken).ConfigureAwait(false);
-
-        if (server.IsConnected)
+        try
         {
-            server.Disconnect();
+            var capability = _authorise(server);
+            await _handler.HandleAsync(
+                server,
+                capability,
+                _requestReadTimeout,
+                _responseWriteTimeout,
+                cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            if (server.IsConnected)
+            {
+                server.Disconnect();
+            }
         }
     }
+
+    private static TimeSpan ValidateTimeout(TimeSpan timeout) =>
+        timeout > TimeSpan.Zero && timeout <= TimeSpan.FromMinutes(1)
+            ? timeout
+            : throw new ArgumentOutOfRangeException(nameof(timeout));
 
     private static FirewallCallerCapability DefaultAuthorise(NamedPipeServerStream server)
     {

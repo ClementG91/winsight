@@ -90,4 +90,46 @@ public sealed class FirewallServiceAdapterTests
 
         Assert.Equal("5", status.Fields["unrecorded"]);
     }
+
+    [Fact]
+    public void BuildReport_DegradedRuntimePreservesIntentButNeverClaimsFilteringActive()
+    {
+        var view = new FirewallServiceView(
+            ServiceAvailable: true,
+            OutboundFirewallMode.Enforcement,
+            EnforcementEnabled: false,
+            Policies: [],
+            Pending: [],
+            EffectiveState: FirewallEnforcementState.Degraded);
+
+        var report = FirewallServiceAdapter.BuildReport(view);
+        var status = Assert.Single(report.Items);
+
+        Assert.Equal("Enforcement", status.Fields["mode"]);
+        Assert.Equal("False", status.Fields["enforcement"]);
+        Assert.Equal("Degraded", status.Fields["effectiveState"]);
+        Assert.Equal("Degraded", report.Summary);
+    }
+
+    [Fact]
+    public void BuildReport_DisabledPolicyCarriesExplicitFalseForLocalizedPresentation()
+    {
+        var view = new FirewallServiceView(
+            ServiceAvailable: true,
+            OutboundFirewallMode.Enforcement,
+            EnforcementEnabled: true,
+            Policies:
+            [
+                new AppFirewallPolicy(
+                    @"C:\apps\disabled.exe", OutboundAction.Block, Enabled: false),
+            ],
+            Pending: [],
+            EffectiveState: FirewallEnforcementState.Active);
+
+        var policy = FirewallServiceAdapter.BuildReport(view).Items.Single(item =>
+            item.Fields.TryGetValue("kind", out var kind) && kind == "policy");
+
+        Assert.Equal("False", policy.Fields["enabled"]);
+        Assert.Equal("Block", policy.Fields["action"]);
+    }
 }

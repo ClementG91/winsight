@@ -49,8 +49,9 @@ public sealed class FirewallServiceCommandLineTests
         Assert.DoesNotContain("Console.Error.WriteLine($", source, StringComparison.Ordinal);
         foreach (var code in new[]
         {
-            "[FW_INSTALL_FAILED]", "[FW_UNINSTALL_FAILED]", "[FW_STORAGE_PROVISIONING_FAILED]",
-            "[FW_STORAGE_UNTRUSTED]", "[FW_ENFORCEMENT_TRANSITION_FAILED]", "[FW_POLICY_MUTATION_FAILED]",
+            "[FW_INSTALL_FAILED]", "[FW_UNINSTALL_FAILED]", "[FW_SERVICE_STATUS_UNAVAILABLE]",
+            "[FW_STORAGE_PROVISIONING_FAILED]", "[FW_STORAGE_UNTRUSTED]",
+            "[FW_ENFORCEMENT_STATUS_UNAVAILABLE]",
         })
         {
             Assert.Contains($"Console.Error.WriteLine(\"{code}\")", source, StringComparison.Ordinal);
@@ -77,6 +78,85 @@ public sealed class FirewallServiceInstallerTests
     [Fact]
     public void ServiceName_HasNoWhitespace_ForScmCompatibility() =>
         Assert.DoesNotContain(FirewallServiceInstaller.ServiceName, character => char.IsWhiteSpace(character));
+
+    [Fact]
+    public void Description_TruthfullyDescribesOptInEnforcement()
+    {
+        Assert.Contains("opt-in", FirewallServiceInstaller.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("effective runtime state", FirewallServiceInstaller.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("audit-only", FirewallServiceInstaller.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("does not install", FirewallServiceInstaller.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("does not apply", FirewallServiceInstaller.Description, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("no filter", FirewallServiceInstaller.Description, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SetDescription_NativeFalse_ThrowsWin32ExceptionWithCapturedError()
+    {
+        const int nativeError = 1234;
+        FirewallServiceInstaller.ChangeServiceDescription change =
+            (IntPtr _, uint _, ref FirewallServiceInstaller.ServiceDescription _) => false;
+
+        var exception = Assert.Throws<Win32Exception>(() => FirewallServiceInstaller.SetDescription(
+            new IntPtr(42),
+            "description",
+            change,
+            () => nativeError));
+
+        Assert.Equal(nativeError, exception.NativeErrorCode);
+    }
+
+    [Fact]
+    public void SetDescription_NativeTrue_DoesNotReadLastErrorOrThrow()
+    {
+        var lastErrorReads = 0;
+        FirewallServiceInstaller.ChangeServiceDescription change =
+            (IntPtr _, uint _, ref FirewallServiceInstaller.ServiceDescription _) => true;
+
+        FirewallServiceInstaller.SetDescription(
+            new IntPtr(42),
+            "description",
+            change,
+            () =>
+            {
+                lastErrorReads++;
+                return 5;
+            });
+
+        Assert.Equal(0, lastErrorReads);
+    }
+
+    [Theory]
+    [InlineData(1060, false)]
+    [InlineData(5, true)]
+    [InlineData(87, true)]
+    public void InterpretServiceQueryResult_Only1060MeansAbsent(int error, bool throws)
+    {
+        if (throws)
+        {
+            var exception = Assert.Throws<Win32Exception>(() =>
+                FirewallServiceInstaller.InterpretServiceQueryResult(IntPtr.Zero, error));
+            Assert.Equal(error, exception.NativeErrorCode);
+            return;
+        }
+
+        Assert.False(FirewallServiceInstaller.InterpretServiceQueryResult(IntPtr.Zero, error));
+    }
+
+    [Fact]
+    public void InterpretServiceQueryResult_NonZeroHandleMeansInstalledRegardlessOfStaleError() =>
+        Assert.True(FirewallServiceInstaller.InterpretServiceQueryResult(new IntPtr(42), 5));
+
+    [Fact]
+    public void StatusCommand_StaticContractReportsScmFailureWithStableCodeAndNonZeroExit()
+    {
+        var programPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "WinSight.FirewallService", "Program.cs"));
+        var source = File.ReadAllText(programPath);
+        const string expectedCatch = "catch (Win32Exception)\r\n    {\r\n        Console.Error.WriteLine(\"[FW_SERVICE_STATUS_UNAVAILABLE]\");\r\n        return 1;\r\n    }";
+
+        Assert.Contains(expectedCatch, source.Replace("\n", "\r\n").Replace("\r\r\n", "\r\n"), StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData(PathTrustCode.InvalidPath)]
@@ -156,6 +236,21 @@ public sealed class FirewallServiceInstallerTests
         Assert.Equal("\"C:\\canonical\\service.exe\" run", scm.BinaryPath);
         Assert.Equal(1, scm.Registration.DeleteCalls);
         Assert.DoesNotContain(@"C:\syntactic\service.exe", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Install_SetDescriptionFailure_DeletesExactlyOnceAndUsesStableRollbackCode()
+    {
+        var inspector = new ScriptedInspector(@"C:\canonical\service.exe",
+            PathTrustDecision.Allow(), PathTrustDecision.Allow());
+        var scm = new RecordingScm(deleteResult: true, descriptionThrows: true);
+
+        var exception = Assert.Throws<ServiceInstallTrustException>(() =>
+            FirewallServiceInstaller.Install(@"C:\input\service.exe", inspector, scm));
+
+        Assert.Equal(ServiceInstallTrustCode.PostCreateOperationRolledBack, exception.Code);
+        Assert.Equal(1, scm.Registration.DeleteCalls);
+        Assert.DoesNotContain(@"C:\input\service.exe", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class DenyingInspector(PathTrustCode code) : IServicePathTrustInspector
@@ -293,7 +388,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
     {
         var store = Store();
         var engine = new RecordingEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.SetPolicyAsync(@"C:\apps\a.exe", OutboundAction.Block);
 
@@ -308,7 +403,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
     {
         var store = Store();
         var engine = new RecordingEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.SetPolicyAsync("\"C:\\apps\\a.exe\"", OutboundAction.Block);
 
@@ -328,13 +423,14 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             new AppFirewallPolicy(@"C:\apps\allow.exe", OutboundAction.Allow),
         ]));
         var engine = new RecordingEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.EnableAsync();
 
         Assert.Equal(OutboundFirewallMode.Enforcement, await coordinator.GetModeAsync());
         var applied = Assert.Single(engine.Applied);
         Assert.EndsWith("block.exe", applied.ExecutablePath, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(FirewallEnforcementState.Active, coordinator.EffectiveState);
     }
 
     [Fact]
@@ -344,12 +440,13 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
             [new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block)]));
         var engine = new RecordingEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.DisableAsync();
 
         Assert.Contains(engine.Removed, path => path.EndsWith("block.exe", StringComparison.OrdinalIgnoreCase));
         Assert.Equal(OutboundFirewallMode.AuditOnly, await coordinator.GetModeAsync());
+        Assert.Equal(FirewallEnforcementState.AuditOnly, coordinator.EffectiveState);
     }
 
     [Fact]
@@ -359,12 +456,13 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.AuditOnly,
             [new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block)]));
         var engine = new RecordingEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.ApplyBlocksAsync();
 
         Assert.Empty(engine.Applied);
         Assert.Empty(engine.Removed);
+        Assert.Equal(FirewallEnforcementState.AuditOnly, coordinator.EffectiveState);
     }
 
     [Fact]
@@ -375,7 +473,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             [new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block)]));
         var observedMode = OutboundFirewallMode.AuditOnly;
         var engine = new CallbackEngine(onApply: async () => observedMode = (await store.LoadAsync()).Mode);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.EnableAsync();
 
@@ -390,7 +488,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             [new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block)]));
         var observedMode = OutboundFirewallMode.AuditOnly;
         var engine = new CallbackEngine(onRemove: async () => observedMode = (await store.LoadAsync()).Mode);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.DisableAsync();
 
@@ -404,7 +502,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"), allowEnforcement: true,
             storageTrust: () => (false, "StorageInspectionFailed"));
         var engine = new RecordingEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() => coordinator.ApplyBlocksAsync());
 
@@ -419,7 +517,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"), allowEnforcement: true,
             storageTrust: () => (false, "StorageInspectionFailed"));
         var constructions = 0;
-        var coordinator = new EnforcementCoordinator(store, () =>
+        var coordinator = TestEnforcementCoordinator.Create(store, () =>
         {
             constructions++;
             return new RecordingEngine();
@@ -437,7 +535,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var policies = new[] { new AppFirewallPolicy(@"C:\apps\owned.exe", OutboundAction.Block) };
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement, policies));
         var engine = new CleanupEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         await coordinator.EmergencyDisableAsync();
 
@@ -454,7 +552,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.AuditOnly,
             [new AppFirewallPolicy(@"C:\apps\owned.exe", OutboundAction.Block)]));
         var engine = new BlockingCleanupEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var enable = coordinator.EnableAsync();
         await engine.ApplyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -478,7 +576,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"), allowEnforcement: true,
             storageTrustGuard: new FailSecondInspectGuard());
         var engine = new ScriptedEngine(failRemove: !rollbackSucceeds);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() =>
             coordinator.UpsertPolicyAsync(new AppFirewallPolicy(@"C:\apps\new.exe", OutboundAction.Block)));
@@ -486,6 +584,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         Assert.Equal(code, exception.Code);
         Assert.Equal(["apply:new.exe", "remove:new.exe"], engine.Events);
         Assert.Empty((await seed.LoadAsync()).Policies);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
     }
 
     [Theory]
@@ -499,7 +598,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"), allowEnforcement: true,
             storageTrustGuard: new FailSecondInspectGuard());
         var engine = new ScriptedEngine(failApply: !rollbackSucceeds);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() =>
             coordinator.RemovePolicyAsync(@"C:\apps\old.exe"));
@@ -507,6 +606,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         Assert.Equal(code, exception.Code);
         Assert.Equal(["remove:old.exe", "apply:old.exe"], engine.Events);
         Assert.Single((await seed.LoadAsync()).Policies);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
     }
 
     [Theory]
@@ -521,15 +621,15 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             new AppFirewallPolicy(@"C:\apps\two.exe", OutboundAction.Block),
         ]));
         var engine = new PartialApplyEngine(rollbackFails);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.EnableAsync());
 
         Assert.Equal(code, exception.Code);
         Assert.Equal(["apply:one.exe", "apply:two.exe", "remove:two.exe"], engine.Events.Take(3));
         Assert.DoesNotContain(engine.Events, item => item.Contains("foreign", StringComparison.Ordinal));
-        Assert.Equal(rollbackFails ? OutboundFirewallMode.Enforcement : OutboundFirewallMode.AuditOnly,
-            (await store.LoadAsync()).Mode);
+        Assert.Equal(OutboundFirewallMode.AuditOnly, (await store.LoadAsync()).Mode);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
     }
 
     [Theory]
@@ -544,13 +644,14 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             new AppFirewallPolicy(@"C:\apps\two.exe", OutboundAction.Block),
         ]));
         var engine = new PartialApplyEngine(rollbackFails);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.ApplyBlocksAsync());
 
         Assert.Equal(code, exception.Code);
         Assert.All(engine.Events, item => Assert.DoesNotContain("foreign", item, StringComparison.Ordinal));
         Assert.StartsWith("remove:two.exe", engine.Events[2], StringComparison.Ordinal);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
     }
 
     [Theory]
@@ -563,7 +664,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
             [new AppFirewallPolicy(@"C:\apps\owned.exe", OutboundAction.Block)]));
         var engine = new FailingCleanupEngine(restoreFails);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.EmergencyDisableAsync());
 
@@ -571,6 +672,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         Assert.Equal(["cleanup:owned.exe", "apply:owned.exe"], engine.Events);
         Assert.DoesNotContain(engine.Events, item => item.Contains("foreign", StringComparison.Ordinal));
         Assert.Equal(OutboundFirewallMode.Enforcement, (await store.LoadAsync()).Mode);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
     }
 
     [Fact]
@@ -582,7 +684,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         var store = new FirewallPolicyStore(Path.Combine(_directory, "policies.json"), allowEnforcement: true,
             storageTrustGuard: new FailSecondInspectGuard());
         var engine = new CleanupThenRecordEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.EmergencyDisableAsync());
 
@@ -590,6 +692,43 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         Assert.Equal(["cleanup:owned.exe", "apply:owned.exe"], engine.Events);
         Assert.Empty(engine.Removed);
         Assert.Equal(OutboundFirewallMode.Enforcement, (await seed.LoadAsync()).Mode);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
+    }
+
+    // Persisted intent is not a runtime attestation. Startup failure is rolled back to the
+    // fail-safe durable mode even when filter cleanup itself also fails.
+    [Fact]
+    public async Task StartupRollbackFailure_WithPersistedEnforcement_RemainsDegraded()
+    {
+        var store = Store();
+        await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
+        [
+            new AppFirewallPolicy(@"C:\apps\one.exe", OutboundAction.Block),
+            new AppFirewallPolicy(@"C:\apps\two.exe", OutboundAction.Block),
+        ]));
+        var coordinator = TestEnforcementCoordinator.Create(store, new PartialApplyEngine(rollbackFails: true));
+
+        await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.ApplyBlocksAsync());
+
+        Assert.Equal(OutboundFirewallMode.AuditOnly, (await store.LoadAsync()).Mode);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
+    }
+
+    [Fact]
+    public async Task EnableAfterFailure_RecoversEffectiveStateOnlyAfterACompleteApply()
+    {
+        var store = Store();
+        await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.AuditOnly,
+            [new AppFirewallPolicy(@"C:\apps\block.exe", OutboundAction.Block)]));
+        var coordinator = TestEnforcementCoordinator.Create(store, new FailOnceApplyEngine());
+
+        await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.EnableEnforcementAsync());
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
+
+        await coordinator.EnableEnforcementAsync();
+
+        Assert.Equal(OutboundFirewallMode.Enforcement, (await store.LoadAsync()).Mode);
+        Assert.Equal(FirewallEnforcementState.Active, coordinator.EffectiveState);
     }
 
     [Theory]
@@ -606,7 +745,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             : [];
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement, policies));
         var engine = new Win32MutationEngine(operation, compensationFails);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() => operation == "upsert"
             ? coordinator.UpsertPolicyAsync(new AppFirewallPolicy(@"C:\apps\owned.exe", OutboundAction.Block))
@@ -633,7 +772,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
             new AppFirewallPolicy(@"C:\apps\two.exe", OutboundAction.Block),
         ]));
         var engine = new Win32PartialEngine(rollbackFails);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() =>
             startup ? coordinator.ApplyBlocksAsync() : coordinator.EnableAsync());
@@ -652,7 +791,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
             [new AppFirewallPolicy(@"C:\apps\owned.exe", OutboundAction.Block)]));
         var engine = new Win32CleanupEngine(restoreFails);
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
 
         var exception = await Assert.ThrowsAsync<FirewallTransitionException>(() => coordinator.EmergencyDisableAsync());
 
@@ -667,7 +806,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement,
             [new AppFirewallPolicy(@"C:\apps\one.exe", OutboundAction.Block)]));
         var engine = new BlockingCleanupEngine();
-        var coordinator = new EnforcementCoordinator(store, engine);
+        var coordinator = TestEnforcementCoordinator.Create(store, engine);
         var active = coordinator.ApplyBlocksAsync();
         await engine.ApplyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var queued = coordinator.GetModeAsync();
@@ -725,7 +864,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         }
     }
 
-    private class CleanupEngine : IOutboundFirewallEngine, IWinSightFirewallCleanup
+    private class CleanupEngine : IOutboundFirewallEngine, ITestWinSightFirewallCleanup
     {
         public List<AppFirewallPolicy> Applied { get; } = [];
         public List<string> Removed { get; } = [];
@@ -804,7 +943,23 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         }
     }
 
-    private sealed class FailingCleanupEngine(bool restoreFails) : IOutboundFirewallEngine, IWinSightFirewallCleanup
+    private sealed class FailOnceApplyEngine : IOutboundFirewallEngine
+    {
+        private bool _failed;
+        public bool IsSupported => true;
+        public Task ApplyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default)
+        {
+            if (!_failed)
+            {
+                _failed = true;
+                throw new IOException("synthetic first apply");
+            }
+            return Task.CompletedTask;
+        }
+        public Task RemoveAsync(string executablePath, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class FailingCleanupEngine(bool restoreFails) : IOutboundFirewallEngine, ITestWinSightFirewallCleanup
     {
         public List<string> Events { get; } = [];
         public bool IsSupported => true;
@@ -867,7 +1022,7 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         }
     }
 
-    private sealed class Win32CleanupEngine(bool restoreFails) : IOutboundFirewallEngine, IWinSightFirewallCleanup
+    private sealed class Win32CleanupEngine(bool restoreFails) : IOutboundFirewallEngine, ITestWinSightFirewallCleanup
     {
         public List<string> Events { get; } = [];
         public bool IsSupported => true;

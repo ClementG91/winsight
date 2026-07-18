@@ -1,4 +1,5 @@
 using System.Globalization;
+using WinSight.Firewall;
 using WinSight.Reporting;
 
 namespace WinSight.Dashboard;
@@ -169,9 +170,14 @@ public static class DashboardFindingPresenter
     private static FindingPresentation OutboundFirewallPolicy(ReportItem item, LocalizationManager text)
     {
         var action = Field(item, "action");
-        return new FindingPresentation(
-            Field(item, "path") ?? item.Title,
-            text.GetOrFallback($"OutboundAction{action}", action ?? item.Detail));
+        var actionLabel = text.GetOrFallback($"OutboundAction{action}", action ?? item.Detail);
+        // A policy the operator switched off does not filter, so showing only its action would read
+        // as if it still did. Mark a disabled policy explicitly, or the row implies protection that
+        // is turned off. Only an explicit "False" disables it; a missing field stays enabled.
+        var detail = string.Equals(Field(item, "enabled"), "False", StringComparison.OrdinalIgnoreCase)
+            ? text.Format("OutboundActionDisabled", actionLabel)
+            : actionLabel;
+        return new FindingPresentation(Field(item, "path") ?? item.Title, detail);
     }
 
     /// <summary>An app that reached the network with nobody having ruled on it: the row that wants a human.</summary>
@@ -191,9 +197,12 @@ public static class DashboardFindingPresenter
             return new FindingPresentation(text["OutboundFirewallServiceTitle"], text["OutboundFirewallUnavailable"]);
         }
 
-        var detail = Field(item, "mode") == "Enforcement"
-            ? text["OutboundFirewallEnforcing"]
-            : text["OutboundFirewallAuditOnly"];
+        var detail = Field(item, "effectiveState") switch
+        {
+            nameof(FirewallEnforcementState.Active) => text["OutboundFirewallEnforcing"],
+            nameof(FirewallEnforcementState.Degraded) => text["OutboundFirewallDegraded"],
+            _ => text["OutboundFirewallAuditOnly"],
+        };
         return new FindingPresentation(text["OutboundFirewallServiceTitle"], detail);
     }
 
