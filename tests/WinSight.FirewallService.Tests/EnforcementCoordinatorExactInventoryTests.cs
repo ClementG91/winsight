@@ -78,13 +78,27 @@ public sealed class EnforcementCoordinatorExactInventoryTests : IDisposable
             [new AppFirewallPolicy(@"C:\apps\blocked.exe", OutboundAction.Block)]));
         var reconciler = new InventoryReconciler();
         reconciler.Verification.Enqueue(true);
+        IOException? expectedFailure = null;
         if (failure == "enumeration-error")
-            reconciler.Verification.Enqueue(new IOException("synthetic inventory read failure"));
+        {
+            expectedFailure = new IOException("synthetic inventory read failure");
+            reconciler.Verification.Enqueue(expectedFailure);
+        }
         else
             reconciler.Verification.Enqueue(false);
         await using var coordinator = new EnforcementCoordinator(
             store, reconciler, new RecordingStartModeController());
         await coordinator.EnableEnforcementAsync();
+
+        if (expectedFailure is not null)
+        {
+            var propagated = await Assert.ThrowsAsync<IOException>(
+                () => coordinator.GetRuntimeStatusAsync());
+
+            Assert.Same(expectedFailure, propagated);
+            Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
+            return;
+        }
 
         var status = await coordinator.GetRuntimeStatusAsync();
 

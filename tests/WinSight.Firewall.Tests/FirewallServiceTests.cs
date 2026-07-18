@@ -847,16 +847,17 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
             PipeOptions.Asynchronous, 0, 0, CurrentUserSecurity());
         // Generous budgets so CPU starvation under the parallel suite cannot turn a validation
         // refusal into a connect TimeoutException — that would fail a correct assertion for a
-        // scheduling reason, not a behavioural one. The peer read still ends deterministically:
-        // the client disposes the connection when the validator throws, so the read sees EOF.
+        // scheduling reason, not a behavioural one. Start the server-side read before allowing
+        // the validator to throw: ConnectAsync may otherwise return and dispose the client before
+        // the server's WaitForConnectionAsync continuation observes the short-lived connection.
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        var observedBytes = Task.Run(async () =>
+        var peerReadStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var observedBytes = ObserveBytesUntilClientCloseAsync(peer, peerReadStarted, cts.Token);
+        var client = new FirewallServiceClient(pipeName, _ =>
         {
-            await peer.WaitForConnectionAsync(cts.Token);
-            var buffer = new byte[1];
-            return await peer.ReadAsync(buffer, cts.Token);
-        }, cts.Token);
-        var client = new FirewallServiceClient(pipeName, _ => throw new FirewallPeerValidationException());
+            peerReadStarted.Task.WaitAsync(TimeSpan.FromSeconds(30), cts.Token).GetAwaiter().GetResult();
+            throw new FirewallPeerValidationException();
+        });
 
         await Assert.ThrowsAsync<FirewallPeerValidationException>(() => client.SendAsync(
             new FirewallCommandRequest(FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus),
@@ -1112,6 +1113,18 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         await server.WaitForConnectionAsync(cancellationToken);
         var request = await FirewallProtocolCodec.ReadRequestAsync(server, cancellationToken);
         await FirewallProtocolCodec.WriteResponseAsync(server, responseFactory(request), cancellationToken);
+    }
+
+    private static async Task<int> ObserveBytesUntilClientCloseAsync(
+        NamedPipeServerStream peer,
+        TaskCompletionSource readStarted,
+        CancellationToken cancellationToken)
+    {
+        await peer.WaitForConnectionAsync(cancellationToken);
+        var buffer = new byte[1];
+        var read = peer.ReadAsync(buffer, cancellationToken);
+        readStarted.TrySetResult();
+        return await read;
     }
 
     private static async Task ServeRawBytesAndCloseAsync(
