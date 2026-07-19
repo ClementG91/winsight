@@ -2,6 +2,17 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Phase 4 (ransomware): entropy-on-write sampling
+- The third detection signal lands, with the anti-false-positive gating that was the reason to defer
+  it. `RansomwareEntropySampler` reads a bounded 4 KB prefix — with sharing flags that never fight the
+  writer, and returning false rather than throwing on any I/O trouble — and scores it with
+  `ShannonEntropy`. Formats **compressed by design** are skipped outright: .zip/.jpg/.mp4 and,
+  critically, .docx/.xlsx/.pptx, which are ZIP containers whose entropy is legitimately near maximum.
+  Scoring those would flag a user saving a Word file as ransomware. Ransomware's own extensions
+  (.locked, .encrypted, …) are still scored, and in-place encryption keeping the original extension
+  stays covered by the canary. The classifier gained a `looksEncrypted` argument (defaulted, so
+  existing behaviour is unchanged) and the watcher only scores a create/change of an ordinary file.
+
 ## v0.9.0, 2026-07-20
 
 Real-time protection lands: Guardian (BlockBlock-class persistence monitoring) and the first three

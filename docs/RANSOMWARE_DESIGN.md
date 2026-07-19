@@ -50,8 +50,13 @@ while a security tool that cries wolf on ordinary activity would be worse than n
    touched canary fires immediately; a rename/delete burst fires once. User-mode, real-machine
    validated by functional tests. Entropy-on-write is intentionally NOT wired here (legitimately
    compressed files — .docx/.jpg/.zip — are high-entropy and would false-positive).
-3. **Entropy sampling on write** — read a bounded prefix of a newly-written file to score it,
-   without reading whole files (resource-exhaustion resistance).
+3. **Entropy sampling on write.** ✅ Done. `RansomwareEntropySampler` reads a bounded 4 KB prefix
+   (sharing flags that never fight the writer; any I/O trouble yields false, never an exception) and
+   scores it with `ShannonEntropy`. It is gated twice: formats **compressed by design** are skipped
+   outright — .zip/.jpg/.mp4 and, critically, .docx/.xlsx/.pptx, which are ZIP containers and would
+   otherwise flag someone saving a Word file — and the score still needs a minimum sample and a
+   conservative threshold. Ransomware's own extensions (.locked, .encrypted, …) are exactly what
+   still gets scored; in-place encryption that keeps the original extension is covered by the canary.
 4. **Dashboard alert.** ✅ Done. An opt-in "Ransomware protection" toggle in the dashboard starts and
    stops the monitor (planting runs off the UI thread; clearing the toggle removes the decoys).
    `RansomwarePresenter` maps a detection to a localization key and a detail line that shows only the
