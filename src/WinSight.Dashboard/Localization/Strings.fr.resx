@@ -231,4 +231,9 @@
   <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Browser Helper Object (BHO)</value></data>
   <data name="PersistenceVectorWindowsLoadRun" xml:space="preserve"><value>Valeur Windows Load/Run</value></data>
   <data name="PersistenceVectorPrintProvider" xml:space="preserve"><value>Fournisseur d'impression</value></data>
+  <data name="GuardianLiveTitle" xml:space="preserve"><value>Surveillance de la persistance en temps réel</value></data>
+  <data name="GuardianWatching" xml:space="preserve"><value>Surveillance des nouveaux éléments de démarrage…</value></data>
+  <data name="GuardianBalloonTitle" xml:space="preserve"><value>Nouvel élément de démarrage</value></data>
+  <data name="GuardianDetectedNotable" xml:space="preserve"><value>Un nouvel élément de démarrage a été ajouté et n'est pas de confiance (non signé, non approuvé ou fichier absent). À vérifier.</value></data>
+  <data name="GuardianDetectedSigned" xml:space="preserve"><value>Un nouvel élément de démarrage signé a été ajouté.</value></data>
 </root>

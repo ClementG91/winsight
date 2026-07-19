@@ -231,4 +231,9 @@
   <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Browser helper object</value></data>
   <data name="PersistenceVectorWindowsLoadRun" xml:space="preserve"><value>Windows Load/Run value</value></data>
   <data name="PersistenceVectorPrintProvider" xml:space="preserve"><value>Print provider</value></data>
+  <data name="GuardianLiveTitle" xml:space="preserve"><value>Live persistence monitoring</value></data>
+  <data name="GuardianWatching" xml:space="preserve"><value>Watching for new startup items…</value></data>
+  <data name="GuardianBalloonTitle" xml:space="preserve"><value>New startup item</value></data>
+  <data name="GuardianDetectedNotable" xml:space="preserve"><value>A new startup item was added and is not trusted (unsigned, untrusted, or its file is missing). Review it.</value></data>
+  <data name="GuardianDetectedSigned" xml:space="preserve"><value>A new signed startup item was added.</value></data>
 </root>

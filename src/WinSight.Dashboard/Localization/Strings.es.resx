@@ -231,4 +231,9 @@
   <data name="PersistenceVectorBrowserHelperObject" xml:space="preserve"><value>Objeto auxiliar del navegador</value></data>
   <data name="PersistenceVectorWindowsLoadRun" xml:space="preserve"><value>Valor Windows Load/Run</value></data>
   <data name="PersistenceVectorPrintProvider" xml:space="preserve"><value>Proveedor de impresión</value></data>
+  <data name="GuardianLiveTitle" xml:space="preserve"><value>Supervisión de persistencia en tiempo real</value></data>
+  <data name="GuardianWatching" xml:space="preserve"><value>Vigilando nuevos elementos de inicio…</value></data>
+  <data name="GuardianBalloonTitle" xml:space="preserve"><value>Nuevo elemento de inicio</value></data>
+  <data name="GuardianDetectedNotable" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio que no es de confianza (sin firma, no confiable o con su archivo ausente). Revíselo.</value></data>
+  <data name="GuardianDetectedSigned" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio firmado.</value></data>
 </root>

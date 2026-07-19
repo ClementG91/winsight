@@ -8,6 +8,7 @@ using System.Windows.Controls;
 using Microsoft.Win32;
 using WinSight.Application;
 using WinSight.Firewall;
+using WinSight.Persistence;
 using WinSight.Reporting;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -25,6 +26,7 @@ public partial class MainWindow : Window, IDisposable
     private string? _lastScanCommand;
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
+    private readonly PersistenceMonitor _guardian = GuardianHost.CreateDefault();
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -60,6 +62,49 @@ public partial class MainWindow : Window, IDisposable
         LanguagePicker.ItemsSource = Text.SupportedLanguages;
         LanguagePicker.SelectedValue = Text.CurrentCode;
         _initializing = false;
+
+        Loaded += (_, _) => StartGuardian();
+    }
+
+    /// <summary>
+    /// Begins real-time persistence monitoring (Guardian) for as long as the dashboard runs. Seeding
+    /// the baseline is a full persistence scan, so it runs off the UI thread to keep startup snappy;
+    /// a genuinely new startup item then raises a tray balloon.
+    /// </summary>
+    private void StartGuardian()
+    {
+        _guardian.Detected += OnGuardianDetected;
+        Task.Run(() =>
+        {
+            try
+            {
+                _guardian.Start();
+            }
+            catch (Exception ex) when (ex is IOException
+                                         or UnauthorizedAccessException
+                                         or System.Security.SecurityException)
+            {
+                // Monitoring is best-effort: if the initial scan cannot run, the dashboard still
+                // works and the on-demand persistence scan is unaffected.
+            }
+        });
+    }
+
+    private void OnGuardianDetected(object? sender, PersistenceDetectedEventArgs e)
+    {
+        var detection = e.Detected;
+        Dispatcher.Invoke(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _trayIcon.ShowBalloonTip(
+                5000,
+                Text["GuardianBalloonTitle"],
+                $"{detection.Entry.Vector}/{detection.Entry.Name} — {Text[PersistenceMonitorPresenter.BalloonMessageKey(detection)]}",
+                detection.IsNotable ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
+        });
     }
 
     private static LocalizationManager Text => LocalizationManager.Instance;
@@ -651,6 +696,8 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _scanCancellation?.Dispose();
+        _guardian.Detected -= OnGuardianDetected;
+        _guardian.Dispose();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _applicationIcon?.Dispose();

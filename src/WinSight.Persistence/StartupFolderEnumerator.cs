@@ -13,6 +13,11 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
 {
     public string Surface => "Startup folders";
 
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } =
+        Folders()
+            .Select(f => PersistenceWatchTarget.FileSystem(f.Dir, includeSubdirectories: false))
+            .ToArray();
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         foreach (var (dir, label) in Folders())

@@ -2,6 +2,27 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Guardian: real-time persistence monitoring (Phase 3, BlockBlock-class)
+- The persistence scanner is promoted from on-demand to live. The 22 autostart enumerators stay
+  the single source of truth; new watchers are only dumb triggers. On a change signal the monitor
+  debounces, re-scans the affected surface, diffs against a baseline, and surfaces genuinely new
+  entries — verdict-checked through the same Authenticode path as the manual scan.
+- **Pure core** (`PersistenceIdentity`, `PersistenceDiffEngine`, `PersistenceChangeLog`,
+  `PersistenceMonitorCore`): bounded like `PendingOutboundLog` (caps at `MaxChanges`, counts
+  dropped arrivals instead of silently truncating), seeds a silent baseline on first scan so a
+  machine does not alert on pre-existing persistence, and reports each new entry once. Fully
+  unit-tested.
+- **Registry watcher** (`RegNotifyChangeKeyValue` on Run/Services/Winlogon) and **filesystem
+  watcher** (`FileSystemWatcher` on the Startup folders and `\System32\Tasks`), combined by a
+  composite source. Each has a real-Windows functional test (private HKCU key, temp folder) that
+  asserts a change actually signals — validated off a VM.
+- **Dashboard**: hosts the monitor while running and raises a Notable/Info tray balloon on a new
+  startup item (en/fr/es), reusing the existing proven `ShowBalloonTip` path. `GuardianHost` and
+  `PersistenceMonitorPresenter` are the tested integration seam.
+- Honest limits, stated in `docs/GUARDIAN_DESIGN.md`: detect-and-alert only (blocking the write
+  needs a driver + EV cert, Phase 4+); sees *what* appeared, not *who* wrote it; real-time while
+  the dashboard runs. Live end-to-end dashboard smoke test still recommended.
+
 ### Firewall enforcement verification must mask the INDEXED flag WFP sets itself
 - The exact-inventory verification required a block filter to read back with `Flags == 0`, but WFP
   sets `FWPM_FILTER_FLAG_INDEXED` (0x40) on any app-id filter on its own. Every genuine block

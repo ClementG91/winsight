@@ -71,8 +71,11 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
 ## Roadmap (later phases)
 
 - **Phase 2 Firewall** (LuLu-class) on **WFP**, per-app outbound control.
-- **Phase 3 Real-time persistence** (BlockBlock-class): promote the scanner to a
-  live watcher; optional minifilter for blocking (cert required).
+- **Phase 3 Real-time persistence** (BlockBlock-class): the scanner is now promoted to a
+  live watcher (Guardian) that alerts on new startup items via a tray balloon — registry
+  (`RegNotifyChangeKeyValue`) + Startup/Tasks folders, verdict via the existing Authenticode
+  path. Detect-and-alert only; *blocking* the write still needs a minifilter (cert required).
+  See `docs/GUARDIAN_DESIGN.md`.
 - **Phase 4 Ransomware canary** (RansomWhere-class): canary files + entropy/rename
   heuristics; minifilter for true interception (cert required).
 
