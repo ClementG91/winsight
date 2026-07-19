@@ -19,6 +19,6 @@ public static class GuardianHost
         var enumerators = PersistenceScanner.DefaultEnumerators();
         var scanner = new PersistenceScanner(enumerators);
         var source = CompositePersistenceChangeSource.ForEnumerators(enumerators);
-        return new PersistenceMonitor(source, scanner.Scan);
+        return new PersistenceMonitor(source, scanner.Scan, baselineStore: new FilePersistenceBaselineStore());
     }
 }

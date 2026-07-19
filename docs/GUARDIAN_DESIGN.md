@@ -5,9 +5,11 @@ below have landed. The pure core, the registry watcher and the filesystem watche
 covered by unit tests, including real-Windows functional tests that fire
 `RegNotifyChangeKeyValue` and `FileSystemWatcher` against private HKCU / temp keys (not
 only a VM). The dashboard hosts the monitor and raises a tray balloon on a new startup
-item, reusing the app's existing proven `ShowBalloonTip` path. Remaining: a live
-end-to-end dashboard smoke test, on-start reconciliation across runs (increment 5), and
-ETW/WMI surfaces + writing-process attribution (increment 6).
+item, reusing the app's existing proven `ShowBalloonTip` path. On-start reconciliation
+across runs (increment 5) is implemented: the baseline is persisted locally and, on the
+next launch, what appeared while WinSight was not running surfaces once. Remaining: a
+live end-to-end dashboard smoke test, and ETW/WMI surfaces + writing-process attribution
+(increment 6).
 
 ## Goal
 
@@ -191,8 +193,12 @@ source and a fake/real scanner:
    the shared report model + balloon localization keys; `GuardianHost.CreateDefault()` assembles
    a ready-to-host monitor; the dashboard starts it on load and raises a Notable/Info tray balloon;
    en/fr/es strings added. Live end-to-end smoke test still recommended.
-5. **On-start reconciliation.** ⏳ Next. Persist the baseline across runs so "what changed while
-   WinSight wasn't running" surfaces on next launch (bounded, same diff engine).
+5. **On-start reconciliation.** ✅ Done. `IPersistenceBaselineStore` +
+   `FilePersistenceBaselineStore` (local-only `%LocalAppData%\WinSight\guardian-baseline.tsv`,
+   atomic write, corrupt-tolerant, bounded) persist the baseline; `PersistenceMonitorCore`
+   .`ReconcileFromPersistedBaseline` diffs the current scan against it on Start, so what appeared
+   while WinSight was off surfaces once, then the baseline resets to the current state. Wired by
+   default through `GuardianHost`.
 6. **Later.** ETW/WMI for the remaining surfaces; writing-process attribution (needs
    ETW/audit + elevation — a bonus, not the core value).
 
@@ -209,8 +215,8 @@ boundary with the same honesty:
   changed, not which process changed it. Writing-process attribution needs ETW/audit and
   elevation; deferred.
 - **Real-time coverage is "while the tray host runs".** Persistence written while WinSight is
-  not running is caught on the next start by the reconciliation diff (increment 5), not in
-  real time.
+  not running is caught on the next start by the reconciliation diff (implemented, increment 5),
+  not in real time.
 - **It is bounded and says so.** A flood of new entries is capped at `MaxChanges` with a
   visible "and N more not recorded" — never a silent truncation. A security tool that hides
   its own blind spot is worse than one without the feature.

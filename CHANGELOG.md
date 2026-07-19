@@ -2,6 +2,17 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Guardian: on-start reconciliation across runs
+- The baseline is now persisted across runs, so persistence that appears while WinSight is not
+  running surfaces on the next launch (once), instead of being silently absorbed into a fresh
+  baseline. `FilePersistenceBaselineStore` writes a small local-only file
+  (`%LocalAppData%\WinSight\guardian-baseline.tsv`, atomic temp+move, bounded, corrupt-tolerant —
+  a missing or malformed file is treated as a first run, never a crash). `PersistenceMonitorCore`
+  gains `ReconcileFromPersistedBaseline`: it diffs the current scan against the persisted baseline,
+  surfaces the new entries, then resets the baseline to exactly the current state so items removed
+  while WinSight was off drop out and cannot re-alert. Wired by default via `GuardianHost`; a first
+  run with no saved baseline stays silent and only records one for next time.
+
 ### Guardian: real-time persistence monitoring (Phase 3, BlockBlock-class)
 - The persistence scanner is promoted from on-demand to live. The 22 autostart enumerators stay
   the single source of truth; new watchers are only dumb triggers. On a change signal the monitor
