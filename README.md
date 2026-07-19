@@ -17,9 +17,9 @@ their machine, what persists, what watches the camera/mic, what phones home, wit
 small, single-purpose, auditable tools under one roof. No telemetry, no account, no
 paywall.
 
-## Status
+## What ships today
 
-Shipping today, each validated on real Windows (not only CI):
+Each validated on real Windows (not only CI):
 
 - **Persistence scanner** (KnockKnock-class) — 22 autostart surfaces, catalog-aware
   Authenticode verdicts, VirusTotal enrichment opt-in.
