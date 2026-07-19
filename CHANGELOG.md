@@ -2,6 +2,13 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.9.0, 2026-07-20
+
+Real-time protection lands: Guardian (BlockBlock-class persistence monitoring) and the first three
+increments of Phase 4 (RansomWhere-class ransomware behavior detection), plus the WFP enforcement
+fix that made the Phase 2 firewall actually enforce. Everything here is detect-and-alert and
+user-mode; blocking still needs a signed kernel driver.
+
 ### Phase 4 (ransomware): opt-in dashboard protection + alert
 - The dashboard now exposes ransomware protection as an **opt-in** toggle, cleared by default. This is
   the only WinSight feature that *writes* into the operator's personal folders (everything else only
