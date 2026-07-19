@@ -2,6 +2,20 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Security review of the new real-time code, before shipping it
+- **A concurrency defect that could silently kill filesystem monitoring.** Both watchers set
+  `FileSystemWatcher.EnableRaisingEvents` inside their create helper, so an event could fire on a
+  thread-pool thread while `Start` was still registering watchers — reading `_targetByWatcher` while
+  that `Dictionary` was being written. A Dictionary read racing a write can throw, return garbage, or
+  spin forever; the failure mode was the persistence monitor's filesystem half dying quietly, which
+  is the worst thing a security tool can do. Events now begin only after every watcher is registered.
+- **A shutdown race.** `Dispose` iterated the watcher list outside the lock while `Start` could still
+  be appending to it. Both watchers now snapshot the list under the lock before iterating.
+- **The entropy sampler no longer follows reparse points, and never opens a directory.** A file
+  dropped into a watched folder can be a symlink or junction pointing at a device or a slow network
+  share, and reading it would block a thread-pool thread — so anyone able to write into the user's own
+  folder could starve the monitor. Links are now detected, not followed.
+
 ### Phase 4 (ransomware): entropy-on-write sampling
 - The third detection signal lands, with the anti-false-positive gating that was the reason to defer
   it. `RansomwareEntropySampler` reads a bounded 4 KB prefix — with sharing flags that never fight the
