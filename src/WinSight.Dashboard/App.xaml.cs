@@ -7,6 +7,10 @@ public partial class App : System.Windows.Application
 {
     private void Application_Startup(object sender, StartupEventArgs e)
     {
+        // First thing: without this a crash leaves no trace at all — no message, no log — which
+        // makes a user's "it crashed" impossible to diagnose. Local-only, never sent anywhere.
+        CrashReporter.Install(this);
+
         VirusTotalSettingsStore.Default.ApplyToCurrentProcess();
 
         var languageIndex = Array.FindIndex(

@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The dashboard now records crashes instead of vanishing
+- Investigating a reported crash during analysis turned up something worse than the crash: the app
+  had **no unhandled-exception handling at all** — no `DispatcherUnhandledException`, no
+  `AppDomain.UnhandledException`, no `UnobservedTaskException`. A failure killed the process with no
+  message, no log, and nothing reliable in the Windows event log, so "it crashed" was impossible to
+  act on by design.
+- `CrashReporter` now hooks all three channels and writes a local report
+  (`%LocalAppData%\WinSight\crashes`) with the exception, stack, version and OS — diagnostics only,
+  no scan findings, never sent anywhere. Reports are capped so a crash loop cannot fill the disk, and
+  capture itself swallows failures: reporting must never become the thing that crashes the app. A UI
+  exception is recorded and the app keeps running, because for a monitoring tool staying alive
+  preserves protection.
+
 ### Security review of the new real-time code, before shipping it
 - **A concurrency defect that could silently kill filesystem monitoring.** Both watchers set
   `FileSystemWatcher.EnableRaisingEvents` inside their create helper, so an event could fire on a

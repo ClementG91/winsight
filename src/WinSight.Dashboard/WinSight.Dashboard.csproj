@@ -14,6 +14,9 @@
     <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Dashboard.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <Resource Include="..\..\assets\branding\winsight-logo-256.png"
               Link="Assets\winsight-logo.png" />
   </ItemGroup>
