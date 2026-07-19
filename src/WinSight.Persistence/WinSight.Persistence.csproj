@@ -6,4 +6,7 @@
     <PackageReference Include="System.Management" />
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Persistence.Tests" />
+  </ItemGroup>
 </Project>

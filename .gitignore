@@ -21,3 +21,8 @@ evals/results/
 /.agent/
 /.codex/
 /AGENTS.md
+
+# Local-only VM qualification / diagnostic probe kits. These are privileged, exploratory
+# harnesses that only run against a real machine (WFP/IPC), never in CI, and are not part
+# of the shipped product or the unit test suite. Keep them out of the repo.
+/tests/validation/

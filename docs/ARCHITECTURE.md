@@ -53,9 +53,15 @@ Paths, process names, domains and other forensic values are never rewritten.
 - **Firewall (Phase 2)**, **WFP** (Windows Filtering Platform) user-mode filters
   keyed by app id; a prompt-on-new-connection UX. WFP alone (no driver) covers
   most of LuLu's outbound-control use case.
-- **Guardian (Phase 3/4)**, real-time persistence + ransomware. Monitoring is
-  ETW/user-mode; *blocking* needs a **minifilter** (`FltRegisterFilter`) or WFP
-  callout **driver** → EV cert + attestation signing. Explicitly deferred.
+- **Guardian (Phase 3/4)**, real-time persistence + ransomware. Phase 3 persistence
+  monitoring is **implemented** (user-mode, in the dashboard): `RegNotifyChangeKeyValue`
+  on the Run/Services/Winlogon keys and a `FileSystemWatcher` on the Startup folders and
+  `\System32\Tasks` trigger a re-scan of the affected surface; a genuinely new autostart
+  item is verdict-checked via the existing Authenticode path and raised as a tray balloon.
+  The 22 enumerators stay the source of truth — watchers only trigger the diff. See
+  `docs/GUARDIAN_DESIGN.md`. *Blocking* the write (not just alerting) still needs a
+  **minifilter** (`FltRegisterFilter`) or WFP callout **driver** → EV cert + attestation
+  signing, and ransomware behavior remains deferred.
 
 ## Why .NET for user-mode (recommended)
 

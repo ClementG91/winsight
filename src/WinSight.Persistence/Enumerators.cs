@@ -16,6 +16,14 @@ public interface IAutostartEnumerator
 
     /// <summary>Enumerates the raw autostart records currently present in this surface.</summary>
     IEnumerable<RawAutostart> Enumerate();
+
+    /// <summary>
+    /// Locations to watch to know this surface may have changed, for real-time (Guardian)
+    /// monitoring. Empty — the default — means the surface is not watched live yet; it is still
+    /// covered by the on-start reconciliation diff, so an unwatched surface is honestly
+    /// "polled on start", never silently unmonitored.
+    /// </summary>
+    IReadOnlyList<PersistenceWatchTarget> WatchTargets => Array.Empty<PersistenceWatchTarget>();
 }
 
 /// <summary>
@@ -34,6 +42,24 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
     };
 
     public string Surface => "Run keys";
+
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = BuildWatchTargets();
+
+    private static PersistenceWatchTarget[] BuildWatchTargets()
+    {
+        var targets = new List<PersistenceWatchTarget>();
+        foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
+        {
+            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            {
+                foreach (var sub in SubKeys)
+                {
+                    targets.Add(PersistenceWatchTarget.Registry(hive, view, sub));
+                }
+            }
+        }
+        return targets.ToArray();
+    }
 
     public IEnumerable<RawAutostart> Enumerate()
     {
@@ -100,6 +126,14 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 
     public string Surface => "Services & drivers";
 
+    // Watch the whole Services subtree: a new service is a new subkey (Name) and a repurposed one
+    // is a changed ImagePath/Start value (LastSet), both under this root.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(
+            RegistryHive.LocalMachine, RegistryView.Registry64, Root, watchSubtree: true),
+    };
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
@@ -159,6 +193,12 @@ public sealed class WinlogonEnumerator : IAutostartEnumerator
 
     public string Surface => "Winlogon Shell/Userinit";
 
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+        PersistenceWatchTarget.Registry(RegistryHive.CurrentUser, RegistryView.Registry64, Path),
+    };
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
@@ -206,6 +246,12 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
 
     public string Surface => "Scheduled Tasks";
+
+    // A scheduled task is a file under \System32\Tasks, often nested in subfolders; watch the tree.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.FileSystem(TasksRoot, includeSubdirectories: true),
+    };
 
     // Real task definitions are a few KB; a huge file planted under \Tasks must not
     // be read whole into memory (resource-exhaustion resistance).
