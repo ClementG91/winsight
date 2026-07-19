@@ -17,6 +17,24 @@ their machine, what persists, what watches the camera/mic, what phones home, wit
 small, single-purpose, auditable tools under one roof. No telemetry, no account, no
 paywall.
 
+## Status
+
+Shipping today, each validated on real Windows (not only CI):
+
+- **Persistence scanner** (KnockKnock-class) — 22 autostart surfaces, catalog-aware
+  Authenticode verdicts, VirusTotal enrichment opt-in.
+- **Outbound firewall** (LuLu-class, Phase 2) — per-app **WFP** block/allow, opt-in
+  enforcement that persists and survives reboot, unprivileged dashboard driving a
+  privileged service over authenticated local IPC. Audit-only by default.
+- **Guardian real-time persistence** (BlockBlock-class, Phase 3) — a live tray alert the
+  moment a new startup item appears, verdict-checked like the scan, plus on-start
+  reconciliation of what changed while WinSight was not running. Detect-and-alert only;
+  blocking the write needs a signed kernel driver (deferred). See
+  [`docs/GUARDIAN_DESIGN.md`](docs/GUARDIAN_DESIGN.md).
+
+Everything is read-only / observe-and-decide, local-only, no telemetry. Next: broader live
+persistence coverage, then ransomware behavior (Phase 4).
+
 ## Why this exists (landscape snapshot reviewed 2026-07-14)
 
 This is a maintained, non-exhaustive product-landscape snapshot rather than a claim
