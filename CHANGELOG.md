@@ -2,6 +2,18 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Phase 4 (ransomware): canary planting + file watcher
+- The thin I/O layer over the heuristics core, all user-mode (it watches the user's own
+  Documents/Desktop/Pictures — no elevation). `CanaryManager` plants hidden decoy files and answers
+  `IsCanary`; `RansomwareSignalClassifier` (pure, tested) maps a filesystem change to a signal;
+  `RansomwareFileWatcher` runs a `FileSystemWatcher`, classifies each change, and feeds the bounded
+  burst detector, raising `Detected` once; `RansomwareMonitor` wires planting + watching and removes
+  the decoys on dispose. A touched canary fires immediately (a decoy has no legitimate reason to
+  change); a rename/delete burst fires once. Validated by real-`FileSystemWatcher` functional tests
+  (canary touch, rename burst, plant-detect-cleanup). Entropy-on-write is deliberately not wired yet:
+  legitimately compressed files (.docx/.jpg/.zip) are high-entropy and would false-positive.
+  Attribution (which process) and stopping the write both need elevation / a minifilter — deferred.
+
 ### Phase 4 (ransomware): heuristics core
 - First slice of RansomWhere-class behavior detection: a pure, unit-tested `WinSight.Ransomware`
   core, same "decisions in a tested core, thin watcher later" discipline as the firewall and Guardian.

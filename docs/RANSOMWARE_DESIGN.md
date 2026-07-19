@@ -1,9 +1,10 @@
 # Phase 4, RansomWhere-class ransomware behavior detection
 
-Status: **increment 1 (heuristics core) implemented.** This is the pure, testable foundation:
-Shannon-entropy "looks encrypted" scoring and a bounded windowed burst detector. The
-file-system watcher, canary/decoy planting, and dashboard alert are the next increments
-(thin I/O over this core), and are not built yet.
+Status: **increments 1–2 implemented.** The pure heuristics core (Shannon-entropy scoring +
+bounded windowed burst detector) and the canary/decoy planting + file-system watcher over it. The
+watcher is user-mode (it watches the user's own directories, no elevation) and its runtime is
+covered by real-`FileSystemWatcher` functional tests. The dashboard alert and opt-in
+entropy-on-write sampling are the next increments.
 
 ## Goal
 
@@ -37,9 +38,13 @@ while a security tool that cries wolf on ordinary activity would be worse than n
 
 ## Increments ahead
 
-2. **Canary manager** (thin I/O) — choose decoy locations and hidden, innocuous names; plant and
-   track them; a `FileSystemWatcher` over the decoys + watched user dirs feeds signals into the
-   core. Same shape as Guardian's watchers, real-machine validated.
+2. **Canary manager + file watcher.** ✅ Done. `CanaryManager` plants hidden decoys in the
+   protected directories and answers `IsCanary`; `RansomwareSignalClassifier` (pure) maps a change to
+   a signal; `RansomwareFileWatcher` runs a `FileSystemWatcher` over the dirs, classifies each change,
+   and feeds the burst detector; `RansomwareMonitor` wires them and removes the decoys on dispose. A
+   touched canary fires immediately; a rename/delete burst fires once. User-mode, real-machine
+   validated by functional tests. Entropy-on-write is intentionally NOT wired here (legitimately
+   compressed files — .docx/.jpg/.zip — are high-entropy and would false-positive).
 3. **Entropy sampling on write** — read a bounded prefix of a newly-written file to score it,
    without reading whole files (resource-exhaustion resistance).
 4. **Dashboard alert** — a loud, localized tray alert on a fired burst, listing what was touched;
