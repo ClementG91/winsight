@@ -43,8 +43,9 @@ public sealed class WatchTargetContractTests
     [Fact]
     public void UnwatchedSurface_DefaultsToEmpty_NotNull()
     {
-        // A surface that has not opted into live watching is still covered by the on-start diff.
-        IAutostartEnumerator unwatched = new BootExecuteEnumerator();
+        // A surface with no registry/file backing (WMI) has not opted into live watching; it is
+        // still covered by the on-start reconciliation diff.
+        IAutostartEnumerator unwatched = new WmiSubscriptionEnumerator();
         Assert.Empty(unwatched.WatchTargets);
     }
 }
@@ -82,6 +83,35 @@ public sealed class RegistryChangeWatcherTests
     {
         using var watcher = RegistryChangeWatcher.FromEnumerators(
             new IAutostartEnumerator[] { new RunKeyEnumerator(), new WinlogonEnumerator() });
+        watcher.Start();
+
+        Assert.InRange(watcher.ArmedKeyCount, 1, 63);
+    }
+
+    [Fact]
+    public void DefaultEnumerators_ExposeLiveCoverageForHighValueRegistrySurfaces()
+    {
+        var byType = PersistenceScanner.DefaultEnumerators().ToDictionary(e => e.GetType());
+
+        void HasRegistryTarget<T>() where T : IAutostartEnumerator =>
+            Assert.Contains(byType[typeof(T)].WatchTargets, t => t.Kind == PersistenceWatchKind.Registry);
+
+        HasRegistryTarget<ImageHijackEnumerator>();
+        HasRegistryTarget<AppInitDllsEnumerator>();
+        HasRegistryTarget<ActiveSetupEnumerator>();
+        HasRegistryTarget<SilentProcessExitEnumerator>();
+        HasRegistryTarget<LsaPackagesEnumerator>();
+        HasRegistryTarget<CredentialProviderEnumerator>();
+        HasRegistryTarget<BrowserHelperObjectEnumerator>();
+        HasRegistryTarget<WindowsLoadRunEnumerator>();
+    }
+
+    [Fact]
+    public void FromEnumerators_AllDefaultSurfaces_ArmWithoutExceedingTheCap()
+    {
+        // Arming the whole default set opens dozens of real HKLM keys; it must stay within the
+        // WaitAny cap and never throw, whatever this machine allows the current user to watch.
+        using var watcher = RegistryChangeWatcher.FromEnumerators(PersistenceScanner.DefaultEnumerators());
         watcher.Start();
 
         Assert.InRange(watcher.ArmedKeyCount, 1, 63);

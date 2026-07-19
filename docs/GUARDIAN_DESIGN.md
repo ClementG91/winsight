@@ -183,9 +183,15 @@ source and a fake/real scanner:
    `PersistenceChangeLog`, `PersistenceEvent`, the `WatchTargets` interface addition (default
    empty), `PersistenceMonitorCore` (pure orchestration) and the thin `PersistenceMonitor`
    wrapper driven by `IPersistenceChangeSource`. Fully unit-tested.
-2. **Registry watcher.** ✅ Done. `RegistryChangeWatcher` (`RegNotifyChangeKeyValue`) for Run
-   keys, Services, Winlogon; those enumerators expose `WatchTargets`. Includes a real HKCU
-   functional test that arms the watcher and asserts a value write signals within seconds.
+2. **Registry watcher.** ✅ Done. `RegistryChangeWatcher` (`RegNotifyChangeKeyValue`), initially for
+   Run keys, Services, Winlogon and later broadened to the high-value surfaces most abused for
+   persistence: IFEO (Image File Execution Options), AppInit_DLLs, Active Setup, SilentProcessExit,
+   LSA packages, BootExecute, AppCertDlls, time providers, print monitors/providers, netsh helpers,
+   credential providers, browser helper objects, Windows Load/Run — ~17 live surfaces in total. Each
+   enumerator just declares its `WatchTargets`; arming the whole default set stays within the WaitAny
+   handle cap (asserted by a test). COM/CLSID hijack (a subtree too noisy to watch) and WMI
+   subscriptions (no registry/file backing) stay covered by the on-start diff instead. Includes a
+   real HKCU functional test that arms the watcher and asserts a value write signals within seconds.
 3. **Filesystem watcher.** ✅ Done. `FileSystemPersistenceWatcher` over the Startup folders and
    `\System32\Tasks`, plus `CompositePersistenceChangeSource` fanning registry + filesystem
    into one source. Includes a real temp-folder functional test.

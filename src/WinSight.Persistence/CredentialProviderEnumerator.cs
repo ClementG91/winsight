@@ -15,6 +15,12 @@ public sealed class CredentialProviderEnumerator : IAutostartEnumerator
     private const string Path =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers";
 
+    // Each credential provider is a CLSID subkey under this root.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+    };
+
     public string Surface => "Credential providers";
 
     public IEnumerable<RawAutostart> Enumerate()

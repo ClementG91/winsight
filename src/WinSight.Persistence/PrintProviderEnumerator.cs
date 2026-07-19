@@ -12,6 +12,12 @@ public sealed class PrintProviderEnumerator : IAutostartEnumerator
 {
     private const string Path = @"SYSTEM\CurrentControlSet\Control\Print\Providers";
 
+    // Each print provider is a subkey (with a Driver value) under this root.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+    };
+
     public string Surface => "Print providers";
 
     public IEnumerable<RawAutostart> Enumerate()

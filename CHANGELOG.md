@@ -2,6 +2,16 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Guardian: broaden real-time coverage to more registry persistence surfaces
+- The live registry watcher now covers, beyond Run/Services/Winlogon, the high-value surfaces most
+  abused for persistence: Image File Execution Options (IFEO debugger hijacks), AppInit_DLLs, Active
+  Setup, SilentProcessExit, LSA packages, BootExecute, AppCertDlls, time providers, print
+  monitors/providers, netsh helpers, credential providers, browser helper objects, and Windows
+  Load/Run — ~17 live surfaces in total. Each just declares `WatchTargets` and reuses the proven
+  `RegNotifyChangeKeyValue` watcher; arming the whole default set stays within the WaitAny handle cap
+  (a test asserts this). COM/CLSID hijack (too noisy to watch as a subtree) and the WMI subscription
+  surface (no registry/file backing) stay covered by the on-start reconciliation diff instead.
+
 ### Guardian uses the same robust, cached signature verifier as the on-demand scan
 - Surfaced by a real-machine smoke test: a live registry add fired a Guardian detection correctly
   (unsigned/missing → notable, loud; other → calm), but a signed OS binary (`notepad.exe`) read as

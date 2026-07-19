@@ -15,6 +15,13 @@ public sealed class BrowserHelperObjectEnumerator : IAutostartEnumerator
     private const string Path =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects";
 
+    // Each BHO is a CLSID subkey, across the 64- and 32-bit views.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry32, Path, watchSubtree: true),
+    };
+
     public string Surface => "Browser helper objects";
 
     public IEnumerable<RawAutostart> Enumerate()
