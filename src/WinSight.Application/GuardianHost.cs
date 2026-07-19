@@ -22,8 +22,10 @@ public static class GuardianHost
         // catalog fallback (so signed OS binaries read as trusted, not "unknown"), and caching so a
         // full re-scan on every change does not re-verify unchanged binaries each time.
         var verifier = new CachingSignatureVerifier(new NativeSignatureVerifier());
-        var scanner = new PersistenceScanner(enumerators, verifier);
+        // Scan exactly the given surface subset, so a change re-scans only what actually changed.
+        IReadOnlyList<AutostartEntry> Scan(IReadOnlyList<IAutostartEnumerator> surfaces, CancellationToken ct) =>
+            new PersistenceScanner(surfaces, verifier).Scan(ct);
         var source = CompositePersistenceChangeSource.ForEnumerators(enumerators);
-        return new PersistenceMonitor(source, scanner.Scan, baselineStore: new FilePersistenceBaselineStore());
+        return new PersistenceMonitor(enumerators, source, Scan, baselineStore: new FilePersistenceBaselineStore());
     }
 }

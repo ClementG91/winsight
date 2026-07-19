@@ -40,10 +40,10 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource
         SafeWaitHandle hEvent,
         [MarshalAs(UnmanagedType.Bool)] bool fAsynchronous);
 
-    private sealed class Watch(RegistryKey key, bool subtree) : IDisposable
+    private sealed class Watch(RegistryKey key, PersistenceWatchTarget target) : IDisposable
     {
         public RegistryKey Key { get; } = key;
-        public bool Subtree { get; } = subtree;
+        public PersistenceWatchTarget Target { get; } = target;
         public ManualResetEvent Signal { get; } = new(initialState: false);
 
         public void Dispose()
@@ -109,7 +109,7 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource
                     // crash: skip it. The on-start reconciliation diff still covers that surface.
                     continue;
                 }
-                _watches.Add(new Watch(key, target.Recursive));
+                _watches.Add(new Watch(key, target));
             }
 
             if (_watches.Count == 0)
@@ -150,7 +150,7 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource
     {
         var result = RegNotifyChangeKeyValue(
             watch.Key.Handle,
-            watch.Subtree,
+            watch.Target.Recursive,
             RegNotifyFilter.Name | RegNotifyFilter.LastSet | RegNotifyFilter.ThreadAgnostic,
             watch.Signal.SafeWaitHandle,
             fAsynchronous: true);
@@ -183,7 +183,7 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource
             // between reset and re-arm is caught by the next arming; the monitor's debounced full
             // re-scan absorbs the tiny window.
             watch.Signal.Reset();
-            SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(Array.Empty<AutostartVector>()));
+            SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(new[] { watch.Target }));
             try
             {
                 Arm(watch);
