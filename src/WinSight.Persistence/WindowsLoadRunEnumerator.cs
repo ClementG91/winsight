@@ -11,6 +11,13 @@ namespace WinSight.Persistence;
 public sealed class WindowsLoadRunEnumerator : IAutostartEnumerator
 {
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
+
+    // The Load/Run values live under this key in both HKLM and HKCU.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+        PersistenceWatchTarget.Registry(RegistryHive.CurrentUser, RegistryView.Registry64, Path),
+    };
     private static readonly string[] Values = ["Load", "Run"];
 
     public string Surface => "Windows Load/Run";

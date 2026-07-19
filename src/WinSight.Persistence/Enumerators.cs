@@ -333,6 +333,12 @@ public sealed class AppInitDllsEnumerator : IAutostartEnumerator
 
     public string Surface => "AppInit_DLLs";
 
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry32, Path),
+    };
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
@@ -364,6 +370,12 @@ public sealed class ActiveSetupEnumerator : IAutostartEnumerator
     private const string Path = @"SOFTWARE\Microsoft\Active Setup\Installed Components";
 
     public string Surface => "Active Setup";
+
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry32, Path, watchSubtree: true),
+    };
 
     public IEnumerable<RawAutostart> Enumerate()
     {
@@ -400,6 +412,11 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
 
     public string Surface => "BootExecute";
 
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+    };
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
@@ -430,6 +447,11 @@ public sealed class AppCertDllsEnumerator : IAutostartEnumerator
 
     public string Surface => "AppCertDLLs";
 
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+    };
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
@@ -457,6 +479,11 @@ public sealed class TimeProviderEnumerator : IAutostartEnumerator
     private const string Path = @"SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders";
 
     public string Surface => "Time providers";
+
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+    };
 
     public IEnumerable<RawAutostart> Enumerate()
     {
@@ -566,6 +593,11 @@ public sealed class PrintMonitorEnumerator : IAutostartEnumerator
 
     public string Surface => "Print monitors";
 
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+    };
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
@@ -595,6 +627,12 @@ public sealed class NetshHelperEnumerator : IAutostartEnumerator
     private const string Path = @"SOFTWARE\Microsoft\NetSh";
 
     public string Surface => "Netsh helpers";
+
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry32, Path),
+    };
 
     public IEnumerable<RawAutostart> Enumerate()
     {
@@ -631,6 +669,11 @@ public sealed class LsaPackagesEnumerator : IAutostartEnumerator
         { "Security Packages", "Authentication Packages", "Notification Packages" };
 
     public string Surface => "LSA packages";
+
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path),
+    };
 
     public IEnumerable<RawAutostart> Enumerate()
     {
@@ -671,6 +714,11 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit";
 
     public string Surface => "SilentProcessExit monitors";
+
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+    };
 
     public IEnumerable<RawAutostart> Enumerate()
     {
@@ -713,6 +761,12 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
 public sealed class ImageHijackEnumerator : IAutostartEnumerator
 {
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
+
+    // Per-executable Debugger / GlobalFlag hijacks live in subkeys under this root.
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
+    {
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+    };
 
     public string Surface => "IFEO debuggers";
 
