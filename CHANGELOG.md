@@ -2,6 +2,17 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Guardian uses the same robust, cached signature verifier as the on-demand scan
+- Surfaced by a real-machine smoke test: a live registry add fired a Guardian detection correctly
+  (unsigned/missing → notable, loud; other → calm), but a signed OS binary (`notepad.exe`) read as
+  `VerificationError` instead of `SignatureValid`, because `GuardianHost` used the bare default
+  `AuthenticodeVerifier` while the on-demand scan uses
+  `CachingSignatureVerifier(NativeSignatureVerifier())` (WinVerifyTrust + catalog fallback + cache).
+  Guardian now uses the same verifier, so a binary reads identically whether via scan or Guardian,
+  and — since Guardian re-scans fully on every change — the cache avoids re-verifying unchanged
+  binaries each time. Re-validated on a real machine: `notepad.exe` now reads `SignatureValid`,
+  signer `CN=Microsoft Windows`.
+
 ### Guardian: on-start reconciliation across runs
 - The baseline is now persisted across runs, so persistence that appears while WinSight is not
   running surfaces on the next launch (once), instead of being silently absorbed into a fresh

@@ -1,3 +1,4 @@
+using WinSight.Core;
 using WinSight.Persistence;
 
 namespace WinSight.Application;
@@ -17,7 +18,11 @@ public static class GuardianHost
     public static PersistenceMonitor CreateDefault()
     {
         var enumerators = PersistenceScanner.DefaultEnumerators();
-        var scanner = new PersistenceScanner(enumerators);
+        // Use the same robust, cached verifier the on-demand scan uses: WinVerifyTrust with a
+        // catalog fallback (so signed OS binaries read as trusted, not "unknown"), and caching so a
+        // full re-scan on every change does not re-verify unchanged binaries each time.
+        var verifier = new CachingSignatureVerifier(new NativeSignatureVerifier());
+        var scanner = new PersistenceScanner(enumerators, verifier);
         var source = CompositePersistenceChangeSource.ForEnumerators(enumerators);
         return new PersistenceMonitor(source, scanner.Scan, baselineStore: new FilePersistenceBaselineStore());
     }
