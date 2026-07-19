@@ -94,8 +94,10 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
   (`RegNotifyChangeKeyValue`) + Startup/Tasks folders, verdict via the existing Authenticode
   path. Detect-and-alert only; *blocking* the write still needs a minifilter (cert required).
   See `docs/GUARDIAN_DESIGN.md`.
-- **Phase 4 Ransomware canary** (RansomWhere-class): canary files + entropy/rename
-  heuristics; minifilter for true interception (cert required).
+- **Phase 4 Ransomware canary** (RansomWhere-class): the pure heuristics core has landed
+  (Shannon-entropy "looks encrypted" scoring + a bounded burst detector); canary files, the
+  file-system watcher and the dashboard alert follow. True *interception* needs a minifilter
+  (cert required). See `docs/RANSOMWARE_DESIGN.md`.
 
 ## Stack (locked, see `docs/ARCHITECTURE.md`)
 
