@@ -112,7 +112,60 @@ public sealed class CanaryManager
         }
     }
 
+    private const string CanaryPrefix = "WinSightGuard_";
+    private const string CanaryExtension = ".xlsx";
+
+    /// <summary>The pattern that identifies a WinSight decoy, used to sweep up orphans.</summary>
+    internal const string CanaryGlob = $"{CanaryPrefix}*{CanaryExtension}";
+
     // A plausible-looking document name so ransomware treats it as a real target, made unique so two
     // runs never collide.
-    internal static string CanaryFileName() => $"WinSightGuard_{Guid.NewGuid():N}.xlsx";
+    internal static string CanaryFileName() => $"{CanaryPrefix}{Guid.NewGuid():N}{CanaryExtension}";
+
+    /// <summary>
+    /// Deletes decoys left behind by a run that ended without disposing (a crash, a kill). Without
+    /// this, a hard stop would litter the user's own folders with hidden files that nothing ever
+    /// cleans up. Best-effort; returns how many were removed.
+    /// </summary>
+    public static int RemoveOrphans(IReadOnlyList<string> directories)
+    {
+        ArgumentNullException.ThrowIfNull(directories);
+        var removed = 0;
+        foreach (var directory in directories)
+        {
+            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            {
+                continue;
+            }
+
+            string[] orphans;
+            try
+            {
+                orphans = Directory.GetFiles(directory, CanaryGlob);
+            }
+            catch (Exception ex) when (ex is IOException
+                                         or UnauthorizedAccessException
+                                         or System.Security.SecurityException)
+            {
+                continue;
+            }
+
+            foreach (var orphan in orphans)
+            {
+                try
+                {
+                    File.SetAttributes(orphan, FileAttributes.Normal);
+                    File.Delete(orphan);
+                    removed++;
+                }
+                catch (Exception ex) when (ex is IOException
+                                             or UnauthorizedAccessException
+                                             or System.Security.SecurityException)
+                {
+                    // Leave it; the next run tries again.
+                }
+            }
+        }
+        return removed;
+    }
 }

@@ -9,6 +9,7 @@ using Microsoft.Win32;
 using WinSight.Application;
 using WinSight.Firewall;
 using WinSight.Persistence;
+using WinSight.Ransomware;
 using WinSight.Reporting;
 using Drawing = System.Drawing;
 using Forms = System.Windows.Forms;
@@ -27,6 +28,9 @@ public partial class MainWindow : Window, IDisposable
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
     private readonly PersistenceMonitor _guardian = GuardianHost.CreateDefault();
+    // Opt-in: created only when the operator enables ransomware protection, because it is the one
+    // feature that WRITES (decoy files) into their personal folders. Null means off, nothing planted.
+    private RansomwareMonitor? _ransomware;
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -87,6 +91,68 @@ public partial class MainWindow : Window, IDisposable
                 // Monitoring is best-effort: if the initial scan cannot run, the dashboard still
                 // works and the on-demand persistence scan is unaffected.
             }
+        });
+    }
+
+    /// <summary>
+    /// Turns on ransomware protection. This is opt-in because it is the only WinSight feature that
+    /// writes into the operator's own folders: it sweeps decoys orphaned by an earlier crash, plants
+    /// fresh hidden ones, and watches them. Planting is file I/O, so it runs off the UI thread.
+    /// </summary>
+    private void RansomwareProtection_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_initializing || _disposed || _ransomware is not null)
+        {
+            return;
+        }
+
+        var monitor = RansomwareHost.CreateDefault();
+        monitor.Detected += OnRansomwareDetected;
+        _ransomware = monitor;
+        Task.Run(() =>
+        {
+            try
+            {
+                monitor.Start();
+            }
+            catch (Exception ex) when (ex is IOException
+                                         or UnauthorizedAccessException
+                                         or System.Security.SecurityException)
+            {
+                // Best-effort: a folder we cannot write leaves protection partial, not broken.
+            }
+        });
+    }
+
+    private void RansomwareProtection_Unchecked(object sender, RoutedEventArgs e) => StopRansomwareProtection();
+
+    /// <summary>Stops protection and removes every planted decoy. Safe to call when already off.</summary>
+    private void StopRansomwareProtection()
+    {
+        var monitor = _ransomware;
+        _ransomware = null;
+        if (monitor is null)
+        {
+            return;
+        }
+        monitor.Detected -= OnRansomwareDetected;
+        monitor.Dispose(); // removes the decoys
+    }
+
+    private void OnRansomwareDetected(object? sender, RansomwareDetectedEventArgs e)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            // Louder and longer than a persistence alert: this is the one event where minutes matter.
+            _trayIcon.ShowBalloonTip(
+                10000,
+                Text["RansomwareBalloonTitle"],
+                $"{Text[RansomwarePresenter.AlertMessageKey(e.Kind)]}\n{RansomwarePresenter.Detail(e.Kind, e.Path)}",
+                RansomwarePresenter.IsCritical(e.Kind) ? Forms.ToolTipIcon.Error : Forms.ToolTipIcon.Warning);
         });
     }
 
@@ -696,6 +762,7 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _scanCancellation?.Dispose();
+        StopRansomwareProtection(); // removes any planted decoys before we go
         _guardian.Detected -= OnGuardianDetected;
         _guardian.Dispose();
         _trayIcon.Visible = false;

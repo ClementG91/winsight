@@ -65,6 +65,32 @@ public sealed class CanaryManagerTests
 
     [Fact]
     public void IsCanary_BlankPath_IsFalse() => Assert.False(new CanaryManager().IsCanary("  "));
+
+    [Fact]
+    public void RemoveOrphans_SweepsDecoysLeftByACrash_AndLeavesRealFilesAlone()
+    {
+        var dir = TempDir();
+        try
+        {
+            // Simulate a previous run that died without disposing: a decoy is still on disk, and the
+            // manager that planted it is gone, so only the on-disk pattern identifies it.
+            var orphan = Path.Combine(dir, CanaryManager.CanaryFileName());
+            File.WriteAllText(orphan, "leftover");
+            File.SetAttributes(orphan, FileAttributes.Hidden);
+            var userFile = Path.Combine(dir, "my-real-spreadsheet.xlsx");
+            File.WriteAllText(userFile, "user data");
+
+            var removed = CanaryManager.RemoveOrphans(new[] { dir });
+
+            Assert.Equal(1, removed);
+            Assert.False(File.Exists(orphan));
+            Assert.True(File.Exists(userFile)); // a real user file is never touched
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
 
 public sealed class RansomwareFileWatcherTests

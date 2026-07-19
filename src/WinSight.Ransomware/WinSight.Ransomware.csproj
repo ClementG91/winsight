@@ -2,4 +2,7 @@
   <PropertyGroup>
     <RootNamespace>WinSight.Ransomware</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Ransomware.Tests" />
+  </ItemGroup>
 </Project>
