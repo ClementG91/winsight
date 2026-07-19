@@ -3,8 +3,13 @@
 Status: **increments 1–2 implemented.** The pure heuristics core (Shannon-entropy scoring +
 bounded windowed burst detector) and the canary/decoy planting + file-system watcher over it. The
 watcher is user-mode (it watches the user's own directories, no elevation) and its runtime is
-covered by real-`FileSystemWatcher` functional tests. The dashboard alert and opt-in
-entropy-on-write sampling are the next increments.
+covered by real-`FileSystemWatcher` functional tests. The dashboard surfaces it as an **opt-in**
+toggle with a loud tray alert. Entropy-on-write sampling is the next increment.
+
+**Protection is opt-in, deliberately.** This is the only WinSight feature that *writes* into the
+operator's personal folders (everything else only reads), so nothing is planted until they tick
+"Ransomware protection". Decoys are hidden, swept on start if an earlier run died without cleaning
+up, and removed when the toggle is cleared or WinSight closes.
 
 ## Goal
 
@@ -47,8 +52,12 @@ while a security tool that cries wolf on ordinary activity would be worse than n
    compressed files — .docx/.jpg/.zip — are high-entropy and would false-positive).
 3. **Entropy sampling on write** — read a bounded prefix of a newly-written file to score it,
    without reading whole files (resource-exhaustion resistance).
-4. **Dashboard alert** — a loud, localized tray alert on a fired burst, listing what was touched;
-   reuse the shared report model and the proven `ShowBalloonTip` path.
+4. **Dashboard alert.** ✅ Done. An opt-in "Ransomware protection" toggle in the dashboard starts and
+   stops the monitor (planting runs off the UI thread; clearing the toggle removes the decoys).
+   `RansomwarePresenter` maps a detection to a localization key and a detail line that shows only the
+   file NAME — never the directory tree, so an alert cannot leak a folder layout into a screenshot.
+   A touched canary is presented as critical, a burst as a warning, on the proven `ShowBalloonTip`
+   path, localized en/fr/es.
 
 ## What this cannot do (stated on purpose)
 

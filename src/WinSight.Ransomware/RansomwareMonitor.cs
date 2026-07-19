@@ -43,6 +43,9 @@ public sealed class RansomwareMonitor : IDisposable
             }
             _started = true;
         }
+        // Sweep decoys a previous run left behind (crash/kill) before planting fresh ones, so the
+        // user's folders never accumulate hidden files.
+        CanaryManager.RemoveOrphans(_directories);
         _canaries.Plant(_directories);
         _watcher.Start();
     }

@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Phase 4 (ransomware): opt-in dashboard protection + alert
+- The dashboard now exposes ransomware protection as an **opt-in** toggle, cleared by default. This is
+  the only WinSight feature that *writes* into the operator's personal folders (everything else only
+  reads), so nothing is planted until they ask for it; clearing the toggle or closing WinSight removes
+  every decoy. Planting runs off the UI thread.
+- `CanaryManager.RemoveOrphans` sweeps decoys left behind by a run that died without disposing (a
+  crash or a kill), so the user's folders never accumulate hidden files; the monitor calls it before
+  planting. A real user file matching nothing of ours is never touched (asserted by a test).
+- `RansomwarePresenter` maps a detection to a localization key and a detail line that shows only the
+  file NAME, never the directory tree — an alert cannot leak a folder layout into a screenshot or a
+  shoulder-surfed balloon. A touched canary is presented as critical, a rename/delete burst as a
+  warning, on the proven `ShowBalloonTip` path, localized en/fr/es.
+
 ### Phase 4 (ransomware): canary planting + file watcher
 - The thin I/O layer over the heuristics core, all user-mode (it watches the user's own
   Documents/Desktop/Pictures — no elevation). `CanaryManager` plants hidden decoy files and answers

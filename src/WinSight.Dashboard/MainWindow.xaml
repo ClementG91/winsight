@@ -97,6 +97,10 @@
                                 Background="#2563EB" Foreground="White" BorderThickness="0"
                                 FontWeight="SemiBold" Click="ScanButton_Click"
                                 automation:AutomationProperties.Name="{Binding [StartAnalysisAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
+                        <CheckBox x:Name="RansomwareProtection" Margin="2,16,2,0"
+                                  Content="{Binding [RansomwareProtectionToggle], Source={x:Static local:LocalizationManager.Instance}}"
+                                  ToolTip="{Binding [RansomwareProtectionTooltip], Source={x:Static local:LocalizationManager.Instance}}"
+                                  Checked="RansomwareProtection_Checked" Unchecked="RansomwareProtection_Unchecked" />
                     </StackPanel>
                 </Grid>
             </Border>

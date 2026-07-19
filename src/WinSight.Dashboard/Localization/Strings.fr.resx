@@ -236,4 +236,9 @@
   <data name="GuardianBalloonTitle" xml:space="preserve"><value>Nouvel élément de démarrage</value></data>
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Un nouvel élément de démarrage a été ajouté et n'est pas de confiance (non signé, non approuvé ou fichier absent). À vérifier.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Un nouvel élément de démarrage signé a été ajouté.</value></data>
+  <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protection rançongiciel</value></data>
+  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Place des fichiers leurres cachés dans vos Documents, Bureau et Images, et vous alerte dès que quelque chose les modifie — c'est le comportement d'un rançongiciel. Rien n'est écrit tant que vous n'activez pas l'option, et les leurres sont retirés quand vous la désactivez ou fermez WinSight.</value></data>
+  <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Activité possible de rançongiciel</value></data>
+  <data name="RansomwareCanaryTouched" xml:space="preserve"><value>Un fichier-appât protégé vient d'être modifié. Rien de légitime n'y touche : c'est le comportement d'un rançongiciel. Déconnectez ce PC du réseau et vérifiez ce qui s'exécute.</value></data>
+  <data name="RansomwareBurstDetected" xml:space="preserve"><value>Une rafale inhabituelle de renommages ou de suppressions de fichiers a été détectée. Si vous n'avez pas lancé d'opération en masse, considérez-la comme suspecte.</value></data>
 </root>
