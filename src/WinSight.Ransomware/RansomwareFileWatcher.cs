@@ -20,6 +20,7 @@ public sealed class RansomwareFileWatcher : IDisposable
 {
     private readonly IReadOnlyList<string> _directories;
     private readonly Func<string?, bool> _isCanary;
+    private readonly Func<string?, bool> _looksEncrypted;
     private readonly RansomwareBurstDetector _detector;
     private readonly Func<DateTimeOffset> _clock;
     private readonly List<FileSystemWatcher> _watchers = [];
@@ -33,12 +34,14 @@ public sealed class RansomwareFileWatcher : IDisposable
         IReadOnlyList<string> directories,
         Func<string?, bool> isCanary,
         RansomwareBurstDetector? detector = null,
-        Func<DateTimeOffset>? clock = null)
+        Func<DateTimeOffset>? clock = null,
+        Func<string?, bool>? looksEncrypted = null)
     {
         _directories = directories ?? throw new ArgumentNullException(nameof(directories));
         _isCanary = isCanary ?? throw new ArgumentNullException(nameof(isCanary));
         _detector = detector ?? new RansomwareBurstDetector();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _looksEncrypted = looksEncrypted ?? RansomwareEntropySampler.LooksEncrypted;
     }
 
     /// <summary>The burst detector, exposed so the operator can acknowledge (Reset) after responding.</summary>
@@ -106,7 +109,13 @@ public sealed class RansomwareFileWatcher : IDisposable
             ? _isCanary(renamed.OldFullPath)
             : _isCanary(e.FullPath);
 
-        var kind = RansomwareSignalClassifier.Classify(e.ChangeType, isCanary);
+        // Only score content for a create/change of an ordinary file; the sampler's own extension
+        // gate then skips formats that are compressed by design, so this stays cheap and quiet.
+        var looksEncrypted = !isCanary
+            && e.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Changed
+            && _looksEncrypted(e.FullPath);
+
+        var kind = RansomwareSignalClassifier.Classify(e.ChangeType, isCanary, looksEncrypted);
         if (kind is null)
         {
             return;
