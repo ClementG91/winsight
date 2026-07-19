@@ -97,6 +97,23 @@ public sealed class RansomwareEntropySamplerTests
     }
 
     [Fact]
+    public void LooksEncrypted_ADirectory_IsFalse_NotAnAttemptToReadIt()
+    {
+        // A Created event can name a directory. Opening it would throw; the guard must catch it
+        // cheaply, alongside the reparse-point check that stops us following links off the machine.
+        var dir = Path.Combine(Path.GetTempPath(), $"wsg-dir-{Guid.NewGuid():N}.locked");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            Assert.False(RansomwareEntropySampler.LooksEncrypted(dir));
+        }
+        finally
+        {
+            Directory.Delete(dir);
+        }
+    }
+
+    [Fact]
     public void LooksEncrypted_MissingFile_IsFalseNotAnException() =>
         Assert.False(RansomwareEntropySampler.LooksEncrypted(
             Path.Combine(Path.GetTempPath(), $"gone-{Guid.NewGuid():N}.txt")));

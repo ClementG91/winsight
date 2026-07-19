@@ -67,6 +67,16 @@ public static class RansomwareEntropySampler
 
         try
         {
+            // Never follow a reparse point (symlink/junction), and never try to read a directory. A
+            // file dropped into a watched folder can be a link to anywhere — a device, a slow network
+            // share — and reading it would block this thread-pool thread. Anyone able to write to the
+            // user's own folder could starve the monitor that way, so links are detected, not followed.
+            var attributes = File.GetAttributes(path!);
+            if (attributes.HasFlag(FileAttributes.ReparsePoint) || attributes.HasFlag(FileAttributes.Directory))
+            {
+                return false;
+            }
+
             using var stream = new FileStream(
                 path!,
                 FileMode.Open,

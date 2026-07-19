@@ -71,6 +71,13 @@ public sealed class RansomwareFileWatcher : IDisposable
                     _watchers.Add(watcher);
                 }
             }
+
+            // Enable only after every watcher is registered, so no event can fire while Start is
+            // still mutating _watchers.
+            foreach (var watcher in _watchers)
+            {
+                watcher.EnableRaisingEvents = true;
+            }
         }
     }
 
@@ -91,7 +98,7 @@ public sealed class RansomwareFileWatcher : IDisposable
             watcher.Changed += OnChanged;
             watcher.Deleted += OnChanged;
             watcher.Renamed += OnChanged;
-            watcher.EnableRaisingEvents = true;
+            // Deliberately NOT enabled here; Start enables them all once registration is complete.
             return watcher;
         }
         catch (Exception ex) when (ex is IOException
@@ -129,6 +136,8 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     public void Dispose()
     {
+        // Snapshot under the lock: Start may still be adding watchers on another thread.
+        FileSystemWatcher[] watchers;
         lock (_gate)
         {
             if (_disposed)
@@ -136,8 +145,9 @@ public sealed class RansomwareFileWatcher : IDisposable
                 return;
             }
             _disposed = true;
+            watchers = [.. _watchers];
         }
-        foreach (var watcher in _watchers)
+        foreach (var watcher in watchers)
         {
             watcher.EnableRaisingEvents = false;
             watcher.Created -= OnChanged;

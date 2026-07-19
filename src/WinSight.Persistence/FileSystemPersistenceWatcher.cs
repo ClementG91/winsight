@@ -63,6 +63,16 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
                     _targetByWatcher[watcher] = target;
                 }
             }
+
+            // Only begin delivering events once EVERY watcher is registered. Enabling inside
+            // TryCreate would let an event fire on a thread-pool thread while this loop is still
+            // writing _targetByWatcher, and a Dictionary read racing a write can throw, return
+            // garbage, or spin forever — silently killing the filesystem half of persistence
+            // monitoring, which is the worst failure mode a security tool has.
+            foreach (var watcher in _watchers)
+            {
+                watcher.EnableRaisingEvents = true;
+            }
         }
     }
 
@@ -88,7 +98,8 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
             watcher.Changed += OnChanged;
             watcher.Deleted += OnChanged;
             watcher.Renamed += OnChanged;
-            watcher.EnableRaisingEvents = true;
+            // Deliberately NOT enabled here — Start enables every watcher only after all of them are
+            // registered, so no event can race the registration.
             return watcher;
         }
         catch (Exception ex) when (ex is IOException
@@ -109,6 +120,9 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
 
     public void Dispose()
     {
+        // Snapshot under the lock: Start may still be adding watchers on another thread, and
+        // iterating a List while it is mutated throws.
+        FileSystemWatcher[] watchers;
         lock (_gate)
         {
             if (_disposed)
@@ -116,8 +130,9 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
                 return;
             }
             _disposed = true;
+            watchers = [.. _watchers];
         }
-        foreach (var watcher in _watchers)
+        foreach (var watcher in watchers)
         {
             watcher.EnableRaisingEvents = false;
             watcher.Created -= OnChanged;
