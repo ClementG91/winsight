@@ -196,7 +196,8 @@ public sealed class PersistenceMonitorStartWithStoreTests
                 Entries.Unsigned(AutostartVector.RunKey, "AppearedWhileOff", @"C:\new.exe"),
             };
 
-            using var monitor = new PersistenceMonitor(new NoopSource(), _ => scan, baselineStore: store);
+            using var monitor = new PersistenceMonitor(
+                Array.Empty<IAutostartEnumerator>(), new NoopSource(), (_, _) => scan, baselineStore: store);
             var detected = new List<PersistenceEvent>();
             monitor.Detected += (_, e) => detected.Add(e.Detected);
 
@@ -219,7 +220,8 @@ public sealed class PersistenceMonitorStartWithStoreTests
             var store = new FilePersistenceBaselineStore(path);
             var scan = new[] { Entries.Unsigned(AutostartVector.RunKey, "X", @"C:\x.exe") };
 
-            using var monitor = new PersistenceMonitor(new NoopSource(), _ => scan, baselineStore: store);
+            using var monitor = new PersistenceMonitor(
+                Array.Empty<IAutostartEnumerator>(), new NoopSource(), (_, _) => scan, baselineStore: store);
             var detected = new List<PersistenceEvent>();
             monitor.Detected += (_, e) => detected.Add(e.Detected);
 
@@ -232,5 +234,52 @@ public sealed class PersistenceMonitorStartWithStoreTests
         {
             File.Delete(path);
         }
+    }
+}
+
+public sealed class ScopedRescanSelectionTests
+{
+    [Fact]
+    public void EnumeratorsForTargets_SelectsOnlyOwnersOfTheFiredTarget()
+    {
+        IReadOnlyList<IAutostartEnumerator> all = new IAutostartEnumerator[]
+        {
+            new RunKeyEnumerator(), new ImageHijackEnumerator(), new WmiSubscriptionEnumerator(),
+        };
+        var runTarget = new RunKeyEnumerator().WatchTargets[0];
+
+        var selected = PersistenceMonitor.EnumeratorsForTargets(all, new[] { runTarget });
+
+        Assert.IsType<RunKeyEnumerator>(Assert.Single(selected));
+    }
+
+    [Fact]
+    public void EnumeratorsForTargets_EmptyOrUnknown_FallsBackToScanningEverything()
+    {
+        IReadOnlyList<IAutostartEnumerator> all = new IAutostartEnumerator[]
+        {
+            new RunKeyEnumerator(), new ImageHijackEnumerator(),
+        };
+        var unknown = PersistenceWatchTarget.FileSystem(@"C:\nowhere");
+
+        Assert.Equal(all, PersistenceMonitor.EnumeratorsForTargets(all, Array.Empty<PersistenceWatchTarget>()));
+        Assert.Equal(all, PersistenceMonitor.EnumeratorsForTargets(all, new[] { unknown }));
+    }
+
+    [Fact]
+    public void EnumeratorsForTargets_SharedTarget_SelectsEveryOwner()
+    {
+        // AppInit_DLLs and Windows Load/Run both watch HKLM\...\CurrentVersion\Windows.
+        IReadOnlyList<IAutostartEnumerator> all = new IAutostartEnumerator[]
+        {
+            new AppInitDllsEnumerator(), new WindowsLoadRunEnumerator(), new RunKeyEnumerator(),
+        };
+        var shared = new AppInitDllsEnumerator().WatchTargets[0];
+
+        var selected = PersistenceMonitor.EnumeratorsForTargets(all, new[] { shared });
+
+        Assert.Contains(selected, e => e is AppInitDllsEnumerator);
+        Assert.Contains(selected, e => e is WindowsLoadRunEnumerator);
+        Assert.DoesNotContain(selected, e => e is RunKeyEnumerator);
     }
 }

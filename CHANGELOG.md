@@ -2,6 +2,16 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Guardian: scoped re-scan — near-instant detection
+- A change now re-scans only the surface that fired, not all 22. The change source carries the watch
+  target that fired (`PersistenceSurfaceChangedEventArgs.ChangedTargets`); the monitor maps it to the
+  owning enumerator(s) via `WatchTargets` and re-scans just those, falling back to a full scan when
+  the origin is unknown. Validated on a real machine: detecting a new HKCU Run value dropped from
+  ~20s (a full re-scan that also re-verifies signatures) to **~0.5s** (a 500 ms debounce plus a
+  ~30 ms scoped scan). Writing-process attribution and live WMI/ETW surfaces stay deferred — both
+  need elevation, which would break the unprivileged in-dashboard model; a future opt-in elevated
+  "deep monitoring" mode could add them.
+
 ### Guardian: broaden real-time coverage to more registry persistence surfaces
 - The live registry watcher now covers, beyond Run/Services/Winlogon, the high-value surfaces most
   abused for persistence: Image File Execution Options (IFEO debugger hijacks), AppInit_DLLs, Active

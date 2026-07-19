@@ -205,8 +205,15 @@ source and a fake/real scanner:
    .`ReconcileFromPersistedBaseline` diffs the current scan against it on Start, so what appeared
    while WinSight was off surfaces once, then the baseline resets to the current state. Wired by
    default through `GuardianHost`.
-6. **Later.** ETW/WMI for the remaining surfaces; writing-process attribution (needs
-   ETW/audit + elevation — a bonus, not the core value).
+6. **Scoped re-scan.** ✅ Done. A change re-scans only the surface that fired — the change source
+   carries the fired `PersistenceWatchTarget`, and the monitor maps it to the owning enumerator(s)
+   via `WatchTargets` and scans just those (full scan when the origin is unknown). Real-machine
+   latency for a new HKCU Run value dropped from ~20s to ~0.5s.
+7. **Deferred — needs elevation.** Live WMI/ETW surfaces and writing-process attribution both
+   require admin (reading `root\subscription`, the kernel-registry ETW provider, or the security
+   audit log), which would break the unprivileged in-dashboard model. A future opt-in elevated
+   "deep monitoring" mode could add them; the WMI subscription surface stays covered by the on-start
+   reconciliation diff meanwhile.
 
 ## What this cannot do (stated on purpose)
 

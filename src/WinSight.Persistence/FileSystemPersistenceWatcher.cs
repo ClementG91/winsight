@@ -10,6 +10,7 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
 {
     private readonly IReadOnlyList<PersistenceWatchTarget> _targets;
     private readonly List<FileSystemWatcher> _watchers = [];
+    private readonly Dictionary<FileSystemWatcher, PersistenceWatchTarget> _targetByWatcher = [];
     private readonly Lock _gate = new();
     private bool _started;
     private bool _disposed;
@@ -59,6 +60,7 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
                 if (watcher is not null)
                 {
                     _watchers.Add(watcher);
+                    _targetByWatcher[watcher] = target;
                 }
             }
         }
@@ -97,8 +99,13 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
         }
     }
 
-    private void OnChanged(object sender, FileSystemEventArgs e) =>
-        SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(Array.Empty<AutostartVector>()));
+    private void OnChanged(object sender, FileSystemEventArgs e)
+    {
+        var changed = sender is FileSystemWatcher watcher && _targetByWatcher.TryGetValue(watcher, out var target)
+            ? new[] { target }
+            : Array.Empty<PersistenceWatchTarget>();
+        SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(changed));
+    }
 
     public void Dispose()
     {

@@ -96,7 +96,7 @@ public sealed class CompositePersistenceChangeSourceTests
         public event EventHandler<PersistenceSurfaceChangedEventArgs>? SurfaceChanged;
 
         public void Raise() =>
-            SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(Array.Empty<AutostartVector>()));
+            SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(Array.Empty<PersistenceWatchTarget>()));
 
         public void Start() => Started = true;
         public void Dispose() => Disposed = true;
