@@ -17,6 +17,7 @@ public sealed class PersistenceMonitor : IDisposable
     private readonly IPersistenceChangeSource _source;
     private readonly Func<CancellationToken, IReadOnlyList<AutostartEntry>> _scan;
     private readonly PersistenceMonitorCore _core;
+    private readonly IPersistenceBaselineStore? _baselineStore;
     private readonly Func<DateTimeOffset> _clock;
     private readonly TimeSpan _debounce;
     private readonly Lock _gate = new();
@@ -32,13 +33,15 @@ public sealed class PersistenceMonitor : IDisposable
         Func<CancellationToken, IReadOnlyList<AutostartEntry>> scan,
         PersistenceMonitorCore? core = null,
         TimeSpan? debounce = null,
-        Func<DateTimeOffset>? clock = null)
+        Func<DateTimeOffset>? clock = null,
+        IPersistenceBaselineStore? baselineStore = null)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _scan = scan ?? throw new ArgumentNullException(nameof(scan));
         _core = core ?? new PersistenceMonitorCore();
         _debounce = debounce ?? TimeSpan.FromMilliseconds(750);
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _baselineStore = baselineStore;
     }
 
     /// <summary>The pure core; exposes the change log for the presenter/UI.</summary>
@@ -55,7 +58,23 @@ public sealed class PersistenceMonitor : IDisposable
             }
             _started = true;
         }
-        _core.SeedBaseline(_scan(cancellationToken));
+        var scan = _scan(cancellationToken);
+        var persisted = _baselineStore?.Load();
+        if (persisted is not null)
+        {
+            // Persistence that appeared while WinSight was not running surfaces now, once, then the
+            // baseline becomes the current state.
+            foreach (var detection in _core.ReconcileFromPersistedBaseline(persisted, scan, _clock()))
+            {
+                Detected?.Invoke(this, new PersistenceDetectedEventArgs(detection));
+            }
+        }
+        else
+        {
+            _core.SeedBaseline(scan);
+        }
+        _baselineStore?.Save(_core.CurrentBaseline);
+
         _source.SurfaceChanged += OnSurfaceChanged;
         _source.Start();
     }
@@ -93,6 +112,12 @@ public sealed class PersistenceMonitor : IDisposable
         {
             Detected?.Invoke(this, new PersistenceDetectedEventArgs(ev));
         }
+
+        if (detected.Count > 0)
+        {
+            // Persist the advanced baseline so a crash does not re-alert on entries already surfaced.
+            _baselineStore?.Save(_core.CurrentBaseline);
+        }
     }
 
     public void Dispose()
@@ -108,5 +133,12 @@ public sealed class PersistenceMonitor : IDisposable
         _source.SurfaceChanged -= OnSurfaceChanged;
         _debounceTimer?.Dispose();
         _source.Dispose();
+
+        // Save the final known baseline for next launch — but only if it was actually seeded, so an
+        // early/failed start never overwrites a good baseline with an empty one.
+        if (_core.IsSeeded)
+        {
+            _baselineStore?.Save(_core.CurrentBaseline);
+        }
     }
 }

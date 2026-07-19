@@ -28,6 +28,15 @@ public sealed class PersistenceMonitorCore
     }
 
     /// <summary>
+    /// A snapshot of the current baseline identities, for persisting across runs so the next launch
+    /// can tell what changed while WinSight was not running.
+    /// </summary>
+    public IReadOnlyCollection<PersistenceIdentity> CurrentBaseline
+    {
+        get { lock (_gate) { return _baseline.ToArray(); } }
+    }
+
+    /// <summary>
     /// Seeds the baseline from an initial full scan WITHOUT surfacing anything. Pre-existing
     /// persistence is not news; without this every machine would alert on first launch. Idempotent:
     /// only the first seeding takes effect.
@@ -63,26 +72,66 @@ public sealed class PersistenceMonitorCore
                 return Array.Empty<PersistenceEvent>();
             }
 
-            var diff = PersistenceDiffEngine.Diff(_baseline, freshScan);
-            if (diff.Added.Count == 0)
-            {
-                return Array.Empty<PersistenceEvent>();
-            }
+            return ReconcileLocked(freshScan, nowUtc);
+        }
+    }
 
-            var detected = new List<PersistenceEvent>(diff.Added.Count);
-            foreach (var entry in diff.Added)
+    /// <summary>
+    /// Reconciles the current scan against a baseline persisted from a previous run, so persistence
+    /// that appeared while WinSight was NOT running surfaces on this launch. New identities (present
+    /// now, absent from the persisted baseline) are recorded and returned. Afterwards the baseline is
+    /// set to exactly the current state, so entries that vanished while WinSight was off drop out and
+    /// cannot spuriously re-alert.
+    /// </summary>
+    public IReadOnlyList<PersistenceEvent> ReconcileFromPersistedBaseline(
+        IReadOnlySet<PersistenceIdentity> persistedBaseline,
+        IReadOnlyList<AutostartEntry> currentScan,
+        DateTimeOffset nowUtc)
+    {
+        ArgumentNullException.ThrowIfNull(persistedBaseline);
+        ArgumentNullException.ThrowIfNull(currentScan);
+        lock (_gate)
+        {
+            _baseline.Clear();
+            foreach (var id in persistedBaseline)
             {
-                // Add to the baseline regardless of whether the (bounded) log had room, so a full
-                // log does not re-diff and re-count the same arrival on every subsequent scan.
+                _baseline.Add(id);
+            }
+            _seeded = true;
+
+            var detected = ReconcileLocked(currentScan, nowUtc);
+
+            _baseline.Clear();
+            foreach (var entry in currentScan)
+            {
                 _baseline.Add(PersistenceIdentity.FromEntry(entry));
-                var recorded = _log.Observe(entry, nowUtc);
-                if (recorded is not null)
-                {
-                    detected.Add(recorded);
-                }
             }
             return detected;
         }
+    }
+
+    private IReadOnlyList<PersistenceEvent> ReconcileLocked(
+        IReadOnlyList<AutostartEntry> freshScan, DateTimeOffset nowUtc)
+    {
+        var diff = PersistenceDiffEngine.Diff(_baseline, freshScan);
+        if (diff.Added.Count == 0)
+        {
+            return Array.Empty<PersistenceEvent>();
+        }
+
+        var detected = new List<PersistenceEvent>(diff.Added.Count);
+        foreach (var entry in diff.Added)
+        {
+            // Add to the baseline regardless of whether the (bounded) log had room, so a full log
+            // does not re-diff and re-count the same arrival on every subsequent scan.
+            _baseline.Add(PersistenceIdentity.FromEntry(entry));
+            var recorded = _log.Observe(entry, nowUtc);
+            if (recorded is not null)
+            {
+                detected.Add(recorded);
+            }
+        }
+        return detected;
     }
 
     private void SeedLocked(IReadOnlyList<AutostartEntry> scan)
