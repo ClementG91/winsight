@@ -2,6 +2,17 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Phase 4 (ransomware): heuristics core
+- First slice of RansomWhere-class behavior detection: a pure, unit-tested `WinSight.Ransomware`
+  core, same "decisions in a tested core, thin watcher later" discipline as the firewall and Guardian.
+  `ShannonEntropy` scores a byte buffer in bits/byte and flags "looks encrypted" only above a
+  conservative threshold *and* a minimum sample size, so a tiny high-entropy fragment cannot trigger.
+  `RansomwareBurstDetector` is a bounded, clock-injected sliding-window counter that fires exactly
+  once per burst — or immediately on a touched canary/decoy — and stops accumulating until `Reset`,
+  so a flood cannot grow its state. Detect-and-alert only; the file-system watcher, canary planting,
+  entropy-on-write sampling, and dashboard alert are the next increments, and *stopping* the
+  encryption needs a minifilter + EV cert (deferred). See `docs/RANSOMWARE_DESIGN.md`.
+
 ### Guardian: scoped re-scan — near-instant detection
 - A change now re-scans only the surface that fired, not all 22. The change source carries the watch
   target that fired (`PersistenceSurfaceChangedEventArgs.ChangedTargets`); the monitor maps it to the
