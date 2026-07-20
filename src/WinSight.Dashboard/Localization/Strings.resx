@@ -184,6 +184,10 @@
   <data name="ToolHostsShort" xml:space="preserve"><value>Local website redirects</value></data>
   <data name="ToolHostsDescription" xml:space="preserve"><value>Detects redirects that may hijack a website or block security and update services.</value></data>
   <data name="ToolHostsGuidance" xml:space="preserve"><value>Ad blockers also use this file. Check the domain and address before changing anything.</value></data>
+  <data name="ToolAlertsLabel" xml:space="preserve"><value>Recent alerts</value></data>
+  <data name="ToolAlertsShort" xml:space="preserve"><value>What was detected while you were away</value></data>
+  <data name="ToolAlertsDescription" xml:space="preserve"><value>The recorded history of real-time detections: new startup items, and ransomware-like file activity. Every alert is written here the moment it fires, so one you missed is not lost.</value></data>
+  <data name="ToolAlertsGuidance" xml:space="preserve"><value>Windows can hide notification banners (Do not disturb, or after several in a row), so this list is the reliable record — not the banners. It is stored only on this PC.</value></data>
   <data name="UnknownValue" xml:space="preserve"><value>Unknown</value></data>
   <data name="NoImage" xml:space="preserve"><value>Image path unavailable</value></data>
   <data name="SensorWebcam" xml:space="preserve"><value>Webcam</value></data>

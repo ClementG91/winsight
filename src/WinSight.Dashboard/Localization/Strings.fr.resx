@@ -184,6 +184,10 @@
   <data name="ToolHostsShort" xml:space="preserve"><value>Redirections locales de sites</value></data>
   <data name="ToolHostsDescription" xml:space="preserve"><value>Détecte les redirections pouvant détourner un site ou bloquer les services de sécurité et de mise à jour.</value></data>
   <data name="ToolHostsGuidance" xml:space="preserve"><value>Les bloqueurs de publicité utilisent aussi ce fichier. Vérifiez le domaine et l’adresse avant de modifier quoi que ce soit.</value></data>
+  <data name="ToolAlertsLabel" xml:space="preserve"><value>Alertes récentes</value></data>
+  <data name="ToolAlertsShort" xml:space="preserve"><value>Ce qui a été détecté en votre absence</value></data>
+  <data name="ToolAlertsDescription" xml:space="preserve"><value>L’historique des détections en temps réel : nouveaux éléments de démarrage et activité de type rançongiciel. Chaque alerte est enregistrée ici dès qu’elle se déclenche, pour qu’une alerte manquée ne soit pas perdue.</value></data>
+  <data name="ToolAlertsGuidance" xml:space="preserve"><value>Windows peut masquer les bannières de notification (Ne pas déranger, ou après plusieurs d’affilée) : cette liste est donc l’enregistrement fiable, pas les bannières. Elle reste uniquement sur ce PC.</value></data>
   <data name="UnknownValue" xml:space="preserve"><value>Inconnu</value></data>
   <data name="NoImage" xml:space="preserve"><value>Chemin de l’image indisponible</value></data>
   <data name="SensorWebcam" xml:space="preserve"><value>Caméra</value></data>
