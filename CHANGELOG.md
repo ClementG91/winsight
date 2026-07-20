@@ -1,6 +1,12 @@
-## Unreleased
+## v0.9.0, 2026-07-21
 
-Step-by-step progress log. Newest first. Every CI-green step lands here.
+WinSight's first release with real-time protection. Guardian watches persistence surfaces live
+(BlockBlock-class); Phase 4 adds opt-in ransomware behaviour detection (RansomWhere-class), surfaced
+as a header toggle; and every detection is journalled locally and shown in the dashboard, so a tray
+balloon the OS suppresses never loses an alert. The WFP fix makes the Phase 2 firewall actually
+enforce. The UI gained crash reporting, one shared button/design system, and a layout responsive
+down to the minimum window size. Everything here is detect-and-alert and user-mode; blocking still
+needs a signed kernel driver. Local-only, no telemetry.
 
 ### Ransomware protection moved to the header as a real-time toggle
 - It used to be a lone checkbox at the bottom of the "Que voulez-vous vérifier ?" sidebar, wedged
@@ -155,13 +161,6 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   (.locked, .encrypted, …) are still scored, and in-place encryption keeping the original extension
   stays covered by the canary. The classifier gained a `looksEncrypted` argument (defaulted, so
   existing behaviour is unchanged) and the watcher only scores a create/change of an ordinary file.
-
-## v0.9.0, 2026-07-20
-
-Real-time protection lands: Guardian (BlockBlock-class persistence monitoring) and the first three
-increments of Phase 4 (RansomWhere-class ransomware behavior detection), plus the WFP enforcement
-fix that made the Phase 2 firewall actually enforce. Everything here is detect-and-alert and
-user-mode; blocking still needs a signed kernel driver.
 
 ### Phase 4 (ransomware): opt-in dashboard protection + alert
 - The dashboard now exposes ransomware protection as an **opt-in** toggle, cleared by default. This is
