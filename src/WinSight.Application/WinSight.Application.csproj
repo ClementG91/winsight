@@ -3,6 +3,9 @@
     <RootNamespace>WinSight.Application</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Application.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
     <ProjectReference Include="..\WinSight.Reporting\WinSight.Reporting.csproj" />
     <ProjectReference Include="..\WinSight.Persistence\WinSight.Persistence.csproj" />

@@ -59,9 +59,12 @@ Paths, process names, domains and other forensic values are never rewritten.
   `\System32\Tasks` trigger a re-scan of the affected surface; a genuinely new autostart
   item is verdict-checked via the existing Authenticode path and raised as a tray balloon.
   The 22 enumerators stay the source of truth — watchers only trigger the diff. See
-  `docs/GUARDIAN_DESIGN.md`. *Blocking* the write (not just alerting) still needs a
-  **minifilter** (`FltRegisterFilter`) or WFP callout **driver** → EV cert + attestation
-  signing, and ransomware behavior remains deferred.
+  `docs/GUARDIAN_DESIGN.md`. Phase 4 ransomware behavior is **also implemented** (user-mode,
+  opt-in): hidden decoy files plus rename/delete-burst and entropy-on-write heuristics over a
+  `FileSystemWatcher`, with the same pure-core/thin-watcher split. See `docs/RANSOMWARE_DESIGN.md`.
+  Both stop at detect-and-alert: *blocking* the write, and *naming the process* responsible, need a
+  **minifilter** (`FltRegisterFilter`) / WFP callout **driver** or an elevated ETW provider →
+  EV cert + attestation signing for the driver route.
 
 ## Why .NET for user-mode (recommended)
 

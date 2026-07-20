@@ -141,6 +141,11 @@ public partial class MainWindow : Window, IDisposable
 
     private void OnRansomwareDetected(object? sender, RansomwareDetectedEventArgs e)
     {
+        // Journal FIRST, balloon second. Windows may suppress the balloon entirely (Focus Assist, or
+        // its throttling of an app posting several toasts quickly), and a detection that leaves no
+        // trace is indistinguishable from no detection at all.
+        AlertJournal.Append(new SecurityAlert(DateTimeOffset.Now, "Ransomware", e.Kind.ToString(), e.Path));
+
         Dispatcher.Invoke(() =>
         {
             if (_disposed)
@@ -159,6 +164,12 @@ public partial class MainWindow : Window, IDisposable
     private void OnGuardianDetected(object? sender, PersistenceDetectedEventArgs e)
     {
         var detection = e.Detected;
+        AlertJournal.Append(new SecurityAlert(
+            DateTimeOffset.Now,
+            "Guardian",
+            detection.Entry.Vector.ToString(),
+            $"{detection.Entry.Name} — {detection.Entry.ImagePath ?? detection.Entry.ExpectedImagePath ?? detection.Entry.Command}"));
+
         Dispatcher.Invoke(() =>
         {
             if (_disposed)

@@ -2,6 +2,31 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Detections are journalled locally, so a suppressed balloon no longer loses them
+- Live testing made the weakness concrete: a detection's only visible output was a tray balloon, and
+  Windows is free to drop those — Focus Assist ("Ne pas déranger", including its automatic
+  full-screen rule) suppresses them, and the shell throttles an app posting several toasts quickly.
+  Both are indistinguishable from "nothing was detected", and a security tool must not depend on a
+  single channel the OS may silently discard.
+- `AlertJournal` (in `WinSight.Application`) appends every Guardian and ransomware detection to
+  `%LocalAppData%\WinSight\alerts.log` — **before** the balloon is raised, so the record exists even
+  if the balloon never appears. Local-only, never sent anywhere; bounded to the newest
+  `MaxEntries` so it cannot grow without limit; and it never throws, because journalling a detection
+  must not become the thing that breaks the monitor that detected it. Fields containing tabs or
+  newlines are sanitised so an attacker-influenced filename cannot corrupt the journal or split one
+  record into two. Unlike a balloon it records the full path: a balloon can be shoulder-surfed or
+  land in a screenshot, whereas the journal is the place you open precisely to learn *which* file
+  was touched. The path is injectable and the tests use a temp one, so the suite never writes into
+  the operator's real journal (the mistake caught in #88).
+
+### Docs brought back in line with what actually ships
+- `RANSOMWARE_DESIGN.md` still said "increments 1–2 implemented" while listing 3 and 4 as done, and
+  described the burst detector without mentioning that **someone has to re-arm it** — the exact
+  omission behind the bug below. Status, increment list, and that design obligation are now correct.
+- `README.md` listed Phase 4 as upcoming and claimed "everything is read-only", which stopped being
+  true when ransomware protection started planting decoys. It now states what ships and names the two
+  deliberate, opt-in exceptions. `ARCHITECTURE.md` no longer calls ransomware behavior deferred.
+
 ### Ransomware protection re-arms after an alert instead of going silent for the session
 - Found by testing the installed build end-to-end on a real machine, not by reading the code: after
   the first alert (a touched canary or a rename/delete burst), `RansomwareBurstDetector` stayed
