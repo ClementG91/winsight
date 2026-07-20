@@ -45,6 +45,7 @@ public static class DashboardTools
         Tool("Extensions", "extensions", "extensions", DashboardWindowsAction.InstalledApps),
         Tool("Certificates", "certs", "certificates", DashboardWindowsAction.Certificates),
         Tool("Hosts", "hosts", "hosts"),
+        Tool("Alerts", "alerts", "alerts"),
     ];
 
     private static DashboardTool Tool(

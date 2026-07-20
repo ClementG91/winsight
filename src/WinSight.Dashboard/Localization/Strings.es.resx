@@ -184,6 +184,10 @@
   <data name="ToolHostsShort" xml:space="preserve"><value>Redirecciones locales de sitios</value></data>
   <data name="ToolHostsDescription" xml:space="preserve"><value>Detecta redirecciones que podrían secuestrar un sitio o bloquear servicios de seguridad y actualización.</value></data>
   <data name="ToolHostsGuidance" xml:space="preserve"><value>Los bloqueadores de anuncios también usan este archivo. Comprueba el dominio y la dirección antes de modificar nada.</value></data>
+  <data name="ToolAlertsLabel" xml:space="preserve"><value>Alertas recientes</value></data>
+  <data name="ToolAlertsShort" xml:space="preserve"><value>Lo detectado mientras no estabas</value></data>
+  <data name="ToolAlertsDescription" xml:space="preserve"><value>El historial de detecciones en tiempo real: nuevos elementos de inicio y actividad propia de ransomware. Cada alerta se registra aquí en cuanto salta, para que una que te perdiste no se pierda.</value></data>
+  <data name="ToolAlertsGuidance" xml:space="preserve"><value>Windows puede ocultar los avisos emergentes (No molestar, o tras varios seguidos), así que esta lista es el registro fiable, no los avisos. Se guarda solo en este PC.</value></data>
   <data name="UnknownValue" xml:space="preserve"><value>Desconocido</value></data>
   <data name="NoImage" xml:space="preserve"><value>Ruta de imagen no disponible</value></data>
   <data name="SensorWebcam" xml:space="preserve"><value>Cámara</value></data>

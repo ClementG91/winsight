@@ -2,6 +2,21 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The alert journal is now readable from the dashboard, not just from disk
+- Journalling a detection that only a text editor can read solves half the problem. "Alertes
+  récentes" is a normal entry in the tool catalog, so the same list, filter, detail pane and JSON
+  export that every other check uses now work on WinSight's own detection history — this is how an
+  operator sees an alert raised while they were away from the screen.
+- Every row is `Notable`, because everything in the journal is by definition something WinSight
+  judged worth interrupting the operator for; the "show only what deserves attention" filter
+  therefore hides nothing here. Rows carry `time`, `source`, `kind` and `detail` as structured
+  fields, so the JSON export stays machine-readable rather than re-parsing a display string.
+- It is deliberately **not** part of the overview scan: the overview answers "what does this machine
+  look like right now", and history is a different question. It also reads rather than inspects the
+  machine, making it the one tool that costs nothing to open.
+- An empty journal reads as "no real-time detections recorded yet", never as a failure — a fresh
+  install has no history and that is the expected, reassuring case.
+
 ### Detections are journalled locally, so a suppressed balloon no longer loses them
 - Live testing made the weakness concrete: a detection's only visible output was a tray balloon, and
   Windows is free to drop those — Focus Assist ("Ne pas déranger", including its automatic

@@ -54,6 +54,7 @@ public static class Adapters
             "extensions" or "ext" => Extensions(flaggedOnly),
             "certificates" or "certs" => Certificates(flaggedOnly),
             "hosts" => Hosts(flaggedOnly),
+            "alerts" => Alerts(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
     }
@@ -230,6 +231,40 @@ public static class Adapters
                 });
         }
         return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
+    }
+
+    /// <summary>
+    /// The recorded history of real-time detections, read back from <see cref="AlertJournal"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is the one "tool" that inspects WinSight's own record rather than the machine: it is
+    /// how an operator sees an alert they were not at the screen for. Windows can suppress a tray
+    /// balloon outright (Focus Assist) or throttle it, so the balloon alone is not a record —
+    /// this is. Every entry is <see cref="Severity.Notable"/> because everything in the journal is,
+    /// by definition, something WinSight considered worth interrupting the operator for; the
+    /// flagged-only filter therefore does not hide anything here.
+    /// </remarks>
+    public static ToolReport Alerts(int max = 200)
+    {
+        var alerts = AlertJournal.Read(max);
+        var b = new ToolReport.Builder("alerts");
+        foreach (var alert in alerts)
+        {
+            b.Add(
+                Severity.Notable,
+                $"{alert.Source}/{alert.Kind}",
+                $"{alert.TimeUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss} — {alert.Detail}",
+                new Dictionary<string, string?>
+                {
+                    ["time"] = alert.TimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    ["source"] = alert.Source,
+                    ["kind"] = alert.Kind,
+                    ["detail"] = alert.Detail,
+                });
+        }
+        return b.Build(alerts.Count == 0
+            ? "no real-time detections recorded yet"
+            : $"{alerts.Count} recorded detection(s), newest first");
     }
 
     public static ToolReport Hosts(bool flaggedOnly)
