@@ -14,6 +14,11 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   capture itself swallows failures: reporting must never become the thing that crashes the app. A UI
   exception is recorded and the app keeps running, because for a monitoring tool staying alive
   preserves protection.
+- Two follow-ups found by running it for real: the capture test wrote into the **real**
+  `%LocalAppData%` crash folder, leaving files in the user's own application data — it now takes an
+  explicit directory and uses a temp one. And that test then proved `TryCapture` could still throw:
+  a malformed path raises `ArgumentException`/`NotSupportedException`, not `IOException`, so the
+  guard missed it. Both are now covered, and the "never throws" promise actually holds.
 
 ### Security review of the new real-time code, before shipping it
 - **A concurrency defect that could silently kill filesystem monitoring.** Both watchers set

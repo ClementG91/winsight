@@ -67,16 +67,28 @@ public static class CrashReporter
     }
 
     /// <summary>Writes a report, swallowing any failure — reporting must never itself crash.</summary>
-    internal static void TryCapture(Exception exception, string source)
+    internal static void TryCapture(Exception exception, string source) =>
+        TryCapture(exception, source, LogDirectory);
+
+    /// <summary>
+    /// Overload taking the target directory so tests never write into the real
+    /// <see cref="LogDirectory"/> — a test must not leave files in the user's own application data.
+    /// </summary>
+    internal static void TryCapture(Exception exception, string source, string directory)
     {
         try
         {
-            Write(LogDirectory, Format(exception, source, DateTimeOffset.Now));
-            Prune(LogDirectory);
+            Write(directory, Format(exception, source, DateTimeOffset.Now));
+            Prune(directory);
         }
+        // Deliberately broad: this runs while the app is already failing, so an invalid path or an
+        // unsupported target must not turn a recoverable crash into a second one. ArgumentException
+        // and NotSupportedException matter — a malformed directory raises those, not IOException.
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
+                                     or System.Security.SecurityException
+                                     or ArgumentException
+                                     or NotSupportedException)
         {
         }
     }
