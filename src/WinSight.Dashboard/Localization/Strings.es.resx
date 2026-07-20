@@ -241,6 +241,7 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio que no es de confianza (sin firma, no confiable o con su archivo ausente). Revíselo.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio firmado.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protección contra ransomware</value></data>
+  <data name="RansomwareProtectionShort" xml:space="preserve"><value>Protección</value></data>
   <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Coloca archivos señuelo ocultos en Documentos, Escritorio e Imágenes y le avisa en cuanto algo los modifica: así se comporta el ransomware. No se escribe nada hasta que active esta opción, y los señuelos se eliminan al desactivarla o cerrar WinSight.</value></data>
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Posible actividad de ransomware</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>Se acaba de modificar un archivo señuelo protegido. Nada legítimo lo toca: así se comporta el ransomware. Desconecte este equipo de la red y revise qué se está ejecutando.</value></data>

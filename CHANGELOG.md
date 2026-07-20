@@ -2,6 +2,23 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Ransomware protection moved to the header as a real-time toggle
+- It used to be a lone checkbox at the bottom of the "Que voulez-vous vérifier ?" sidebar, wedged
+  under the scan button among on-demand controls. That framed the single most consequential switch in
+  the app — the only feature that *writes* to disk (decoy files), and a persistent background
+  protection rather than a one-shot scan — as a minor scan option.
+- It is now a switch-style toggle in the header, beside the "Analyse locale" status badge: a place an
+  operator can read the protection's state from any screen. Off, the pill matches the neighbouring
+  header controls; on, it turns security-green (shield, track and label) with the knob sliding across,
+  matching the green of the status badge. Same `x:Name` and Checked/Unchecked handlers, so behaviour
+  is unchanged — planting and removing decoys still work exactly as before.
+- The header is now genuinely responsive. The logo is a fixed left anchor, the title/tagline sit in a
+  flexible middle column where the tagline ellipsizes, and the right-hand cluster (settings, language,
+  protection, status) stays fully visible as the window narrows — where before, at the minimum width,
+  the added toggle pushed the status badge off the right edge and clipped it. The now-redundant
+  "Langue" caption was dropped (the dropdown shows the language by name; screen readers still get it
+  via AutomationProperties.Name), freeing the last of the room.
+
 ### Buttons follow one shared style instead of a dozen hand-written ones
 - The dashboard had accumulated five different paddings (`12,0`, `12,5`, `10,4`, `14,7` and the
   default), four margin schemes, `MinWidth`s of 90, 120 and 150 picked per button, heights of 32, 42

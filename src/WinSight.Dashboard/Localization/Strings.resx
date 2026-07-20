@@ -241,6 +241,7 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>A new startup item was added and is not trusted (unsigned, untrusted, or its file is missing). Review it.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>A new signed startup item was added.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Ransomware protection</value></data>
+  <data name="RansomwareProtectionShort" xml:space="preserve"><value>Protection</value></data>
   <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Places hidden decoy files in your Documents, Desktop and Pictures, and alerts you the moment anything modifies them — that is how ransomware behaves. Nothing is written until you turn this on, and the decoys are removed when you turn it off or close WinSight.</value></data>
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Possible ransomware activity</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>A protected decoy file was just modified. Nothing legitimate changes it, so this is how ransomware behaves. Disconnect this PC from the network and check what is running.</value></data>

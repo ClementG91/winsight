@@ -31,28 +31,53 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Image Width="50" Height="50" Margin="0,0,14,0"
-                           Source="Assets/winsight-logo.png" Stretch="Uniform"
-                           automation:AutomationProperties.Name="WinSight" />
-                    <StackPanel VerticalAlignment="Center">
-                        <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
-                        <TextBlock Text="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}"
-                                   Foreground="#CBD5E1" FontSize="13" />
-                    </StackPanel>
+                <!--
+                    The logo stays a fixed anchor on the left; the title block lives in the flexible
+                    middle column and the tagline ellipsizes there. That is what keeps the whole
+                    right-hand cluster (settings, language, the protection toggle, the status badge)
+                    fully visible as the window narrows: the tagline gives up width first, rather
+                    than the header overflowing and clipping the badge off the right edge.
+                -->
+                <Image Grid.Column="0" Width="50" Height="50" Margin="0,0,14,0" VerticalAlignment="Center"
+                       Source="Assets/winsight-logo.png" Stretch="Uniform"
+                       automation:AutomationProperties.Name="WinSight" />
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,16,0">
+                    <TextBlock Text="WinSight" Foreground="White" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock Text="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}"
+                               Foreground="#CBD5E1" FontSize="13"
+                               TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding [AppTagline], Source={x:Static local:LocalizationManager.Instance}}" />
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="SettingsButton" Style="{StaticResource OnDarkButton}" Margin="0,0,16,0"
+                    <Button x:Name="SettingsButton" Style="{StaticResource OnDarkButton}" Margin="0,0,14,0"
                             Content="{Binding [SettingsButton], Source={x:Static local:LocalizationManager.Instance}}"
                             Click="SettingsButton_Click"
                             automation:AutomationProperties.Name="{Binding [SettingsAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
-                    <TextBlock Text="{Binding [LanguageLabel], Source={x:Static local:LocalizationManager.Instance}}"
-                               Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,8,0" />
-                    <ComboBox x:Name="LanguagePicker" Width="112" Height="34" Margin="0,0,16,0"
+                    <!--
+                        The language dropdown carries no "Langue" caption any more: it shows the
+                        current language by name and lists the others, which reads as a language
+                        picker on its own. Dropping the word frees the header room the protection
+                        toggle needs at the minimum window width. Screen readers still announce it
+                        through AutomationProperties.Name.
+                    -->
+                    <ComboBox x:Name="LanguagePicker" Width="108" Height="34" Margin="0,0,14,0"
                               VerticalContentAlignment="Center" Padding="7,0"
                               DisplayMemberPath="NativeName" SelectedValuePath="Code"
                               SelectionChanged="LanguagePicker_SelectionChanged"
                               automation:AutomationProperties.Name="{Binding [LanguagePickerAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
+                    <!--
+                        Real-time ransomware protection. Moved out of the "run a scan" sidebar, where
+                        it read as a minor scan option, into the header beside the "Analyse locale"
+                        status badge: it is a persistent protection an operator should see the state
+                        of from any screen, and the one feature that writes to disk. Same x:Name and
+                        handlers as before, so the behaviour is unchanged — only the placement.
+                    -->
+                    <CheckBox x:Name="RansomwareProtection" Style="{StaticResource HeaderProtectionToggle}"
+                              Margin="0,0,14,0"
+                              Content="{Binding [RansomwareProtectionShort], Source={x:Static local:LocalizationManager.Instance}}"
+                              ToolTip="{Binding [RansomwareProtectionTooltip], Source={x:Static local:LocalizationManager.Instance}}"
+                              automation:AutomationProperties.Name="{Binding [RansomwareProtectionToggle], Source={x:Static local:LocalizationManager.Instance}}"
+                              Checked="RansomwareProtection_Checked" Unchecked="RansomwareProtection_Unchecked" />
                     <Border Background="#163A2D" CornerRadius="14" Padding="12,6">
                         <TextBlock Text="{Binding [LocalAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
                                    Foreground="#86EFAC" FontWeight="SemiBold" />
@@ -97,6 +122,13 @@
                         </ListBox.ItemTemplate>
                     </ListBox>
 
+                    <!--
+                        Scan controls only. Real-time ransomware protection used to sit here as a
+                        lone checkbox under the button, which framed a persistent, disk-writing
+                        protection as one more scan option; it now lives in the header. What stays
+                        here belongs to the on-demand scan: the flagged-only filter and the run
+                        button.
+                    -->
                     <StackPanel Grid.Row="2" Margin="4,12,4,2">
                         <CheckBox x:Name="FlaggedOnly" IsChecked="True" Margin="2,0,2,10"
                                   Content="{Binding [FlaggedOnly], Source={x:Static local:LocalizationManager.Instance}}"
@@ -105,10 +137,6 @@
                                 Content="{Binding [StartAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
                                 Click="ScanButton_Click"
                                 automation:AutomationProperties.Name="{Binding [StartAnalysisAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
-                        <CheckBox x:Name="RansomwareProtection" Margin="2,16,2,0"
-                                  Content="{Binding [RansomwareProtectionToggle], Source={x:Static local:LocalizationManager.Instance}}"
-                                  ToolTip="{Binding [RansomwareProtectionTooltip], Source={x:Static local:LocalizationManager.Instance}}"
-                                  Checked="RansomwareProtection_Checked" Unchecked="RansomwareProtection_Unchecked" />
                     </StackPanel>
                 </Grid>
             </Border>

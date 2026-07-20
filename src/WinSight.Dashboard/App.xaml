@@ -123,5 +123,83 @@
             <Setter Property="Foreground" Value="#E2E8F0" />
             <Setter Property="BorderBrush" Value="#334155" />
         </Style>
+
+        <!--
+            The real-time ransomware protection toggle. It lives in the header rather than the
+            "run a scan" sidebar because it is a persistent protection, not an on-demand check,
+            and it is the only feature that writes to disk (decoy files) — so it earns a permanent,
+            honest on/off state the operator can read from any screen. Green means armed.
+
+            A retemplated CheckBox, so the existing Checked/Unchecked handlers keep working
+            unchanged; the whole pill is the hit target and the knob slides on toggle. Off, it
+            matches the OnDark button beside it so it reads as part of the header, not a loud alarm.
+        -->
+        <Style x:Key="HeaderProtectionToggle" TargetType="CheckBox">
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid>
+                            <Border x:Name="Pill" CornerRadius="17" Padding="12,7"
+                                    Background="#1E293B" BorderBrush="#334155" BorderThickness="1">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Path x:Name="Shield" Width="14" Height="15" Stretch="Uniform"
+                                          Fill="#64748B" VerticalAlignment="Center"
+                                          Data="M12 2 L20 5 V11 C20 16 16.5 20.5 12 22 C7.5 20.5 4 16 4 11 V5 Z" />
+                                    <TextBlock x:Name="Label" Margin="8,0,10,0" VerticalAlignment="Center"
+                                               FontSize="13" FontWeight="SemiBold" Foreground="#94A3B8"
+                                               Text="{TemplateBinding Content}" />
+                                    <Border x:Name="Track" Width="38" Height="20" CornerRadius="10" Background="#475569">
+                                        <Ellipse x:Name="Knob" Width="14" Height="14" Fill="#CBD5E1"
+                                                 HorizontalAlignment="Left" Margin="3,0,0,0">
+                                            <Ellipse.RenderTransform>
+                                                <TranslateTransform x:Name="KnobShift" X="0" />
+                                            </Ellipse.RenderTransform>
+                                        </Ellipse>
+                                    </Border>
+                                </StackPanel>
+                            </Border>
+                            <Border x:Name="FocusRing" CornerRadius="17" Opacity="0" IsHitTestVisible="False"
+                                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="2" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Pill" Property="Background" Value="#12351F" />
+                                <Setter TargetName="Pill" Property="BorderBrush" Value="#15803D" />
+                                <Setter TargetName="Label" Property="Foreground" Value="#86EFAC" />
+                                <Setter TargetName="Shield" Property="Fill" Value="#4ADE80" />
+                                <Setter TargetName="Track" Property="Background" Value="#22C55E" />
+                                <Setter TargetName="Knob" Property="Fill" Value="White" />
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobShift" Storyboard.TargetProperty="X"
+                                                             To="18" Duration="0:0:0.16" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="KnobShift" Storyboard.TargetProperty="X"
+                                                             To="0" Duration="0:0:0.16" />
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Pill" Property="Opacity" Value="0.88" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="FocusRing" Property="Opacity" Value="1" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Application.Resources>
 </Application>
