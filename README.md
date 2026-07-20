@@ -31,9 +31,18 @@ Each validated on real Windows (not only CI):
   reconciliation of what changed while WinSight was not running. Detect-and-alert only;
   blocking the write needs a signed kernel driver (deferred). See
   [`docs/GUARDIAN_DESIGN.md`](docs/GUARDIAN_DESIGN.md).
+- **Ransomware behavior detection** (RansomWhere-class, Phase 4) — **opt-in**: hidden decoy
+  files in your Documents/Desktop/Pictures, plus rename/delete-burst and entropy-on-write
+  heuristics, raising a loud alert the moment something behaves like ransomware. Detect-and-alert
+  only; stopping the write needs a signed kernel driver (deferred). See
+  [`docs/RANSOMWARE_DESIGN.md`](docs/RANSOMWARE_DESIGN.md).
 
-Everything is read-only / observe-and-decide, local-only, no telemetry. Next: broader live
-persistence coverage, then ransomware behavior (Phase 4).
+Local-only, no telemetry. Everything observes and reports rather than acting on its own; the two
+exceptions are explicit and opt-in — the firewall only blocks what you tell it to, and ransomware
+protection is the single feature that *writes* (its decoys), which is why it stays off until you
+turn it on and removes them when you turn it off.
+
+Next: naming the *process* behind a detection, and Arm64 runtime validation.
 
 ## Why this exists (landscape snapshot reviewed 2026-07-14)
 
@@ -94,10 +103,13 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
   (`RegNotifyChangeKeyValue`) + Startup/Tasks folders, verdict via the existing Authenticode
   path. Detect-and-alert only; *blocking* the write still needs a minifilter (cert required).
   See `docs/GUARDIAN_DESIGN.md`.
-- **Phase 4 Ransomware canary** (RansomWhere-class): the pure heuristics core has landed
-  (Shannon-entropy "looks encrypted" scoring + a bounded burst detector); canary files, the
-  file-system watcher and the dashboard alert follow. True *interception* needs a minifilter
-  (cert required). See `docs/RANSOMWARE_DESIGN.md`.
+- **Phase 4 Ransomware canary** (RansomWhere-class): shipped and validated end-to-end — hidden
+  decoys, rename/delete-burst detection, entropy-on-write scoring (gated so saving a .docx or a
+  .jpg never trips it), and an opt-in dashboard toggle with a loud alert. True *interception*
+  needs a minifilter (cert required). See `docs/RANSOMWARE_DESIGN.md`.
+- **Next, and both elevation-gated:** naming the *process* behind a detection (which PID wrote the
+  autostart entry or encrypted the files) needs an ETW file/registry provider or a driver; and
+  Arm64 runtime validation still has no hardware to run on — see `docs/ARM64_VALIDATION.md`.
 
 ## Stack (locked, see `docs/ARCHITECTURE.md`)
 
