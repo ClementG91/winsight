@@ -2,6 +2,23 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Ransomware protection re-arms after an alert instead of going silent for the session
+- Found by testing the installed build end-to-end on a real machine, not by reading the code: after
+  the first alert (a touched canary or a rename/delete burst), `RansomwareBurstDetector` stayed
+  "fired" forever — by design it fires once per burst, but nothing ever called `Reset()`. A second
+  wave of encryption, or a burst the operator missed the first time, produced no further alert for
+  the rest of the session. For a security tool, a silence that no longer means "nothing is
+  happening" is worse than not alerting at all. `RansomwareMonitor` now re-arms the detector right
+  after forwarding each `Detected` event, so the next burst or canary touch alerts again. A new test
+  (`Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`) touches the canary twice and asserts two
+  separate alerts.
+- Diagnosed via a from-scratch, step-by-step trace (subscribe → Start → FileSystemWatcher event →
+  classify → burst detector → Dispatcher.Invoke → ShowBalloonTip) that confirmed every step up to
+  and including `ShowBalloonTip` returning successfully; the earlier appearance of "no alert" during
+  investigation was Windows' own per-app toast throttling after many rapid manual tests in the same
+  session, not a code defect — confirmed by Guardian's independently-working alert also going quiet
+  under the same conditions.
+
 ### The dashboard now records crashes instead of vanishing
 - Investigating a reported crash during analysis turned up something worse than the crash: the app
   had **no unhandled-exception handling at all** — no `DispatcherUnhandledException`, no

@@ -50,8 +50,15 @@ public sealed class RansomwareMonitor : IDisposable
         _watcher.Start();
     }
 
-    private void OnWatcherDetected(object? sender, RansomwareDetectedEventArgs e) =>
+    private void OnWatcherDetected(object? sender, RansomwareDetectedEventArgs e)
+    {
         Detected?.Invoke(this, e);
+        // The detector fires once per burst by design (so a single burst is one alert, not one per
+        // file). Without re-arming here, the FIRST alert of the whole session would be the ONLY one
+        // ever raised — a second wave of encryption, or a burst the operator missed, would go
+        // completely silent. Re-arm right after notifying, so the next burst/touch alerts again.
+        _watcher.Detector.Reset();
+    }
 
     public void Dispose()
     {

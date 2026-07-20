@@ -192,4 +192,49 @@ public sealed class RansomwareMonitorTests
             Directory.Delete(dir, recursive: true);
         }
     }
+
+    [Fact]
+    public void Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires()
+    {
+        // A security tool that alerts once per session and then goes quiet is worse than one that
+        // never alerted: the operator would trust a silence that no longer means "nothing happened".
+        var dir = Path.Combine(Path.GetTempPath(), $"wsg-mon-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+
+        var detections = new System.Collections.Concurrent.ConcurrentQueue<RansomwareDetectedEventArgs>();
+        var first = new ManualResetEventSlim(false);
+        var second = new ManualResetEventSlim(false);
+        var monitor = new RansomwareMonitor(new[] { dir });
+        monitor.Detected += (_, e) =>
+        {
+            detections.Enqueue(e);
+            if (detections.Count == 1)
+            {
+                first.Set();
+            }
+            else if (detections.Count == 2)
+            {
+                second.Set();
+            }
+        };
+        try
+        {
+            monitor.Start();
+            var canary = Assert.Single(monitor.Canaries);
+
+            File.AppendAllText(canary, "first-touch");
+            Assert.True(first.Wait(TimeSpan.FromSeconds(5)), "the first canary touch never alerted");
+
+            // The decoy is gone after a real touch is fine to keep touching for this test; what
+            // matters is that the detector — not the canary — is ready to fire again immediately.
+            File.AppendAllText(canary, "second-touch");
+            Assert.True(second.Wait(TimeSpan.FromSeconds(5)),
+                "a second touch after the first alert produced no second alert — the detector did not re-arm");
+        }
+        finally
+        {
+            monitor.Dispose();
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }
