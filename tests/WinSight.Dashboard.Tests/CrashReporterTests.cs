@@ -94,9 +94,28 @@ public sealed class CrashReporterTests
         CrashReporter.Prune(Path.Combine(Path.GetTempPath(), $"gone-{Guid.NewGuid():N}"));
 
     [Fact]
-    public void TryCapture_NeverThrows_EvenOnAnUnwritableTarget()
+    public void TryCapture_WritesAReport_IntoTheGivenDirectory()
+    {
+        // Deliberately NOT the real LogDirectory: a test must never leave files in the user's own
+        // application data. An earlier version of this test did exactly that.
+        var dir = TempDir();
+        try
+        {
+            CrashReporter.TryCapture(new InvalidOperationException("boom"), "test", dir);
+
+            var report = Assert.Single(Directory.GetFiles(dir, "crash-*.log"));
+            Assert.Contains("boom", File.ReadAllText(report), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryCapture_NeverThrows_EvenOnAnUnusableTarget()
     {
         // Reporting must never become the thing that crashes the app.
-        CrashReporter.TryCapture(new InvalidOperationException("boom"), "test");
+        CrashReporter.TryCapture(new InvalidOperationException("boom"), "test", "\0:\\invalid<>path");
     }
 }
