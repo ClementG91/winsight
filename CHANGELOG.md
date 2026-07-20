@@ -2,6 +2,25 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Nothing is cut off at the smallest window size any more
+- Found while checking whether the results list scrolls (it always has — a `DataGrid` brings its own
+  scrolling, and so does the tool list). The real defect was next to it: shrink the window to the
+  minimum it advertised and the bottom of the page was clipped, taking the guidance text and the
+  *Open file* / *Copy* / *Export* buttons with it. No scrollbar appeared, so there was no way to
+  reach them at all. With the outbound-firewall controls on screen the results grid collapsed to
+  nothing as well.
+- Three causes, three fixes. The action buttons sat in an `Auto` column, which a Grid grants the
+  width it asks for and then lets overflow, so at narrow widths they starved the guidance text down
+  to a sliver that wrapped one character per line and still spilled the last button off the edge;
+  their width is now capped at "the panel minus the width the text needs", which keeps the single
+  row wherever one fits and wraps only where it does not. The results grid had a 200px floor that
+  stopped the star-sized row from yielding, so the page overflowed instead of the grid shrinking.
+  And `MinHeight` claimed 680 when the content genuinely needs 750, which is what it now says.
+- Deliberately not fixed with a page-level `ScrollViewer`. That was tried first and is worse than
+  the problem: measuring inside one makes the available height unbounded, so the star-sized row
+  grows to its full content height, the results grid loses the internal scrolling it had, and the
+  guidance panel is pushed off-screen. Verified on a real machine before reverting it.
+
 ### The alert journal is now readable from the dashboard, not just from disk
 - Journalling a detection that only a text editor can read solves half the problem. "Alertes
   récentes" is a normal entry in the tool catalog, so the same list, filter, detail pane and JSON

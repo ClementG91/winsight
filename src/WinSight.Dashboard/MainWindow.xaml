@@ -5,8 +5,18 @@
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         Title="{Binding [WindowTitle], Source={x:Static local:LocalizationManager.Instance}}"
         Icon="Assets/winsight-logo.png" Height="860" Width="1220"
-        MinHeight="680" MinWidth="960" Background="#F1F5F9"
+        MinHeight="750" MinWidth="960" Background="#F1F5F9"
         WindowStartupLocation="CenterScreen">
+    <!--
+        MinHeight is 750, not the 680 it claimed for a long time, because 680 was never true. With
+        the outbound-firewall controls on screen the content rows alone need more than 680 leaves
+        them, so the page overflowed and the bottom — the guidance text and its action buttons —
+        was cut off with no way to scroll to it. Declaring the height the layout actually needs is
+        what keeps every control reachable at the smallest size the window will accept.
+    -->
+    <Window.Resources>
+        <local:RemainingWidthConverter x:Key="RemainingWidth" />
+    </Window.Resources>
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="78" />
@@ -198,7 +208,17 @@
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Row="4" MinHeight="200" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">
+                <!--
+                    No MinHeight here on purpose. This row is star-sized, so it already fills
+                    whatever the content rows leave and a floor buys nothing in the normal case. In
+                    the tight case it actively hurts: when the header, the firewall controls and the
+                    guidance panel together need more than the window has, a floor makes this row
+                    refuse to give way, so the Grid overflows and the bottom of the page — including
+                    the action buttons — is clipped with no way to scroll to it. Letting the row
+                    shrink keeps everything reachable; a cramped grid is a visible hint to enlarge
+                    the window, whereas silently unreachable buttons are not.
+                -->
+                <Border Grid.Row="4" Background="White" BorderBrush="#E2E8F0" BorderThickness="1" CornerRadius="12">
                     <DataGrid x:Name="ResultsGrid" AutoGenerateColumns="False" IsReadOnly="True"
                               CanUserAddRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                               BorderThickness="0" AlternatingRowBackground="#F8FAFC" SelectionMode="Single"
@@ -231,7 +251,7 @@
 
                 <Border Grid.Row="5" Margin="0,12,0,0" Background="White" BorderBrush="#E2E8F0"
                         BorderThickness="1" CornerRadius="12" Padding="14">
-                    <Grid>
+                    <Grid x:Name="GuidanceLayout">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
@@ -245,7 +265,17 @@
                             <TextBlock x:Name="SelectedFindingText" Margin="0,6,10,0" TextWrapping="Wrap"
                                        Foreground="#64748B" FontSize="12" />
                         </StackPanel>
-                        <WrapPanel Grid.Column="1" VerticalAlignment="Center">
+                        <!--
+                            The cap is "the panel minus the width the guidance text needs", so these
+                            keep their single row for as long as the window leaves room for one and
+                            wrap only when it does not. Without it a narrow window handed this Auto
+                            column the full width it asked for, left the text a sliver wrapping one
+                            character per line, and pushed the last buttons past the edge where they
+                            could not be clicked at all.
+                        -->
+                        <WrapPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   MaxWidth="{Binding ActualWidth, ElementName=GuidanceLayout,
+                                              Converter={StaticResource RemainingWidth}, ConverterParameter=260}">
                             <Button x:Name="BlockOutboundButton" IsEnabled="False" Margin="0,0,10,0" Padding="10,4"
                                     Background="#B91C1C" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
                                     Content="{Binding [BlockOutbound], Source={x:Static local:LocalizationManager.Instance}}"
