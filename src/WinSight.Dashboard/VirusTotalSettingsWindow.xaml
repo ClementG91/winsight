@@ -49,13 +49,17 @@
             </Grid.ColumnDefinitions>
             <Button Grid.Column="0" Content="{Binding [VtGetKey], Source={x:Static local:LocalizationManager.Instance}}"
                     Click="GetKeyButton_Click" />
-            <StackPanel Grid.Column="2" Orientation="Horizontal">
+            <!--
+                Confirming actions sit at the trailing edge, the destructive one furthest from them,
+                with the same gutter the rest of the app uses.
+            -->
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,-8,0">
                 <Button Content="{Binding [VtDisable], Source={x:Static local:LocalizationManager.Instance}}"
-                        Click="DisableButton_Click" />
+                        Margin="0,0,8,0" Click="DisableButton_Click" />
                 <Button Content="{Binding [Cancel], Source={x:Static local:LocalizationManager.Instance}}"
-                        IsCancel="True" />
+                        Margin="0,0,8,0" IsCancel="True" />
                 <Button Content="{Binding [VtSave], Source={x:Static local:LocalizationManager.Instance}}"
-                        Background="#2563EB" Foreground="White" BorderThickness="0"
+                        Style="{StaticResource PrimaryButton}" Margin="0,0,8,0"
                         IsDefault="True" Click="SaveButton_Click" />
             </StackPanel>
         </Grid>

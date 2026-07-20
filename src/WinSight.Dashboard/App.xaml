@@ -3,10 +3,125 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              Startup="Application_Startup">
     <Application.Resources>
+        <!--
+            One place for the surface colours the windows share, so a card, a border and a button
+            edge cannot drift apart over time the way five hand-written paddings did.
+        -->
         <SolidColorBrush x:Key="AccentBrush" Color="#2563EB" />
-        <Style TargetType="Button">
-            <Setter Property="Padding" Value="14,7" />
-            <Setter Property="Margin" Value="4,0" />
+        <SolidColorBrush x:Key="AccentPressedBrush" Color="#1D4ED8" />
+        <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="SurfaceEdgeBrush" Color="#CBD5E1" />
+        <SolidColorBrush x:Key="TextBrush" Color="#0F172A" />
+        <SolidColorBrush x:Key="DangerBrush" Color="#B91C1C" />
+        <SolidColorBrush x:Key="SuccessBrush" Color="#15803D" />
+
+        <!--
+            The gutter every group of buttons uses. Buttons carry it as a right/bottom margin and
+            their container cancels the trailing edge with a negative margin, which is what keeps the
+            gaps identical whether a row wraps or not — the alternative, hand-set margins per button,
+            is exactly how this UI ended up with four different spacings.
+        -->
+        <Thickness x:Key="ButtonGutterMargin">0,0,8,8</Thickness>
+        <Thickness x:Key="ButtonGutterCompensation">0,0,-8,-8</Thickness>
+
+        <Style x:Key="AppButton" TargetType="Button">
+            <Setter Property="Height" Value="34" />
+            <Setter Property="MinWidth" Value="88" />
+            <Setter Property="Padding" Value="12,0" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="FontSize" Value="13" />
+            <!--
+                Neutral weight by default. Only the coloured variants below carry SemiBold, so
+                emphasis marks the button that acts rather than every button equally — which also
+                keeps the secondary row narrow enough to leave the guidance text room to breathe.
+            -->
+            <Setter Property="FontWeight" Value="Normal" />
+            <Setter Property="Background" Value="{StaticResource SurfaceBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource SurfaceEdgeBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="SnapsToDevicePixels" Value="True" />
+            <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <!--
+                            Hover and press are a translucent layer over whatever colour the button
+                            already is, rather than a second palette per variant. One template then
+                            covers the white, blue, red and green buttons and they all react
+                            identically — no variant can be forgotten when a colour changes.
+                        -->
+                        <Grid>
+                            <Border x:Name="Chrome" CornerRadius="8"
+                                    Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="{TemplateBinding BorderThickness}"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Border x:Name="StateLayer" CornerRadius="7" Background="#0F172A" Opacity="0" />
+                                    <ContentPresenter Margin="{TemplateBinding Padding}"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                      RecognizesAccessKey="True" />
+                                </Grid>
+                            </Border>
+                            <!--
+                                A visible keyboard focus ring: the default WPF dotted rectangle is
+                                invisible against these surfaces, and the whole app is navigable
+                                without a mouse.
+                            -->
+                            <Border x:Name="FocusRing" CornerRadius="8" Opacity="0" IsHitTestVisible="False"
+                                    BorderBrush="{StaticResource AccentBrush}" BorderThickness="2" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="StateLayer" Property="Opacity" Value="0.06" />
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="StateLayer" Property="Opacity" Value="0.14" />
+                            </Trigger>
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="FocusRing" Property="Opacity" Value="1" />
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="Chrome" Property="Opacity" Value="0.45" />
+                                <Setter Property="Cursor" Value="Arrow" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Every button in the app is this one unless it opts into a variant below. -->
+        <Style TargetType="Button" BasedOn="{StaticResource AppButton}" />
+
+        <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource AppButton}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{StaticResource AccentBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource AppButton}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{StaticResource DangerBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style x:Key="SuccessButton" TargetType="Button" BasedOn="{StaticResource AppButton}">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Background" Value="{StaticResource SuccessBrush}" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <!-- Sits on the dark header bar, where a white button would shout louder than the content. -->
+        <Style x:Key="OnDarkButton" TargetType="Button" BasedOn="{StaticResource AppButton}">
+            <Setter Property="Background" Value="#1E293B" />
+            <Setter Property="Foreground" Value="#E2E8F0" />
+            <Setter Property="BorderBrush" Value="#334155" />
         </Style>
     </Application.Resources>
 </Application>

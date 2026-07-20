@@ -2,6 +2,24 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Buttons follow one shared style instead of a dozen hand-written ones
+- The dashboard had accumulated five different paddings (`12,0`, `12,5`, `10,4`, `14,7` and the
+  default), four margin schemes, `MinWidth`s of 90, 120 and 150 picked per button, heights of 32, 42
+  and unset, and default square WPF chrome sitting inside cards with 12px rounded corners. Each was
+  reasonable when it was written; together they read as unfinished.
+- `App.xaml` now holds the whole button system — one base style plus `Primary`, `Danger`, `Success`
+  and `OnDark` variants — shared by the dashboard and the settings window. Hover and press are a
+  translucent state layer over whatever colour the button already is, so one template covers every
+  variant and none can be forgotten when a colour changes. Keyboard focus draws a real accent ring:
+  the WPF default is a dotted rectangle that is invisible against these surfaces, and the app is
+  meant to be navigable without a mouse.
+- Spacing is a single 8px gutter carried by the buttons, with the container cancelling the trailing
+  edge via a negative margin. That is what keeps the gaps identical whether a row wraps or not —
+  per-button margins are exactly how the four different spacings appeared in the first place.
+- Emphasis now means something: only the coloured variants are SemiBold. Beyond the hierarchy it
+  reads better, it also keeps the secondary row narrow enough that the guidance text beside it is
+  not squeezed.
+
 ### Nothing is cut off at the smallest window size any more
 - Found while checking whether the results list scrolls (it always has — a `DataGrid` brings its own
   scrolling, and so does the tool list). The real defect was next to it: shrink the window to the

@@ -42,14 +42,13 @@
                     </StackPanel>
                 </StackPanel>
                 <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button x:Name="SettingsButton" Height="32" Margin="0,0,16,0" Padding="12,0"
-                            VerticalContentAlignment="Center"
+                    <Button x:Name="SettingsButton" Style="{StaticResource OnDarkButton}" Margin="0,0,16,0"
                             Content="{Binding [SettingsButton], Source={x:Static local:LocalizationManager.Instance}}"
                             Click="SettingsButton_Click"
                             automation:AutomationProperties.Name="{Binding [SettingsAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                     <TextBlock Text="{Binding [LanguageLabel], Source={x:Static local:LocalizationManager.Instance}}"
-                               Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,7,0" />
-                    <ComboBox x:Name="LanguagePicker" Width="112" Height="32" Margin="0,0,14,0"
+                               Foreground="#CBD5E1" VerticalAlignment="Center" Margin="0,0,8,0" />
+                    <ComboBox x:Name="LanguagePicker" Width="112" Height="34" Margin="0,0,16,0"
                               VerticalContentAlignment="Center" Padding="7,0"
                               DisplayMemberPath="NativeName" SelectedValuePath="Code"
                               SelectionChanged="LanguagePicker_SelectionChanged"
@@ -102,10 +101,9 @@
                         <CheckBox x:Name="FlaggedOnly" IsChecked="True" Margin="2,0,2,10"
                                   Content="{Binding [FlaggedOnly], Source={x:Static local:LocalizationManager.Instance}}"
                                   ToolTip="{Binding [FlaggedOnlyTooltip], Source={x:Static local:LocalizationManager.Instance}}" />
-                        <Button x:Name="ScanButton" Height="42"
+                        <Button x:Name="ScanButton" Style="{StaticResource PrimaryButton}" Height="42" FontSize="14"
                                 Content="{Binding [StartAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
-                                Background="#2563EB" Foreground="White" BorderThickness="0"
-                                FontWeight="SemiBold" Click="ScanButton_Click"
+                                Click="ScanButton_Click"
                                 automation:AutomationProperties.Name="{Binding [StartAnalysisAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
                         <CheckBox x:Name="RansomwareProtection" Margin="2,16,2,0"
                                   Content="{Binding [RansomwareProtectionToggle], Source={x:Static local:LocalizationManager.Instance}}"
@@ -183,25 +181,32 @@
                         <TextBlock x:Name="FirewallControlsHint" Margin="0,3,0,0" FontSize="12" Foreground="#64748B"
                                    TextWrapping="Wrap"
                                    Text="{Binding [FirewallControlsHint], Source={x:Static local:LocalizationManager.Instance}}" />
-                        <WrapPanel Margin="0,10,0,0">
-                            <Button x:Name="FirewallBlockAppButton" Margin="0,4,10,4" Padding="12,5" MinWidth="120"
+                        <!--
+                            The negative right/bottom margin cancels the gutter the last button in
+                            each row carries, so the group ends flush with the panel edge no matter
+                            where it wraps. Sizing and padding come from the shared button style;
+                            the per-button MinWidths this panel used to carry (90, 120, 150) made
+                            the row look hand-assembled at every width.
+                        -->
+                        <WrapPanel Margin="0,12,-8,-8">
+                            <Button x:Name="FirewallBlockAppButton" Margin="{StaticResource ButtonGutterMargin}"
                                     Content="{Binding [FirewallBlockApp], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallBlockAppButton_Click" />
-                            <Button x:Name="FirewallAllowSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
+                            <Button x:Name="FirewallAllowSelectedButton" Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
                                     Content="{Binding [FirewallAllowSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallAllowSelectedButton_Click" />
-                            <Button x:Name="FirewallBlockSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
+                            <Button x:Name="FirewallBlockSelectedButton" Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
                                     Content="{Binding [FirewallBlockSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallBlockSelectedButton_Click" />
-                            <Button x:Name="FirewallRemoveSelectedButton" Margin="0,4,10,4" Padding="12,5" MinWidth="90" IsEnabled="False"
+                            <Button x:Name="FirewallRemoveSelectedButton" Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
                                     Content="{Binding [FirewallRemoveSelected], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallRemoveSelectedButton_Click" />
-                            <Button x:Name="FirewallEnableEnforcementButton" Margin="0,4,10,4" Padding="12,5" MinWidth="150"
-                                    Background="#15803D" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                            <Button x:Name="FirewallEnableEnforcementButton" Style="{StaticResource SuccessButton}"
+                                    Margin="{StaticResource ButtonGutterMargin}"
                                     Content="{Binding [FirewallEnableEnforcement], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallEnableEnforcementButton_Click" />
-                            <Button x:Name="FirewallEmergencyButton" Margin="0,4,0,4" Padding="12,5" MinWidth="150"
-                                    Background="#B91C1C" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                            <Button x:Name="FirewallEmergencyButton" Style="{StaticResource DangerButton}"
+                                    Margin="{StaticResource ButtonGutterMargin}"
                                     Content="{Binding [FirewallEmergencyDisable], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="FirewallEmergencyButton_Click" />
                         </WrapPanel>
@@ -259,10 +264,10 @@
                         <StackPanel>
                             <TextBlock Text="{Binding [WhatToDo], Source={x:Static local:LocalizationManager.Instance}}"
                                        FontWeight="SemiBold" Foreground="#0F172A" />
-                            <TextBlock x:Name="GuidanceText" Margin="0,4,10,0" TextWrapping="Wrap"
+                            <TextBlock x:Name="GuidanceText" Margin="0,4,16,0" TextWrapping="Wrap"
                                        Foreground="#475569"
                                        Text="{Binding [DefaultGuidance], Source={x:Static local:LocalizationManager.Instance}}" />
-                            <TextBlock x:Name="SelectedFindingText" Margin="0,6,10,0" TextWrapping="Wrap"
+                            <TextBlock x:Name="SelectedFindingText" Margin="0,6,16,0" TextWrapping="Wrap"
                                        Foreground="#64748B" FontSize="12" />
                         </StackPanel>
                         <!--
@@ -274,21 +279,22 @@
                             could not be clicked at all.
                         -->
                         <WrapPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Right"
+                                   Margin="0,0,-8,-8"
                                    MaxWidth="{Binding ActualWidth, ElementName=GuidanceLayout,
-                                              Converter={StaticResource RemainingWidth}, ConverterParameter=260}">
-                            <Button x:Name="BlockOutboundButton" IsEnabled="False" Margin="0,0,10,0" Padding="10,4"
-                                    Background="#B91C1C" Foreground="White" BorderThickness="0" FontWeight="SemiBold"
+                                              Converter={StaticResource RemainingWidth}, ConverterParameter=240}">
+                            <Button x:Name="BlockOutboundButton" Style="{StaticResource DangerButton}"
+                                    Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
                                     Content="{Binding [BlockOutbound], Source={x:Static local:LocalizationManager.Instance}}"
                                     ToolTip="{Binding [BlockOutboundTooltip], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="BlockOutboundButton_Click" />
-                            <Button x:Name="OpenLocationButton"
-                                    Content="{Binding [OpenFile], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
+                            <Button x:Name="OpenLocationButton" Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
+                                    Content="{Binding [OpenFile], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="OpenLocationButton_Click" />
-                            <Button x:Name="CopyButton"
-                                    Content="{Binding [CopyDetails], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
+                            <Button x:Name="CopyButton" Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
+                                    Content="{Binding [CopyDetails], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="CopyButton_Click" />
-                            <Button x:Name="ExportButton"
-                                    Content="{Binding [ExportJson], Source={x:Static local:LocalizationManager.Instance}}" IsEnabled="False"
+                            <Button x:Name="ExportButton" Margin="{StaticResource ButtonGutterMargin}" IsEnabled="False"
+                                    Content="{Binding [ExportJson], Source={x:Static local:LocalizationManager.Instance}}"
                                     Click="ExportButton_Click" />
                         </WrapPanel>
                     </Grid>
