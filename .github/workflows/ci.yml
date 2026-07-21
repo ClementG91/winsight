@@ -1,3 +1,23 @@
+# Two jobs, deliberately independent.
+#
+# `package` used to declare `needs: build-test`, and the wall clock was 8m18 — 2m37 of build and
+# test, then 5m38 of packaging that had been waiting for it. Nothing was being reused: the package
+# job runs Build-Release.ps1, which publishes from source itself. The dependency only serialised two
+# jobs that had no relationship. Run together, the same work lands in about 5m40, the length of the
+# longest job.
+#
+# The trade is that a commit whose tests fail still gets packaged, spending runner minutes on an
+# artifact nobody wants. Acceptable here: minutes are free on a public repository, superseded pushes
+# are cancelled by the concurrency group, and nothing publishable escapes because release.yml builds
+# and tests the tagged source itself before it will produce a release.
+#
+# Why formatting and the dependency audit stay inside build-test rather than becoming a third job:
+# `build-test` is the required status check on main, so moving those steps out would leave the
+# required check unable to fail on a formatting violation — protection quietly weakened while
+# looking unchanged. Splitting them would also not shorten anything, because `package` dominates the
+# wall clock either way. It is worth doing only alongside adding the new job to the branch's
+# required checks, which is a repository settings change.
+
 name: ci
 
 on:
@@ -14,6 +34,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The job id is the status-check name main's branch protection requires. Do not rename it, and do
+  # not give it a `name:` — that would change the check name and silently stop the rule matching.
   build-test:
     runs-on: windows-latest
     timeout-minutes: 25
@@ -29,15 +51,17 @@ jobs:
       - name: Restore
         run: dotnet restore winsight.sln
 
+      # Cheapest checks first: a formatting violation or a vulnerable package should not wait behind
+      # a build and a full test run to be reported.
       - name: Verify formatting
         run: dotnet format winsight.sln --verify-no-changes --no-restore
-
-      - name: Build
-        run: dotnet build winsight.sln -c Release --no-restore
 
       - name: Audit NuGet dependencies
         shell: pwsh
         run: ./scripts/Test-VulnerablePackages.ps1
+
+      - name: Build
+        run: dotnet build winsight.sln -c Release --no-restore
 
       - name: Test
         run: dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=tests-x64"
@@ -51,7 +75,6 @@ jobs:
           if-no-files-found: ignore
 
   package:
-    needs: build-test
     strategy:
       fail-fast: false
       matrix:
