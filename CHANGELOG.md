@@ -2,6 +2,26 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The "nothing leaves this PC" promise is now proven by tests, not just asserted in the README
+- Coverage had never been measured. Measuring it found that `VirusTotalEnricher` — the only code in
+  WinSight that can send anything off the machine — had **no tests at all**. Its guards (lookups must
+  be switched on *and* a key present) were load-bearing for the product's central privacy claim and
+  entirely unverified.
+- The first attempt at tests would have been worthless: asserting "the result came back empty" also
+  passes when a request was made and merely failed, so deleting a guard would not have failed
+  anything. `Lookup` now takes an injectable stand-in for the client — the pattern already used for
+  the journal's path and the burst detector's clock — and the tests assert the lookup was never
+  *reached*. Confirmed by deliberately breaking the guard and watching the test go red. The real
+  client is also now constructed only after the guards pass and there is something to ask about, so
+  a scan that will not use it no longer opens one.
+- `scripts/Measure-Coverage.ps1` makes this repeatable, with a per-assembly breakdown and an
+  `-EngineMinimum` gate. It reports the detection libraries separately on purpose: the uncovered
+  code is concentrated in WFP P/Invoke declarations, the service host and WPF code-behind, which
+  unit tests genuinely cannot reach (VM validation and the packaged-installer tests cover those).
+  Engine libraries sit at **84.1%**, every one of them above 80; shipped code overall is 63.7%.
+  Chasing that global number would mean writing assertions against P/Invoke signatures — a number,
+  not confidence.
+
 ### The alert journal is reachable over MCP, so a connected LLM sees what protection already caught
 - The MCP server exposed the ten machine scanners but not the alert journal added in #91: a connected
   model could scan the machine's current state yet not read what WinSight's real-time protection had

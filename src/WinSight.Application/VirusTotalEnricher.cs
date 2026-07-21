@@ -11,6 +11,22 @@ internal static class VirusTotalEnricher
     public static IReadOnlyDictionary<string, VtVerdict> Lookup(
         IEnumerable<string> imagePaths,
         bool allowNetworkLookups,
+        CancellationToken cancellationToken) =>
+        Lookup(imagePaths, allowNetworkLookups, lookup: null, cancellationToken);
+
+    /// <param name="lookup">Stands in for the live VirusTotal client; production passes null.</param>
+    /// <remarks>
+    /// This is the only code in WinSight that can send anything off the machine, so its guards are
+    /// worth proving rather than inferring. An empty result is not proof: a request that simply
+    /// failed returns empty too, so a test asserting "nothing came back" would keep passing even if
+    /// a guard were deleted. Injecting the call lets a test assert the lookup was never *reached*.
+    /// The real client is constructed only once every guard has passed and there is something to
+    /// ask about, so no HttpClient is created for a scan that will not use it.
+    /// </remarks>
+    internal static IReadOnlyDictionary<string, VtVerdict> Lookup(
+        IEnumerable<string> imagePaths,
+        bool allowNetworkLookups,
+        Func<string, CancellationToken, VtVerdict?>? lookup,
         CancellationToken cancellationToken)
     {
         var results = new Dictionary<string, VtVerdict>(StringComparer.OrdinalIgnoreCase);
@@ -24,7 +40,6 @@ internal static class VirusTotalEnricher
             return results;
         }
 
-        var client = new VirusTotalClient(apiKey);
         // A per-scan cap bounds latency even for premium keys. The persistent,
         // cross-process limiter additionally protects Community minute/day/month
         // allowances and fails closed when accounting cannot be persisted.
@@ -39,6 +54,12 @@ internal static class VirusTotalEnricher
             }
         }
 
+        if (candidates.Count == 0)
+        {
+            return results;
+        }
+
+        var resolve = lookup ?? new VirusTotalClient(apiKey).Lookup;
         foreach (var candidateGroup in candidates
                      .GroupBy(candidate => candidate.Sha256, StringComparer.OrdinalIgnoreCase)
                      .Take(cap))
@@ -48,7 +69,7 @@ internal static class VirusTotalEnricher
             {
                 break;
             }
-            if (client.Lookup(candidateGroup.Key, cancellationToken) is not { } verdict)
+            if (resolve(candidateGroup.Key, cancellationToken) is not { } verdict)
             {
                 continue;
             }
