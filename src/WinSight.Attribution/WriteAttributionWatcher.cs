@@ -37,7 +37,21 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
     /// until cancelled. Blocking; run on its own thread. Throws
     /// <see cref="UnauthorizedAccessException"/> when not elevated.
     /// </summary>
-    public void Watch(Action<WriteObservation> onWrite, CancellationToken token)
+    public void Watch(Action<WriteObservation> onWrite, CancellationToken token) =>
+        Watch(onWrite, onUnattributed: null, token);
+
+    /// <summary>
+    /// As above, additionally reporting writes that were seen but could not be attributed.
+    /// </summary>
+    /// <remarks>
+    /// Dropping an unattributable write is right; dropping it <i>silently</i> is how a monitor
+    /// comes to look healthy while seeing nothing. A caller that wants to know its own blind spots
+    /// passes <paramref name="onUnattributed"/>.
+    /// </remarks>
+    public void Watch(
+        Action<WriteObservation> onWrite,
+        Action<UnattributedWrite>? onUnattributed,
+        CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(onWrite);
 
@@ -84,16 +98,25 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
 
         void Record(int processId, DateTime timeStamp, string? target)
         {
+            var whenUtc = timeStamp.ToUniversalTime();
             if (target is null)
             {
+                onUnattributed?.Invoke(
+                    new UnattributedWrite(whenUtc, processId, null, UnattributedReason.UnresolvedTarget));
                 return;
             }
-            // Unattributed means the process started before this session and never told us its
-            // command line. Naming it anyway would be worse than staying quiet: the whole value of
-            // attribution is that the name is right.
+            // An unknown process means it was never announced, or its write reached us before its
+            // start event did. Naming it anyway would be worse than staying quiet: the whole value
+            // of attribution is that the name is right. It is still reported as unattributed, so
+            // the blind spot is visible rather than silent.
             if (processes.Resolve(processId) is { } image)
             {
-                onWrite(new WriteObservation(timeStamp.ToUniversalTime(), processId, image, target));
+                onWrite(new WriteObservation(whenUtc, processId, image, target));
+            }
+            else
+            {
+                onUnattributed?.Invoke(
+                    new UnattributedWrite(whenUtc, processId, target, UnattributedReason.UnknownProcess));
             }
         }
 
@@ -106,11 +129,29 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
         session.Source.Kernel.RegistryKCBRundownEnd += e => keys.Track(e.KeyHandle, e.KeyName);
         session.Source.Kernel.RegistryKCBDelete += e => keys.Forget(e.KeyHandle);
 
-        void RecordRegistry(Microsoft.Diagnostics.Tracing.Parsers.Kernel.RegistryTraceData e) =>
-            Record(
-                e.ProcessID,
-                e.TimeStamp,
-                normalizer.NormalizeRegistryKey(keys.Resolve(e.KeyHandle, e.KeyName)));
+        void RecordRegistry(Microsoft.Diagnostics.Tracing.Parsers.Kernel.RegistryTraceData e)
+        {
+            // Two different failures hide behind "no target", and telling them apart is the whole
+            // point of reporting misses: a handle the kernel never announced is a coverage gap in
+            // the key bookkeeping, while a key that resolved but would not translate is a gap in
+            // the path mapping. Carrying the kernel's own spelling through lets the caller see
+            // which, instead of both looking like silence.
+            var kernelKey = keys.Resolve(e.KeyHandle, e.KeyName);
+            if (kernelKey is null)
+            {
+                onUnattributed?.Invoke(new UnattributedWrite(
+                    e.TimeStamp.ToUniversalTime(), e.ProcessID, null, UnattributedReason.UnresolvedTarget));
+                return;
+            }
+            var target = normalizer.NormalizeRegistryKey(kernelKey);
+            if (target is null)
+            {
+                onUnattributed?.Invoke(new UnattributedWrite(
+                    e.TimeStamp.ToUniversalTime(), e.ProcessID, kernelKey, UnattributedReason.UnresolvedTarget));
+                return;
+            }
+            Record(e.ProcessID, e.TimeStamp, target);
+        }
 
         // Writes only. Opening or querying a key is not a change, and recording reads would drown
         // the index in exactly the traffic it must not hold.

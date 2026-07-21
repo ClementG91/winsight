@@ -196,12 +196,38 @@ public static class Adapters
             startupFolders.Any(folder => path.Contains(folder, StringComparison.OrdinalIgnoreCase));
 
         Console.WriteLine("Watching registry writes and startup-folder writes (ETW), Ctrl+C to stop.");
+        var attributed = 0;
+        var unknownProcess = 0;
+        var unresolvedTarget = 0;
         try
         {
             new WriteAttributionWatcher(IsStartupFile).Watch(
-                observation => Console.WriteLine(
-                    $"  {Path.GetFileName(observation.ExecutablePath)} (pid {observation.ProcessId})  →  {observation.Target}"),
+                observation =>
+                {
+                    attributed++;
+                    Console.WriteLine(
+                        $"  {Path.GetFileName(observation.ExecutablePath)} (pid {observation.ProcessId})  →  {observation.Target}");
+                },
+                // Printed as well as counted: a watcher that only shows what it managed to attribute
+                // cannot be told apart from one that is missing everything.
+                miss =>
+                {
+                    if (miss.Reason == UnattributedReason.UnknownProcess)
+                    {
+                        unknownProcess++;
+                        Console.WriteLine($"  [unknown process {miss.ProcessId}]  →  {miss.Target}");
+                    }
+                    else
+                    {
+                        unresolvedTarget++;
+                        Console.WriteLine(miss.Target is null
+                            ? $"  [unannounced key handle, pid {miss.ProcessId}]"
+                            : $"  [untranslatable key, pid {miss.ProcessId}]  →  {miss.Target}");
+                    }
+                },
                 cts.Token);
+            Console.WriteLine(
+                $"attributed {attributed}, unknown process {unknownProcess}, unresolved target {unresolvedTarget}");
             return 0;
         }
         catch (UnauthorizedAccessException)

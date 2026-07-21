@@ -24,6 +24,10 @@ public sealed class KernelPathNormalizer
     private const string MachineHive = "MACHINE";
     private const string UserHive = "USER";
 
+    // The Windows Container namespace, which is how user-hive writes actually arrive.
+    private const string ContainerHive = "WC";
+    private const string UserSiloSuffix = "user_sid";
+
     private readonly Dictionary<string, string> _deviceToDrive;
     private readonly string? _currentUserSid;
 
@@ -116,6 +120,10 @@ public sealed class KernelPathNormalizer
         {
             return Join("HKLM", rest);
         }
+        if (hive.Equals(ContainerHive, StringComparison.OrdinalIgnoreCase))
+        {
+            return NormalizeSiloKey(rest);
+        }
         if (!hive.Equals(UserHive, StringComparison.OrdinalIgnoreCase))
         {
             return null;
@@ -137,6 +145,38 @@ public sealed class KernelPathNormalizer
             return Join("HKCU", underSid);
         }
         return Join($"HKU\\{sid}", underSid);
+    }
+
+    /// <summary>
+    /// Translates a key reached through a registry silo, e.g.
+    /// <c>\REGISTRY\WC\Silo{guid}user_sid\Software\…</c>.
+    /// </summary>
+    /// <remarks>
+    /// Found by watching a live machine rather than by reading documentation: a plain write to
+    /// <c>HKCU\Software\…</c> arrived under <c>\REGISTRY\WC\</c> — the Windows Container namespace —
+    /// not under <c>\REGISTRY\USER\</c> at all. Windows routes user-hive access through a silo, so a
+    /// normaliser that only knew the two documented hives silently refused every user-hive write
+    /// while machine-hive writes sailed through. The scan looked partly healthy, which is the worst
+    /// kind of broken.
+    ///
+    /// Only the shape actually observed is accepted: a silo segment ending in <c>user_sid</c> means
+    /// the rest is the current user's hive. Anything else in this namespace is refused rather than
+    /// guessed at — a silo can belong to a container whose "user hive" is not this user's at all,
+    /// and attributing a container's write to the operator would be a lie.
+    /// </remarks>
+    private string? NormalizeSiloKey(string rest)
+    {
+        if (rest.Length == 0)
+        {
+            return null;
+        }
+        var separator = rest.IndexOf('\\');
+        var silo = separator < 0 ? rest : rest[..separator];
+        var underSilo = separator < 0 ? string.Empty : rest[(separator + 1)..];
+
+        return silo.EndsWith(UserSiloSuffix, StringComparison.OrdinalIgnoreCase)
+            ? Join("HKCU", underSilo)
+            : null;
     }
 
     private static string Join(string hive, string rest) =>

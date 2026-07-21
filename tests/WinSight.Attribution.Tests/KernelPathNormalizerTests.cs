@@ -135,6 +135,40 @@ public sealed class KernelPathNormalizerTests
     }
 
     [Fact]
+    public void RegistryKey_TranslatesTheSiloNamespaceUserHive()
+    {
+        // Found on a live machine, not in documentation: a plain write to HKCU arrives under the
+        // Windows Container namespace, not under \REGISTRY\USER at all. Before this, every
+        // user-hive write was silently refused while machine-hive writes sailed through.
+        Assert.Equal(
+            @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+            Normalizer().NormalizeRegistryKey(
+                @"\REGISTRY\WC\Silocae75ac5-1a6e-a65b-f9f9-0b3c7d07e4e0user_sid\Software\Microsoft\Windows\CurrentVersion\Run"));
+    }
+
+    [Fact]
+    public void RegistryKey_TranslatesTheSiloNamespaceRegardlessOfCase()
+    {
+        // The kernel reports these in both cases, sometimes upper-cased entirely.
+        Assert.Equal(
+            @"HKCU\SOFTWARE\WINSIGHTDIAGKEY",
+            Normalizer().NormalizeRegistryKey(
+                @"\REGISTRY\WC\SILOCAE75AC5-1A6E-A65B-F9F9-0B3C7D07E4E0USER_SID\SOFTWARE\WINSIGHTDIAGKEY"));
+    }
+
+    [Fact]
+    public void RegistryKey_RefusesASiloThatIsNotTheUsersHive()
+    {
+        // A silo can belong to a container whose "user hive" is not this user's at all. Attributing
+        // a container's write to the operator would be a lie, so anything but the observed
+        // user-hive shape is refused rather than guessed at.
+        Assert.Null(Normalizer().NormalizeRegistryKey(
+            @"\REGISTRY\WC\Silo123-machine\Software\Foo"));
+        Assert.Null(Normalizer().NormalizeRegistryKey(@"\REGISTRY\WC\"));
+        Assert.Null(Normalizer().NormalizeRegistryKey(@"\REGISTRY\WC"));
+    }
+
+    [Fact]
     public void HiveNamesAreMatchedRegardlessOfCase()
     {
         // Kernel paths are not consistently cased between providers and Windows versions.

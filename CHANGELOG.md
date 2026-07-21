@@ -74,11 +74,28 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   observation within seconds, leaving it full and useless at the moment a detection asked it a
   question. Registry writes are not filtered — they are orders of magnitude rarer and are where
   persistence lives.
-- **Known gap, stated plainly:** writes from some processes are still dropped rather than
-  attributed, including ones deliberately triggered during testing. The guard that drops an
-  unattributable write is correct — a wrong process name beside a security finding is worse than
-  none — but the reason those processes are missing from the index is not yet established, and a
-  short-lived writer is exactly the case that matters most. Increment 3 starts there.
+- **A watcher that cannot say what it missed is indistinguishable from one that is broken.** The
+  first version silently discarded every write it could not attribute — the same shape of defect as
+  the signature verifier that swallowed its child's stderr. `Watch` now optionally reports
+  unattributable writes with the reason: an unknown process, an unannounced key handle, or a key
+  that resolved but would not translate. That is a feature, not scaffolding: an operator who is
+  told "four hundred writes seen, twelve unattributed" can calibrate; one told nothing cannot.
+- **It immediately found a real defect that reading documentation would not have.** Every
+  user-hive write was being refused. A plain write to `HKCU\Software\…` does not arrive as
+  `\REGISTRY\USER\{sid}\…` at all — it arrives as
+  `\REGISTRY\WC\Silo{guid}user_sid\Software\…`, the Windows Container namespace, because Windows
+  routes user-hive access through a silo. Machine-hive writes sailed through the whole time, so the
+  watcher looked *partly* healthy, which is the worst kind of broken. The normaliser now translates
+  that shape, and only that shape: a silo whose segment does not end in `user_sid` is refused rather
+  than guessed at, because a container's hive is not the operator's. Verified live afterwards —
+  `powershell.exe (pid 2856) → HKCU\Software\Microsoft\SystemCertificates\…` — with untranslatable
+  keys dropping from thirteen to three in the same sample.
+- **Known limit, measured rather than estimated:** in that same sample, 5,774 writes could not be
+  resolved because the kernel never announced their key handle — the key was already open when the
+  session started. Keys opened *during* a session resolve correctly, so a long-running monitor
+  recovers as keys are reopened, but a short observation window sees a large blind spot. This is
+  now visible in the numbers instead of being invisible, which is the prerequisite for fixing it.
+  Increment 3 starts there.
 
 ### The scan that gives every other kernel finding its meaning
 - The drivers scan can say a kernel driver is unsigned. It cannot say whether that *matters*. On a
