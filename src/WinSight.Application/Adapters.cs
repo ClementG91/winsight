@@ -370,8 +370,25 @@ public static class Adapters
 
     public static ToolReport Hosts(bool flaggedOnly)
     {
-        var entries = new HostsReader().Snapshot();
+        var snapshot = new HostsReader().Read();
+        var entries = snapshot.Entries;
         var b = new ToolReport.Builder("hosts");
+        // Reported as a finding, not a footnote. The hosts file is world-readable on Windows, so a
+        // refusal means its permissions were changed — which is precisely what someone who has just
+        // pointed a bank or an update server at their own address would do next. Rendering that as
+        // "0 entries, 0 flagged" would hand them a clean bill of health.
+        if (snapshot.Unreadable)
+        {
+            b.Add(
+                Severity.Notable,
+                "hosts file could not be read",
+                $"{HostsReader.DefaultPath()} exists but access was denied; its contents are unknown",
+                new Dictionary<string, string?>
+                {
+                    ["path"] = HostsReader.DefaultPath(),
+                    ["unreadable"] = bool.TrueString,
+                });
+        }
         foreach (var e in entries.Where(e => !flaggedOnly || e.Notable)
                      .OrderByDescending(e => e.Notable)
                      .ThenBy(e => e.Hostname, StringComparer.OrdinalIgnoreCase))
@@ -389,7 +406,9 @@ public static class Adapters
                     ["isSensitive"] = e.IsSensitive.ToString(),
                 });
         }
-        return b.Build($"{entries.Count} hosts entry(ies), {entries.Count(e => e.Notable)} flagged");
+        return b.Build(snapshot.Unreadable
+            ? "hosts file exists but could not be read; its contents are unknown"
+            : $"{entries.Count} hosts entry(ies), {entries.Count(e => e.Notable)} flagged");
     }
 
     /// <summary>

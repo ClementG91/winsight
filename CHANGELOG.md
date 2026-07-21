@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### An unreadable hosts file used to report as a clean one
+- Continuing the audit that produced v0.9.1, applied to the rest of the scanners. `HostsReader`
+  answered a file it could not open with an empty list, so the report read **"0 hosts entry(ies),
+  0 flagged"** — indistinguishable from a machine with nothing in its hosts file.
+- **This one is a detection, not just honest reporting.** On Windows the hosts file is readable by
+  every user by default. If WinSight cannot read it, its permissions were changed — which is
+  precisely the next move for someone who has just pointed a bank or an update server at their own
+  address. It is now a `Notable` finding in its own right, and the summary says the contents are
+  unknown rather than implying they are clean.
+- A genuinely **absent** hosts file is reported as absent and stays quiet: Windows works fine
+  without one, and conflating "no file" with "refused" would only trade one false reassurance for a
+  false alarm.
+
 ## v0.9.1, 2026-07-22
 
 A corrective release. Every item below is a case of WinSight **looking healthy while seeing

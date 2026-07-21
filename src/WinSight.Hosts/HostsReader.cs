@@ -1,5 +1,17 @@
 namespace WinSight.Hosts;
 
+/// <summary>The hosts file's active entries, and what reading it actually did.</summary>
+/// <param name="Entries">The active mappings. Empty when the file could not be read.</param>
+/// <param name="Unreadable">
+/// True when the file exists but could not be opened. On Windows it is world-readable by default,
+/// so this is itself worth reporting rather than a missing detail.
+/// </param>
+/// <param name="Missing">True when there is no hosts file, which is normal and harmless.</param>
+public sealed record HostsSnapshot(
+    IReadOnlyList<HostEntry> Entries,
+    bool Unreadable,
+    bool Missing);
+
 /// <summary>
 /// Reads and parses the Windows hosts file into its active entries. Read-only. Parsing
 /// is a pure static so it can be tested without touching the real file; the default
@@ -16,15 +28,41 @@ public sealed class HostsReader(string? path = null)
         return Path.Combine(systemRoot, "System32", "drivers", "etc", "hosts");
     }
 
-    public IReadOnlyList<HostEntry> Snapshot()
+    /// <summary>The active entries, or an empty list when the file could not be read.</summary>
+    /// <remarks>
+    /// Kept for callers that only want the entries. Prefer <see cref="Read"/>: an empty list here
+    /// cannot be told apart from a file nobody was allowed to open.
+    /// </remarks>
+    public IReadOnlyList<HostEntry> Snapshot() => Read().Entries;
+
+    /// <summary>The active entries, and whether the file could be read at all.</summary>
+    /// <remarks>
+    /// <b>Why the distinction is a security signal, not just bookkeeping.</b> On Windows the hosts
+    /// file is readable by every user by default. A scan that returns nothing therefore means one of
+    /// two very different things: the file has no active entries, or something changed its
+    /// permissions. The second is exactly what an attacker who has just pointed a banking or update
+    /// domain at their own address would want, and reporting it as "0 entries, 0 flagged" hands
+    /// them a clean bill of health.
+    /// </remarks>
+    public HostsSnapshot Read()
     {
         try
         {
-            return Parse(File.ReadLines(_path));
+            return new HostsSnapshot(Parse(File.ReadLines(_path)), Unreadable: false, Missing: false);
+        }
+        catch (FileNotFoundException)
+        {
+            // Genuinely absent is not suspicious: Windows works fine without the file, and it is
+            // materially different from "present but refused".
+            return new HostsSnapshot(Array.Empty<HostEntry>(), Unreadable: false, Missing: true);
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return new HostsSnapshot(Array.Empty<HostEntry>(), Unreadable: false, Missing: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return Array.Empty<HostEntry>();
+            return new HostsSnapshot(Array.Empty<HostEntry>(), Unreadable: true, Missing: false);
         }
     }
 
