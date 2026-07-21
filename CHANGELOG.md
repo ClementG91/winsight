@@ -53,6 +53,25 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   of them through that path at once, which is why it surfaced now — and it is not cosmetic: it hid
   both genuinely unsigned drivers above until the environment was cleaned.
 
+### Signature verification was failing open, silently, and hiding real findings
+- Found while reviewing the drivers scan: it reported four flagged drivers here but six on the
+  machine that built it. Same binary, same machine, same minute — the difference was **which shell
+  launched it**.
+- `AuthenticodeVerifier` shells out to Windows PowerShell, and a child inherits the parent's
+  environment including `PSModulePath`. Launched from a PowerShell 7 session it pointed at PS7's
+  module directories; Windows PowerShell 5.1 then failed to import
+  `Microsoft.PowerShell.Security`, so `Get-AuthenticodeSignature` did not exist and the command
+  produced no output at all. Every catalog-signed file degraded to `Unknown`.
+- **The failure was invisible twice over**: `Unknown` is deliberately never treated as suspicious,
+  and the child's stderr is discarded. So the scan looked healthy while 450 kernel drivers came
+  back as 269 trusted / 177 unknown instead of 444 trusted / 2 unsigned — and **two genuinely
+  unsigned kernel drivers were simply absent from the results**. This affected every scanner that
+  verifies a signature, not just the new one: persistence, processes, modules, keyboard filters.
+- Fixed by pinning the child's `PSModulePath` to Windows PowerShell's own module directory.
+  Regression tests deliberately pollute the variable first — a test that only ran in a clean
+  environment would never have caught this — and were confirmed by removing the fix and watching
+  them fail.
+
 ### Camera/mic alerting verified on real hardware, and the alert made readable
 - Verified end-to-end at last, by driving real device acquisitions rather than reasoning about them.
   **Microphone:** a real hardware transition produced `MicrophoneActivated` in the journal 1.5s

@@ -197,13 +197,33 @@ public sealed class AuthenticodeVerifier : ISignatureVerifier
             Environment.GetFolderPath(Environment.SpecialFolder.System),
             "WindowsPowerShell", "v1.0", "powershell.exe");
 
-        using var p = Process.Start(new ProcessStartInfo(exe, $"-NoProfile -NonInteractive -EncodedCommand {encoded}")
+        var start = new ProcessStartInfo(exe, $"-NoProfile -NonInteractive -EncodedCommand {encoded}")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
-        }) ?? throw new InvalidOperationException("powershell did not start");
+        };
+
+        // Pin the child's module path to Windows PowerShell's own.
+        //
+        // A child process inherits the parent's environment, and PSModulePath is the one variable
+        // that breaks this call. Launched from a PowerShell 7 session it points at PS7's module
+        // directories; Windows PowerShell 5.1 then autoloads PS7's Microsoft.PowerShell.Security,
+        // the import fails, and Get-AuthenticodeSignature does not exist. The command produces no
+        // output, so every catalog-signed file degrades to Unknown — and because Unknown is
+        // deliberately never treated as suspicious, the whole check fails *open and silently*.
+        //
+        // Measured on one machine, same binary, same minute: 450 registered kernel drivers came
+        // back as 269 trusted / 177 unknown / 4 flagged with the inherited path, and 444 trusted /
+        // 2 unsigned / 6 flagged with this line in place. Two genuinely unsigned kernel drivers
+        // were invisible. Every scanner that verifies a signature was affected, not just one.
+        start.Environment["PSModulePath"] = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "Modules");
+
+        using var p = Process.Start(start)
+            ?? throw new InvalidOperationException("powershell did not start");
 
         // Cancellation kills the child immediately (closing its pipes ends the read).
         using var registration = cancellationToken.Register(static state => TryKill((Process)state!), p);
