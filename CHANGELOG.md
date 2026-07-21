@@ -2,6 +2,36 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The camera/microphone monitor now actually alerts someone
+- `CameraMicMonitor` describes itself as an OverSight-class real-time monitor and has done for a
+  long time — but nothing ever hosted it. Its only caller was a CLI watch command that prints to a
+  console, so someone using the app was never told their webcam had turned on, which is the entire
+  point of that class. The detection engine was finished; the lifecycle around it was missing.
+- `AvWatchHost` supplies it, the way `GuardianHost` does for persistence: the dashboard now hosts
+  the poll loop for as long as it runs, raises a tray balloon when an app **activates** the webcam
+  or microphone, and journals both activation and release so the record shows how long something
+  was watching or listening. Releases do not raise a balloon — a device being freed is not a
+  security event.
+- It runs unconditionally rather than behind an opt-in, because it is read-only: it polls the
+  capability records Windows already keeps. Ransomware protection stays opt-in because it alone
+  writes. Localised across the three languages, and covered by lifecycle tests for the two risks a
+  hosted poll loop actually has: a leaked thread, and an unsafe second start or dispose.
+
+### A tool-by-tool comparison against Objective-See, and the plan that follows
+- New `docs/OBJECTIVE_SEE_PARITY.md`. WinSight is at **parity on the five tools that matter most** —
+  BlockBlock and KnockKnock (Guardian and the persistence scan), LuLu (WFP outbound firewall),
+  RansomWhere (canaries and burst detection) and OverSight (the camera/mic watch above) — while
+  being one app instead of six, and it carries scanners Objective-See has no equivalent for (MCP,
+  DNS cache, browser extensions, trusted roots, hosts, the alert journal).
+- The genuine gaps, ranked by security value per unit of work: **process attribution** (in progress
+  — a detection says what changed, never who), **keylogger/input-hook detection** (ReiKey-class, no
+  coverage at all, no elevation needed), **loaded kernel drivers** (KextViewr-class, exactly what a
+  rootkit leaves behind), then DLL-hijack analysis, a per-process drill-down view, and
+  physical-access detection.
+- Two things are deliberately *not* planned, and the document says so rather than implying them
+  away: blocking file/registry writes needs a signed minifilter and an EV certificate, and a
+  signature-info shell extension means putting a crash surface in every Explorer window.
+
 ### Process attribution, increment 1: the pure core that says *who* touched something
 - Today a detection says *what* changed, never *who* changed it — the single biggest gap left in the
   product. Naming the process needs a kernel ETW session, which needs elevation, so the work starts

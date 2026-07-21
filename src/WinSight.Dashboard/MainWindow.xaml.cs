@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using WinSight.Application;
+using WinSight.AvMonitor;
 using WinSight.Firewall;
 using WinSight.Persistence;
 using WinSight.Ransomware;
@@ -28,6 +29,9 @@ public partial class MainWindow : Window, IDisposable
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
     private readonly PersistenceMonitor _guardian = GuardianHost.CreateDefault();
+    // Read-only like Guardian, so it runs unconditionally: it only reads the capability records
+    // Windows already keeps. Ransomware protection stays opt-in because it alone writes.
+    private readonly AvWatchHost _avWatch = new();
     // Opt-in: created only when the operator enables ransomware protection, because it is the one
     // feature that WRITES (decoy files) into their personal folders. Null means off, nothing planted.
     private RansomwareMonitor? _ransomware;
@@ -77,6 +81,7 @@ public partial class MainWindow : Window, IDisposable
     /// </summary>
     private void StartGuardian()
     {
+        StartCameraMicWatch();
         _guardian.Detected += OnGuardianDetected;
         Task.Run(() =>
         {
@@ -91,6 +96,54 @@ public partial class MainWindow : Window, IDisposable
                 // Monitoring is best-effort: if the initial scan cannot run, the dashboard still
                 // works and the on-demand persistence scan is unaffected.
             }
+        });
+    }
+
+    /// <summary>
+    /// Begins real-time camera/microphone watching for as long as the dashboard runs.
+    /// </summary>
+    /// <remarks>
+    /// The detector existed but nothing hosted it, so "your webcam just turned on" — the signal an
+    /// OverSight-class monitor exists to give — never reached anyone using the app. Only activations
+    /// raise a balloon; a device being released is not a security event, though both are journalled
+    /// so the record shows how long something was watching or listening.
+    /// </remarks>
+    private void StartCameraMicWatch()
+    {
+        _avWatch.Detected += OnCameraMicDetected;
+        _avWatch.Start();
+    }
+
+    private void OnCameraMicDetected(object? sender, DeviceEvent e)
+    {
+        var usage = e.Usage;
+        // Journal first, for the same reason as every other detection: Windows may drop the balloon
+        // and a detection that leaves no trace is indistinguishable from no detection.
+        AlertJournal.Append(new SecurityAlert(
+            DateTimeOffset.Now,
+            "Camera/Mic",
+            $"{usage.Kind}{(e.Kind == AvEventKind.Activated ? "Activated" : "Deactivated")}",
+            usage.App));
+
+        if (e.Kind != AvEventKind.Activated)
+        {
+            return;
+        }
+
+        var message = usage.Kind == DeviceKind.Webcam
+            ? Text["AvWebcamActivated"]
+            : Text["AvMicrophoneActivated"];
+        Dispatcher.Invoke(() =>
+        {
+            if (_disposed)
+            {
+                return;
+            }
+            _trayIcon.ShowBalloonTip(
+                5000,
+                Text["AvBalloonTitle"],
+                $"{usage.App} — {message}",
+                Forms.ToolTipIcon.Warning);
         });
     }
 
@@ -776,6 +829,8 @@ public partial class MainWindow : Window, IDisposable
         StopRansomwareProtection(); // removes any planted decoys before we go
         _guardian.Detected -= OnGuardianDetected;
         _guardian.Dispose();
+        _avWatch.Detected -= OnCameraMicDetected;
+        _avWatch.Dispose();
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _applicationIcon?.Dispose();
