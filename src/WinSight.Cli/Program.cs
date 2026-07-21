@@ -21,6 +21,7 @@ using WinSight.Reporting;
 //   winsight mcp                        local read-only MCP stdio server
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight dns --watch                live DNS queries via ETW (Administrator)
+//   winsight attribution --watch        who writes autostart entries, via ETW (Administrator)
 //   winsight ... --flagged              only noteworthy items
 //   winsight ... --json                 machine-readable output (GUI/automation)
 
@@ -48,6 +49,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight mcp                            local read-only MCP stdio server
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
           winsight dns --watch                    live DNS queries via ETW (Administrator)
+          winsight attribution --watch            who writes autostart entries (Administrator)
 
         Options:
           --flagged     only noteworthy items
@@ -73,6 +75,11 @@ if ((command is "av" or "avmonitor") && args.Contains("--watch"))
 {
     return Adapters.WatchCameraMic();
 }
+if (command == "attribution" && args.Contains("--watch"))
+{
+    return Adapters.WatchAttribution();
+}
+
 if (command == "dns" && args.Contains("--watch"))
 {
     return Adapters.WatchDns();

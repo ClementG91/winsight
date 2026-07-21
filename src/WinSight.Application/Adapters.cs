@@ -1,3 +1,4 @@
+using WinSight.Attribution;
 using WinSight.AvMonitor;
 using WinSight.Browser;
 using WinSight.Certificates;
@@ -165,6 +166,48 @@ public static class Adapters
             var device = e.Usage.Kind == DeviceKind.Webcam ? "webcam" : "mic";
             var verb = e.Kind == AvEventKind.Activated ? "ON " : "OFF";
             Console.WriteLine($"  [{verb}] {device}, {e.Usage.App}");
+        }
+    }
+
+    /// <summary>
+    /// Runs the live write-attribution watcher, printing who writes what until Ctrl+C.
+    /// </summary>
+    /// <remarks>
+    /// The observation vehicle for attribution: a detection says a Run key appeared, this says which
+    /// program wrote it. File writes are narrowed to the startup folders, because the point is to
+    /// show persistence being installed, not to print every file the machine touches.
+    /// </remarks>
+    public static int WatchAttribution()
+    {
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        var startupFolders = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup),
+        }.Where(folder => !string.IsNullOrWhiteSpace(folder)).ToArray();
+
+        bool IsStartupFile(string path) =>
+            startupFolders.Any(folder => path.Contains(folder, StringComparison.OrdinalIgnoreCase));
+
+        Console.WriteLine("Watching registry writes and startup-folder writes (ETW), Ctrl+C to stop.");
+        try
+        {
+            new WriteAttributionWatcher(IsStartupFile).Watch(
+                observation => Console.WriteLine(
+                    $"  {Path.GetFileName(observation.ExecutablePath)} (pid {observation.ProcessId})  →  {observation.Target}"),
+                cts.Token);
+            return 0;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine("Live attribution (ETW) requires Administrator privileges.");
+            return 1;
         }
     }
 

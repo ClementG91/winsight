@@ -5,4 +5,8 @@
   <ItemGroup>
     <InternalsVisibleTo Include="WinSight.Attribution.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" />
+    <ProjectReference Include="..\WinSight.NetMonitor\WinSight.NetMonitor.csproj" />
+  </ItemGroup>
 </Project>

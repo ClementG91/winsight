@@ -53,6 +53,33 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   of them through that path at once, which is why it surfaced now — and it is not cosmetic: it hid
   both genuinely unsigned drivers above until the environment was cleaned.
 
+### Process attribution, increment 2: the live ETW session, and what testing it actually found
+- The watcher that answers *who*, not just *what*: an elevated kernel session that reports registry
+  and file writes already attributed to the process that made them, feeding the correlation core
+  from increment 1. Available as `winsight attribution --watch` (Administrator), which is also how
+  it was verified — the dashboard wiring follows in the next increment.
+- **Registry ETW does not report the key you would recognise, and the first version failed
+  silently because of it.** A write names a *key control block* handle plus, at most, a name
+  relative to it; the full path is announced separately when the kernel opens the key. Run
+  elevated, that first version printed a healthy-looking burst of fully-qualified keys and then
+  recorded nothing at all — the burst was only the rundown of keys already open, and every live
+  write went past unresolved. It looked like it was working. `RegistryKeyResolver` now keeps the
+  kernel's announcements and joins them, which turned live capture on: verified with a real write
+  arriving as `HKLM\SOFTWARE\…\CPSS\DevicePolicy\AllowTelemetry`, attributed to the process.
+- Increment 1's path translation was confirmed against reality in the same run: `\REGISTRY\MACHINE`
+  read back as `HKLM\`, the current user's hive as `HKCU\`, and the `_Classes` companion hive stayed
+  distinct as `HKU\{sid}_Classes` — the decision that was argued for in tests, now observed.
+- File writes are filtered at the source, and the default filter accepts nothing. A busy machine
+  writes thousands of files a second; feeding those into a bounded index would evict every useful
+  observation within seconds, leaving it full and useless at the moment a detection asked it a
+  question. Registry writes are not filtered — they are orders of magnitude rarer and are where
+  persistence lives.
+- **Known gap, stated plainly:** writes from some processes are still dropped rather than
+  attributed, including ones deliberately triggered during testing. The guard that drops an
+  unattributable write is correct — a wrong process name beside a security finding is worse than
+  none — but the reason those processes are missing from the index is not yet established, and a
+  short-lived writer is exactly the case that matters most. Increment 3 starts there.
+
 ### The scan that gives every other kernel finding its meaning
 - The drivers scan can say a kernel driver is unsigned. It cannot say whether that *matters*. On a
   machine with test signing turned on, an unsigned driver is not an anomaly at all — it is the
