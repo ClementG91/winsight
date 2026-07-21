@@ -10,7 +10,7 @@ public sealed class AdaptersTests
         var expected = new[]
         {
             "persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts",
-            "input", "drivers", "integrity",
+            "input", "drivers", "integrity", "hijack",
         };
 
         Assert.Equal(expected.Order(), Adapters.SnapshotCommands.Order());

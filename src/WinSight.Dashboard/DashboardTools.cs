@@ -48,6 +48,7 @@ public static class DashboardTools
         Tool("Input", "input", "input"),
         Tool("Integrity", "integrity", "integrity"),
         Tool("Drivers", "drivers", "drivers"),
+        Tool("Hijack", "hijack", "hijack"),
         Tool("Alerts", "alerts", "alerts"),
     ];
 

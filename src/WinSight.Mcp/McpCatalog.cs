@@ -31,6 +31,7 @@ public static class McpCatalog
         new("input", "Kernel drivers positioned to see every keystroke or mouse movement.", true),
         new("integrity", "Whether driver signing, memory integrity and Secure Boot are actually enforced.", true),
         new("drivers", "Registered kernel-mode drivers, their load disposition and signature verdicts.", false),
+        new("hijack", "Services whose unquoted command line lets an earlier executable run in their place.", true),
     ];
 
     public static string CapabilitiesJson(bool sensitiveEnabled) => JsonSerializer.Serialize(new

@@ -22,5 +22,6 @@
     <ProjectReference Include="..\WinSight.CodeIntegrity\WinSight.CodeIntegrity.csproj" />
     <ProjectReference Include="..\WinSight.Attribution\WinSight.Attribution.csproj" />
     <ProjectReference Include="..\WinSight.Drivers\WinSight.Drivers.csproj" />
+    <ProjectReference Include="..\WinSight.Hijack\WinSight.Hijack.csproj" />
   </ItemGroup>
 </Project>

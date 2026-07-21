@@ -2,6 +2,42 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### `hijack`: services another program could run in place of — a vector macOS does not have
+- Parity gap #4, and the one place a Windows tool should be *ahead* of the Objective-See family
+  rather than catching up. Windows registers a service as a **command line**, not a path, so an
+  unquoted `C:\Program Files\My App\svc.exe` is attempted as `C:\Program.exe` first. Anyone able to
+  create that earlier file gets their code run by the service's account — usually SYSTEM, at boot,
+  before anyone logs in. No elevation needed to detect it: the services key is world-readable.
+- **The candidate list is the finding.** "This path is unquoted" is a lint result; "anyone who can
+  write `C:\Program.exe` owns this SYSTEM service" is something an operator can act on. The exact
+  sequence Windows tries is computed as a pure function with its own tests, because naming the wrong
+  path sends someone to inspect an innocent file.
+- **Graded by real exploitability, not flagged uniformly.** Unquoted service paths are common and
+  nearly all of them sit under Program Files where nothing unprivileged can be planted; flagging
+  them equally produces a wall nobody reads. **Latent** is `Info`, **Exploitable** (an earlier
+  candidate can be created now) and **Occupied** (it already exists) are `Notable`. Measured on a
+  real desktop: **1 finding out of ~700 services**, correctly graded Latent.
+- **Writability is settled by asking the filesystem, not by reading the DACL.** Effective access is
+  the sum of inherited allow and deny entries across every group plus overriding privileges, and
+  reconstructing that is exactly where this class of check gets it quietly wrong. The probe creates
+  a uniquely-named temporary file with `FileMode.CreateNew` and `DeleteOnClose`, so it never
+  overwrites a real candidate and never leaves litter in Program Files.
+- Wired through the CLI, MCP (14 scanners) and the dashboard in all three languages. **A fourth
+  MCP-count pinning site turned up** that earlier notes did not list —
+  `AdaptersTests.SnapshotCommands_AreUniqueAndComplete` — alongside the MCP integration test,
+  `scripts/Test-McpServer.ps1` and the catalog.
+
+### CI: `package` no longer waits for `build-test`
+- Measured, not guessed: the wall clock was **8m18** — 2m37 of build and test, then 5m38 of
+  packaging that had been queued behind it. Nothing was being reused, because the package job runs
+  `Build-Release.ps1` and publishes from source itself, so the dependency serialised two unrelated
+  jobs. Run together, the same work lands in about **5m40**, the length of the longest job.
+- Formatting and the dependency audit deliberately stay **inside** `build-test` rather than becoming
+  a third job: `build-test` is the required status check on `main`, so moving them out would leave
+  the required check unable to fail on a formatting violation — protection quietly weakened while
+  looking unchanged. They are reordered ahead of the build so a violation is reported without
+  waiting for a compile and a full test run.
+
 ### A Startup folder nobody could list used to report as an empty one
 - The same shape as the scheduled-tasks defect, in the other classic drop point. `StartupFolderEnumerator`
   answered a folder it could not list with an empty array, so a re-ACLed Startup folder — which is

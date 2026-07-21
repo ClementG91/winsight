@@ -25,7 +25,7 @@ Two structural differences shape everything below:
 | **TaskExplorer** | Process explorer with signatures, libraries, network | **Processes + Modules scans** | **Partial** — no single per-process drill-down view. |
 | **What's Your Sign?** | Signature info in the file manager | *(none)* | **Missing** — Explorer shell extension. |
 | **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** — filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
-| **DHS** | Dylib hijack scanner | **Modules scan** flags unsigned/untrusted loaded modules | **Partial** — no DLL search-order/phantom-DLL analysis. |
+| **DHS** | Dylib hijack scanner | **Hijack scan** grades pre-emptable service command lines; **modules scan** flags unsigned/untrusted loaded modules | **Partial** — unquoted-path hijacking is covered and graded by real exploitability; DLL search-order and phantom-DLL analysis are not. |
 | **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | *(none)* | **Missing** — lid/logon/USB-while-locked. |
 
@@ -82,10 +82,21 @@ Remaining, lower-value follow-up in the same area: an opt-in elevated pass that 
 resident set, and boot-configuration checks (test signing, DSE state) that give the flagged
 findings their context.
 
-### 4. DLL hijacking scan (DHS-class)
-Extend the modules work into a real search-order analysis: writable directories ahead of system
-ones on a process's search path, and phantom DLLs (imported-but-absent) that an attacker can drop
-in. Higher analysis effort than #2 and #3; build after them.
+### 4. Hijacking scan (DHS-class) — **partly shipped as the `hijack` scanner**
+The first and highest-signal half is done: **unquoted service command lines**, which is the
+Windows-specific vector with no macOS analogue at all. Windows registers a service as a command
+line, so `C:\Program Files\My App\svc.exe` unquoted is attempted as `C:\Program.exe` first, and
+whoever can write that path runs as SYSTEM at boot.
+
+The scan grades each finding by whether it is actually exploitable *on this machine* rather than
+listing every unquoted path: **Latent** (nothing writable ahead of it — the common, boring case),
+**Exploitable** (an earlier candidate can be created right now), **Occupied** (it already exists).
+Writability is settled by asking the filesystem, never by reconstructing effective access from the
+DACL, because that is where this class of check quietly gets it wrong. Measured on a real desktop:
+1 finding out of roughly 700 services, correctly graded Latent.
+
+Still open here: DLL search-order analysis proper — writable directories ahead of system ones on a
+process's search path, and phantom DLLs (imported-but-absent) an attacker can drop in.
 
 ### 5. Per-process drill-down (TaskExplorer-class)
 The data mostly exists across the processes, modules and connections scanners; what is missing is

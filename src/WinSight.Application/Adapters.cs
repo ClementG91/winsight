@@ -6,6 +6,7 @@ using WinSight.CodeIntegrity;
 using WinSight.Core;
 using WinSight.Drivers;
 using WinSight.Firewall;
+using WinSight.Hijack;
 using WinSight.Hosts;
 using WinSight.InputHooks;
 using WinSight.Modules;
@@ -24,11 +25,11 @@ namespace WinSight.Application;
 public static class Adapters
 {
     public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
-        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers", "integrity"],
+        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers", "integrity", "hijack"],
         StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> OverviewCommands { get; } =
-        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs", "input", "integrity"];
+        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs", "input", "integrity", "hijack"];
 
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
@@ -61,6 +62,7 @@ public static class Adapters
             "input" or "inputhooks" => InputHooks(flaggedOnly, cancellationToken),
             "integrity" or "ci" => CodeIntegrity(flaggedOnly),
             "drivers" or "drv" => Drivers(flaggedOnly, cancellationToken),
+            "hijack" or "hijacks" => Hijack(flaggedOnly, cancellationToken),
             "alerts" => Alerts(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
@@ -367,6 +369,58 @@ public static class Adapters
             ? "no real-time detections recorded yet"
             : $"{alerts.Count} recorded detection(s), newest first");
     }
+
+    /// <summary>
+    /// Services whose registered command line can be pre-empted by planting an executable earlier
+    /// in the path Windows searches.
+    /// </summary>
+    /// <remarks>
+    /// A privilege-escalation check rather than a persistence one, and the reason it belongs in a
+    /// Windows tool specifically: the vector does not exist on macOS, so nothing in the
+    /// Objective-See family has an equivalent. A service usually runs as SYSTEM and starts before
+    /// anyone logs in, so a writable earlier candidate is a straight path from ordinary user to
+    /// SYSTEM at boot.
+    ///
+    /// Kept in the balanced overview despite being a new tool, because it is small and specific:
+    /// one finding on the machine this was written on, out of roughly seven hundred services. The
+    /// large inventories (processes, modules, drivers) stay out of the overview for the opposite
+    /// reason.
+    /// </remarks>
+    public static ToolReport Hijack(bool flaggedOnly, CancellationToken cancellationToken = default)
+    {
+        var findings = new HijackScanner().Scan(cancellationToken);
+        var b = new ToolReport.Builder("hijack");
+        foreach (var f in findings.Where(f => !flaggedOnly || f.Exposure != HijackExposure.Latent))
+        {
+            b.Add(
+                // Latent is deliberately Info: unquoted paths are common, almost always sit under
+                // Program Files where nobody unprivileged can plant anything, and flagging them all
+                // equally would bury the one that is actually exploitable.
+                f.Exposure == HijackExposure.Latent ? Severity.Info : Severity.Notable,
+                $"{f.Service}",
+                HijackDetail(f),
+                new Dictionary<string, string?>
+                {
+                    ["service"] = f.Service,
+                    ["command"] = f.CommandLine,
+                    ["exposure"] = f.Exposure.ToString(),
+                    ["actionablePath"] = f.ActionablePath,
+                    ["candidates"] = string.Join(" | ", f.Candidates),
+                });
+        }
+        var exploitable = findings.Count(f => f.Exposure != HijackExposure.Latent);
+        return b.Build(
+            $"{findings.Count} service(s) with a pre-emptable command line, {exploitable} exploitable now");
+    }
+
+    private static string HijackDetail(HijackFinding finding) => finding.Exposure switch
+    {
+        HijackExposure.Occupied =>
+            $"{finding.ActionablePath} already exists and would run instead of {finding.CommandLine}",
+        HijackExposure.Exploitable =>
+            $"anyone who can write {finding.ActionablePath} would run instead of {finding.CommandLine}",
+        _ => $"unquoted path; Windows would try {finding.Candidates[0]} first, but it is not writable",
+    };
 
     public static ToolReport Hosts(bool flaggedOnly)
     {
