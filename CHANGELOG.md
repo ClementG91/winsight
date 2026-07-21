@@ -2,6 +2,36 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.9.1, 2026-07-22
+
+A corrective release. Every item below is a case of WinSight **looking healthy while seeing
+nothing** — the one failure mode a security tool must not have. All four were found the same way:
+by running the real CLI elevated and unelevated and comparing, rather than by reasoning about the
+code. Three of them were shipped in v0.9.0.
+
+**Scheduled tasks were entirely invisible unless you ran WinSight as Administrator.** A top-tier
+persistence vector, listed among the covered surfaces, returning zero rows and reading exactly like
+a clean machine — 0 unelevated against 104 elevated on a real desktop, including one item already
+flagged as suspicious. Now read through the Task Scheduler service, which needs no elevation and
+sees more: **81 unelevated (was 0), 104 elevated (unchanged, so nothing regressed).**
+
+**A program launched by bare name had no identity at all** — `powershell.exe`, `cmd /c …`, `node`,
+which is how living-off-the-land attacks run. 9% of every process start on an idle desktop was
+being discarded, blinding write attribution *and* the outbound firewall.
+
+**The firewall's own "unattributed connections" counter could never count anything**, because the
+connections it was meant to count were dropped before the service saw them.
+
+**Attribution could name the wrong program**: a write to a parent registry key was allowed to
+explain a change in any child beneath it, and on the first live run a browser was named as the
+author of a key it had never touched.
+
+Also in this release: attribution is wired end to end, so a persistence alert can name the program
+that installed the entry when WinSight runs elevated; a persistence scan now reports what it was
+*not allowed to read*, so "no findings" and "I could not look" no longer render the same; and the
+unreachable `persistence-live` report was removed, its signature verdict moving into the alert
+journal line where it is actually read.
+
 ### WinSight reported **zero** scheduled tasks unless you ran it as Administrator
 - Scheduled tasks are a top-tier persistence vector and one of the 22 surfaces WinSight claims to
   cover. Unelevated it found **none of them**, and said nothing: the report listed the surface,
