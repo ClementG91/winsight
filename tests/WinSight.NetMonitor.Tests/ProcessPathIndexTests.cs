@@ -59,6 +59,35 @@ public sealed class ProcessCommandLineTests
     public void ExtractExecutablePath_RefusesWhatItCannotRead(string? commandLine, string imageFileName) =>
         Assert.Null(ProcessCommandLine.ExtractExecutablePath(commandLine, imageFileName));
 
+    // Measured against a live kernel session: 9% of process starts on an ordinary desktop yielded
+    // no path at all, and the Windows directory written in one of these two forms accounted for the
+    // system processes among them — smss, csrss, wininit. Expanding them is not a guess: the
+    // Windows directory is machine-global, identical for every process on the machine.
+    [Theory]
+    [InlineData(@"\SystemRoot\System32\smss.exe", "smss.exe", @"System32\smss.exe")]
+    [InlineData(@"%SystemRoot%\system32\csrss.exe ObjectDirectory=\Windows", "csrss.exe", @"system32\csrss.exe")]
+    [InlineData(@"%windir%\system32\svchost.exe -k netsvcs", "svchost.exe", @"system32\svchost.exe")]
+    [InlineData(@"""%SystemRoot%\explorer.exe""", "explorer.exe", "explorer.exe")]
+    public void ExtractExecutablePath_ExpandsTheWindowsDirectory(
+        string commandLine, string imageFileName, string expectedSuffix)
+    {
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+        var path = ProcessCommandLine.ExtractExecutablePath(commandLine, imageFileName);
+
+        Assert.Equal(Path.GetFullPath(Path.Combine(windows, expectedSuffix)), path);
+    }
+
+    // Only the Windows directory, and only those two spellings. Expanding whatever else appears
+    // would read OUR environment to interpret ANOTHER process's command line — %USERPROFILE% and
+    // %TEMP% differ per user and per session, so that would manufacture a path that never existed.
+    [Theory]
+    [InlineData(@"%USERPROFILE%\Downloads\setup.exe", "setup.exe")]
+    [InlineData(@"%TEMP%\dropper.exe", "dropper.exe")]
+    [InlineData(@"%APPDATA%\thing.exe", "thing.exe")]
+    public void ExtractExecutablePath_DoesNotExpandPerUserVariables(string commandLine, string imageFileName) =>
+        Assert.Null(ProcessCommandLine.ExtractExecutablePath(commandLine, imageFileName));
+
     // A quoted path is unambiguous on its own; the image name is only needed to disambiguate.
     [Fact]
     public void ExtractExecutablePath_WithoutAnImageNameStillReadsAQuotedPath() =>
@@ -92,6 +121,71 @@ public sealed class ProcessPathIndexTests
         index.Stopped(100, T0);
 
         Assert.Equal(@"C:\apps\a.exe", index.Resolve(100));
+    }
+
+    // Measured against a live kernel session: powershell.exe, "cmd /c npx …" and node were all
+    // launched by bare name and dropped entirely, so nothing could name them. The image name is a
+    // fact the kernel reported, not a guess — discarding it threw away the only identity available
+    // for exactly the launches that matter most.
+    [Fact]
+    public void ResolveImage_NamesAProcessWhoseFullPathIsUnknown()
+    {
+        var index = new ProcessPathIndex();
+        index.StartedWithoutPath(100, "powershell.exe");
+
+        var image = index.ResolveImage(100);
+
+        Assert.Equal("powershell.exe", image?.Value);
+        Assert.False(image?.IsFullPath);
+    }
+
+    // THE safety property. Blocking is keyed on the executable path, and a rule matching the bare
+    // name "powershell.exe" would apply to every powershell on the machine, wherever it came from.
+    // The firewall reads Resolve; it must never see anything but a real path.
+    [Fact]
+    public void Resolve_NeverReturnsABareImageName()
+    {
+        var index = new ProcessPathIndex();
+        index.StartedWithoutPath(100, "powershell.exe");
+
+        Assert.Null(index.Resolve(100));
+    }
+
+    [Fact]
+    public void ResolveImage_PrefersTheFullPathWhenThereIsOne()
+    {
+        var index = new ProcessPathIndex();
+        index.Started(100, @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+
+        var image = index.ResolveImage(100);
+
+        Assert.Equal(@"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe", image?.Value);
+        Assert.True(image?.IsFullPath);
+    }
+
+    // A later start with a real path is an upgrade; a later start without one must not downgrade an
+    // identity we already had, or a pid reused by a bare-name launch would erase a known path.
+    [Fact]
+    public void StartedWithoutPath_DoesNotOverwriteAKnownPath()
+    {
+        var index = new ProcessPathIndex();
+        index.Started(100, @"C:\apps\a.exe");
+
+        index.StartedWithoutPath(100, "a.exe");
+
+        Assert.Equal(@"C:\apps\a.exe", index.Resolve(100));
+    }
+
+    [Fact]
+    public void ResolveImage_ForgetsAlongsideResolve()
+    {
+        var index = new ProcessPathIndex();
+        index.StartedWithoutPath(100, "powershell.exe");
+        index.Stopped(100, T0);
+
+        index.Prune(T0 + ProcessPathIndex.DeadRetention + TimeSpan.FromSeconds(1));
+
+        Assert.Null(index.ResolveImage(100));
     }
 
     [Fact]

@@ -89,6 +89,14 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
             {
                 processes.Started(process.ProcessID, path);
             }
+            // No readable path is not the same as no identity. Measured live, this is where
+            // powershell.exe, "cmd /c …" and node land — launched by bare name through the search
+            // path, which is precisely how living-off-the-land attacks run. Dropping them meant a
+            // dropper that ran as `reg add` could never be named at all.
+            else if (!string.IsNullOrWhiteSpace(process.ImageFileName))
+            {
+                processes.StartedWithoutPath(process.ProcessID, process.ImageFileName);
+            }
         };
         session.Source.Kernel.ProcessStop += process =>
         {
@@ -109,9 +117,10 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
             // start event did. Naming it anyway would be worse than staying quiet: the whole value
             // of attribution is that the name is right. It is still reported as unattributed, so
             // the blind spot is visible rather than silent.
-            if (processes.Resolve(processId) is { } image)
+            if (processes.ResolveImage(processId) is { } image)
             {
-                onWrite(new WriteObservation(whenUtc, processId, image, target));
+                onWrite(new WriteObservation(
+                    whenUtc, processId, image.Value, target, PathIsExact: image.IsFullPath));
             }
             else
             {

@@ -2,6 +2,41 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### `powershell.exe` was invisible to attribution *and* to the outbound firewall
+- A process's identity is captured at start, from the command line the kernel reports, and anything
+  that did not yield a fully qualified path was **discarded entirely**. Measured against a live
+  kernel session, that was **9% of every process start on an idle desktop** — and not obscure ones:
+  `powershell.exe`, `cmd /c npx …`, `node`, `smss.exe`, `csrss.exe`, `wininit.exe`. Launching by
+  bare name through the search path is how living-off-the-land attacks run, so the tool was blind to
+  precisely the launches that matter most. Both write attribution and the outbound firewall are
+  built on this same index.
+- **The Windows directory is now expanded** — `\SystemRoot\…`, `%SystemRoot%\…`, `%windir%\…` —
+  which recovered every system process on the dropped list. This is expansion, not guessing: that
+  directory is machine-global. General environment expansion stays refused, because `%USERPROFILE%`
+  and `%TEMP%` differ per user and per session, and reading another process's command line through
+  *our* environment would manufacture a path that never existed.
+- **A process with no readable path is now indexed under its image name** rather than dropped. The
+  image name is a fact the kernel reported. `powershell.exe (pid 4242, full path unknown)` is a real
+  answer; silence is not.
+- **The two are kept apart all the way to the alert.** `Resolve` still answers only with real paths,
+  because blocking is keyed on the path and a rule matching the bare name `powershell.exe` would
+  apply to every powershell on the machine whatever its origin. A test pins that property directly.
+  Callers that only need to *name* a process use `ResolveImage` and are told which they got.
+- **Found by testing the scenario the feature exists for.** Every earlier probe wrote from the
+  probe's own long-lived process — the easy case, which passed. A short-lived `reg.exe` that writes
+  a key and exits, which is the actual dropper pattern, failed outright: the key resolved fine and
+  the *process* could not be named. It now passes on real hardware.
+
+### The `persistence-live` report is gone; the alert carries its verdict instead
+- A whole parallel report of the session's arrivals was built, unit-tested, and **never rendered by
+  anything**. Guardian's detections reach the operator through the alert journal, which does the
+  same job and survives a restart and a suppressed balloon — the failure modes the journal exists
+  for. A second, unreachable rendering path in a security tool is worse than none: it drifts from
+  the live one while still looking tested.
+- The one thing it showed that the journal did not — the signature verdict — moved into the journal
+  line. "A new startup item appeared" and "an *unsigned* new startup item appeared" are different
+  emergencies, and an operator reading an alert hours later needs that in the same sentence.
+
 ### Attribution named the wrong program, and an elevated probe on real hardware caught it
 - The correlation rule let a detection match an observed write when the detection's target
   *continued past it at a boundary* — designed for `…\Run` answering a finding spelled

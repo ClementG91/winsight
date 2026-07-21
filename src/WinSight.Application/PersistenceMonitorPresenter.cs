@@ -1,81 +1,27 @@
 using WinSight.Attribution;
 using WinSight.Persistence;
-using WinSight.Reporting;
 
 namespace WinSight.Application;
 
 /// <summary>
-/// UI-agnostic mapping of live persistence detections (Guardian) to the shared report model and to
-/// localization keys, so the dashboard's existing findings rendering and actions serve the live
-/// view unchanged. It is the single place that knows the live-detection field schema — deliberately
-/// the same shape as the on-demand scan in <see cref="Adapters"/> — kept out of WPF so it is
-/// unit-tested without a UI.
+/// UI-agnostic rendering of a live persistence detection (Guardian) into the sentence an operator
+/// reads and the localization key the tray balloon uses. Kept out of WPF so both are unit-tested
+/// without a UI.
 /// </summary>
+/// <remarks>
+/// This once also built a parallel <c>persistence-live</c> report of the current session's arrivals.
+/// Nothing ever rendered it: Guardian's detections reach the operator through the alert journal,
+/// which does the same job and survives a restart and a suppressed balloon — the failure modes the
+/// journal was built for in the first place. A second, unreachable rendering path in a security tool
+/// is worse than no second path, because it drifts from the live one while still looking tested, so
+/// it was removed rather than wired up, and the one thing it showed that the journal did not — the
+/// signature verdict — moved into the journal line below.
+/// </remarks>
 public static class PersistenceMonitorPresenter
 {
-    /// <summary>The report kind tag on a live-detection row, distinct from an on-demand scan row.</summary>
-    public const string LiveKind = "persistence-live";
-
-    /// <summary>Builds a report of the currently-surfaced live detections, in the order given.</summary>
-    /// <param name="detections">The arrivals to render.</param>
-    /// <param name="droppedChanges">Arrivals the log could not record, named in the summary.</param>
-    /// <param name="attribute">
-    /// Optional lookup of the write that installed an entry, shaped like
-    /// <see cref="AttributionHost.Attribute"/>. Null — the default — renders exactly as before, so
-    /// attribution stays an enrichment: a detection is never withheld because nobody could name its
-    /// author, and a name is never invented when the lookup has none.
-    /// </param>
-    public static ToolReport BuildReport(
-        IReadOnlyList<PersistenceEvent> detections,
-        int droppedChanges,
-        Func<string?, DateTimeOffset, WriteObservation?>? attribute = null)
-    {
-        ArgumentNullException.ThrowIfNull(detections);
-
-        var builder = new ToolReport.Builder("persistence-live");
-        foreach (var detection in detections)
-        {
-            var entry = detection.Entry;
-            var displayedPath = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
-            // The write is looked up at first sight, not now: a detection surfaced minutes later
-            // would otherwise fall outside the index's window and lose an author it did have.
-            var author = attribute?.Invoke(entry.Location, detection.FirstSeenUtc);
-            builder.Add(
-                detection.IsNotable ? Severity.Notable : Severity.Info,
-                $"{entry.Vector}/{entry.Name}",
-                author is null
-                    ? $"{displayedPath}  [{StatusLabel(entry.Status)}]"
-                    : $"{displayedPath}  [{StatusLabel(entry.Status)}]  ← written by {Path.GetFileName(author.ExecutablePath)} (pid {author.ProcessId})",
-                new Dictionary<string, string?>
-                {
-                    ["writtenBy"] = author?.ExecutablePath,
-                    ["writtenByPid"] = author?.ProcessId.ToString(),
-                    ["kind"] = LiveKind,
-                    ["vector"] = entry.Vector.ToString(),
-                    ["name"] = entry.Name,
-                    ["path"] = displayedPath,
-                    ["location"] = entry.Location,
-                    ["command"] = entry.Command,
-                    ["image"] = entry.ImagePath,
-                    ["expectedImage"] = entry.ExpectedImagePath,
-                    ["fileStatus"] = entry.ImageStatus.ToString(),
-                    ["signature"] = entry.ImageStatus == WinSight.Persistence.ImageResolutionStatus.Present
-                        ? entry.Signature.State.ToString()
-                        : null,
-                    ["status"] = entry.Status.ToString(),
-                    ["signer"] = entry.Signature.Signer,
-                    ["firstSeen"] = detection.FirstSeenUtc.ToString("O"),
-                    ["lastSeen"] = detection.LastSeenUtc.ToString("O"),
-                    ["observations"] = detection.Observations.ToString(),
-                });
-        }
-
-        return builder.Build(Summary(detections.Count, detections.Count(d => d.IsNotable), droppedChanges));
-    }
-
     /// <summary>
-    /// The journal line for a detection: what arrived, where it points, and — when attribution was
-    /// watching and can say — which program put it there.
+    /// The journal line for a detection: what arrived, where it points, whether it is signed, and —
+    /// when attribution was watching and can say — which program put it there.
     /// </summary>
     /// <remarks>
     /// Lives here rather than in the dashboard because it is the one sentence an operator reads when
@@ -93,10 +39,18 @@ public static class PersistenceMonitorPresenter
         ArgumentNullException.ThrowIfNull(detection);
         var entry = detection.Entry;
         var target = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
+        var line = $"{entry.Name} — {target} [{StatusLabel(entry.Status)}]";
         var author = attribute?.Invoke(entry.Location, detection.FirstSeenUtc);
-        return author is null
-            ? $"{entry.Name} — {target}"
-            : $"{entry.Name} — {target} — written by {author.ExecutablePath} (pid {author.ProcessId})";
+        if (author is null)
+        {
+            return line;
+        }
+        // A bare-name launch is named, but never dressed up as a located file: "powershell.exe" and
+        // "C:\Windows\...\powershell.exe" mean different things to someone deciding what to do next.
+        var by = author.PathIsExact
+            ? $"{author.ExecutablePath} (pid {author.ProcessId})"
+            : $"{author.ExecutablePath} (pid {author.ProcessId}, full path unknown)";
+        return $"{line} — written by {by}";
     }
 
     /// <summary>
@@ -108,15 +62,6 @@ public static class PersistenceMonitorPresenter
         ArgumentNullException.ThrowIfNull(detection);
         return detection.IsNotable ? "GuardianDetectedNotable" : "GuardianDetectedSigned";
     }
-
-    /// <summary>
-    /// A plain-language one-line summary (English, like the scan's report detail; the dashboard
-    /// localizes chrome, not report bodies). Names the blind spot when the log dropped arrivals.
-    /// </summary>
-    public static string Summary(int total, int notable, int dropped) =>
-        dropped > 0
-            ? $"{total} new autostart item(s), {notable} flagged, {dropped} not recorded (log full)"
-            : $"{total} new autostart item(s), {notable} flagged";
 
     private static string StatusLabel(PersistenceStatus status) => status switch
     {

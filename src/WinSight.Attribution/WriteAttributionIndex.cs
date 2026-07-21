@@ -3,13 +3,23 @@ namespace WinSight.Attribution;
 /// <summary>A write observed with its author, already translated to WinSight's path forms.</summary>
 /// <param name="WhenUtc">When the kernel reported the write.</param>
 /// <param name="ProcessId">The process that performed it.</param>
-/// <param name="ExecutablePath">That process's executable, captured while it was alive.</param>
+/// <param name="ExecutablePath">
+/// That process's executable, captured while it was alive — a full path, or its image name alone
+/// when the kernel's command line carried no path. See <paramref name="PathIsExact"/>.
+/// </param>
 /// <param name="Target">The file path or registry key written.</param>
+/// <param name="PathIsExact">
+/// False when <paramref name="ExecutablePath"/> is only an image name. A bare-name launch
+/// (<c>powershell.exe</c>, <c>cmd /c …</c>) is how living-off-the-land attacks run, and naming one
+/// is far better than staying silent — but the caller must be able to say "powershell.exe, full
+/// path unknown" rather than presenting a name as if it were a located file.
+/// </param>
 public sealed record WriteObservation(
     DateTimeOffset WhenUtc,
     int ProcessId,
     string ExecutablePath,
-    string Target);
+    string Target,
+    bool PathIsExact = true);
 
 /// <summary>
 /// Remembers recent writes just long enough to answer "who did this?" when a detection lands.

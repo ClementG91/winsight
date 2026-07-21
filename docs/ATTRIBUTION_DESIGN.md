@@ -61,6 +61,45 @@ means a deeper key, and a write to a parent does not explain a change in a child
 any program touching `HKCU\Software` the author of every finding beneath it — caught on the first
 live run, with every unit test passing.
 
+## Naming the writer
+
+A write event carries a process id, not a program. The identity is captured at process start, from
+the command line the kernel reports, because asking the OS when the write arrives does not work —
+ETW delivers a second or more late and a dropper that writes and exits is already gone.
+
+The command line does not always contain a path, and this is where attribution was silently losing
+its most important cases. Measured against a live kernel session, **9% of process starts on an
+ordinary desktop yielded no readable path** — and not obscure ones:
+
+```
+DROPPED  image=powershell.exe   cmd=<powershell.exe>
+DROPPED  image=cmd.exe          cmd=<cmd /c npx -y @upstash/context7-mcp@latest>
+DROPPED  image=node.exe         cmd=<"node" "…\index.js">
+DROPPED  image=smss.exe         cmd=<\SystemRoot\System32\smss.exe>
+DROPPED  image=csrss.exe        cmd=<%SystemRoot%\system32\csrss.exe ObjectDirectory=…>
+```
+
+Bare-name launches through the search path are exactly how living-off-the-land attacks run, and
+every one was discarded. Two changes, of different kinds:
+
+- **The Windows directory is expanded** — `\SystemRoot\…`, `%SystemRoot%\…`, `%windir%\…`. This is
+  not guessing: that directory is machine-global, identical for every process, so the rewrite
+  recovers the path the kernel meant. Deliberately *only* those, never general environment
+  expansion: `%USERPROFILE%` and `%TEMP%` differ per user and per session, so expanding another
+  process's command line through *our* environment would manufacture a path that never existed.
+- **A process with no readable path is indexed under its image name**, not dropped. The image name
+  is a fact the kernel reported. `powershell.exe (pid 4242, full path unknown)` is a real answer;
+  silence is not.
+
+The two are kept distinct all the way to the alert. `ProcessPathIndex.Resolve` still answers **only**
+with real paths, because everything that acts — blocking, allowing, rule-making — is keyed on the
+path, and a firewall rule matching the bare name `powershell.exe` would apply to every powershell on
+the machine whatever its origin. Callers that only need to *name* a process use `ResolveImage` and
+are told which they got.
+
+Verified end to end on real hardware: `reg.exe` launched by bare name, writing a key and exiting
+before the question is asked, is now named correctly.
+
 ## Measured blind spot
 
 The dominant limitation, measured over 20 s on an idle desktop:
@@ -88,6 +127,13 @@ The remaining candidate is the rundown itself: keys held open by long-lived proc
 the session started, which the start-of-session replay does not enumerate. `KCBRundownEnd` does
 carry them, but only when the session stops, which is too late to attribute anything live.
 
-Until that is solved, attribution answers for roughly the top 40% of registry writes and says so.
-An honest partial answer with a readable health counter is the point; the failure mode this design
+Measured by owner, the misses are almost entirely `svchost` instances **running for 32 hours** —
+long-lived services holding one key open since boot. That is the opposite of the pattern attribution
+exists to catch, and it is why the raw percentage is misleading on its own.
+
+It is still a real limitation, stated plainly: **a program that opened its key before monitoring
+started can write through that handle unattributed.** In practice that means a threat already
+resident before WinSight ran, not one that arrives while it is watching.
+
+An honest partial answer with a readable health counter is the point. The failure mode this design
 exists to prevent is a monitor that looks healthy while seeing nothing.
