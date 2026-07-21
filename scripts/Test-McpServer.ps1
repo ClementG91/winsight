@@ -74,7 +74,7 @@ try
     Send-McpMessage @{ jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{} }
     $toolList = Receive-McpMessage
     $tools = @($toolList.result.tools)
-    $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan")
+    $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts")
     if ($tools.Count -ne $expectedTools.Count)
     {
         throw "Expected $($expectedTools.Count) MCP tools, got $($tools.Count)."
@@ -117,6 +117,20 @@ try
         $reports[0].returnedItemCount -ne 0 -or @($reports[0].items).Count -ne 0)
     {
         throw "MCP default scan did not preserve the summary-only disclosure contract."
+    }
+
+    Send-McpMessage @{
+        jsonrpc = "2.0"
+        id = 5
+        method = "tools/call"
+        params = @{ name = "winsight_alerts"; arguments = @{} }
+    }
+    $alerts = Receive-McpMessage
+    $alertReports = @($alerts.result.structuredContent.reports)
+    if ($alerts.result.structuredContent.evidenceIncluded -or
+        $alertReports.Count -ne 1 -or $alertReports[0].tool -ne "alerts")
+    {
+        throw "MCP alerts tool did not preserve the summary-only disclosure contract."
     }
 }
 finally
