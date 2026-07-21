@@ -821,12 +821,13 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
             0,
             CurrentUserSecurity());
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var observedBytes = Task.Run(async () =>
-        {
-            await hostile.WaitForConnectionAsync(cts.Token);
-            var buffer = new byte[1];
-            return await hostile.ReadAsync(buffer, cts.Token);
-        }, cts.Token);
+        // Shares the observer with the injected-refusal test. Unlike that one this cannot gate the
+        // client — the refusal comes from real pipe-ownership validation, not an injected callback —
+        // so the observer has to tolerate the connection being torn down mid-wait.
+        var observedBytes = ObserveBytesUntilClientCloseAsync(
+            hostile,
+            new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
+            cts.Token);
         var client = new FirewallServiceClient(pipeName);
 
         var error = await Assert.ThrowsAsync<FirewallPeerValidationException>(() => client.SendAsync(
@@ -1120,11 +1121,25 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         TaskCompletionSource readStarted,
         CancellationToken cancellationToken)
     {
-        await peer.WaitForConnectionAsync(cancellationToken);
-        var buffer = new byte[1];
-        var read = peer.ReadAsync(buffer, cancellationToken);
-        readStarted.TrySetResult();
-        return await read;
+        try
+        {
+            await peer.WaitForConnectionAsync(cancellationToken);
+            var buffer = new byte[1];
+            var read = peer.ReadAsync(buffer, cancellationToken);
+            readStarted.TrySetResult();
+            return await read;
+        }
+        catch (IOException)
+        {
+            // A client that refuses its peer disposes the pipe at once, and whether that surfaces
+            // here as a clean end-of-stream or tears down a still-pending WaitForConnection is a
+            // scheduling detail. CI hits the second often enough to fail a correct refusal.
+            // Both mean the same thing for this assertion: no request byte reached this server. A
+            // byte that was written and delivered would have been returned by ReadAsync before any
+            // teardown could be observed, so mapping the tear-down to zero cannot hide a write.
+            readStarted.TrySetResult();
+            return 0;
+        }
     }
 
     private static async Task ServeRawBytesAndCloseAsync(
