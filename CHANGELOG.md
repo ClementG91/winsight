@@ -2,6 +2,30 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Attribution reaches the alert: a persistence detection can now name the program that installed it
+- The correlation index and the ETW watcher were built and tested separately, and nothing joined
+  them, so a detection still could not answer the question the whole feature exists for. New
+  `AttributionHost` is that join: it owns the watch's lifecycle, feeds the index, and answers
+  "who wrote this?" — and Guardian's journal line now carries `written by <path> (pid)` when it can.
+- **The host reports its own health, because "no answer" hides three different situations.**
+  Attribution can be unavailable (not elevated), running and blind (a key handle the kernel never
+  announced), or working and genuinely finding nothing. Collapsing those into one silent empty
+  answer is how a monitor gets trusted when it should not be, so `AttributionHealth` counts what was
+  attributed, what was seen but unattributable and why, and whether the watch was refused outright.
+- **Started only when elevated, and never demanded.** A kernel trace session is privileged and
+  WinSight is deliberately unprivileged by default, so an unelevated dashboard simply carries no
+  author on its alerts. Attribution is an enrichment: a detection is never withheld because nobody
+  could name its author, and a name is never invented when the lookup has none — including when a
+  neighbouring key was written at the same moment, which is pinned by a test.
+- **The watch is now testable without Administrator.** `IWriteWatcher` exists for the same reason
+  the capture-device reader has a seam: a component whose only implementation needs elevation is a
+  component whose lifecycle nobody ever exercises, and an untested lifecycle around a security
+  monitor is how a monitor comes to be silently dead. Start/stop, idempotence, refusal and prompt
+  shutdown are all covered by a scripted watcher.
+- The journal line moved out of the WPF event handler into the tested presenter, and a test round-
+  trips it through the journal's own format — a detail carrying a tab would have made its own
+  record unparseable, writing the alert and then losing it.
+
 ### Kernel drivers: WinSight can now answer "what is running inside the kernel?"
 - Priority #3 in the parity analysis, and the cheapest genuine capability still missing. A kernel
   driver runs with the same authority as Windows itself: it can hide files from every other scan

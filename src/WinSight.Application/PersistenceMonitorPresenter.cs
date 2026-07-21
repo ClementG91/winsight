@@ -1,3 +1,4 @@
+using WinSight.Attribution;
 using WinSight.Persistence;
 using WinSight.Reporting;
 
@@ -16,7 +17,18 @@ public static class PersistenceMonitorPresenter
     public const string LiveKind = "persistence-live";
 
     /// <summary>Builds a report of the currently-surfaced live detections, in the order given.</summary>
-    public static ToolReport BuildReport(IReadOnlyList<PersistenceEvent> detections, int droppedChanges)
+    /// <param name="detections">The arrivals to render.</param>
+    /// <param name="droppedChanges">Arrivals the log could not record, named in the summary.</param>
+    /// <param name="attribute">
+    /// Optional lookup of the write that installed an entry, shaped like
+    /// <see cref="AttributionHost.Attribute"/>. Null — the default — renders exactly as before, so
+    /// attribution stays an enrichment: a detection is never withheld because nobody could name its
+    /// author, and a name is never invented when the lookup has none.
+    /// </param>
+    public static ToolReport BuildReport(
+        IReadOnlyList<PersistenceEvent> detections,
+        int droppedChanges,
+        Func<string?, DateTimeOffset, WriteObservation?>? attribute = null)
     {
         ArgumentNullException.ThrowIfNull(detections);
 
@@ -25,12 +37,19 @@ public static class PersistenceMonitorPresenter
         {
             var entry = detection.Entry;
             var displayedPath = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
+            // The write is looked up at first sight, not now: a detection surfaced minutes later
+            // would otherwise fall outside the index's window and lose an author it did have.
+            var author = attribute?.Invoke(entry.Location, detection.FirstSeenUtc);
             builder.Add(
                 detection.IsNotable ? Severity.Notable : Severity.Info,
                 $"{entry.Vector}/{entry.Name}",
-                $"{displayedPath}  [{StatusLabel(entry.Status)}]",
+                author is null
+                    ? $"{displayedPath}  [{StatusLabel(entry.Status)}]"
+                    : $"{displayedPath}  [{StatusLabel(entry.Status)}]  ← written by {Path.GetFileName(author.ExecutablePath)} (pid {author.ProcessId})",
                 new Dictionary<string, string?>
                 {
+                    ["writtenBy"] = author?.ExecutablePath,
+                    ["writtenByPid"] = author?.ProcessId.ToString(),
                     ["kind"] = LiveKind,
                     ["vector"] = entry.Vector.ToString(),
                     ["name"] = entry.Name,
@@ -52,6 +71,32 @@ public static class PersistenceMonitorPresenter
         }
 
         return builder.Build(Summary(detections.Count, detections.Count(d => d.IsNotable), droppedChanges));
+    }
+
+    /// <summary>
+    /// The journal line for a detection: what arrived, where it points, and — when attribution was
+    /// watching and can say — which program put it there.
+    /// </summary>
+    /// <remarks>
+    /// Lives here rather than in the dashboard because it is the one sentence an operator reads when
+    /// they come back to a machine that alerted while they were away, and a sentence that important
+    /// should be pinned by tests instead of assembled inline in a WPF event handler.
+    ///
+    /// The journal records the full executable path, not just the file name shown in the balloon: it
+    /// is opened deliberately, on one's own machine, precisely because one needs to know exactly
+    /// which program to look at.
+    /// </remarks>
+    public static string AlertDetail(
+        PersistenceEvent detection,
+        Func<string?, DateTimeOffset, WriteObservation?>? attribute = null)
+    {
+        ArgumentNullException.ThrowIfNull(detection);
+        var entry = detection.Entry;
+        var target = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
+        var author = attribute?.Invoke(entry.Location, detection.FirstSeenUtc);
+        return author is null
+            ? $"{entry.Name} — {target}"
+            : $"{entry.Name} — {target} — written by {author.ExecutablePath} (pid {author.ProcessId})";
     }
 
     /// <summary>

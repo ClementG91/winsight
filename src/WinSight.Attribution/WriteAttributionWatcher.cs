@@ -28,7 +28,7 @@ namespace WinSight.Attribution;
 /// so nothing is recorded by accident. Registry writes are not filtered: they are orders of
 /// magnitude rarer and are where persistence actually lives.
 /// </remarks>
-public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = null)
+public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = null) : IWriteWatcher
 {
     private readonly Func<string, bool> _fileFilter = fileFilter ?? (static _ => false);
 

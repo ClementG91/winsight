@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using WinSight.Application;
+using WinSight.Attribution;
 using WinSight.AvMonitor;
 using WinSight.Firewall;
 using WinSight.Persistence;
@@ -35,6 +36,10 @@ public partial class MainWindow : Window, IDisposable
     // Opt-in: created only when the operator enables ransomware protection, because it is the one
     // feature that WRITES (decoy files) into their personal folders. Null means off, nothing planted.
     private RansomwareMonitor? _ransomware;
+    // Names the program behind a persistence alert. Null when the dashboard is not elevated: a
+    // kernel trace session is privileged, and WinSight is deliberately unprivileged by default, so
+    // attribution is a bonus for an elevated run rather than a reason to demand elevation.
+    private AttributionHost? _attribution;
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -82,6 +87,7 @@ public partial class MainWindow : Window, IDisposable
     private void StartGuardian()
     {
         StartCameraMicWatch();
+        StartAttribution();
         _guardian.Detected += OnGuardianDetected;
         Task.Run(() =>
         {
@@ -97,6 +103,26 @@ public partial class MainWindow : Window, IDisposable
                 // works and the on-demand persistence scan is unaffected.
             }
         });
+    }
+
+    /// <summary>
+    /// Begins watching registry writes so a persistence alert can name the program that installed
+    /// the entry, when the dashboard is elevated enough to open a kernel trace session.
+    /// </summary>
+    /// <remarks>
+    /// Started only when elevated, deliberately. Starting it regardless would open a privileged
+    /// session on every launch just to have it refused, and the refusal would be indistinguishable
+    /// from a quiet machine. Unelevated, the alert simply carries no author — which is the honest
+    /// answer, and never blocks the detection itself.
+    /// </remarks>
+    private void StartAttribution()
+    {
+        if (!AttributionHost.IsElevated())
+        {
+            return;
+        }
+        _attribution = new AttributionHost();
+        _attribution.Start();
     }
 
     /// <summary>
@@ -221,7 +247,9 @@ public partial class MainWindow : Window, IDisposable
             DateTimeOffset.Now,
             "Guardian",
             detection.Entry.Vector.ToString(),
-            $"{detection.Entry.Name} — {detection.Entry.ImagePath ?? detection.Entry.ExpectedImagePath ?? detection.Entry.Command}"));
+            PersistenceMonitorPresenter.AlertDetail(
+                detection,
+                _attribution is { } attribution ? attribution.Attribute : null)));
 
         Dispatcher.Invoke(() =>
         {
@@ -831,6 +859,8 @@ public partial class MainWindow : Window, IDisposable
         _guardian.Dispose();
         _avWatch.Detected -= OnCameraMicDetected;
         _avWatch.Dispose();
+        _attribution?.Dispose(); // closes the trace session before the process goes
+        _attribution = null;
         _trayIcon.Visible = false;
         _trayIcon.Dispose();
         _applicationIcon?.Dispose();
