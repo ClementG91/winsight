@@ -3,11 +3,17 @@
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
 ### Camera/mic alerting verified on real hardware, and the alert made readable
-- Verified end-to-end at last, by driving an actual microphone acquisition rather than reasoning
-  about it: a real hardware transition produced `MicrophoneActivated` in the journal 1.5s later (the
-  poll interval), `MicrophoneDeactivated` 0.6s after release, and a tray balloon on screen. The
-  whole chain — device → CapabilityAccessManager → reader → diff → host → journal and balloon — is
-  now confirmed against reality, not just against tests.
+- Verified end-to-end at last, by driving real device acquisitions rather than reasoning about them.
+  **Microphone:** a real hardware transition produced `MicrophoneActivated` in the journal 1.5s
+  later (the poll interval), `MicrophoneDeactivated` 0.6s after release, and a tray balloon on
+  screen. **Webcam:** confirmed too, and it turned out not to need a camera at all — an app holding
+  the webcam *capability* is enough, so `WebcamActivated`/`WebcamDeactivated` were captured on a
+  machine whose only "Camera" devices are printers. The whole chain — device →
+  CapabilityAccessManager → reader → diff → host → journal and balloon — is now confirmed against
+  reality for both device kinds, not just against tests.
+- The webcam case also exercised the packaged-app path for free: the Camera app is recorded by
+  package family name rather than a path, and is shown as-is rather than being trimmed at a
+  separator that does not exist.
 - **Looking at the real alert immediately found a defect.** The balloon showed the app's full path,
   which wrapped over four lines and was truncated before it identified anything, while putting the
   operator's folder layout on screen. It now shows the executable's name, matching the deliberate
