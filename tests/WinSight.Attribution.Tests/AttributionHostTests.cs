@@ -47,8 +47,32 @@ public sealed class AttributionHostTests
         var health = host.Health;
         Assert.Equal(1, health.Attributed);
         Assert.Equal(1, health.UnknownProcess);
-        Assert.Equal(2, health.UnresolvedTarget);
+        Assert.Equal(2, health.UnannouncedKey);
+        Assert.Equal(3, health.Unattributed);
         Assert.False(health.Refused);
+    }
+
+    [Fact]
+    public void HealthSeparatesAnUnannouncedKeyFromAnUntranslatablePath()
+    {
+        // Both are "a write nobody could name", and merging them makes either impossible to
+        // investigate: an unannounced handle is a gap in the kernel's bookkeeping replay, an
+        // untranslatable path is a gap in WinSight's own namespace mapping. Different fixes.
+        var watcher = new ScriptedWatcher(
+            misses:
+            [
+                new UnattributedWrite(Noon, 1, null, UnattributedReason.UnresolvedTarget),
+                new UnattributedWrite(
+                    Noon, 2, @"\REGISTRY\A\{a-packaged-app}", UnattributedReason.UnresolvedTarget),
+            ]);
+        using var host = new AttributionHost(watcher);
+
+        host.Start();
+        watcher.Delivered.Wait(TimeSpan.FromSeconds(5));
+
+        var health = host.Health;
+        Assert.Equal(1, health.UnannouncedKey);
+        Assert.Equal(1, health.UntranslatablePath);
     }
 
     [Fact]

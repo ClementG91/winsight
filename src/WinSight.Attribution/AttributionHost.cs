@@ -3,10 +3,25 @@ using System.Security.Principal;
 namespace WinSight.Attribution;
 
 /// <summary>What the watcher has managed to see, so its blind spots are readable.</summary>
+/// <remarks>
+/// The two unresolved counters are kept apart on purpose. They look identical from the outside —
+/// both are a write nobody could name — but they have different causes and different fixes: an
+/// unannounced key handle is a gap in the kernel's own bookkeeping replay, while an untranslatable
+/// path is a gap in WinSight's namespace mapping. Merged into one number, neither can be
+/// investigated; the first live run of this host reported 114 unresolved against 2 attributed, and
+/// that number was useless until it could be split.
+/// </remarks>
 /// <param name="Running">Whether a watch is currently active.</param>
 /// <param name="Attributed">Writes seen and pinned on a process.</param>
 /// <param name="UnknownProcess">Writes seen whose writer was not in the process index.</param>
-/// <param name="UnresolvedTarget">Writes seen whose key or file could not be resolved to a path.</param>
+/// <param name="UnannouncedKey">
+/// Writes on a key handle the kernel never announced — typically a key already open when the
+/// session started.
+/// </param>
+/// <param name="UntranslatablePath">
+/// Writes whose key resolved to a kernel path WinSight could not translate into a form an operator
+/// would recognise.
+/// </param>
 /// <param name="Refused">
 /// True when the watch could not start because the process is not elevated. Distinct from "running
 /// and seeing nothing", which is the confusion this whole type exists to prevent.
@@ -15,8 +30,13 @@ public sealed record AttributionHealth(
     bool Running,
     long Attributed,
     long UnknownProcess,
-    long UnresolvedTarget,
-    bool Refused);
+    long UnannouncedKey,
+    long UntranslatablePath,
+    bool Refused)
+{
+    /// <summary>Every write seen but not attributed, for a one-line "how blind am I?" answer.</summary>
+    public long Unattributed => UnknownProcess + UnannouncedKey + UntranslatablePath;
+}
 
 /// <summary>
 /// Joins the watcher to the correlation index: runs the trace session for as long as it is wanted,
@@ -45,7 +65,8 @@ public sealed class AttributionHost : IDisposable
     private bool _disposed;
     private long _attributed;
     private long _unknownProcess;
-    private long _unresolvedTarget;
+    private long _unannouncedKey;
+    private long _untranslatablePath;
     private bool _refused;
     private bool _running;
 
@@ -79,7 +100,8 @@ public sealed class AttributionHost : IDisposable
                     _running,
                     Interlocked.Read(ref _attributed),
                     Interlocked.Read(ref _unknownProcess),
-                    Interlocked.Read(ref _unresolvedTarget),
+                    Interlocked.Read(ref _unannouncedKey),
+                    Interlocked.Read(ref _untranslatablePath),
                     _refused);
             }
         }
@@ -196,9 +218,16 @@ public sealed class AttributionHost : IDisposable
         {
             Interlocked.Increment(ref _unknownProcess);
         }
+        // The watcher already draws the distinction the counters need, in the only way it can: it
+        // carries the kernel's own spelling through when a key resolved but would not translate, and
+        // nothing at all when the handle was never announced in the first place.
+        else if (miss.Target is null)
+        {
+            Interlocked.Increment(ref _unannouncedKey);
+        }
         else
         {
-            Interlocked.Increment(ref _unresolvedTarget);
+            Interlocked.Increment(ref _untranslatablePath);
         }
     }
 }

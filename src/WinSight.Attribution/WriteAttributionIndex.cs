@@ -137,11 +137,23 @@ public sealed class WriteAttributionIndex
     /// </summary>
     /// <remarks>
     /// The two are not always spelled identically. A kernel session reports the registry <i>key</i>
-    /// that changed, while a finding names the key plus the value inside it
-    /// (<c>HKCU\...\Run [Foo]</c>), and a startup-folder finding may carry a display suffix too. An
-    /// observation therefore also matches when the detection target continues past it at a
-    /// boundary — but never on a bare character boundary, so <c>...\Run</c> does not match a
+    /// that changed; a finding names that key plus the value inside it (<c>HKCU\...\Run [Foo]</c>)
+    /// or the registry view it was read through (<c>HKCU\...\Run [64-bit]</c>). An observation
+    /// therefore also matches when the detection target continues past it into such a display
+    /// suffix — but never on a bare character boundary, so <c>...\Run</c> does not match a
     /// different key that merely starts with the same text.
+    ///
+    /// <b>A backslash is deliberately not a boundary.</b> It reads like the same idea — the
+    /// detection simply names something more specific — but it means the detection is about a
+    /// <i>deeper key</i>, and a write to a parent key does not explain a change in a child. Allowing
+    /// it made any program that touched <c>HKCU\Software</c> the author of every finding underneath
+    /// it: on the first live run, a browser writing to a shared ancestor was named as the author of
+    /// a key it had never touched. That is the exact failure this whole component is built to avoid,
+    /// because a wrong name beside a security finding is worse than no name.
+    ///
+    /// Nothing is lost by refusing it. The kernel reports the key itself, not the key plus the value
+    /// written — verified on live hardware — so a legitimate detection is always the observed key,
+    /// or that key followed by a display suffix.
     /// </remarks>
     private static bool Matches(string observed, string detectionTarget)
     {
@@ -154,6 +166,6 @@ public sealed class WriteAttributionIndex
             return false;
         }
         var next = detectionTarget[observed.Length];
-        return next is '\\' or ' ' or '[';
+        return next is ' ' or '[';
     }
 }

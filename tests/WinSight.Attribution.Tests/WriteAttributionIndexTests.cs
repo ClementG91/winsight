@@ -32,14 +32,28 @@ public sealed class WriteAttributionIndexTests
     }
 
     [Fact]
-    public void Attribute_MatchesAFindingThatNamesTheValueInsideTheKey()
+    public void Attribute_MatchesAFindingThatNamesTheValueOrViewAlongsideTheKey()
     {
-        // A kernel session reports the key that changed; the finding names the key plus the value.
+        // A kernel session reports the key that changed — verified against live hardware. A finding
+        // names that key plus the value inside it, or the registry view it was read through.
         var index = new WriteAttributionIndex();
         index.Record(Write(Noon, RunKey));
 
         Assert.NotNull(index.Attribute($"{RunKey} [Updater]", Noon.AddSeconds(1)));
-        Assert.NotNull(index.Attribute($@"{RunKey}\Updater", Noon.AddSeconds(1)));
+        Assert.NotNull(index.Attribute($"{RunKey} [64-bit]", Noon.AddSeconds(1)));
+    }
+
+    [Fact]
+    public void Attribute_DoesNotBlameAParentKeyWriteForAChildKey()
+    {
+        // Caught on the first live run: a browser writing somewhere under HKCU\Software was named
+        // as the author of a key it had never touched. A backslash means the detection is about a
+        // deeper key, and a write to a parent does not explain a change in a child.
+        var index = new WriteAttributionIndex();
+        index.Record(Write(Noon, @"HKCU\Software"));
+
+        Assert.Null(index.Attribute(@"HKCU\Software\SomeoneElsesApp\Run [64-bit]", Noon.AddSeconds(1)));
+        Assert.Null(index.Attribute(@"HKCU\Software\SomeoneElsesApp", Noon.AddSeconds(1)));
     }
 
     [Fact]

@@ -2,6 +2,25 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Attribution named the wrong program, and an elevated probe on real hardware caught it
+- The correlation rule let a detection match an observed write when the detection's target
+  *continued past it at a boundary* — designed for `…\Run` answering a finding spelled
+  `…\Run [Updater]`. A backslash was one of those boundaries, and a backslash does not mean "the
+  same thing, spelled more fully": it means a **deeper key**. So any program that wrote anywhere
+  under `HKCU\Software` became the author of every finding beneath it. On the very first live run,
+  a browser touching a shared ancestor was reported as the author of a key it had never touched.
+- **Every unit test passed throughout.** They pinned the rule that was written, using spellings that
+  were assumed rather than observed. What broke the tie was asking the kernel: a probe run elevated
+  on real hardware showed that a registry value write is reported as the **key**, uppercased, with
+  no value name appended — so a legitimate finding is always the observed key, or that key plus a
+  display suffix, and never a deeper one. Removing the backslash boundary costs nothing real and
+  removes a whole class of false attribution.
+- Health counters split `UnresolvedTarget` into `UnannouncedKey` and `UntranslatablePath`. They look
+  the same from outside — a write nobody could name — but one is a gap in the kernel's bookkeeping
+  replay and the other a gap in WinSight's namespace mapping, with different fixes. The first live
+  run reported 114 unresolved against 2 attributed, and that number was useless until it could be
+  split; it is now known to be almost entirely unannounced key handles.
+
 ### Attribution reaches the alert: a persistence detection can now name the program that installed it
 - The correlation index and the ETW watcher were built and tested separately, and nothing joined
   them, so a detection still could not answer the question the whole feature exists for. New
