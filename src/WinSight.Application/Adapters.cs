@@ -2,6 +2,7 @@ using WinSight.AvMonitor;
 using WinSight.Browser;
 using WinSight.Certificates;
 using WinSight.Core;
+using WinSight.Drivers;
 using WinSight.Firewall;
 using WinSight.Hosts;
 using WinSight.InputHooks;
@@ -21,7 +22,7 @@ namespace WinSight.Application;
 public static class Adapters
 {
     public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
-        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input"],
+        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers"],
         StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> OverviewCommands { get; } =
@@ -56,14 +57,16 @@ public static class Adapters
             "certificates" or "certs" => Certificates(flaggedOnly),
             "hosts" => Hosts(flaggedOnly),
             "input" or "inputhooks" => InputHooks(flaggedOnly, cancellationToken),
+            "drivers" or "drv" => Drivers(flaggedOnly, cancellationToken),
             "alerts" => Alerts(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
     }
 
     /// <summary>
-    /// Runs the balanced default overview. Process/module/firewall inventories remain
-    /// explicit because they are large and would make a routine overview noisy.
+    /// Runs the balanced default overview. Process, module, driver and firewall
+    /// inventories remain explicit because they are large and would make a routine
+    /// overview noisy.
     /// </summary>
     public static IReadOnlyList<ToolReport> RunOverview(
         bool flaggedOnly = false,
@@ -348,6 +351,84 @@ public static class Adapters
 
         static string SignerSuffix(InputFilter filter) =>
             string.IsNullOrWhiteSpace(filter.Signature.Signer) ? string.Empty : $" (signed by {filter.Signature.Signer})";
+    }
+
+    /// <summary>
+    /// The kernel-mode drivers registered on this machine — the Windows answer to a
+    /// KextViewr-style "what runs inside the kernel" check.
+    /// </summary>
+    /// <remarks>
+    /// A driver has the same authority as Windows itself, which is why an unsigned or
+    /// untrusted one is the loudest single finding WinSight produces and why a rootkit's
+    /// residue shows up here. Several hundred are registered on a normal machine, so
+    /// <c>--flagged</c> deliberately narrows to the two conditions nothing explains away:
+    /// a signature that did not stand up, and a registration whose image is gone.
+    /// </remarks>
+    public static ToolReport Drivers(bool flaggedOnly, CancellationToken cancellationToken = default)
+    {
+        var drivers = new KernelDriverScanner(SharedVerifier).Scan(cancellationToken);
+        var triaged = drivers
+            .Select(driver => (Driver: driver, Concern: KernelDriverTriage.Concern(driver)))
+            .ToList();
+        var notable = triaged.Count(entry => KernelDriverTriage.IsNotable(entry.Concern));
+
+        var b = new ToolReport.Builder("drivers");
+        // Notable first, then earliest-loading first: a boot-start driver is running
+        // before anything on the machine could have inspected it.
+        foreach (var (driver, concern) in triaged
+                     .Where(entry => !flaggedOnly || KernelDriverTriage.IsNotable(entry.Concern))
+                     .OrderByDescending(entry => KernelDriverTriage.IsNotable(entry.Concern))
+                     .ThenBy(entry => entry.Driver.Start)
+                     .ThenBy(entry => entry.Driver.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            var displayedPath = driver.ImagePath ?? driver.ExpectedImagePath ?? "<no image>";
+            b.Add(
+                KernelDriverTriage.IsNotable(concern) ? Severity.Notable : Severity.Info,
+                $"{driver.Kind}/{driver.Name}",
+                $"{displayedPath}  [{StartLabel(driver.Start)}, {Explain(concern)}{SignerSuffix(driver)}]",
+                new Dictionary<string, string?>
+                {
+                    ["name"] = driver.Name,
+                    ["kind"] = driver.Kind.ToString(),
+                    ["start"] = driver.Start.ToString(),
+                    ["image"] = driver.ImagePath,
+                    ["expectedImage"] = driver.ExpectedImagePath,
+                    ["signature"] = driver.Signature.State.ToString(),
+                    ["signer"] = driver.Signature.Signer,
+                    ["windowsProvided"] = driver.IsWindowsProvided.ToString(),
+                    ["concern"] = concern.ToString(),
+                });
+        }
+        return b.Build($"{drivers.Count} kernel driver(s) registered, {notable} unsigned, untrusted or orphaned");
+
+        // Each line states what was established, not what it implies: Windows attests
+        // plenty of drivers it did not write, so "signed by somebody other than Windows"
+        // is the claim the evidence supports and "third-party" is not.
+        static string Explain(KernelDriverConcern concern) => concern switch
+        {
+            KernelDriverConcern.WindowsProvided => "shipped and signed by Windows",
+            KernelDriverConcern.ThirdParty => "signed by a publisher other than Windows",
+            KernelDriverConcern.Untrusted => "UNSIGNED or untrusted kernel code",
+            KernelDriverConcern.Unverified => "signature could not be verified",
+            _ => "registered, but its image file is gone",
+        };
+
+        static string StartLabel(DriverStart start) => start switch
+        {
+            DriverStart.Boot => "boot start",
+            DriverStart.System => "system start",
+            DriverStart.Automatic => "automatic start",
+            DriverStart.Manual => "on demand",
+            DriverStart.Disabled => "disabled",
+            _ => "start unknown",
+        };
+
+        // The full X.500 subject is kept in the fields for machine consumers; the human
+        // line only needs the name the certificate was issued to.
+        static string SignerSuffix(KernelDriver driver) =>
+            KernelDriverTriage.SignerCommonName(driver.Signature.Signer) is { } signer
+                ? $", signed by {signer}"
+                : string.Empty;
     }
 
     public static ToolReport Certificates(bool flaggedOnly)

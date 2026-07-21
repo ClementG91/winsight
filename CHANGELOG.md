@@ -2,6 +2,57 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Kernel drivers: WinSight can now answer "what is running inside the kernel?"
+- Priority #3 in the parity analysis, and the cheapest genuine capability still missing. A kernel
+  driver runs with the same authority as Windows itself: it can hide files from every other scan
+  WinSight performs, read any process's memory, and make itself invisible to everything above it.
+  That is what a rootkit leaves behind, and WinSight listed none of them.
+- New `drivers` scanner (`WinSight.Drivers`), no elevation required: the service control manager's
+  own registry names every driver Windows can load, its type, its start disposition and its image,
+  and the verdicts come from the Authenticode path every other scan already uses. In the dashboard,
+  the CLI and over MCP. Left out of the balanced overview on the `processes`/`modules` precedent —
+  450 rows is an inventory you go and ask for, not one a routine scan should hand you.
+- **`EnumDeviceDrivers` would name what is actually resident, and was still rejected.** Since
+  Windows 8.1 it returns zeroed load addresses to a process that is not elevated, as an
+  ASLR-disclosure defence. The call still succeeds and still reports the right count, so the
+  failure is silent rather than loud: every one of the 232 loaded modules on this machine resolved
+  to `ntoskrnl.exe`. A residency list that answers with the same file 232 times is worse than no
+  residency list, so the scan reports what is *registered*, says when Windows loads it, and does
+  not claim to know what is resident. Earning that claim costs the elevation this program exists
+  to avoid.
+- **"Windows ships this" is an exact certificate-subject test, not a name match.** In-box drivers
+  are signed `CN=Microsoft Windows`. Drivers somebody else wrote and Microsoft merely attested
+  carry a longer name off the same issuer — `Microsoft Windows Hardware Compatibility Publisher`,
+  `… Hardware Abstraction Layer Publisher`, `… Early Launch Anti-malware Publisher` — every one of
+  which a substring match on "Microsoft Windows" swallows whole. Bring-your-own-vulnerable-driver
+  attacks live in precisely that gap. So the common name is compared entire, and the image must
+  also sit inside the System32 tree: a genuine Microsoft driver running from a download folder is
+  a finding, not an expectation. Live, that test correctly keeps WireGuard and `wintun` — both
+  Microsoft-attested — out of the 418 drivers Windows actually ships.
+- **`--flagged` narrows harder here than in the input scan, on purpose.** That one flags every
+  driver Windows did not install because its list is two lines long; this one is 450, since every
+  disk, display and network component registers a driver. A flagged view that answers with eighty
+  rows is a flagged view nobody opens twice, so only the two conditions nothing explains away
+  survive it: a signature that did not stand up, and a registration whose image is gone. Signed
+  third-party drivers stay in the full listing, where they are context rather than noise.
+- An unverifiable driver gets its own answer instead of being quietly filed as third-party. Not
+  flagging `Unknown` is the standing rule and it holds — but calling it third-party would assert a
+  provenance never established, and would hide a condition worth seeing, because when catalog
+  verification fails it fails for every catalog-signed file at once.
+- **Verified live, and it found things.** 450 drivers registered, 418 shipped by Windows, 26 signed
+  by other publishers (Intel, NVIDIA, Realtek, Oracle, Proton, SteelSeries, WireGuard), 6 flagged:
+  two in-box Windows 11 drivers carrying no signature at all — `bthmodem.sys` and `usb80236.sys`,
+  both confirmed independently — and four registrations pointing at files that no longer exist, one
+  of them a Windows Setup filter still set to load at boot, two of them leftovers from uninstalled
+  anti-cheat drivers.
+- Building it exposed a pre-existing weakness in `AuthenticodeVerifier` that deserves its own fix:
+  the catalog fallback spawns `powershell.exe` without sanitising `PSModulePath`, so a WinSight
+  started from a PowerShell 7 session hands Windows PowerShell 5.1 PowerShell 7's copy of
+  `Microsoft.PowerShell.Security`. That module fails to import and takes `Get-AuthenticodeSignature`
+  with it, degrading every catalog-signed file to `Unknown`. This is the first scan to push hundreds
+  of them through that path at once, which is why it surfaced now — and it is not cosmetic: it hid
+  both genuinely unsigned drivers above until the environment was cleaned.
+
 ### Camera/mic alerting verified on real hardware, and the alert made readable
 - Verified end-to-end at last, by driving real device acquisitions rather than reasoning about them.
   **Microphone:** a real hardware transition produced `MicrophoneActivated` in the journal 1.5s

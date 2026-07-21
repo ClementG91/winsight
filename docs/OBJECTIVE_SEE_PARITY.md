@@ -26,7 +26,7 @@ Two structural differences shape everything below:
 | **What's Your Sign?** | Signature info in the file manager | *(none)* | **Missing** — Explorer shell extension. |
 | **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** — filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
 | **DHS** | Dylib hijack scanner | **Modules scan** flags unsigned/untrusted loaded modules | **Partial** — no DLL search-order/phantom-DLL analysis. |
-| **KextViewr** | Kernel extension viewer | *(none)* | **Missing** — no loaded-driver enumeration. |
+| **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | *(none)* | **Missing** — lid/logon/USB-while-locked. |
 
 ### What WinSight has that Objective-See does not
@@ -60,10 +60,27 @@ Remaining, lower-value follow-ups in the same area: hook DLLs identifiable by be
 unusual number of processes (an extension of the modules scan), and per-device-instance filters
 under `Enum\…\UpperFilters` rather than only the class-level ones.
 
-### 3. Loaded kernel drivers (KextViewr-class)
-Unsigned or unexpected kernel drivers are exactly what a rootkit leaves behind, and WinSight lists
-none of them. Enumerable via the service control manager and `EnumDeviceDrivers`, verdicts through
-the existing Authenticode path. Reuses everything the persistence scanner already does.
+### ~~3. Loaded kernel drivers (KextViewr-class)~~ — **done**
+Shipped as the `drivers` scanner. Two decisions are worth recording, because the obvious versions
+of both are wrong.
+
+**`EnumDeviceDrivers` names what is resident and was still rejected.** Since Windows 8.1 it returns
+zeroed load addresses to an unelevated process, as an ASLR-disclosure defence. The call succeeds and
+still reports the right count, so the failure is silent: every entry resolves to whatever sits at
+address 0, which on the development machine meant all 232 loaded modules naming `ntoskrnl.exe`. A
+residency list that answers with the same file 232 times is worse than none. The scan therefore
+reads the service control manager's registry, reports what is **registered** and says when Windows
+loads it, and does not claim to know what is resident — that claim costs elevation.
+
+**"Windows ships this" is an exact certificate-subject test.** In-box drivers are signed
+`CN=Microsoft Windows`; drivers somebody else wrote and Microsoft merely attested carry a longer
+name off the same issuer (`… Hardware Compatibility Publisher`, `… Hardware Abstraction Layer
+Publisher`, `… Early Launch Anti-malware Publisher`). A substring match on "Microsoft Windows"
+swallows all of them, and bring-your-own-vulnerable-driver attacks live in exactly that gap.
+
+Remaining, lower-value follow-up in the same area: an opt-in elevated pass that would name the
+resident set, and boot-configuration checks (test signing, DSE state) that give the flagged
+findings their context.
 
 ### 4. DLL hijacking scan (DHS-class)
 Extend the modules work into a real search-order analysis: writable directories ahead of system
@@ -87,8 +104,8 @@ useful, but the lowest signal-to-noise of the list on a machine in daily use.
 
 ## The bar this sets
 
-Beating Objective-See on Windows is not a checklist race. WinSight is now at parity on the six tools
-that matter most — persistence × 2, firewall, ransomware, camera/mic and keyboard interception —
-while being one app instead of seven. What still separates it from "a set of scanners" is **#1**:
-naming the process behind a detection. **#3** (loaded kernel drivers) is the next-cheapest genuine
-capability win, and it reuses everything the persistence scanner already does.
+Beating Objective-See on Windows is not a checklist race. WinSight is now at parity on the seven
+tools that matter most — persistence × 2, firewall, ransomware, camera/mic, keyboard interception
+and kernel drivers — while being one app instead of eight. What still separates it from "a set of
+scanners" is **#1**: naming the process behind a detection. **#4** (DLL hijacking) is the next
+genuine capability win, and unlike the two before it, it is analysis work rather than enumeration.

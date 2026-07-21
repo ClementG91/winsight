@@ -29,6 +29,7 @@ public static class McpCatalog
         new("certs", "Trusted root certificates and risky trust-store properties.", true),
         new("hosts", "Hosts-file redirects and security-service blocking signals.", true),
         new("input", "Kernel drivers positioned to see every keystroke or mouse movement.", true),
+        new("drivers", "Registered kernel-mode drivers, their load disposition and signature verdicts.", false),
     ];
 
     public static string CapabilitiesJson(bool sensitiveEnabled) => JsonSerializer.Serialize(new

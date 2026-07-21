@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>WinSight.Drivers</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Drivers.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+  </ItemGroup>
+</Project>
