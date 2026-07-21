@@ -24,7 +24,7 @@ Two structural differences shape everything below:
 | **Netiquette** | Network connection list | **Connections scan** — with process attribution | **Parity.** |
 | **TaskExplorer** | Process explorer with signatures, libraries, network | **Processes + Modules scans** | **Partial** — no single per-process drill-down view. |
 | **What's Your Sign?** | Signature info in the file manager | *(none)* | **Missing** — Explorer shell extension. |
-| **ReiKey** | Keyboard event-tap (keylogger) detection | *(none)* | **Missing** — the clearest capability gap. |
+| **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** — filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
 | **DHS** | Dylib hijack scanner | **Modules scan** flags unsigned/untrusted loaded modules | **Partial** — no DLL search-order/phantom-DLL analysis. |
 | **KextViewr** | Kernel extension viewer | *(none)* | **Missing** — no loaded-driver enumeration. |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | *(none)* | **Missing** — lid/logon/USB-while-locked. |
@@ -48,12 +48,17 @@ Remaining: the elevated ETW session behind an opt-in, then wiring into Guardian 
 alerts, the journal and the MCP surface. Follow `WinSight.NetMonitor/OutboundConnectionWatcher.cs`:
 private session name, capture PID→path at process start (never resolve after the fact).
 
-### 2. Keylogger / input-hook detection (ReiKey-class)
-No coverage at all, and it is a classic, cheap-to-implement attack surface on Windows:
-low-level keyboard hooks (`SetWindowsHookEx` with `WH_KEYBOARD_LL`), raw-input registrations, and
-hook DLLs injected across processes. Detection is enumerable from user mode. High value, no
-elevation, fits the existing scanner shape (a new `WinSight.InputHooks` project and one catalog
-entry).
+### ~~2. Keylogger / input-hook detection (ReiKey-class)~~ — **done**
+Shipped as the `input` scanner. Worth recording *why it took the shape it did*, because the obvious
+approach is a dead end: Windows has **no documented way to enumerate `SetWindowsHookEx` hooks**, so a
+direct ReiKey port is not possible. What is both enumerable and higher-signal is the **filter driver
+on the keyboard or mouse device stack** — kernel-resident, sees every keystroke before any
+application, and exactly where a serious keylogger installs itself. Read from the device setup class
+keys, verdicts through the existing Authenticode path, no elevation.
+
+Remaining, lower-value follow-ups in the same area: hook DLLs identifiable by being loaded into an
+unusual number of processes (an extension of the modules scan), and per-device-instance filters
+under `Enum\…\UpperFilters` rather than only the class-level ones.
 
 ### 3. Loaded kernel drivers (KextViewr-class)
 Unsigned or unexpected kernel drivers are exactly what a rootkit leaves behind, and WinSight lists
@@ -82,7 +87,8 @@ useful, but the lowest signal-to-noise of the list on a machine in daily use.
 
 ## The bar this sets
 
-Beating Objective-See on Windows is not a checklist race. WinSight is already at parity on the five
-tools that matter most (persistence × 2, firewall, ransomware, camera/mic) while being one app
-instead of six. What actually separates it from "a set of scanners" is **#1**: naming the process
-behind a detection. Items #2 and #3 are the next-cheapest genuine capability wins.
+Beating Objective-See on Windows is not a checklist race. WinSight is now at parity on the six tools
+that matter most — persistence × 2, firewall, ransomware, camera/mic and keyboard interception —
+while being one app instead of seven. What still separates it from "a set of scanners" is **#1**:
+naming the process behind a detection. **#3** (loaded kernel drivers) is the next-cheapest genuine
+capability win, and it reuses everything the persistence scanner already does.
