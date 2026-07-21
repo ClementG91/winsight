@@ -2,6 +2,29 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Process attribution, increment 1: the pure core that says *who* touched something
+- Today a detection says *what* changed, never *who* changed it — the single biggest gap left in the
+  product. Naming the process needs a kernel ETW session, which needs elevation, so the work starts
+  with the parts that can be built and proven without either.
+- New `WinSight.Attribution` project with the two pieces the rest will hang off, both pure and
+  fully unit-tested:
+  - `KernelPathNormalizer` translates what a kernel session actually reports into the form findings
+    use: `\Device\HarddiskVolume3\...` to `C:\...`, and `\REGISTRY\MACHINE\...` /
+    `\REGISTRY\USER\{sid}\...` to the `HKLM\` / `HKCU\` spellings the persistence enumerators emit.
+    This is where attribution would fail *silently* — mistranslate and every detection simply comes
+    back unattributed while the plumbing looks healthy — so the volume map and current-user SID are
+    injected rather than read inline, and the cases that must refuse (unmapped volumes, `\??\` and
+    other NT namespaces, another user's hive, the `_Classes` companion hive) are pinned as tightly
+    as the ones that must translate.
+  - `WriteAttributionIndex` remembers recent writes just long enough to answer "who did this?" when
+    a detection lands, since a detection never arrives at the instant of the write that caused it.
+    Bounded on both time and count, every timestamp explicit. It matches a finding that names the
+    value inside a key (`...\Run [Updater]`) against an observed write to the key, but refuses a
+    key that merely starts with the same text (`...\RunOnce`), and refuses anything outside the
+    window — a confident wrong name beside a security finding is worse than no name.
+- Nothing is wired up yet and no elevation is requested: the ETW session and the opt-in flow follow
+  in the next increments.
+
 ### The "nothing leaves this PC" promise is now proven by tests, not just asserted in the README
 - Coverage had never been measured. Measuring it found that `VirusTotalEnricher` — the only code in
   WinSight that can send anything off the machine — had **no tests at all**. Its guards (lookups must
