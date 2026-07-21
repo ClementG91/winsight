@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>WinSight.InputHooks</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.InputHooks.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+  </ItemGroup>
+</Project>

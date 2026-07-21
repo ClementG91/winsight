@@ -3,6 +3,22 @@ using Microsoft.Win32;
 namespace WinSight.AvMonitor;
 
 /// <summary>
+/// The source of capture-device usage, behind an interface so the alerting path above it can be
+/// tested without a webcam.
+/// </summary>
+/// <remarks>
+/// This exists because the concrete reader is registry- and hardware-bound: on a machine with no
+/// webcam — including every CI runner — nothing can ever produce a camera transition, so an
+/// end-to-end test of "device turns on, operator gets told" was impossible to write. For a security
+/// product, an alerting path that cannot be exercised is a defect in itself.
+/// </remarks>
+public interface ICapabilityAccessReader
+{
+    /// <summary>Recorded webcam and microphone usage, including what is live right now.</summary>
+    IReadOnlyList<DeviceUsage> Read();
+}
+
+/// <summary>
 /// Reads the Windows CapabilityAccessManager ConsentStore to report which apps have
 /// used the webcam/microphone and which are using them right now. This is the
 /// registry-backed (no-driver) core of the OverSight-class monitor; ETW-based
@@ -14,7 +30,7 @@ namespace WinSight.AvMonitor;
 /// device is live. Desktop apps live under a NonPackaged subkey, keyed by their exe
 /// path with '#' substituted for '\'.
 /// </summary>
-public sealed class CapabilityAccessReader
+public sealed class CapabilityAccessReader : ICapabilityAccessReader
 {
     private const string Base =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";

@@ -4,6 +4,7 @@ using WinSight.Certificates;
 using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.Hosts;
+using WinSight.InputHooks;
 using WinSight.Modules;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
@@ -20,11 +21,11 @@ namespace WinSight.Application;
 public static class Adapters
 {
     public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
-        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts"],
+        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input"],
         StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> OverviewCommands { get; } =
-        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs"];
+        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs", "input"];
 
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
@@ -54,6 +55,7 @@ public static class Adapters
             "extensions" or "ext" => Extensions(flaggedOnly),
             "certificates" or "certs" => Certificates(flaggedOnly),
             "hosts" => Hosts(flaggedOnly),
+            "input" or "inputhooks" => InputHooks(flaggedOnly, cancellationToken),
             "alerts" => Alerts(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
@@ -289,6 +291,63 @@ public static class Adapters
                 });
         }
         return b.Build($"{entries.Count} hosts entry(ies), {entries.Count(e => e.Notable)} flagged");
+    }
+
+    /// <summary>
+    /// The kernel drivers sitting in this machine's keyboard and mouse paths — the Windows answer
+    /// to a ReiKey-style "what can read my keystrokes" check.
+    /// </summary>
+    /// <remarks>
+    /// Windows exposes no documented way to enumerate <c>SetWindowsHookEx</c> hooks, but a serious
+    /// keylogger installs a filter driver on the input device stack, and those are plainly
+    /// readable. Anything other than the class driver Windows installs itself is reported with its
+    /// signature standing — including properly signed drivers, because a signed kernel keylogger is
+    /// still a kernel keylogger and this list is one or two lines on a normal machine.
+    /// </remarks>
+    public static ToolReport InputHooks(bool flaggedOnly, CancellationToken cancellationToken = default)
+    {
+        var filters = new InputFilterScanner().Scan(cancellationToken);
+        var b = new ToolReport.Builder("input");
+        var notable = 0;
+        foreach (var filter in filters)
+        {
+            var concern = InputFilterTriage.Concern(filter);
+            var isNotable = InputFilterTriage.IsNotable(concern);
+            if (isNotable)
+            {
+                notable++;
+            }
+            if (flaggedOnly && !isNotable)
+            {
+                continue;
+            }
+            b.Add(
+                isNotable ? Severity.Notable : Severity.Info,
+                $"{filter.Stack}/{filter.Name}",
+                $"{filter.Position} filter — {Explain(concern)}{SignerSuffix(filter)}",
+                new Dictionary<string, string?>
+                {
+                    ["stack"] = filter.Stack.ToString(),
+                    ["position"] = filter.Position.ToString(),
+                    ["name"] = filter.Name,
+                    ["image"] = filter.ImagePath,
+                    ["signature"] = filter.Signature.State.ToString(),
+                    ["signer"] = filter.Signature.Signer,
+                    ["concern"] = concern.ToString(),
+                });
+        }
+        return b.Build($"{filters.Count} input filter(s), {notable} not installed by Windows");
+
+        static string Explain(InputFilterConcern concern) => concern switch
+        {
+            InputFilterConcern.Expected => "the class driver Windows installs",
+            InputFilterConcern.ThirdParty => "a third-party driver that can see every keystroke",
+            InputFilterConcern.Untrusted => "UNSIGNED or untrusted, and can see every keystroke",
+            _ => "listed here but its driver file is missing",
+        };
+
+        static string SignerSuffix(InputFilter filter) =>
+            string.IsNullOrWhiteSpace(filter.Signature.Signer) ? string.Empty : $" (signed by {filter.Signature.Signer})";
     }
 
     public static ToolReport Certificates(bool flaggedOnly)

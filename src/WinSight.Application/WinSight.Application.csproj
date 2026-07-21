@@ -18,5 +18,6 @@
     <ProjectReference Include="..\WinSight.Browser\WinSight.Browser.csproj" />
     <ProjectReference Include="..\WinSight.Certificates\WinSight.Certificates.csproj" />
     <ProjectReference Include="..\WinSight.Hosts\WinSight.Hosts.csproj" />
+    <ProjectReference Include="..\WinSight.InputHooks\WinSight.InputHooks.csproj" />
   </ItemGroup>
 </Project>

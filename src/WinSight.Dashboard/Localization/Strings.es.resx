@@ -241,6 +241,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio que no es de confianza (sin firma, no confiable o con su archivo ausente). Revíselo.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio firmado.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protección contra ransomware</value></data>
+  <data name="ToolInputLabel" xml:space="preserve"><value>Intercepción de teclado</value></data>
+  <data name="ToolInputShort" xml:space="preserve"><value>Qué puede leer sus pulsaciones</value></data>
+  <data name="ToolInputDescription" xml:space="preserve"><value>Enumera los controladores de núcleo situados en la ruta del teclado y del ratón. Un controlador aquí ve cada tecla que pulsa, antes que cualquier aplicación: es exactamente donde se instala un keylogger serio.</value></data>
+  <data name="ToolInputGuidance" xml:space="preserve"><value>Solo se espera el controlador que instala Windows. Los controladores de panel táctil y de escritorio remoto también aparecen aquí legítimamente: compruebe el editor en lugar de suponer lo peor, pero un controlador sin firmar en esta lista merece atención inmediata.</value></data>
   <data name="AvBalloonTitle" xml:space="preserve"><value>Cámara o micrófono en uso</value></data>
   <data name="AvWebcamActivated" xml:space="preserve"><value>ha activado su cámara</value></data>
   <data name="AvMicrophoneActivated" xml:space="preserve"><value>ha activado su micrófono</value></data>

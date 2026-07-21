@@ -17,9 +17,9 @@ public sealed record DeviceEvent(AvEventKind Kind, DeviceUsage Usage);
 /// <see cref="CapabilityAccessReader"/> on an interval (a driver-free approach).
 /// RegNotifyChangeKeyValue is the future event-driven optimization.
 /// </summary>
-public sealed class CameraMicMonitor(CapabilityAccessReader? reader = null, TimeSpan? interval = null)
+public sealed class CameraMicMonitor(ICapabilityAccessReader? reader = null, TimeSpan? interval = null)
 {
-    private readonly CapabilityAccessReader _reader = reader ?? new CapabilityAccessReader();
+    private readonly ICapabilityAccessReader _reader = reader ?? new CapabilityAccessReader();
     private readonly TimeSpan _interval = interval ?? TimeSpan.FromSeconds(1);
 
     /// <summary>

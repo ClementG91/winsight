@@ -15,6 +15,7 @@ using WinSight.Reporting;
 //   winsight extensions                 browser extensions + risky permissions
 //   winsight certs                      trusted root CAs + rogue-root signals
 //   winsight hosts                      hosts-file hijack / AV-block detection
+//   winsight input                      kernel drivers on the keyboard/mouse path
 //   winsight mcp                        local read-only MCP stdio server
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
 //   winsight dns --watch                live DNS queries via ETW (Administrator)
@@ -39,6 +40,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight extensions                     browser extensions + risky permissions
           winsight certs                          trusted root CAs + rogue-root signals
           winsight hosts                          hosts-file hijack / AV-block detection
+          winsight input                          kernel drivers on the keyboard/mouse path
           winsight mcp                            local read-only MCP stdio server
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
           winsight dns --watch                    live DNS queries via ETW (Administrator)
@@ -82,7 +84,7 @@ try
 catch (ArgumentOutOfRangeException)
 {
     Console.Error.WriteLine(
-        $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | hosts | all)");
+        $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | hosts | input | all)");
     return 2;
 }
 

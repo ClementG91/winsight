@@ -2,6 +2,30 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Keyboard interception: WinSight can now answer "what can read my keystrokes?"
+- The clearest capability gap in the parity analysis, and the one an operator most wants answered.
+  macOS lets ReiKey enumerate event taps outright; Windows exposes no documented way to list
+  `SetWindowsHookEx` hooks. But a *serious* keylogger does not use a user-mode hook — it installs a
+  **filter driver on the keyboard or mouse device stack**, where it sees every keystroke in the
+  kernel before any application does. Those are plainly readable from the device setup class keys,
+  which makes this both the highest-signal and the most honestly detectable form of input
+  interception on this platform.
+- New `input` scanner (`WinSight.InputHooks`), no elevation required: a registry read plus the same
+  Authenticode verification every other scan uses. Available in the dashboard, the CLI, the balanced
+  overview and over MCP.
+- **No vendor allowlist, deliberately.** Touchpad and remote-desktop drivers legitimately sit here
+  and it is tempting to hard-code their names as benign — but nothing stops a keylogger calling
+  itself `SynTP`. Only the class driver Windows itself installs (`kbdclass` / `mouclass`) is treated
+  as expected; everything else is reported with its signature standing and the operator decides.
+  Reading one extra line costs a moment. Hiding a keylogger because it borrowed a familiar name
+  costs everything. A signed third-party driver is still surfaced, because a signed kernel keylogger
+  is still a kernel keylogger.
+- The judgement is a pure, tested type: recognising the class driver despite casing and padding,
+  refusing near-miss names (`kbdclass2`), refusing a class driver in the *other* stack, and never
+  treating an unverifiable file as suspicious — WinSight does not cry wolf on files it merely failed
+  to check. Verified live on a real machine: two filters, both Microsoft-signed class drivers, zero
+  not installed by Windows.
+
 ### The camera/microphone monitor now actually alerts someone
 - `CameraMicMonitor` describes itself as an OverSight-class real-time monitor and has done for a
   long time — but nothing ever hosted it. Its only caller was a CLI watch command that prints to a
@@ -16,6 +40,18 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   capability records Windows already keeps. Ransomware protection stays opt-in because it alone
   writes. Localised across the three languages, and covered by lifecycle tests for the two risks a
   hosted poll loop actually has: a leaked thread, and an unsafe second start or dispose.
+
+### The camera/mic alerting path can finally be tested without a webcam
+- Verifying the balloon end-to-end meant owning a webcam: `CapabilityAccessReader` was sealed with a
+  non-virtual `Read()`, so the alerting path could only be exercised by real hardware. This machine
+  has none — its "Camera" devices are printers — and neither does any CI runner. **For a security
+  product, an alerting path that cannot be exercised is a defect in its own right.**
+- The reader now sits behind `ICapabilityAccessReader`, and two tests drive the whole chain from a
+  scripted snapshot: an app taking the microphone reaches the subscriber with the app named, and a
+  device *already* in use at startup is treated as the baseline rather than announced as new — which
+  would otherwise cry wolf on every launch during a call.
+- The read half was separately confirmed against live reality: the `av` scan correctly reported
+  Discord holding the microphone open, matching the registry exactly.
 
 ### A tool-by-tool comparison against Objective-See, and the plan that follows
 - New `docs/OBJECTIVE_SEE_PARITY.md`. WinSight is at **parity on the five tools that matter most** —

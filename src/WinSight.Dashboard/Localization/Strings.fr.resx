@@ -241,6 +241,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Un nouvel élément de démarrage a été ajouté et n'est pas de confiance (non signé, non approuvé ou fichier absent). À vérifier.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Un nouvel élément de démarrage signé a été ajouté.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protection rançongiciel</value></data>
+  <data name="ToolInputLabel" xml:space="preserve"><value>Interception clavier</value></data>
+  <data name="ToolInputShort" xml:space="preserve"><value>Ce qui peut lire vos frappes</value></data>
+  <data name="ToolInputDescription" xml:space="preserve"><value>Liste les pilotes noyau placés sur le chemin du clavier et de la souris. Un pilote ici voit chaque touche que vous tapez, avant toute application — c'est exactement là qu'un keylogger sérieux s'installe.</value></data>
+  <data name="ToolInputGuidance" xml:space="preserve"><value>Seul le pilote installé par Windows lui-même est attendu. Les pilotes de pavé tactile et de bureau à distance apparaissent aussi légitimement ici : vérifiez l'éditeur plutôt que de supposer le pire — mais un pilote non signé dans cette liste mérite une attention immédiate.</value></data>
   <data name="AvBalloonTitle" xml:space="preserve"><value>Caméra ou micro en cours d'utilisation</value></data>
   <data name="AvWebcamActivated" xml:space="preserve"><value>vient d'activer votre caméra</value></data>
   <data name="AvMicrophoneActivated" xml:space="preserve"><value>vient d'activer votre micro</value></data>

@@ -1,3 +1,5 @@
+using WinSight.AvMonitor;
+
 using Xunit;
 
 namespace WinSight.Application.Tests;
@@ -65,5 +67,72 @@ public sealed class AvWatchHostTests
         var host = new AvWatchHost();
 
         host.Dispose();
+    }
+
+    [Fact]
+    public void AnAppTakingTheMicrophoneReachesTheSubscriber()
+    {
+        // The end-to-end claim: a device goes live and whoever is listening is told, with the app
+        // named. Until the reader was put behind an interface this could not be tested at all —
+        // it needed real hardware, so a machine with no webcam (every CI runner, and this one)
+        // could never exercise the alerting path the whole feature exists for.
+        var reader = new ScriptedReader(
+            [Idle],
+            [InUse]);
+        using var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(15)));
+        using var raised = new ManualResetEventSlim();
+        DeviceEvent? observed = null;
+        host.Detected += (_, e) =>
+        {
+            observed = e;
+            raised.Set();
+        };
+
+        host.Start();
+
+        Assert.True(raised.Wait(TimeSpan.FromSeconds(10)), "No activation reached the subscriber.");
+        Assert.Equal(AvEventKind.Activated, observed!.Kind);
+        Assert.Equal(DeviceKind.Microphone, observed.Usage.Kind);
+        Assert.Equal(@"C:\apps\recorder.exe", observed.Usage.App);
+    }
+
+    [Fact]
+    public void ADeviceAlreadyInUseAtStartupIsNotReportedAsNew()
+    {
+        // The first snapshot is a baseline, exactly like Guardian's. Something already holding the
+        // microphone when the dashboard opens is the status quo, not an event — reporting it would
+        // cry wolf on every launch during a call.
+        var reader = new ScriptedReader(
+            [InUse],
+            [InUse]);
+        using var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(15)));
+        using var raised = new ManualResetEventSlim();
+        host.Detected += (_, _) => raised.Set();
+
+        host.Start();
+
+        Assert.False(raised.Wait(TimeSpan.FromMilliseconds(400)), "A pre-existing session was reported as new.");
+    }
+
+    private static DeviceUsage InUse => new(
+        DeviceKind.Microphone, @"C:\apps\recorder.exe", Packaged: false, LastStart: DateTime.UtcNow,
+        LastStop: null, Active: true);
+
+    private static DeviceUsage Idle => InUse with { Active = false, LastStop = DateTime.UtcNow };
+
+    /// <summary>
+    /// Returns each scripted snapshot in turn, then repeats the last one, so the poll loop keeps
+    /// running without the test having to script every tick.
+    /// </summary>
+    private sealed class ScriptedReader(params IReadOnlyList<DeviceUsage>[] snapshots) : ICapabilityAccessReader
+    {
+        private int _index;
+
+        public IReadOnlyList<DeviceUsage> Read()
+        {
+            var current = snapshots[Math.Min(_index, snapshots.Length - 1)];
+            _index++;
+            return current;
+        }
     }
 }

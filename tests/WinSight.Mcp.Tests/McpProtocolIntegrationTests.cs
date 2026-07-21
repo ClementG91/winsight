@@ -57,7 +57,7 @@ public sealed class McpProtocolIntegrationTests
             Assert.True(structured.GetProperty("readOnly").GetBoolean());
             Assert.False(structured.GetProperty("networkListener").GetBoolean());
             Assert.False(structured.GetProperty("networkReputationLookups").GetBoolean());
-            Assert.Equal(10, structured.GetProperty("scanners").GetArrayLength());
+            Assert.Equal(11, structured.GetProperty("scanners").GetArrayLength());
 
             await SendAsync(process, """
                 {"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"winsight_scan","arguments":{"scanner":"hosts"}}}
