@@ -241,6 +241,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio que no es de confianza (sin firma, no confiable o con su archivo ausente). Revíselo.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio firmado.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protección contra ransomware</value></data>
+  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Protecciones del núcleo</value></data>
+  <data name="ToolIntegrityShort" xml:space="preserve"><value>Lo que este PC se niega a ejecutar</value></data>
+  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Pregunta al propio núcleo qué aplica realmente: firma de controladores, test signing, integridad de memoria, Arranque seguro y si hay un depurador de núcleo conectado. Es lo que da sentido a los demás hallazgos sobre el núcleo.</value></data>
+  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>El test signing activado es lo que exige actuar: este PC aceptará un controlador firmado por cualquiera, así que un «controlador sin firmar» detectado en otro sitio pasa a ser esperado. El Arranque seguro y la integridad de memoria desactivados son ajustes más débiles, no una prueba de nada, pero si no los desactivó usted, averigüe quién lo hizo.</value></data>
   <data name="ToolInputLabel" xml:space="preserve"><value>Intercepción de teclado</value></data>
   <data name="ToolInputShort" xml:space="preserve"><value>Qué puede leer sus pulsaciones</value></data>
   <data name="ToolInputDescription" xml:space="preserve"><value>Enumera los controladores de núcleo situados en la ruta del teclado y del ratón. Un controlador aquí ve cada tecla que pulsa, antes que cualquier aplicación: es exactamente donde se instala un keylogger serio.</value></data>

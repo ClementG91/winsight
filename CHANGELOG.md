@@ -53,6 +53,28 @@ Step-by-step progress log. Newest first. Every CI-green step lands here.
   of them through that path at once, which is why it surfaced now — and it is not cosmetic: it hid
   both genuinely unsigned drivers above until the environment was cleaned.
 
+### The scan that gives every other kernel finding its meaning
+- The drivers scan can say a kernel driver is unsigned. It cannot say whether that *matters*. On a
+  machine with test signing turned on, an unsigned driver is not an anomaly at all — it is the
+  documented consequence of a setting, and the real finding is the setting. Nothing in WinSight
+  asked that question.
+- New `integrity` scanner (`WinSight.CodeIntegrity`), no elevation: driver signature enforcement,
+  test signing, memory integrity (HVCI), Secure Boot, and whether a kernel debugger is attached. In
+  the balanced overview, because it is six lines and reframes everything else.
+- **Asked of the kernel, not the registry.** `NtQuerySystemInformation` reports what is actually
+  being enforced; the policy keys record what somebody configured. A pending reboot, a policy that
+  failed to apply or a hypervisor that could not start all make the two disagree — the same
+  distinction the WFP "effective state" fix turned on.
+- **Two volumes, deliberately.** Test signing on, driver signing off, or a debugger attached change
+  what the machine will load, so they are `Weakened`. Secure Boot and memory integrity being off are
+  weaker settings that a great many healthy machines have — reporting those at the same volume would
+  train the operator to ignore the scan, so they are `Hardening`. HVCI in *audit* mode is called out
+  separately: it reads as enabled everywhere in the UI while enforcing nothing, which is exactly the
+  false comfort this tool exists to remove. Anything unreadable is never counted as a weakness.
+- Every protection is reported even when healthy, so the reader can tell "verified good" from "never
+  looked". Verified on a real machine: driver signing on, test signing off, HVCI enforcing in strict
+  mode, no kernel debugger — and **Secure Boot off**, the one thing worth telling its owner.
+
 ### Signature verification was failing open, silently, and hiding real findings
 - Found while reviewing the drivers scan: it reported four flagged drivers here but six on the
   machine that built it. Same binary, same machine, same minute — the difference was **which shell

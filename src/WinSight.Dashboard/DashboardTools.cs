@@ -46,6 +46,7 @@ public static class DashboardTools
         Tool("Certificates", "certs", "certificates", DashboardWindowsAction.Certificates),
         Tool("Hosts", "hosts", "hosts"),
         Tool("Input", "input", "input"),
+        Tool("Integrity", "integrity", "integrity"),
         Tool("Drivers", "drivers", "drivers"),
         Tool("Alerts", "alerts", "alerts"),
     ];

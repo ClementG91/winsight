@@ -1,6 +1,7 @@
 using WinSight.AvMonitor;
 using WinSight.Browser;
 using WinSight.Certificates;
+using WinSight.CodeIntegrity;
 using WinSight.Core;
 using WinSight.Drivers;
 using WinSight.Firewall;
@@ -22,11 +23,11 @@ namespace WinSight.Application;
 public static class Adapters
 {
     public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
-        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers"],
+        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers", "integrity"],
         StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> OverviewCommands { get; } =
-        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs", "input"];
+        ["persistence", "av", "net", "dns", "extensions", "hosts", "certs", "input", "integrity"];
 
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
@@ -57,6 +58,7 @@ public static class Adapters
             "certificates" or "certs" => Certificates(flaggedOnly),
             "hosts" => Hosts(flaggedOnly),
             "input" or "inputhooks" => InputHooks(flaggedOnly, cancellationToken),
+            "integrity" or "ci" => CodeIntegrity(flaggedOnly),
             "drivers" or "drv" => Drivers(flaggedOnly, cancellationToken),
             "alerts" => Alerts(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
@@ -429,6 +431,45 @@ public static class Adapters
             KernelDriverTriage.SignerCommonName(driver.Signature.Signer) is { } signer
                 ? $", signed by {signer}"
                 : string.Empty;
+    }
+
+    /// <summary>
+    /// What this machine currently enforces about the code it will run, and about its own boot
+    /// chain: driver signing, test signing, memory integrity, Secure Boot, kernel debugger.
+    /// </summary>
+    /// <remarks>
+    /// This is the scan that gives the others their meaning. "An unsigned kernel driver is
+    /// registered" reads very differently on a machine in test signing, where loading unsigned
+    /// drivers is the documented consequence of a setting rather than an anomaly. It is small and
+    /// cheap, so it belongs in the balanced overview despite being only a handful of lines.
+    /// </remarks>
+    public static ToolReport CodeIntegrity(bool flaggedOnly)
+    {
+        var findings = CodeIntegrityTriage.Evaluate(new CodeIntegrityReader().Read());
+        var b = new ToolReport.Builder("integrity");
+        var notable = 0;
+        foreach (var finding in findings)
+        {
+            var isNotable = CodeIntegrityTriage.IsNotable(finding.Concern);
+            if (isNotable)
+            {
+                notable++;
+            }
+            if (flaggedOnly && !isNotable)
+            {
+                continue;
+            }
+            b.Add(
+                isNotable ? Severity.Notable : Severity.Info,
+                finding.Name,
+                finding.Detail,
+                new Dictionary<string, string?>
+                {
+                    ["protection"] = finding.Name,
+                    ["concern"] = finding.Concern.ToString(),
+                });
+        }
+        return b.Build($"{findings.Count} protection(s) checked, {notable} weakened or not enabled");
     }
 
     public static ToolReport Certificates(bool flaggedOnly)

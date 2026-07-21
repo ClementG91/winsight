@@ -16,6 +16,7 @@ using WinSight.Reporting;
 //   winsight certs                      trusted root CAs + rogue-root signals
 //   winsight hosts                      hosts-file hijack / AV-block detection
 //   winsight input                      kernel drivers on the keyboard/mouse path
+//   winsight integrity                  driver signing, memory integrity, Secure Boot
 //   winsight drivers                    registered kernel drivers + signature verdicts
 //   winsight mcp                        local read-only MCP stdio server
 //   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
@@ -42,6 +43,7 @@ if (args.Contains("--help") || args.Contains("-h"))
           winsight certs                          trusted root CAs + rogue-root signals
           winsight hosts                          hosts-file hijack / AV-block detection
           winsight input                          kernel drivers on the keyboard/mouse path
+          winsight integrity                      driver signing, memory integrity, Secure Boot
           winsight drivers                        registered kernel drivers + signature verdicts
           winsight mcp                            local read-only MCP stdio server
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)

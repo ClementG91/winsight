@@ -241,6 +241,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>A new startup item was added and is not trusted (unsigned, untrusted, or its file is missing). Review it.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>A new signed startup item was added.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Ransomware protection</value></data>
+  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Kernel protections</value></data>
+  <data name="ToolIntegrityShort" xml:space="preserve"><value>What this PC refuses to run</value></data>
+  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Asks the kernel itself what it currently enforces: driver signing, test signing, memory integrity, Secure Boot, and whether a kernel debugger is attached. This is what gives every other kernel finding its meaning.</value></data>
+  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Test signing turned on is the one to act on: it means this PC will load a driver signed by anyone, so an "unsigned driver" reported elsewhere is expected rather than surprising. Secure Boot and memory integrity being off are weaker settings, not evidence of anything — but if you did not turn them off, find out who did.</value></data>
   <data name="ToolInputLabel" xml:space="preserve"><value>Keyboard interception</value></data>
   <data name="ToolInputShort" xml:space="preserve"><value>What can read your keystrokes</value></data>
   <data name="ToolInputDescription" xml:space="preserve"><value>Lists the kernel drivers sitting in the keyboard and mouse paths. A driver here sees every key you press, before any application does — which is exactly where a serious keylogger installs itself.</value></data>

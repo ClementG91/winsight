@@ -19,6 +19,7 @@
     <ProjectReference Include="..\WinSight.Certificates\WinSight.Certificates.csproj" />
     <ProjectReference Include="..\WinSight.Hosts\WinSight.Hosts.csproj" />
     <ProjectReference Include="..\WinSight.InputHooks\WinSight.InputHooks.csproj" />
+    <ProjectReference Include="..\WinSight.CodeIntegrity\WinSight.CodeIntegrity.csproj" />
     <ProjectReference Include="..\WinSight.Drivers\WinSight.Drivers.csproj" />
   </ItemGroup>
 </Project>

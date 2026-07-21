@@ -241,6 +241,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Un nouvel élément de démarrage a été ajouté et n'est pas de confiance (non signé, non approuvé ou fichier absent). À vérifier.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Un nouvel élément de démarrage signé a été ajouté.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protection rançongiciel</value></data>
+  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Protections du noyau</value></data>
+  <data name="ToolIntegrityShort" xml:space="preserve"><value>Ce que ce PC refuse d'exécuter</value></data>
+  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Demande au noyau lui-même ce qu'il applique réellement : signature des pilotes, test signing, intégrité mémoire, Secure Boot, et présence d'un débogueur noyau. C'est ce qui donne son sens à tous les autres résultats concernant le noyau.</value></data>
+  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Le test signing activé est le point sur lequel agir : ce PC accepte alors un pilote signé par n'importe qui, et un « pilote non signé » signalé ailleurs devient attendu plutôt que surprenant. Secure Boot et l'intégrité mémoire désactivés sont des réglages plus faibles, pas une preuve — mais si ce n'est pas vous qui les avez désactivés, cherchez qui l'a fait.</value></data>
   <data name="ToolInputLabel" xml:space="preserve"><value>Interception clavier</value></data>
   <data name="ToolInputShort" xml:space="preserve"><value>Ce qui peut lire vos frappes</value></data>
   <data name="ToolInputDescription" xml:space="preserve"><value>Liste les pilotes noyau placés sur le chemin du clavier et de la souris. Un pilote ici voit chaque touche que vous tapez, avant toute application — c'est exactement là qu'un keylogger sérieux s'installe.</value></data>
