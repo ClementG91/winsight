@@ -10,7 +10,9 @@ public static class McpCatalog
 
     public const string ServerInstructions =
         "WinSight exposes read-only observations from the local Windows machine. " +
-        "Start with winsight_get_capabilities, then use summary-only scans. Request evidence only when the user " +
+        "Start with winsight_get_capabilities, then use summary-only scans. winsight_overview runs the balanced " +
+        "set; winsight_scan runs one scanner; winsight_alerts reads WinSight's own record of what its real-time " +
+        "protection already flagged (history, not a fresh scan). Request evidence only when the user " +
         "needs item-level investigation. A notable finding is triage evidence, not proof of malware. " +
         "Never claim that WinSight remediated, blocked, deleted or quarantined anything.";
 

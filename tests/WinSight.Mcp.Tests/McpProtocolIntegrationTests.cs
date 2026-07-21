@@ -40,7 +40,7 @@ public sealed class McpProtocolIntegrationTests
             await SendAsync(process, """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}""");
             using var tools = await ReadAsync(process);
             var listedTools = tools.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToList();
-            Assert.Equal(3, listedTools.Count);
+            Assert.Equal(4, listedTools.Count);
             Assert.All(listedTools, tool =>
             {
                 var annotations = tool.GetProperty("annotations");
@@ -69,6 +69,16 @@ public sealed class McpProtocolIntegrationTests
             Assert.Equal("hosts", hostReport.GetProperty("tool").GetString());
             Assert.Equal(0, hostReport.GetProperty("returnedItemCount").GetInt32());
             Assert.Empty(hostReport.GetProperty("items").EnumerateArray());
+
+            // The dedicated history tool must answer over the protocol and tag its report "alerts".
+            // Summary mode returns counts only, so this holds whether or not the journal has entries.
+            await SendAsync(process, """
+                {"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"winsight_alerts","arguments":{}}}
+                """);
+            using var alerts = await ReadAsync(process);
+            var alertsResult = alerts.RootElement.GetProperty("result").GetProperty("structuredContent");
+            Assert.False(alertsResult.GetProperty("evidenceIncluded").GetBoolean());
+            Assert.Equal("alerts", alertsResult.GetProperty("reports")[0].GetProperty("tool").GetString());
 
             await SendAsync(process, """{"jsonrpc":"2.0","id":5,"method":"resources/list","params":{}}""");
             using var resources = await ReadAsync(process);

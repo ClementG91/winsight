@@ -93,6 +93,39 @@ public sealed class WinSightMcpTools(McpScanService scans, McpSecurityOptions se
             maxItemsPerScanner,
             cancellationToken);
 
+    [McpServerTool(
+        Name = "winsight_alerts",
+        Title = "Read WinSight's real-time detection history",
+        ReadOnly = true,
+        Idempotent = true,
+        Destructive = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description(
+        "Read WinSight's own real-time detection journal: persistence changes and ransomware activity its " +
+        "background protection flagged locally, including while the operator was away from the screen. This is " +
+        "WinSight's recorded history, not a fresh scan of the machine, so it is a separate tool from the scanners. " +
+        "Read-only; summary-only by default. An empty journal is normal on a machine that has flagged nothing.")]
+    public Task<McpScanResult> AlertsAsync(
+        [Description("Include each recorded detection. False returns counts only.")]
+        bool includeEvidence = false,
+        [Description("Include the full path in each detection's detail. Requires WINSIGHT_MCP_ALLOW_SENSITIVE=1 on the server.")]
+        bool includeSensitive = false,
+        [Description("Maximum recorded detections returned, from 1 to 200.")]
+        int maxItems = 50,
+        CancellationToken cancellationToken = default) =>
+        // Goes through the same projector as the scanners, so the journal inherits the identical privacy
+        // model — profile paths redacted unless the server was launched with sensitive evidence enabled.
+        // "alerts" is dispatched by Adapters.Run but is deliberately absent from SnapshotCommands, which is
+        // why it is its own tool rather than a winsight_scan target: it is history, not a machine snapshot.
+        RunAndProjectAsync(
+            scanner: "alerts",
+            flaggedOnly: true,
+            includeEvidence,
+            includeSensitive,
+            maxItems,
+            cancellationToken);
+
     private async Task<McpScanResult> RunAndProjectAsync(
         string? scanner,
         bool flaggedOnly,

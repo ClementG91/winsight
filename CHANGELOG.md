@@ -1,3 +1,19 @@
+## Unreleased
+
+Step-by-step progress log. Newest first. Every CI-green step lands here.
+
+### The alert journal is reachable over MCP, so a connected LLM sees what protection already caught
+- The MCP server exposed the ten machine scanners but not the alert journal added in #91: a connected
+  model could scan the machine's current state yet not read what WinSight's real-time protection had
+  already flagged, including detections raised while the operator was away from the screen.
+- New dedicated tool `winsight_alerts` reads the journal through the same projector as the scanners,
+  so it inherits the identical privacy model — profile paths redacted unless the server was launched
+  with `WINSIGHT_MCP_ALLOW_SENSITIVE=1`, results bounded, summary-only by default. It is deliberately
+  a separate tool rather than a `winsight_scan` scanner: the journal is WinSight's own detection
+  history, not a live machine snapshot, so `SnapshotCommands` stays exactly the ten scanners and the
+  pinned catalog-parity test is untouched. The stdio integration test now negotiates four tools and
+  calls the new one end-to-end.
+
 ## v0.9.0, 2026-07-21
 
 WinSight's first release with real-time protection. Guardian watches persistence surfaces live
