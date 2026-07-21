@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### A Startup folder nobody could list used to report as an empty one
+- The same shape as the scheduled-tasks defect, in the other classic drop point. `StartupFolderEnumerator`
+  answered a folder it could not list with an empty array, so a re-ACLed Startup folder — which is
+  what somebody hiding a shortcut there would arrange — reported clean. It now counts the folder
+  through the coverage mechanism added for scheduled tasks, and the scan summary names it.
+- A folder that simply **does not exist** stays quiet: a machine with no all-users Startup folder is
+  ordinary, and treating absence as refusal would trade a false reassurance for a false alarm.
+- **The test denies itself the ACL rather than faking the symptom.** A first attempt stood a plain
+  file in for a locked directory; it passed for the wrong reason — `Directory.Exists` is false for a
+  file, so nothing ever threw and no gap was counted. The test now creates a real deny-listing ACE
+  on a real directory, which is the situation being defended against, and lifts it again on
+  teardown. Mutation-verified.
+
 ### An unreadable hosts file used to report as a clean one
 - Continuing the audit that produced v0.9.1, applied to the rest of the scanners. `HostsReader`
   answered a file it could not open with an empty list, so the report read **"0 hosts entry(ies),

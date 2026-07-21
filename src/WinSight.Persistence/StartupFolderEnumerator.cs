@@ -9,18 +9,37 @@ namespace WinSight.Persistence;
 /// binary; non-shortcut files are reported as-is. Resolution is best-effort, a .lnk
 /// that cannot be resolved falls back to the shortcut path.
 /// </summary>
-public sealed class StartupFolderEnumerator : IAutostartEnumerator
+/// <param name="folders">
+/// The folders to read, as (directory, label). Defaults to the real per-user and all-users Startup
+/// folders; supplied by tests so the "folder exists but will not open" path — the one an attacker
+/// creates by re-ACLing a drop point — can actually be exercised.
+/// </param>
+public sealed class StartupFolderEnumerator(
+    IReadOnlyList<(string Dir, string Label)>? folders = null) : IAutostartEnumerator
 {
+    private readonly IReadOnlyList<(string Dir, string Label)> _folders = folders ?? DefaultFolders();
+
     public string Surface => "Startup folders";
 
-    public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } =
-        Folders()
+    public IReadOnlyList<PersistenceWatchTarget> WatchTargets =>
+        _folders
             .Select(f => PersistenceWatchTarget.FileSystem(f.Dir, includeSubdirectories: false))
             .ToArray();
 
+    private int _unreadable;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// One per folder that exists but would not open. A startup folder is a classic drop point, and
+    /// an attacker who puts something there can also deny read access to it; without this, that
+    /// folder would report as empty and the surface would look clean.
+    /// </remarks>
+    public int UnreadableLocations => Volatile.Read(ref _unreadable);
+
     public IEnumerable<RawAutostart> Enumerate()
     {
-        foreach (var (dir, label) in Folders())
+        Volatile.Write(ref _unreadable, 0);
+        foreach (var (dir, label) in _folders)
         {
             foreach (var file in SafeFiles(dir))
             {
@@ -33,11 +52,11 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
         }
     }
 
-    private static IEnumerable<(string Dir, string Label)> Folders()
-    {
-        yield return (Environment.GetFolderPath(Environment.SpecialFolder.Startup), "User startup");
-        yield return (Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "Common startup");
-    }
+    private static IReadOnlyList<(string Dir, string Label)> DefaultFolders() =>
+    [
+        (Environment.GetFolderPath(Environment.SpecialFolder.Startup), "User startup"),
+        (Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "Common startup"),
+    ];
 
     private static string ResolveCommand(string file)
     {
@@ -79,7 +98,7 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
         }
     }
 
-    private static string[] SafeFiles(string dir)
+    private string[] SafeFiles(string dir)
     {
         try
         {
@@ -87,6 +106,9 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
+            // A folder that exists but refuses to be listed is not an empty folder, and the
+            // difference is the whole finding: this is where something would be hidden.
+            Interlocked.Increment(ref _unreadable);
             return Array.Empty<string>();
         }
     }
