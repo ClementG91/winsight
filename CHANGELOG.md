@@ -2,6 +2,22 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The firewall's "unattributed connections" counter could never count anything
+- `OutboundObserverService` has always exposed `UnattributedConnections`, and it was structurally
+  incapable of counting the case it is named for: the watcher **discarded** a connection whose
+  process it could not name, before the service ever saw it. The counter only ever incremented for
+  a path the pending log rejected — so a machine quietly losing connections reported zero. A health
+  counter that reads clean while the thing it measures is failing is worse than no counter.
+- The population it was missing is exactly the one worth knowing about: the same bare-name launches
+  that were invisible to attribution — `powershell.exe`, `cmd`, `node`. The watcher now indexes
+  those under their kernel-reported image name and reports the connection as unattributed, with a
+  name where there is one and the process id either way.
+- **It still cannot be ruled on, and that is deliberate.** An unattributed connection never reaches
+  the pending log: that log is the list of apps the operator may Allow or Block, and a rule keyed on
+  the bare name `powershell.exe` would apply to every powershell on the machine whatever its origin.
+  Counting and naming it is the honest answer — the connection is known to have happened, and known
+  not to be rulable.
+
 ### `powershell.exe` was invisible to attribution *and* to the outbound firewall
 - A process's identity is captured at start, from the command line the kernel reports, and anything
   that did not yield a fully qualified path was **discarded entirely**. Measured against a live

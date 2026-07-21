@@ -50,7 +50,22 @@ public sealed class OutboundConnectionWatcher
     /// connection until cancelled. Blocking; run on its own thread. Throws
     /// UnauthorizedAccessException when not elevated.
     /// </summary>
-    public void Watch(Action<OutboundConnectionEvent> onEvent, CancellationToken token)
+    public void Watch(Action<OutboundConnectionEvent> onEvent, CancellationToken token) =>
+        Watch(onEvent, onUnattributed: null, token);
+
+    /// <summary>
+    /// As above, additionally reporting connections whose process could not be named well enough to
+    /// rule on — with its image name when the kernel gave one, and the process id either way.
+    /// </summary>
+    /// <remarks>
+    /// Dropping an unrulable connection is right; dropping it <i>silently</i> left the service's
+    /// own "unattributed" counter permanently at zero on a machine that was losing connections. The
+    /// caller can now distinguish a quiet network from a blind watcher.
+    /// </remarks>
+    public void Watch(
+        Action<OutboundConnectionEvent> onEvent,
+        Action<int, string?>? onUnattributed,
+        CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(onEvent);
 
@@ -84,6 +99,14 @@ public sealed class OutboundConnectionWatcher
             {
                 index.Started(process.ProcessID, path);
             }
+            // No readable path is not the same as no identity. Measured live, this is where
+            // powershell.exe, "cmd /c …" and node land — launched by bare name through the search
+            // path. The name cannot carry a firewall rule, but it can tell an operator which
+            // program's traffic went unruled instead of leaving them a bare process id.
+            else if (!string.IsNullOrWhiteSpace(process.ImageFileName))
+            {
+                index.StartedWithoutPath(process.ProcessID, process.ImageFileName);
+            }
         };
         session.Source.Kernel.ProcessStop += process =>
         {
@@ -93,13 +116,18 @@ public sealed class OutboundConnectionWatcher
 
         session.Source.Kernel.TcpIpConnect += connect =>
         {
-            // Unattributed means the process started before this session and never told us its
-            // command line. Reporting it with a made-up identity would be worse than staying quiet:
-            // every policy is keyed on the executable.
+            // Only a real path is emitted as an attributed connection: every policy is keyed on the
+            // executable, and a rule matching a bare name would apply to every program sharing it.
+            // Anything else is reported as unattributed rather than discarded — a connection nobody
+            // could name is a fact about the machine, not an absence of one.
             if (index.Resolve(connect.ProcessID) is { } path)
             {
                 onEvent(new OutboundConnectionEvent(
                     connect.ProcessID, path, connect.daddr.ToString(), connect.dport));
+            }
+            else
+            {
+                onUnattributed?.Invoke(connect.ProcessID, index.ResolveImage(connect.ProcessID)?.Value);
             }
         };
 

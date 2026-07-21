@@ -60,6 +60,25 @@ public sealed class OutboundObserverServiceTests : IDisposable
         Assert.Equal(1, observer.UnattributedConnections);
     }
 
+    // The counter existed but could never count the case it is named for: the watcher dropped a
+    // connection whose process it could not name before this service ever saw it, so a machine
+    // losing connections reported zero unattributed. Measured live, that population is exactly the
+    // bare-name launches — powershell.exe, cmd, node — which is the traffic worth knowing about.
+    [Fact]
+    public void OnUnattributedConnection_CountsAConnectionTheWatcherCouldNotName()
+    {
+        var log = new PendingOutboundLog();
+        var observer = Observer(log);
+
+        observer.OnUnattributedConnection(4242, "powershell.exe");
+        observer.OnUnattributedConnection(4243, imageName: null);
+
+        Assert.Equal(2, observer.UnattributedConnections);
+        // Never into the pending log: that log is the list of apps the operator can Allow or Block,
+        // and a bare name is not something a rule may be keyed on.
+        Assert.Empty(log.Snapshot());
+    }
+
     // The snapshot is reused for a few seconds so file IO stays off the trace callback path; a
     // decision taken meanwhile must still be picked up once it goes stale.
     [Fact]

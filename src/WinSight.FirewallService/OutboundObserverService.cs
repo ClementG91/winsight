@@ -73,7 +73,7 @@ public sealed partial class OutboundObserverService : BackgroundService
         try
         {
             LogWatching();
-            _watcher.Watch(OnConnection, stoppingToken);
+            _watcher.Watch(OnConnection, OnUnattributedConnection, stoppingToken);
         }
         catch (OperationCanceledException)
         {
@@ -120,6 +120,27 @@ public sealed partial class OutboundObserverService : BackgroundService
         }
     }
 
+    /// <summary>
+    /// Called for an outbound connection whose process could not be named well enough to rule on.
+    /// </summary>
+    /// <remarks>
+    /// These used to be discarded inside the watcher, which meant <see cref="UnattributedConnections"/>
+    /// stood at zero on a machine that was losing connections — a health counter that structurally
+    /// could not count the failure it is named for. Measured against a live kernel session, this
+    /// population is the bare-name launches (<c>powershell.exe</c>, <c>cmd</c>, <c>node</c>), which
+    /// is precisely the traffic an operator would want to know went unseen.
+    ///
+    /// It deliberately does not reach the pending log. That log is the list of apps the operator can
+    /// Allow or Block, and a rule keyed on a bare name would apply to every program sharing it.
+    /// Counting is the honest answer: the connection is known to have happened and known not to be
+    /// rulable.
+    /// </remarks>
+    public void OnUnattributedConnection(int processId, string? imageName)
+    {
+        Interlocked.Increment(ref _unattributed);
+        LogUnattributed(processId, imageName ?? "unknown");
+    }
+
     private HashSet<string> Ruled()
     {
         var now = _time.GetUtcNow();
@@ -154,4 +175,9 @@ public sealed partial class OutboundObserverService : BackgroundService
 
     [LoggerMessage(Level = LogLevel.Warning, Message = "[FW_OBSERVER_UNAVAILABLE] Outbound observation is unavailable; the firewall service continues without it.")]
     private partial void LogUnavailable();
+
+    // The image name, never a path: this branch is reached precisely because there is no path, and
+    // a bare name is not sensitive the way a user's directory layout is.
+    [LoggerMessage(Level = LogLevel.Information, Message = "[FW_OBSERVER_UNATTRIBUTED] A connection from pid {ProcessId} ({ImageName}) could not be attributed to a rulable executable.")]
+    private partial void LogUnattributed(int processId, string imageName);
 }
