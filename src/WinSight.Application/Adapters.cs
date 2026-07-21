@@ -94,7 +94,8 @@ public static class Adapters
         bool allowNetworkLookups = true,
         CancellationToken cancellationToken = default)
     {
-        var entries = new PersistenceScanner(verifier: SharedVerifier).Scan(cancellationToken);
+        var scan = new PersistenceScanner(verifier: SharedVerifier).ScanWithCoverage(cancellationToken);
+        var entries = scan.Entries;
 
         // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
         var vt = VirusTotalEnricher.Lookup(
@@ -135,7 +136,31 @@ public static class Adapters
                     ["vtLink"] = report?.Permalink,
                 });
         }
-        return b.Build($"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged");
+        return b.Build(PersistenceSummary(entries, scan.Coverage));
+    }
+
+    /// <summary>
+    /// The scan's one-line result, including what it was <b>not allowed to read</b>.
+    /// </summary>
+    /// <remarks>
+    /// Measured on a real desktop, the same scan returned 8 546 items unelevated and 8 756
+    /// elevated. The 210 missing ones were scheduled tasks — Brave, Edge, NVIDIA, OneDrive and
+    /// Google updaters — and one of them was already flagged as suspicious. Nothing said so: the
+    /// unelevated report read as a complete, clean scan. Naming the gap costs one clause and is the
+    /// difference between "there is nothing there" and "I could not look".
+    /// </remarks>
+    internal static string PersistenceSummary(
+        IReadOnlyList<AutostartEntry> entries, PersistenceCoverage coverage)
+    {
+        var line = $"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged";
+        if (!coverage.IsPartial)
+        {
+            return line;
+        }
+        var surfaces = string.Join(", ", coverage.UnreadableSurfaces.Distinct().Order(StringComparer.Ordinal));
+        return coverage.UnreadableLocations > 0
+            ? $"{line}, {coverage.UnreadableLocations} not readable without elevation ({surfaces})"
+            : $"{line}, surface(s) not readable without elevation ({surfaces})";
     }
 
     private static string PersistenceStatusLabel(PersistenceStatus status) => status switch

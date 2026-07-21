@@ -2,6 +2,32 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### WinSight reported **zero** scheduled tasks unless you ran it as Administrator
+- Scheduled tasks are a top-tier persistence vector and one of the 22 surfaces WinSight claims to
+  cover. Unelevated it found **none of them**, and said nothing: the report listed the surface,
+  showed no rows, and read exactly like a clean machine. Measured on a real desktop: **0 tasks
+  unelevated, 104 elevated** — Brave, Edge, NVIDIA, OneDrive and Google updaters, and one already
+  flagged as suspicious.
+- The cause was a reasonable-looking decision compounding into a silent total failure. The
+  enumerator parsed the XML files under `%SystemRoot%\System32\Tasks` "to avoid a COM dependency".
+  That directory is administrators-only, and `Directory.GetFiles` does not skip what it cannot
+  enumerate — **it throws for the whole tree**. The exception was caught and turned into an empty
+  list, so one denied directory became "this machine has no scheduled tasks".
+- **Reading through the Task Scheduler service needs no elevation and sees more**: 195 registered
+  tasks visible on the same machine, against 104 files the elevated scan could open. It returns the
+  identical XML, so the parsing that was already tested is reused unchanged. Measured after the
+  change: **81 tasks unelevated (was 0), and 104 elevated — byte-for-byte the previous elevated
+  result, so nothing regressed.** The 23 still unseen unelevated are tasks this user genuinely
+  cannot enumerate, which is the correct answer rather than a hidden one.
+- **A scan now reports what it was not allowed to read.** `ScanWithCoverage` returns the entries
+  plus a `PersistenceCoverage`, and the summary line names the gap — a surface that failed outright
+  is named, and definitions individually refused are counted. "No findings" and "I was not allowed
+  to look" must never render the same, which is precisely how this defect stayed invisible.
+- Late binding is used for the four COM calls deliberately: the alternative is an interop assembly
+  or a hand-written pile of COM declarations, which is a lot of unverifiable surface to add to a
+  security tool. The source sits behind `IScheduledTaskSource`, so the enumerator is tested against
+  a scripted task set with no COM and no dependency on the test machine's own tasks.
+
 ### The firewall's "unattributed connections" counter could never count anything
 - `OutboundObserverService` has always exposed `UnattributedConnections`, and it was structurally
   incapable of counting the case it is named for: the watcher **discarded** a connection whose

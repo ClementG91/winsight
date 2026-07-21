@@ -24,6 +24,22 @@ public interface IAutostartEnumerator
     /// "polled on start", never silently unmonitored.
     /// </summary>
     IReadOnlyList<PersistenceWatchTarget> WatchTargets => Array.Empty<PersistenceWatchTarget>();
+
+    /// <summary>
+    /// How many locations the last <see cref="Enumerate"/> had to skip because it was not allowed
+    /// to read them. Valid once that enumeration has been fully consumed; each call resets it.
+    /// </summary>
+    /// <remarks>
+    /// Zero by default, which is the truth for every surface readable by any user.
+    ///
+    /// <b>Why a scanner must count its own refusals.</b> Measured on a real machine, the same scan
+    /// returned 8 546 entries unelevated and 8 756 elevated: 210 autostart items — scheduled tasks
+    /// belonging to Brave, Edge, NVIDIA, OneDrive and Google updaters, and <i>one already flagged as
+    /// suspicious</i> — were simply absent, with no indication anything had been skipped. An
+    /// operator reading that scan sees a clean surface, and "clean" and "I was not allowed to look"
+    /// are not the same statement. Counting turns the second into something the report can say.
+    /// </remarks>
+    int UnreadableLocations => 0;
 }
 
 /// <summary>
@@ -236,49 +252,56 @@ public sealed class WinlogonEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// Scheduled Tasks, read by parsing the task definition XML files under
-/// %SystemRoot%\System32\Tasks (no Task Scheduler COM dependency). Each task's
-/// Exec action Command is an autostart command. A favourite modern persistence spot.
+/// Scheduled Tasks, read from the Task Scheduler service. Each task's Exec action Command is an
+/// autostart command. A favourite modern persistence spot.
 /// </summary>
-public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
+/// <remarks>
+/// This used to parse the XML files under <c>%SystemRoot%\System32\Tasks</c> directly, to avoid a
+/// COM dependency. That directory is administrators-only and <c>Directory.GetFiles</c> throws for
+/// the whole tree rather than skipping what it cannot read, so unelevated WinSight reported
+/// <b>zero</b> scheduled tasks while still listing the surface as covered — measured, 0 unelevated
+/// against 104 elevated. The service answers without elevation and answers better (195 on the same
+/// machine, because it lists what is registered rather than what has a readable file), and it hands
+/// back the same XML, so the parsing below is unchanged. See <see cref="ComScheduledTaskSource"/>.
+/// </remarks>
+public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null) : IAutostartEnumerator
 {
     private static readonly string TasksRoot =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
 
+    private readonly IScheduledTaskSource _source = source ?? new ComScheduledTaskSource();
+    private bool _unreadable;
+
     public string Surface => "Scheduled Tasks";
 
-    // A scheduled task is a file under \System32\Tasks, often nested in subfolders; watch the tree.
+    // A scheduled task is still a file under \System32\Tasks even when read through the service, so
+    // the live watcher keeps watching the tree — directory change notifications do not require the
+    // read access that opening the files does.
     public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
     {
         PersistenceWatchTarget.FileSystem(TasksRoot, includeSubdirectories: true),
     };
 
-    // Real task definitions are a few KB; a huge file planted under \Tasks must not
-    // be read whole into memory (resource-exhaustion resistance).
-    private const long MaxTaskFileBytes = 1024 * 1024;
+    /// <inheritdoc />
+    /// <remarks>
+    /// Reported as one unreadable location, not a count: when the service cannot be reached the
+    /// number of tasks behind it is exactly what is unknown.
+    /// </remarks>
+    public int UnreadableLocations => _unreadable ? 1 : 0;
 
     public IEnumerable<RawAutostart> Enumerate()
     {
-        foreach (var file in SafeFiles(TasksRoot))
+        var tasks = _source.Enumerate().ToList();
+        _unreadable = _source.Unreadable;
+        foreach (var task in tasks)
         {
-            string xml;
-            try
+            foreach (var command in ParseTaskCommands(task.Xml))
             {
-                if (new FileInfo(file).Length > MaxTaskFileBytes)
-                {
-                    continue;
-                }
-                xml = File.ReadAllText(file);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                continue;
-            }
-
-            var name = Path.GetRelativePath(TasksRoot, file);
-            foreach (var command in ParseTaskCommands(xml))
-            {
-                yield return new RawAutostart(AutostartVector.ScheduledTask, name, file, command);
+                yield return new RawAutostart(
+                    AutostartVector.ScheduledTask,
+                    task.Path.TrimStart('\\'),
+                    Path.Combine(TasksRoot, task.Path.TrimStart('\\')),
+                    command);
             }
         }
     }
@@ -306,19 +329,6 @@ public sealed class ScheduledTaskEnumerator : IAutostartEnumerator
             .ToList();
     }
 
-    private static string[] SafeFiles(string root)
-    {
-        try
-        {
-            return Directory.Exists(root)
-                ? Directory.GetFiles(root, "*", SearchOption.AllDirectories)
-                : Array.Empty<string>();
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return Array.Empty<string>();
-        }
-    }
 }
 
 /// <summary>
