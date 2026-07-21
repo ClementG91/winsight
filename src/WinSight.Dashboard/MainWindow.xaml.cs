@@ -142,7 +142,7 @@ public partial class MainWindow : Window, IDisposable
             _trayIcon.ShowBalloonTip(
                 5000,
                 Text["AvBalloonTitle"],
-                $"{usage.App} — {message}",
+                $"{AvPresenter.DisplayName(usage)} — {message}",
                 Forms.ToolTipIcon.Warning);
         });
     }

@@ -2,6 +2,24 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Camera/mic alerting verified on real hardware, and the alert made readable
+- Verified end-to-end at last, by driving an actual microphone acquisition rather than reasoning
+  about it: a real hardware transition produced `MicrophoneActivated` in the journal 1.5s later (the
+  poll interval), `MicrophoneDeactivated` 0.6s after release, and a tray balloon on screen. The
+  whole chain — device → CapabilityAccessManager → reader → diff → host → journal and balloon — is
+  now confirmed against reality, not just against tests.
+- **Looking at the real alert immediately found a defect.** The balloon showed the app's full path,
+  which wrapped over four lines and was truncated before it identified anything, while putting the
+  operator's folder layout on screen. It now shows the executable's name, matching the deliberate
+  choice already made for the ransomware balloon: an alert can be shoulder-surfed or land in a
+  screenshot, and the file name is what answers "what is using my microphone". The journal still
+  records the full path, because that is opened deliberately to investigate. Packaged apps keep
+  their family name, which has no directories to trim.
+- Worth recording for anyone testing this later: initialising a capture object is **not** enough to
+  register in the consent store — Windows records an app only once the device is genuinely
+  streaming. That is the correct boundary rather than a blind spot: without a stream no samples are
+  delivered, so nothing is actually hearing or watching.
+
 ### Keyboard interception: WinSight can now answer "what can read my keystrokes?"
 - The clearest capability gap in the parity analysis, and the one an operator most wants answered.
   macOS lets ReiKey enumerate event taps outright; Windows exposes no documented way to list
