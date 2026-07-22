@@ -2,6 +2,38 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.10.0, 2026-07-22
+
+**Objective-See parity is complete.** Every tool on the comparison list is now at parity or ahead —
+persistence × 2, outbound firewall, ransomware, camera/mic, keyboard interception, kernel drivers,
+process explorer, hijack analysis and physical access — in one application instead of eight, with an
+MCP server, an alert journal, four scanners Objective-See has no equivalent for, and three languages.
+
+This release came out of an adversarial audit of the whole repository, not of the recent commits, and
+the pattern it hunted was a single one: *a component silently discards what it cannot handle, and the
+health signal meant to reveal that is structurally incapable of seeing the rejection.* Six instances
+were found and closed, including one inside the coverage gate itself and one inside the component
+written to fix an earlier instance of the same defect.
+
+**New capability**
+- `presence` — physical-access detection. Resume timeline with Windows' own wake source, flagging
+  only wakes attributable to a human hand. Two of the three planned data sources were measured and
+  rejected before any code was written.
+- `process <pid>` — the per-process view: lineage, unsigned modules, live external sockets.
+- `hijack` gains **phantom imports**, closing the last DHS gap, plus UNC paths and non-`.exe` images.
+- Ransomware alerts now **name the process doing the encrypting**, and any alert without an author
+  now says why it has none.
+
+**Fixed, each one a blind spot rather than a crash**
+- A COM failure could never be reported as "could not look", and threw through the whole persistence
+  scan instead.
+- The coverage gate graded one assembly out of twenty-two — and no workflow ever ran it.
+- A swapped binary could be served its old trusted verdict.
+- A hijack finding could name a directory the service does not live in.
+- A whole scanner was undiscoverable from `--help`.
+
+1 294 tests (from 1 097), engine libraries at 87.5%, coverage now enforced by CI.
+
 ### `presence` — physical-access detection, and the two sources measured and rejected first
 - The last Objective-See parity gap (DoNotDisturb). **Two of the three planned sources were measured
   and discarded before any code was written**, and why matters more than what remained.
