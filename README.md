@@ -36,11 +36,18 @@ Each validated on real Windows (not only CI):
   heuristics, raising a loud alert the moment something behaves like ransomware. Detect-and-alert
   only; stopping the write needs a signed kernel driver (deferred). See
   [`docs/RANSOMWARE_DESIGN.md`](docs/RANSOMWARE_DESIGN.md).
-- **Write attribution** — when WinSight happens to run elevated, a persistence alert also names
-  the program that installed the entry (`written by setup.exe (pid 4242)`). A kernel trace session
-  is privileged, so this is a bonus for an elevated run, never a requirement: unelevated, the alert
-  simply carries no author. It reports its own coverage rather than guessing. See
+- **Write attribution** — when WinSight happens to run elevated, a persistence *or ransomware* alert
+  also names the program behind it (`written by setup.exe (pid 4242)`), and when it cannot, it says
+  why (`author unknown (attribution needs Administrator)`) rather than staying silent. A kernel trace
+  session is privileged, so this is a bonus for an elevated run, never a requirement. See
   [`docs/ATTRIBUTION_DESIGN.md`](docs/ATTRIBUTION_DESIGN.md).
+- **Hijack scan** (DHS-class) — services another program could run in their place: unquoted service
+  paths, writable service directories and PATH entries, and **phantom imports** (a DLL a binary needs
+  that no directory in its search order provides), each graded by whether it is exploitable on *this*
+  machine rather than listed flat.
+- **Per-process view** (`winsight process <pid>`) and **physical-access detection**
+  (`winsight presence`) — the resume timeline with Windows' own wake source, flagging only wakes a
+  human hand can be held responsible for.
 
 Local-only, no telemetry. Everything observes and reports rather than acting on its own; the two
 exceptions are explicit and opt-in — the firewall only blocks what you tell it to, and ransomware
