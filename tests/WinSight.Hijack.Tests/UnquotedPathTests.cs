@@ -102,4 +102,25 @@ public sealed class UnquotedPathTests
 
         Assert.Equal([@"C:\Program.exe"], candidates);
     }
+
+    // Regression: taking the LAST .exe matched the one inside an argument, so the whole command
+    // line became "the executable" and the candidate list gained C:\...\svc.exe.exe and
+    // C:\...\svc.exe -c.exe — paths that cannot exist, sending an operator to inspect nothing.
+    [Fact]
+    public void AnExeInsideAnArgumentIsNotMistakenForTheExecutable()
+    {
+        var candidates = UnquotedPath.HijackCandidates(@"C:\Program Files\App\svc.exe -c C:\other.exe");
+
+        Assert.Equal([@"C:\Program.exe"], candidates);
+    }
+
+    // A directory genuinely named "my.exe" is not a mistake — it is what Windows would try first,
+    // so the first-.exe-at-a-token-boundary rule is right for this too.
+    [Fact]
+    public void ADirectoryNamedLikeAnExecutableIsTakenAtFaceValue()
+    {
+        var candidates = UnquotedPath.HijackCandidates(@"C:\tools\my.exe dir\svc.exe");
+
+        Assert.Empty(candidates);
+    }
 }

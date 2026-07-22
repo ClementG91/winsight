@@ -82,24 +82,34 @@ public static class UnquotedPath
     /// </summary>
     /// <remarks>
     /// Windows itself cannot know where the executable ends — that is the whole ambiguity — so this
-    /// takes the longest prefix ending in <c>.exe</c>. When there is no <c>.exe</c> at all the
-    /// command line is not something this rule can reason about, and it says so with null rather
-    /// than guessing: a wrong candidate list sends an operator to inspect an innocent file.
+    /// takes the <b>first</b> <c>.exe</c> that ends a token, which is also the order
+    /// <c>CreateProcess</c> resolves in: it tries the shortest interpretations first.
+    ///
+    /// Taking the <i>last</i> one instead is wrong and was the first version of this: a service
+    /// registered as <c>C:\Program Files\App\svc.exe -c C:\other.exe</c> matched the <c>.exe</c>
+    /// inside the argument, so the whole command line became "the executable" and the candidate
+    /// list contained <c>C:\Program Files\App\svc.exe.exe</c> and
+    /// <c>C:\Program Files\App\svc.exe -c.exe</c> — paths that cannot exist, sending an operator to
+    /// inspect nothing. Exactly the failure this method exists to prevent.
+    ///
+    /// When there is no <c>.exe</c> ending a token at all, the command line is not something this
+    /// rule can reason about, and it says so with null rather than guessing.
     /// </remarks>
     private static string? ExecutableSpan(string line)
     {
         const string extension = ".exe";
-        var at = line.LastIndexOf(extension, StringComparison.OrdinalIgnoreCase);
-        if (at < 0)
+        var at = line.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
+        while (at >= 0)
         {
-            return null;
+            var end = at + extension.Length;
+            // ".exe" must end a token; "...\foo.exefoo" is not an executable name, but a directory
+            // called "my.exe" followed by a space genuinely is what Windows would try first.
+            if (end == line.Length || line[end] is ' ' or '"')
+            {
+                return line[..end];
+            }
+            at = line.IndexOf(extension, at + 1, StringComparison.OrdinalIgnoreCase);
         }
-        var end = at + extension.Length;
-        // ".exe" must end a segment; "...\foo.exefoo" is not an executable name.
-        if (end < line.Length && line[end] is not (' ' or '"'))
-        {
-            return null;
-        }
-        return line[..end];
+        return null;
     }
 }
