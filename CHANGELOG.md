@@ -2,6 +2,22 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The outbound firewall is validated end-to-end on a real machine, and the proof is in the repo
+- The one thing CI structurally cannot cover — arming WFP and cutting real traffic through P/Invoke —
+  now has a **recorded, reproducible transcript**:
+  [`docs/validation/2026-07-23-firewall-enforcement-x64.md`](docs/validation/2026-07-23-firewall-enforcement-x64.md).
+  **18 checks, 0 failures**, run on a clean x64 VM against the published binaries, armed through the
+  real dashboard → authenticated IPC → service path.
+- The load-bearing result is **per-app scoping**: the blocked copy of curl could not reach the
+  network while a second, unblocked copy still could. A machine-wide cut that happened to block the
+  target would have passed the naive check and failed this one. It passed the real one.
+- Provider/sublayer created on arm, **all WFP state removed on emergency disable**, traffic restored,
+  service uninstalled clean — the machine returns exactly to its prior state.
+- This closes a standing gap in the project's own honesty: "covered by VM validation" was true but
+  left nothing a third party could check. Now it does. The enforcement code is byte-identical from
+  `v0.10.2` through `HEAD`, so the record describes the current path. Arm64 and the adversarial
+  service-path TOCTOU race remain explicitly out of scope and are called out in the record.
+
 ## v0.10.3, 2026-07-22
 
 Three shipped scripts could not be parsed by the shell a clean Windows opens. Found by someone
