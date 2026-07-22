@@ -1,3 +1,5 @@
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
 namespace WinSight.Persistence;
@@ -73,14 +75,17 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
                 return [];
             }
             var collected = new List<ScheduledTaskDefinition>();
-            Collect(root, collected, depth: 0);
+            try
+            {
+                Collect(root, collected, depth: 0);
+            }
+            finally
+            {
+                Release(root);
+            }
             return collected;
         }
-        catch (Exception ex) when (ex is COMException
-                                     or UnauthorizedAccessException
-                                     or InvalidOperationException
-                                     or MissingMethodException
-                                     or NotSupportedException)
+        catch (Exception ex) when (IsRecoverable(ex))
         {
             // The Task Scheduler service can be stopped or restricted. An empty list is then not a
             // finding about the machine, and saying so is the whole point of this flag.
@@ -93,6 +98,39 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
         }
     }
 
+    /// <summary>
+    /// Whether a failure means "this source could not be read" rather than a defect in WinSight.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this is a named predicate and not an inline <c>when</c> clause.</b> The set was wrong,
+    /// and nothing could see that it was wrong. Late binding raises COM failures through
+    /// <see cref="Type.InvokeMember(string, BindingFlags, Binder, object, object[], System.Globalization.CultureInfo)"/>,
+    /// which wraps whatever the member threw in a <see cref="TargetInvocationException"/> — measured
+    /// on this machine, asking the live service for a folder that does not exist surfaced
+    /// <c>TargetInvocationException</c> (0x80131604), not <see cref="COMException"/>. The previous
+    /// filter listed only unwrapped types, so <b>no</b> COM failure matched it: a stopped Task
+    /// Scheduler service threw straight through <see cref="Enumerate"/> and took the whole
+    /// persistence scan with it, while <see cref="Unreadable"/> — the flag whose entire purpose is
+    /// to say "an empty list is not a fact about this machine" — could never become true.
+    ///
+    /// That is the same class of defect this component was written to fix, one layer down: the
+    /// health signal was structurally incapable of reporting the blind spot it guards.
+    ///
+    /// The inner exception is what gets classified, because the CLR maps well-known HRESULTs to
+    /// specific types before wrapping: <c>ERROR_FILE_NOT_FOUND</c> arrives as
+    /// <see cref="FileNotFoundException"/>, <c>E_ACCESSDENIED</c> as
+    /// <see cref="UnauthorizedAccessException"/>, and only the rest as <see cref="COMException"/>.
+    /// Keeping this a predicate means it is tested directly, with the exception shapes the runtime
+    /// actually produces, rather than asserted through a stub that can never fail the way COM does.
+    /// </remarks>
+    internal static bool IsRecoverable(Exception exception) => Unwrap(exception) is
+        COMException or UnauthorizedAccessException or InvalidOperationException or
+        MissingMethodException or NotSupportedException or IOException or ArgumentException;
+
+    /// <summary>The exception a late-bound member actually threw, past the reflection wrapper.</summary>
+    private static Exception Unwrap(Exception exception) =>
+        exception is TargetInvocationException { InnerException: { } inner } ? inner : exception;
+
     /// <summary>Folders nest, and a cycle or a pathological tree must not become a stack overflow.</summary>
     private const int MaxDepth = 32;
 
@@ -104,55 +142,62 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
         }
 
         var tasks = Invoke(folder, "GetTasks", IncludeHidden);
-        if (tasks is System.Collections.IEnumerable taskList)
+        try
         {
-            foreach (var task in taskList)
+            if (tasks is System.Collections.IEnumerable taskList)
             {
-                try
+                foreach (var task in taskList)
                 {
-                    var path = Get(task, "Path") as string;
-                    var xml = Get(task, "Xml") as string;
-                    if (!string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(xml))
+                    try
                     {
-                        into.Add(new ScheduledTaskDefinition(path, xml));
+                        var path = Get(task, "Path") as string;
+                        var xml = Get(task, "Xml") as string;
+                        if (!string.IsNullOrWhiteSpace(path) && !string.IsNullOrWhiteSpace(xml))
+                        {
+                            into.Add(new ScheduledTaskDefinition(path, xml));
+                        }
+                    }
+                    catch (Exception ex) when (IsRecoverable(ex))
+                    {
+                        // One unreadable task must not cost the other 194.
+                    }
+                    finally
+                    {
+                        Release(task);
                     }
                 }
-                catch (COMException)
-                {
-                    // One unreadable task must not cost the other 194.
-                }
-                finally
-                {
-                    Release(task);
-                }
             }
         }
-        Release(tasks);
+        finally
+        {
+            Release(tasks);
+        }
 
         var folders = Invoke(folder, "GetFolders", 0);
-        if (folders is System.Collections.IEnumerable folderList)
+        try
         {
-            foreach (var child in folderList)
+            if (folders is System.Collections.IEnumerable folderList)
             {
-                try
+                foreach (var child in folderList)
                 {
-                    Collect(child, into, depth + 1);
-                }
-                catch (COMException)
-                {
-                    // Likewise: a folder we cannot open is not a reason to abandon the rest.
-                }
-                finally
-                {
-                    Release(child);
+                    try
+                    {
+                        Collect(child, into, depth + 1);
+                    }
+                    catch (Exception ex) when (IsRecoverable(ex))
+                    {
+                        // Likewise: a folder we cannot open is not a reason to abandon the rest.
+                    }
+                    finally
+                    {
+                        Release(child);
+                    }
                 }
             }
         }
-        Release(folders);
-
-        if (depth > 0)
+        finally
         {
-            // The caller released the root; children are released by the loop above.
+            Release(folders);
         }
     }
 
