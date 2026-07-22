@@ -2,4 +2,7 @@
   <PropertyGroup>
     <RootNamespace>WinSight.Hijack</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Hijack.Tests" />
+  </ItemGroup>
 </Project>

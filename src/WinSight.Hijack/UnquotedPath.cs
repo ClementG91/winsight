@@ -94,8 +94,13 @@ public static class UnquotedPath
     ///
     /// When there is no <c>.exe</c> ending a token at all, the command line is not something this
     /// rule can reason about, and it says so with null rather than guessing.
+    ///
+    /// Internal rather than private because <see cref="HijackScanner.ExecutableDirectory"/> reads the
+    /// same string for a different question and must reach the same answer. It had its own copy of
+    /// this parse without the end-of-token rule, so the two disagreed on exactly the inputs this rule
+    /// was hardened for — one of them would have named a directory that is not the service's.
     /// </remarks>
-    private static string? ExecutableSpan(string line)
+    internal static string? ExecutableSpan(string line)
     {
         const string extension = ".exe";
         var at = line.IndexOf(extension, StringComparison.OrdinalIgnoreCase);

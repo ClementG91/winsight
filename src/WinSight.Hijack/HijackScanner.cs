@@ -175,6 +175,13 @@ public sealed class HijackScanner(
     /// Deliberately conservative. A driver's NT path is loaded by the kernel, not from a directory
     /// search; a command line with no <c>.exe</c> cannot be split reliably. Guessing here would
     /// probe — and then accuse — the wrong directory.
+    ///
+    /// The unquoted case defers to <see cref="UnquotedPath.ExecutableSpan"/> rather than repeating
+    /// the parse. It used to take the first <c>.exe</c> in the string with no end-of-token check, so
+    /// a command line whose path contains an earlier <c>.exe</c> — say
+    /// <c>C:\Tools\7z.exe.bak\svc.exe -k</c> — resolved to <c>C:\Tools</c> and the scan would probe,
+    /// and on a writable machine accuse, a directory the service does not live in. Two readings of
+    /// one string in one feature have to agree, or the harder-won one is wasted.
     /// </remarks>
     internal static string? ExecutableDirectory(string? commandLine)
     {
@@ -184,7 +191,7 @@ public sealed class HijackScanner(
             return null;
         }
 
-        string executable;
+        string? executable;
         if (line.StartsWith('"'))
         {
             var close = line.IndexOf('"', 1);
@@ -196,12 +203,11 @@ public sealed class HijackScanner(
         }
         else
         {
-            var at = line.IndexOf(".exe", StringComparison.OrdinalIgnoreCase);
-            if (at < 0)
+            executable = UnquotedPath.ExecutableSpan(line);
+            if (executable is null)
             {
                 return null;
             }
-            executable = line[..(at + 4)];
         }
 
         try
