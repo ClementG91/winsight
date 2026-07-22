@@ -14,7 +14,12 @@ public static class McpCatalog
         "set; winsight_scan runs one scanner; winsight_alerts reads WinSight's own record of what its real-time " +
         "protection already flagged (history, not a fresh scan). Request evidence only when the user " +
         "needs item-level investigation. A notable finding is triage evidence, not proof of malware. " +
-        "Never claim that WinSight remediated, blocked, deleted or quarantined anything.";
+        "Never claim that WinSight remediated, blocked, deleted or quarantined anything. " +
+        "An alert may name the process that wrote it ('written by <path> (pid N)'); when it instead " +
+        "says 'author unknown', the reason in brackets is meaningful and must be repeated rather " +
+        "than dropped: 'attribution needs Administrator' means the writer could have been identified " +
+        "had WinSight been elevated, while 'attribution watching, no matching write seen' means it " +
+        "was identified as genuinely unknown. Never present the first as if it were the second.";
 
     public static IReadOnlyList<McpScannerCapability> Scanners { get; } =
     [

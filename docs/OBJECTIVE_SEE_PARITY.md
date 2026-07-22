@@ -70,8 +70,21 @@ Matching the root-relative tail is correct under either spelling, which is the p
 be observed from an unelevated machine, so the code is written to be right either way rather than
 betting on which form arrives.
 
-Still open: surfacing attribution health over MCP, so an LLM asking "is attribution watching?" can
-tell "not elevated" from "running and seeing nothing".
+**An absent author now says why it is absent.** Three states hide behind a nameless alert and they
+call for three different responses: nothing was watching, nothing *could* watch because the process
+is unelevated, or something was watching and genuinely saw nothing. `AttributionHealth` was built to
+draw exactly those distinctions — and was read by nothing outside its own tests, so no operator,
+journal or MCP client ever saw any of them. Every alert now carries the reason
+(`author unknown (attribution needs Administrator)`), which matters because a silent absence reads as
+the *last* of the three when on an unelevated machine it is always the second.
+
+The note rides on the alert rather than on a separate health endpoint, deliberately. The journal
+already crosses the process boundary — the dashboard writes it, the MCP server reads it — so the
+caveat reaches an LLM with no new file and no new tool. More importantly it has no staleness problem:
+a health file written by a dashboard that has since exited would describe a world that no longer
+exists, whereas a note beside the detection describes the state at the moment that detection fired,
+which is the only state that can explain it. The MCP server instructions tell a client that the
+bracketed reason is meaningful and must not be dropped.
 
 ### ~~2. Keylogger / input-hook detection (ReiKey-class)~~ — **done**
 Shipped as the `input` scanner. Worth recording *why it took the shape it did*, because the obvious

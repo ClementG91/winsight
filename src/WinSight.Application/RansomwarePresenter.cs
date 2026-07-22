@@ -60,21 +60,13 @@ public static class RansomwarePresenter
         RansomwareSignalKind kind,
         string? path,
         Func<string?, DateTimeOffset, WriteObservation?>? attribute = null,
-        DateTimeOffset? detectedAtUtc = null)
+        DateTimeOffset? detectedAtUtc = null,
+        AttributionHealth? health = null)
     {
         var line = string.IsNullOrWhiteSpace(path)
             ? kind.ToString()
             : $"{kind}: {path}";
-        var author = attribute?.Invoke(path, detectedAtUtc ?? DateTimeOffset.UtcNow);
-        if (author is null)
-        {
-            return line;
-        }
-        // A bare-name launch is named, never dressed up as a located file: an operator deciding what
-        // to terminate must be able to tell "powershell.exe" from a path they can go and inspect.
-        var by = author.PathIsExact
-            ? $"{author.ExecutablePath} (pid {author.ProcessId})"
-            : $"{author.ExecutablePath} (pid {author.ProcessId}, full path unknown)";
-        return $"{line} — written by {by}";
+        return AttributionNote.Describe(
+            line, attribute?.Invoke(path, detectedAtUtc ?? DateTimeOffset.UtcNow), health);
     }
 }

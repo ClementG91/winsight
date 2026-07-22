@@ -245,7 +245,12 @@ public partial class MainWindow : Window, IDisposable
             RansomwarePresenter.AlertDetail(
                 e.Kind,
                 e.Path,
-                _attribution is { } attribution ? attribution.Attribute : null)));
+                _attribution is { } attribution ? attribution.Attribute : null,
+                detectedAtUtc: null,
+                // Carried so a nameless alert says why it is nameless. "Not elevated" and "watching
+                // and saw nothing" call for different responses, and a silent absence reads as the
+                // second when it is usually the first.
+                health: _attribution?.Health)));
 
         Dispatcher.Invoke(() =>
         {
@@ -271,7 +276,8 @@ public partial class MainWindow : Window, IDisposable
             detection.Entry.Vector.ToString(),
             PersistenceMonitorPresenter.AlertDetail(
                 detection,
-                _attribution is { } attribution ? attribution.Attribute : null)));
+                _attribution is { } attribution ? attribution.Attribute : null,
+                _attribution?.Health)));
 
         Dispatcher.Invoke(() =>
         {

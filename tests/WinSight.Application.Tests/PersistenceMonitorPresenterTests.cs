@@ -73,6 +73,29 @@ public sealed class PersistenceMonitorPresenterTests
         Assert.Contains("Updater", detail, StringComparison.Ordinal);
         Assert.Contains(@"C:\evil.exe", detail, StringComparison.Ordinal);
         Assert.DoesNotContain("written by", detail, StringComparison.Ordinal);
+        // ...and it says *why* there is no author. A silent absence reads as "attribution was
+        // watching and had nothing to report", which is the opposite of what unelevated means.
+        Assert.Contains("author unknown (attribution not running)", detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AlertDetail_DistinguishesUnelevatedFromWatchingAndSeeingNothing()
+    {
+        var refused = new AttributionHealth(
+            Running: false, Attributed: 0, UnknownProcess: 0, UnannouncedKey: 0,
+            UntranslatablePath: 0, Refused: true);
+        var watching = refused with { Running = true, Refused = false };
+
+        var unelevated = PersistenceMonitorPresenter.AlertDetail(
+            Event(AtRunKey("Updater", @"C:\evil.exe")), attribute: null, health: refused);
+        var blind = PersistenceMonitorPresenter.AlertDetail(
+            Event(AtRunKey("Updater", @"C:\evil.exe")), attribute: null, health: watching);
+
+        // "Run it as Administrator and you will get a name" and "the answer really is unknown" are
+        // different instructions to the person reading this line.
+        Assert.Contains("needs Administrator", unelevated, StringComparison.Ordinal);
+        Assert.Contains("no matching write seen", blind, StringComparison.Ordinal);
+        Assert.NotEqual(unelevated, blind);
     }
 
     public static TheoryData<ImageResolutionStatus, SignatureState, string> Verdicts => new()

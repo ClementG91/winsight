@@ -32,25 +32,22 @@ public static class PersistenceMonitorPresenter
     /// is opened deliberately, on one's own machine, precisely because one needs to know exactly
     /// which program to look at.
     /// </remarks>
+    /// <param name="health">
+    /// Attribution's account of itself, so an absent author is explained rather than merely missing.
+    /// A nameless alert that does not say why is read as "attribution had nothing to report", which
+    /// is indistinguishable from "attribution was never running".
+    /// </param>
     public static string AlertDetail(
         PersistenceEvent detection,
-        Func<string?, DateTimeOffset, WriteObservation?>? attribute = null)
+        Func<string?, DateTimeOffset, WriteObservation?>? attribute = null,
+        AttributionHealth? health = null)
     {
         ArgumentNullException.ThrowIfNull(detection);
         var entry = detection.Entry;
         var target = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
         var line = $"{entry.Name} — {target} [{StatusLabel(entry.Status)}]";
-        var author = attribute?.Invoke(entry.Location, detection.FirstSeenUtc);
-        if (author is null)
-        {
-            return line;
-        }
-        // A bare-name launch is named, but never dressed up as a located file: "powershell.exe" and
-        // "C:\Windows\...\powershell.exe" mean different things to someone deciding what to do next.
-        var by = author.PathIsExact
-            ? $"{author.ExecutablePath} (pid {author.ProcessId})"
-            : $"{author.ExecutablePath} (pid {author.ProcessId}, full path unknown)";
-        return $"{line} — written by {by}";
+        return AttributionNote.Describe(
+            line, attribute?.Invoke(entry.Location, detection.FirstSeenUtc), health);
     }
 
     /// <summary>

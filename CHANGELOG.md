@@ -2,6 +2,30 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### An alert with no author now says why it has none
+- Three states hide behind a nameless detection and they call for three different responses: nothing
+  was watching, nothing **could** watch because the process is unelevated, or something was watching
+  and genuinely saw nothing. `AttributionHealth` exists to draw exactly those distinctions, and its
+  own summary says collapsing them "is how a monitor gets trusted when it should not be".
+- **Nothing read it.** Outside its own tests, `AttributionHealth` had no consumer anywhere in the
+  product: every caller took the author or the absence of one, and the health record reached no
+  operator, no journal and no MCP client. The type was right and unwired — the same shape of defect
+  as the scheduled-task flag, one layer up.
+- Alerts now end with `— written by <path> (pid N)` or `— author unknown (<reason>)`. The reason is
+  what makes it actionable: *attribution needs Administrator* means the writer could have been named
+  had WinSight been elevated, while *attribution watching, no matching write seen* means it really is
+  unknown. A silent absence reads as the second when on an unelevated machine it is always the first.
+- **The note rides on the alert, not on a health endpoint** — deliberately. The journal already
+  crosses the process boundary (the dashboard writes it, the MCP server reads it), so the caveat
+  reaches an LLM with no new file and no new tool. And it has no staleness problem: a health file
+  written by a dashboard that has since exited would describe a world that no longer exists, while a
+  note beside the detection describes the state at the moment it fired — the only state that can
+  explain it.
+- Both monitors now share one renderer. They had a copy each, and a security record whose wording
+  depends on which code path reached it is one you have to read twice.
+- MCP server instructions tell a client the bracketed reason is meaningful and must be repeated
+  rather than dropped, and never to present "needs Administrator" as if it were "genuinely unknown".
+
 ### Ransomware alerts now name the process doing the encrypting
 - `CanaryTouched: decoy.docx` says something is wrong. **`— written by C:\Users\me\AppData\Local\Temp\x.exe (pid 8121)`
   says what to terminate.** Ransomware is the one detection where minutes matter, and it was the one
