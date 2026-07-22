@@ -841,8 +841,7 @@ public static class Adapters
         {
             foreach (var r in enabled.OrderBy(r => r.Direction).ThenBy(r => r.DisplayName, StringComparer.OrdinalIgnoreCase))
             {
-                var detail = string.Join("  ", new[] { r.Program, r.Ports }.Where(s => !string.IsNullOrEmpty(s)));
-                b.Add(Severity.Info, $"{r.Direction}/{r.Action}, {r.DisplayName}", detail,
+                b.Add(Severity.Info, $"{r.Direction}/{r.Action}, {r.DisplayName}", FirewallRuleDetail(r),
                     new Dictionary<string, string?>
                     {
                         ["name"] = r.DisplayName,
@@ -855,6 +854,24 @@ public static class Adapters
             }
         }
         return b.Build($"{rules.Count} rule(s), {enabled.Count} enabled");
+    }
+
+    /// <summary>
+    /// What a firewall rule actually covers, in one line.
+    /// </summary>
+    /// <remarks>
+    /// A rule that names neither a program nor a port applies to <b>everything</b>, and joining two
+    /// empty strings rendered it as a blank line — so the broadest rules on the machine displayed the
+    /// least information. Measured here: all 420 enabled rules produced an empty detail, because the
+    /// reader supplies program and ports only for rules that scope themselves. Saying "any program,
+    /// any port" is both the truth and the more interesting reading.
+    /// </remarks>
+    internal static string FirewallRuleDetail(FirewallRule rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+        var program = string.IsNullOrWhiteSpace(rule.Program) ? "any program" : rule.Program;
+        var ports = string.IsNullOrWhiteSpace(rule.Ports) ? "any port" : rule.Ports;
+        return $"{program}  {ports}";
     }
 
     public static ToolReport Dns(bool flaggedOnly)

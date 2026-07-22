@@ -2,6 +2,33 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Not one scanner had ever been run by the test suite
+- Every scanner's rules were tested through its own module with injected seams — the right place for
+  them — and **not one scanner was ever executed end to end**. The only adapter that ran was
+  `alerts`, which reads a file. Fifteen scanners proven correct in isolation, none proven to compose.
+- That gap is the one that matters for "does this work on somebody else's machine". A scanner reads
+  registry keys, WMI, event logs and device classes that exist here and may not exist there: Windows
+  Home has no Group Policy keys, a server has no camera, Task Scheduler can be disabled, and Windows
+  need not be on `C:`. A scripted source cannot see any of it.
+- All fifteen now run for real, three ways: the report is coherent (a tool name, a non-empty summary,
+  no item without a title or detail, no blank field key), the `--flagged` view is a subset of the
+  full one, and the output survives being rendered to JSON **and parsed back**. Every assertion is
+  machine-agnostic — never a count, never a specific finding.
+- **The point is CI.** Run here they prove little; run on a GitHub runner — different Windows
+  edition, different locale, no interactive session, none of this developer's software — they are
+  the only evidence the suite has that WinSight works somewhere nobody developed it.
+- Cost is about two minutes, dominated by persistence and modules, and close to free in wall-clock
+  terms: `build-test` runs beside the longer packaging job.
+- `WinSight.Application` coverage 58.4% → **87.9%**; overall production 65.3% → **72%**.
+
+### Every enabled firewall rule displayed a blank line
+- Found by the sweep above on its first run: **420 of 420** enabled rules produced an empty detail.
+  The line was built by joining the rule's program and ports, and the reader supplies those only for
+  rules that scope themselves — so a rule naming neither, which therefore applies to **everything**,
+  rendered as nothing at all. The broadest rules on the machine showed the least information.
+- They now read `any program  any port`, which is both the truth and the more interesting reading:
+  `Inbound/Block, Antigravity — any program  any port` says something; a blank line did not.
+
 ### "Windows ships this" could be answered yes for a driver in a download folder
 - `IsWindowsProvided` is what removes a driver from the operator's view: signed by the Windows
   identity, chain valid, **and inside System32**. The location half is not a formality — a genuinely
