@@ -40,6 +40,41 @@ This is not box-ticking. The plausible failure modes are specific:
   must be elevated to arm the machine — both are enforced, not conventions.
 - Build from `main`, or grab the `winsight-win-arm64` artifact from CI.
 
+## Getting a build, and checking it is the one we published
+
+Validating an artifact you have not verified proves something about a file, not about WinSight. Every
+release carries a SHA-256 and a **build provenance attestation**, so both are worth the thirty
+seconds — and a security tool asking you to skip that check would be a poor advertisement for itself.
+
+```powershell
+# Latest release, x64. Use -win-arm64 on Arm hardware.
+gh release download --repo ClementG91/winsight --pattern "*win-x64.zip*" --dir C:\winsight-dl
+cd C:\winsight-dl
+
+# 1. Checksum: the published digest must match the file you actually have.
+$zip      = (Get-Item *win-x64.zip).FullName
+$expected = (Get-Content *win-x64.zip.sha256).Split(' ')[0].Trim()
+$actual   = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actual -ne $expected) { throw "checksum mismatch" } else { "checksum OK" }
+
+# 2. Provenance: proves GitHub Actions built it from this repository, not that someone
+#    with the signing key produced it. This is the check a supply-chain attack fails.
+gh attestation verify $zip --repo ClementG91/winsight
+```
+
+Then extract and deploy into a trusted location — the service refuses to install from anywhere an
+unprivileged user can write, which is step 1 of the protocol, not a formality:
+
+```powershell
+Expand-Archive .\winsight-*-win-x64.zip -DestinationPath C:\winsight-stage -Force
+New-Item -ItemType Directory -Force -Path 'C:\Program Files\WinSight-VM' | Out-Null
+Copy-Item C:\winsight-stage\* 'C:\Program Files\WinSight-VM\' -Recurse -Force
+$svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+```
+
+Building from source instead is fine and covered in step 0 below; the published artifact is preferred
+because it is what a user actually runs.
+
 ## Run it as a script, not by hand
 
 `scripts/Test-WfpValidation.ps1` executes this protocol and prints a verdict per step. Prefer it to

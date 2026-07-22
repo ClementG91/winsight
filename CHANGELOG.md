@@ -2,6 +2,33 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.10.1, 2026-07-22
+
+Two defects, both found by making the suite do something it had never done: run the product.
+
+- **A driver in a download folder could answer yes to "does Windows ship this?"** The containment
+  half of that check was a raw prefix comparison, so `…\System32\..\..\Users\Public\evil.sys` read as
+  inside System32 — and a genuinely Microsoft-signed driver loaded from a user-writable folder is the
+  bring-your-own-vulnerable-driver case exactly. Not reachable through the shipping scanner, which
+  normalises first; fixed anyway, because the rule was safe by a caller's habit rather than its own
+  construction, on a public method.
+- **Every enabled firewall rule displayed a blank line** — 420 of 420 here. The detail joined the
+  rule's program and ports, and a rule naming neither applies to *everything*, so the broadest rules
+  on the machine showed the least information. They now read `any program  any port`.
+
+Behind both: the fifteen scanners are now executed end to end by the test suite, on **two different
+Windows builds** in CI (Server 2025 and Server 2022). Until this release not one of them had ever
+been run by a test — each was proven correct in isolation and none proven to compose.
+
+The WFP exact-shape predicate, which decides whether enforcement reads Active or collapses to
+Degraded, is falsified clause by clause instead of being guarded by grepping its own source. That
+guard had two clauses missing from its list, and deleting one left it green while the predicate began
+accepting a filter that blocks every program *except* the named one.
+
+`scripts/Test-WfpValidation.ps1` executes the VM protocol and prints a verdict per step.
+
+1 395 tests. Engine libraries 87.9%, overall production 72%.
+
 ### CI now proves the suite on two different Windows, not one
 - Running all fifteen scanners end to end is only worth what the machine underneath it is worth, and
   that was one machine: `windows-latest`, which resolves to **Server 2025**. `windows-2022` is a
