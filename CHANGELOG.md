@@ -2,6 +2,21 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.10.2, 2026-07-22
+
+Packaging, found by someone actually trying to validate a release on a clean VM.
+
+- **The validation protocol and its script now ship inside the archive.** They did not, so exercising
+  the one thing CI cannot cover meant fetching the script separately — on a machine that by design
+  has no `git` and no `gh`. Shipping them beside the executables also guarantees the protocol and the
+  binaries come from the same commit, which fetching from `main` would not.
+- **`Build-Release.ps1 -SkipSbom` failed on the first line of a clean shell.** After calling
+  `Install-InnoSetup.ps1` — a PowerShell script, which never sets an exit code of its own — it tested
+  `$LASTEXITCODE`, so it was reading whichever native command had run last, anywhere. With `-SkipSbom`
+  nothing had run at all and StrictMode threw on the unset variable. CI never saw it because
+  `dotnet tool restore` runs first and leaves a value behind, masking the bug by ordering. It now
+  validates the path it actually depends on.
+
 ## v0.10.1, 2026-07-22
 
 Two defects, both found by making the suite do something it had never done: run the product.

@@ -78,9 +78,12 @@ winget install --id GitHub.cli --silent --accept-source-agreements --accept-pack
 gh attestation verify "C:\winsight-dl\$name" --repo ClementG91/winsight
 ```
 
-**The validation script is not in the release archive** — the archive carries the three executables
-and the docs, nothing else. Fetch it from the tag you are validating, so the script and the binaries
-come from the same commit:
+**From v0.10.2 the validation script ships inside the archive**, beside the executables it validates,
+so the script and the binaries always come from the same commit and there is nothing extra to fetch.
+
+Earlier tags do not carry it. If you are validating v0.10.1 or older, pull it from the tag you are
+validating — never from `main`, or you would be running one commit's protocol against another
+commit's binaries:
 
 ```powershell
 Invoke-WebRequest "https://raw.githubusercontent.com/ClementG91/winsight/$version/scripts/Test-WfpValidation.ps1" `

@@ -46,9 +46,16 @@ if (-not $SkipInstaller)
 {
     if ([string]::IsNullOrWhiteSpace($InnoCompiler))
     {
-        $InnoCompiler = & (Join-Path $PSScriptRoot "Install-InnoSetup.ps1")
-        if ($LASTEXITCODE -ne 0) { throw "Unable to install or locate Inno Setup." }
-        $InnoCompiler = $InnoCompiler | Select-Object -Last 1
+        # Validate what we depend on, not $LASTEXITCODE. Install-InnoSetup.ps1 is a PowerShell
+        # script, so it never sets an exit code of its own — the check here read whichever native
+        # command ran last, anywhere. On a clean shell with -SkipSbom nothing had run at all and
+        # StrictMode failed on the unset variable, which is how this surfaced. The script stops on
+        # error by itself; what matters afterwards is whether it handed back a usable path.
+        $InnoCompiler = & (Join-Path $PSScriptRoot "Install-InnoSetup.ps1") | Select-Object -Last 1
+        if ([string]::IsNullOrWhiteSpace($InnoCompiler))
+        {
+            throw "Unable to install or locate Inno Setup."
+        }
     }
     $InnoCompiler = (Resolve-Path -LiteralPath $InnoCompiler).Path
 }
@@ -89,6 +96,11 @@ foreach ($architecture in $Architectures)
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\INSTALLATION.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\DETECTIONS.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\MCP.md") -Destination $packageRoot
+    # The runtime validation protocol travels with the build it validates. Shipping the artifact
+    # without it meant a validator had to clone the repository to exercise the one thing CI cannot
+    # cover — and a clean VM, which is exactly where this belongs, has neither git nor gh.
+    Copy-Item -LiteralPath (Join-Path $repoRoot "docs\ARM64_VALIDATION.md") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-WfpValidation.ps1") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "assets\branding") `
         -Destination (Join-Path $packageRoot "assets\branding") -Recurse
 
@@ -164,6 +176,8 @@ foreach ($architecture in $Architectures)
             "INSTALLATION.md",
             "DETECTIONS.md",
             "MCP.md",
+            "ARM64_VALIDATION.md",
+            "Test-WfpValidation.ps1",
             "assets/branding/winsight-logo.png",
             "assets/branding/winsight-logo-256.png",
             "assets/branding/winsight.ico",
