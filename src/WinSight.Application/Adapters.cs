@@ -12,6 +12,7 @@ using WinSight.InputHooks;
 using WinSight.Modules;
 using WinSight.NetMonitor;
 using WinSight.Persistence;
+using WinSight.Presence;
 using WinSight.Processes;
 using WinSight.Reporting;
 
@@ -25,7 +26,7 @@ namespace WinSight.Application;
 public static class Adapters
 {
     public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
-        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers", "integrity", "hijack"],
+        ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers", "integrity", "hijack", "presence"],
         StringComparer.OrdinalIgnoreCase);
 
     public static IReadOnlyList<string> OverviewCommands { get; } =
@@ -63,6 +64,7 @@ public static class Adapters
             "integrity" or "ci" => CodeIntegrity(flaggedOnly),
             "drivers" or "drv" => Drivers(flaggedOnly, cancellationToken),
             "hijack" or "hijacks" => Hijack(flaggedOnly, cancellationToken),
+            "presence" => Presence(flaggedOnly),
             "alerts" => Alerts(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
@@ -462,6 +464,62 @@ public static class Adapters
 
         return ProcessInsightReport.Render(
             pid, ProcessInsightBuilder.Build(pid, processes, modules, connections));
+    }
+
+    /// <summary>
+    /// When this machine woke, and which of those wakes mean somebody was physically at it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Deliberately not in the default overview.</b> This is a timeline you consult when you
+    /// suspect somebody was at your desk, not a check that should speak on every routine scan: a
+    /// machine in daily use wakes constantly, and the one thing that would make a wake suspicious —
+    /// knowing a person caused it — is exactly what Windows most often declines to record.
+    /// </remarks>
+    public static ToolReport Presence(bool flaggedOnly)
+    {
+        var report = new PresenceScanner().Scan();
+        var builder = new ToolReport.Builder("presence");
+        foreach (var wake in report.Wakes.Where(wake => !flaggedOnly || wake.IndicatesPresence))
+        {
+            builder.Add(
+                // Only a wake attributable to a human hand is notable. A timer, a Wake-on-LAN packet
+                // or a cause Windows never recorded are all reported without being dressed up as a
+                // visitor — measured on a real desktop, none of twelve resumes was a person.
+                wake.IndicatesPresence ? Severity.Notable : Severity.Info,
+                $"{wake.WokeUtc:u} {wake.Cause}",
+                Describe(wake),
+                new Dictionary<string, string?>
+                {
+                    ["wokeUtc"] = wake.WokeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    ["sleptUtc"] = wake.SleptUtc?.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                    ["cause"] = wake.Cause.ToString(),
+                    ["source"] = wake.Source,
+                    ["indicatesPresence"] = wake.IndicatesPresence.ToString(),
+                });
+        }
+
+        if (report.Unreadable)
+        {
+            // An empty timeline and an unreadable log look identical from outside, and only one of
+            // them is a fact about the machine.
+            return builder.Build("the System event log could not be read, so no resume history is available");
+        }
+        return builder.Build(report.Wakes.Count == 0
+            ? "no resume from sleep recorded"
+            : $"{report.Wakes.Count} resume(s), {report.PresenceCount} indicating someone was physically present");
+    }
+
+    private static string Describe(WakeRecord wake)
+    {
+        var asleep = wake.Asleep is { } duration ? $" after {duration:hh\\:mm} asleep" : string.Empty;
+        return wake.Cause switch
+        {
+            WakeCause.PhysicalInput => $"woken by {wake.Source ?? "a button or input device"}{asleep} — somebody was at the machine",
+            WakeCause.Network => $"woken over the network by {wake.Source}{asleep} — a packet, not a person",
+            WakeCause.Timer => $"woken by scheduled work{asleep}",
+            WakeCause.Device => $"woken by {wake.Source}{asleep} — Windows named the device but not why",
+            _ => $"woken{asleep}, cause not recorded by Windows",
+        };
     }
 
     public static ToolReport Hosts(bool flaggedOnly)

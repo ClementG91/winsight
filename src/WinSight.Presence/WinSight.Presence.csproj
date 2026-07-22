@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>WinSight.Presence</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Presence.Tests" />
+  </ItemGroup>
+</Project>

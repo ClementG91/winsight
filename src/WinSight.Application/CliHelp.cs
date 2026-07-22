@@ -35,6 +35,7 @@ public static partial class CliHelp
           winsight drivers                        registered kernel drivers + signature verdicts
           winsight hijack                         services another program could run in place of
           winsight process <pid>                  one process: lineage, modules, connections
+          winsight presence                       when this machine woke, and whether anyone was there
           winsight mcp                            local read-only MCP stdio server
           winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
           winsight dns --watch                    live DNS queries via ETW (Administrator)

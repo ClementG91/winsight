@@ -27,7 +27,7 @@ Two structural differences shape everything below:
 | **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** — filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
 | **DHS** | Dylib hijack scanner | **Hijack scan** — unquoted command lines, writable service directories and PATH entries, and **phantom imports**; **modules scan** flags unsigned/untrusted loaded modules | **Parity, arguably ahead.** DHS finds weak/rpath dylibs; the Windows equivalents are all covered, each graded by real exploitability on this machine. |
 | **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
-| **DoNotDisturb** | Physical-access ("evil maid") detection | *(none)* | **Missing** — lid/logon/USB-while-locked. |
+| **DoNotDisturb** | Physical-access ("evil maid") detection | **Presence scan** — resume timeline with Windows' wake source, flagging only wakes attributable to a human hand | **Parity, with a narrower honest claim.** A lid open is unambiguous; a Windows wake source is `Unknown` half the time, and the scan says so rather than guessing. |
 
 ### What WinSight has that Objective-See does not
 
@@ -209,9 +209,37 @@ concurrently would roughly halve it, and is deliberately **not** done yet: the v
 shared and its catalog fallback has not been proven thread-safe, and an unproven concurrency change
 inside the trust core is not worth four seconds.
 
-### 6. Physical-access detection (DoNotDisturb-class)
-Logon failures, USB insertion and lid events while locked, from the Windows event log. Genuinely
-useful, but the lowest signal-to-noise of the list on a machine in daily use.
+### ~~6. Physical-access detection (DoNotDisturb-class)~~ — **done, shipped as the `presence` scanner**
+The plan named three sources. **Two of them were measured and rejected before a line was written**,
+and recording why matters more than the code that remained.
+
+**Logon failures live in the Security log, which requires Administrator** — measured, reading it
+unelevated throws. Building the check on it would have made a whole surface blind in the default
+mode, which is the defect this project keeps finding in itself.
+
+**USB device history was the obvious second source and is a trap.** The device keys under
+`SYSTEM\CurrentControlSet\Enum` *are* readable unelevated. Their `Properties` subkey — where the
+first-install and last-arrival timestamps live — throws `SecurityException` without elevation. An
+inventory of devices with no dates cannot answer "was something plugged in while I was away", and
+would have looked complete while failing to.
+
+What is readable unelevated is the **System log's resume timeline**, including Windows' own wake
+source. That is the closest honest Windows analogue to DoNotDisturb's lid-open.
+
+**The measurement then reshaped the rule.** Windows records a numeric `WakeSourceType` plus a device
+name. Across fifty resumes on a real desktop: **25 `Unknown`, 24 a network adapter, 1 a physical
+input device.** So "a device woke the machine" is emphatically not "somebody touched the machine" —
+had the two been equated, this scanner's first run would have produced **24 false accusations**
+against ordinary Wake-on-LAN traffic while still explaining none of the 25 it cannot.
+
+The rule therefore claims physical presence only for devices a person's hands operate, reports
+everything else in Windows' own vocabulary, and says "cause not recorded by Windows" when that is the
+truth. Classification is driven by the numeric type, never the rendered message, which is localised —
+this machine renders it in French.
+
+**Deliberately not in the default overview.** A machine in daily use wakes constantly, and the one
+thing that would make a wake suspicious is what Windows most often declines to record. This is a
+timeline you consult when you suspect somebody was at your desk, not a routine check.
 
 ### Deliberately not planned
 
@@ -227,6 +255,11 @@ eight tools that matter most — persistence × 2, firewall, ransomware, camera/
 interception, kernel drivers and hijack analysis — while being one app instead of eight, with an MCP
 server, an alert journal and four scanners Objective-See has no equivalent for.
 
-What still separates it from "a set of scanners" is **#1**: naming the process behind a detection.
-Everything else remaining is either UI work (**#5**) or low signal-to-noise on a machine in daily
-use (**#6**).
+**Every tool on the list above is now at parity or ahead**, in one app instead of eight, with an MCP
+server, an alert journal, four scanners Objective-See has no equivalent for, and three languages.
+
+What is left is not parity work. It is depth: the elevated resident-driver pass, boot-configuration
+context for the driver findings, per-device-instance input filters, and runtime observation for the
+DLL hijacks that `LoadLibrary` reaches rather than the import table. Each is a smaller increment than
+anything above, and each is worth doing only with the same rule the list was built on — measure the
+signal before building the check, and say plainly what it cannot see.

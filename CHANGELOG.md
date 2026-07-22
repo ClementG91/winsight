@@ -2,6 +2,34 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### `presence` — physical-access detection, and the two sources measured and rejected first
+- The last Objective-See parity gap (DoNotDisturb). **Two of the three planned sources were measured
+  and discarded before any code was written**, and why matters more than what remained.
+- **Logon failures need Administrator.** The Security log throws unelevated — measured. Building on
+  it would have made a whole surface blind in the default mode.
+- **USB device history is a trap.** The device keys under `SYSTEM\CurrentControlSet\Enum` *are*
+  readable unelevated; their `Properties` subkey, where the first-install and last-arrival timestamps
+  live, throws `SecurityException`. An inventory of devices with no dates cannot answer "was
+  something plugged in while I was away" — and would have looked complete while failing to.
+- What **is** readable is the System log's resume timeline with Windows' own wake source.
+- **The measurement then reshaped the rule.** Across 50 resumes on a real desktop: **25 `Unknown`,
+  24 a network adapter, 1 a physical input device.** "A device woke the machine" is not "somebody
+  touched the machine" — equating them would have produced **24 false accusations** against ordinary
+  Wake-on-LAN traffic on this scanner's very first run, while still explaining none of the 25 it
+  cannot. Both the network case and the "uniformly optimistic classifier" case are pinned as tests;
+  removing the discrimination fails five of them.
+- Classification is driven by Windows' **numeric type code, never the rendered message**, which is
+  localised — this machine renders it in French. A type code Windows may add later degrades to
+  `Unknown`, never to whichever cause sits next to it.
+- Built test-first: 31 tests, RED confirmed before each implementation, and the live event-log reader
+  held to the same "saw something, or admits it could not look" contract as the scheduled-task
+  source. Measured end to end: **647 ms**, 1 finding out of 50 resumes.
+- Deliberately **not** in the default overview: a machine in daily use wakes constantly, and the one
+  thing that would make a wake suspicious is what Windows most often declines to record. This is a
+  timeline you consult when you suspect someone was at your desk.
+- Wired through the CLI, MCP (**15 scanners** — all four pinning sites moved together) and the
+  dashboard in all three languages.
+
 ### `winsight process <pid>` — the per-process view, TaskExplorer's last gap
 - Everything WinSight knows about one process in one answer: its image and signer, its lineage
   (parent, and the children it spawned), the unsigned modules loaded into it, and its live external

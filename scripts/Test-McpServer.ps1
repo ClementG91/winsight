@@ -99,7 +99,7 @@ try
     if (-not $capabilities.result.structuredContent.readOnly -or
         $capabilities.result.structuredContent.networkListener -or
         $capabilities.result.structuredContent.networkReputationLookups -or
-        @($capabilities.result.structuredContent.scanners).Count -ne 14)
+        @($capabilities.result.structuredContent.scanners).Count -ne 15)
     {
         throw "MCP capability result violates the local read-only contract."
     }

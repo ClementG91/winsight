@@ -37,6 +37,7 @@ public static class McpCatalog
         new("integrity", "Whether driver signing, memory integrity and Secure Boot are actually enforced.", true),
         new("drivers", "Registered kernel-mode drivers, their load disposition and signature verdicts.", false),
         new("hijack", "Services whose unquoted command line lets an earlier executable run in their place.", true),
+        new("presence", "Resume-from-sleep history, and which wakes indicate someone was physically at the machine.", false),
     ];
 
     public static string CapabilitiesJson(bool sensitiveEnabled) => JsonSerializer.Serialize(new

@@ -6,6 +6,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageVersion Include="System.Management" Version="10.0.9" />
+    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.4" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.9" />
