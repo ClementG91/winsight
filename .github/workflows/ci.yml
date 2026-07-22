@@ -1,4 +1,5 @@
-# Two jobs, deliberately independent.
+# Three jobs: `verify` does the work across a Windows matrix, `build-test` is the stable name branch
+# protection requires, and `package` runs beside them.
 #
 # `package` used to declare `needs: build-test`, and the wall clock was 8m18 — 2m37 of build and
 # test, then 5m38 of packaging that had been waiting for it. Nothing was being reused: the package
@@ -11,12 +12,15 @@
 # are cancelled by the concurrency group, and nothing publishable escapes because release.yml builds
 # and tests the tagged source itself before it will produce a release.
 #
-# Why formatting and the dependency audit stay inside build-test rather than becoming a third job:
-# `build-test` is the required status check on main, so moving those steps out would leave the
-# required check unable to fail on a formatting violation — protection quietly weakened while
-# looking unchanged. Splitting them would also not shorten anything, because `package` dominates the
-# wall clock either way. It is worth doing only alongside adding the new job to the branch's
-# required checks, which is a repository settings change.
+# Why formatting and the dependency audit live inside `verify` rather than becoming a job of their
+# own: everything the required check must be able to fail on has to sit under it, or protection is
+# quietly weakened while looking unchanged. Splitting them would also not shorten anything, because
+# `package` still dominates the wall clock.
+#
+# Why `verify` is a matrix and `build-test` is a gate over it: a matrix leg reports as
+# `verify (windows-2022)`, so requiring the matrix directly would mean re-listing every leg in
+# branch protection, and again whenever the matrix changes. The gate keeps one name that outlives
+# whatever runs behind it. Adding a Windows is then a one-line change here and nothing in settings.
 
 name: ci
 
@@ -34,11 +38,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # The job id is the status-check name main's branch protection requires. Do not rename it, and do
-  # not give it a `name:` — that would change the check name and silently stop the rule matching.
-  build-test:
-    runs-on: windows-latest
-    timeout-minutes: 25
+  # Everything that decides whether the code is good, run on more than one Windows.
+  #
+  # Why a matrix at all: until the scanners were executed end to end, the suite could not tell
+  # whether WinSight works anywhere but a developer's desk. It now runs all fifteen for real, and
+  # that evidence is only worth what the machine underneath it is worth. `windows-latest` resolves
+  # to Server 2025; `windows-2022` is a genuinely different build, with a different registry layout
+  # and a different set of components present. A scanner that reads a key one of them does not have
+  # fails here rather than at a user.
+  #
+  # fail-fast is off on purpose: when one Windows breaks, the interesting question is immediately
+  # whether the other one did too, and cancelling the sibling throws that away.
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
@@ -76,11 +93,35 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: test-results-x64
+          # Matrix-scoped: two legs uploading one name collide and the second is rejected.
+          name: test-results-${{ matrix.os }}
           path: |
             **/TestResults/*.trx
             out/coverage/**/*.trx
           if-no-files-found: ignore
+
+  # The status-check name main's branch protection requires.
+  #
+  # It is a gate over `verify` rather than the job that does the work, and that indirection is the
+  # whole point: a matrix leg is reported as `verify (windows-2022)`, so making `verify` itself
+  # required would mean re-listing every leg in branch protection and re-listing them again the day
+  # the matrix changes. One stable name outlives the matrix behind it.
+  #
+  # `needs.verify.result` is the aggregate: `success` only when every leg succeeded. `if: always()`
+  # matters more than it looks — without it this job is *skipped* when a leg fails, and a skipped
+  # required check does not read as a failed one. It would sit there neither passing nor failing.
+  # Do not rename this job, and do not give it a `name:`; either changes the check name and silently
+  # stops the protection rule matching anything.
+  build-test:
+    needs: verify
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every Windows to have passed
+        run: |
+          echo "verify: ${{ needs.verify.result }}"
+          test "${{ needs.verify.result }}" = "success"
 
   package:
     strategy:

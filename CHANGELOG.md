@@ -2,6 +2,23 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### CI now proves the suite on two different Windows, not one
+- Running all fifteen scanners end to end is only worth what the machine underneath it is worth, and
+  that was one machine: `windows-latest`, which resolves to **Server 2025**. `windows-2022` is a
+  genuinely different build with a different registry layout and a different set of components
+  present — the kind of difference a scanner reading a key one of them lacks falls over on.
+- **`build-test` keeps its name.** A matrix leg reports as `verify (windows-2022)`, so making the
+  matrix itself the required check would mean re-listing every leg in branch protection and
+  re-listing them again whenever the matrix changes. `verify` does the work; `build-test` is a gate
+  over it that fails unless every leg passed. One stable name outlives whatever runs behind it, and
+  adding a Windows is now a one-line change with nothing to touch in repository settings.
+- The gate carries `if: always()` deliberately. Without it the job is *skipped* when a leg fails, and
+  a skipped required check does not read as a failed one — it sits there neither passing nor
+  failing, which is the worst of the three outcomes.
+- `fail-fast` is off: when one Windows breaks, the immediately useful question is whether the other
+  broke too, and cancelling the sibling throws that answer away.
+- Test-result artifacts are matrix-scoped; two legs uploading one name collide.
+
 ### Not one scanner had ever been run by the test suite
 - Every scanner's rules were tested through its own module with injected seams — the right place for
   them — and **not one scanner was ever executed end to end**. The only adapter that ran was
