@@ -58,13 +58,25 @@ $name    = "winsight-$version-win-x64.zip"
 $base    = "https://github.com/ClementG91/winsight/releases/download/$version"
 
 New-Item -ItemType Directory -Force C:\winsight-dl | Out-Null
-Invoke-WebRequest "$base/$name"        -OutFile "C:\winsight-dl\$name"        -UseBasicParsing
-Invoke-WebRequest "$base/$name.sha256" -OutFile "C:\winsight-dl\$name.sha256" -UseBasicParsing
+
+# curl.exe has shipped with Windows since 10 1803 and is the fastest thing here.
+curl.exe -sSL -o "C:\winsight-dl\$name"        "$base/$name"
+curl.exe -sSL -o "C:\winsight-dl\$name.sha256" "$base/$name.sha256"
 
 # Checksum: the published digest must match the file you actually have.
 $expected = (Get-Content "C:\winsight-dl\$name.sha256").Split(' ')[0].Trim()
 $actual   = (Get-FileHash "C:\winsight-dl\$name" -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "checksum mismatch" } else { "checksum OK" }
+```
+
+**If you use `Invoke-WebRequest` instead, silence the progress bar first.** Windows PowerShell 5.1 —
+which is what a clean VM opens by default — redraws that bar on every chunk received, and on a
+170 MB archive the rendering, not the network, becomes the bottleneck. Measured on this release:
+**4 seconds** with the bar silenced against minutes with it on, for byte-identical output.
+
+```powershell
+$ProgressPreference = 'SilentlyContinue'
+Invoke-WebRequest "$base/$name" -OutFile "C:\winsight-dl\$name" -UseBasicParsing
 ```
 
 **What that check is and is not worth.** It proves the file matches the digest published beside it —
