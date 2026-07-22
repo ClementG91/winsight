@@ -21,6 +21,9 @@ public sealed class ExecutableDirectoryTests
     [InlineData(@"C:\Program Files\App\svc.exe", @"C:\Program Files\App")]
     [InlineData(@"C:\Program Files\App\svc.exe -k netsvcs", @"C:\Program Files\App")]
     [InlineData(@"""C:\Program Files\App\svc.exe"" -k netsvcs", @"C:\Program Files\App")]
+    // A registered image does not have to be an .exe, and its directory is just as plantable.
+    [InlineData(@"C:\Program Files\App\run.bat", @"C:\Program Files\App")]
+    [InlineData(@"C:\Program Files\App\run.cmd -x", @"C:\Program Files\App")]
     public void ReadsTheDirectoryTheServiceActuallyRunsFrom(string commandLine, string expected)
         => Assert.Equal(expected, HijackScanner.ExecutableDirectory(commandLine));
 
@@ -51,7 +54,7 @@ public sealed class ExecutableDirectoryTests
     [InlineData(@"\SystemRoot\System32\drivers\foo.sys")]
     [InlineData(@"\??\C:\Windows\System32\drivers\foo.sys")]
     // Nothing that names an executable this rule can reason about.
-    [InlineData(@"C:\Program Files\App\run.bat")]
+    [InlineData(@"C:\Program Files\App\readme.txt")]
     [InlineData(@"""")]
     [InlineData(@"""""")]
     // Relative: there is no directory to probe without knowing the working directory.

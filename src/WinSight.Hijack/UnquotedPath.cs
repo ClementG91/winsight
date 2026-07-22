@@ -24,6 +24,20 @@ namespace WinSight.Hijack;
 public static class UnquotedPath
 {
     /// <summary>
+    /// Extensions a registered image can end with. The earliest match in the string wins, whichever
+    /// extension it is.
+    /// </summary>
+    /// <remarks>
+    /// <c>.com</c> is deliberately absent. It is a legitimate executable extension, but it is also
+    /// the end of almost every domain name, and service arguments are full of those: reading the
+    /// <c>.com</c> in <c>C:\App\run --host example.com</c> as the image would name <c>C:\App\run.exe</c>
+    /// — the real executable — as something to be planted. A false accusation is worse than the miss
+    /// it would have prevented, and a <c>.com</c> service image is close to unheard of.
+    /// </remarks>
+    private static readonly string[] ExecutableExtensions =
+        [".exe", ".bat", ".cmd", ".scr", ".pif"];
+
+    /// <summary>
     /// The paths <c>CreateProcess</c> would try before reaching the intended executable, in the
     /// order it tries them. Empty when the command line cannot be hijacked this way.
     /// </summary>
@@ -43,9 +57,7 @@ public static class UnquotedPath
             return [];
         }
 
-        // A driver's ImagePath is an NT path (\SystemRoot\..., \??\...), loaded by the kernel rather
-        // than CreateProcess, so the prefix rule does not apply to it at all.
-        if (line.StartsWith('\\'))
+        if (IsKernelOrDevicePath(line))
         {
             return [];
         }
@@ -59,19 +71,63 @@ public static class UnquotedPath
         }
 
         var candidates = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var separator = executable.IndexOf(' ', StringComparison.Ordinal);
         while (separator >= 0)
         {
-            var prefix = executable[..separator];
-            // Only a prefix that is still a rooted path is a real candidate; a bare fragment is not
-            // something CreateProcess would resolve to a file on disk here.
-            if (Path.IsPathRooted(prefix) && prefix.Trim().Length > 0)
+            // Windows drops trailing spaces from a path component, so `C:\Program  Files\...` with
+            // two spaces yields the same candidate twice rather than the impossible `C:\Program .exe`.
+            var prefix = executable[..separator].TrimEnd();
+            if (IsPlantablePrefix(prefix))
             {
-                candidates.Add(prefix + ".exe");
+                var candidate = prefix + ".exe";
+                if (seen.Add(candidate))
+                {
+                    candidates.Add(candidate);
+                }
             }
             separator = executable.IndexOf(' ', separator + 1);
         }
         return candidates;
+    }
+
+    /// <summary>
+    /// Paths this rule does not model, as opposed to paths it finds nothing in.
+    /// </summary>
+    /// <remarks>
+    /// A driver's ImagePath is an NT path (<c>\SystemRoot\…</c>, <c>\??\…</c>) loaded by the kernel,
+    /// not by <c>CreateProcess</c>, so no prefix is ever tried. The <c>\\?\</c> and <c>\\.\</c>
+    /// namespaces go straight to the object manager with normalization disabled.
+    ///
+    /// <b>A UNC path is deliberately not in this set.</b> It used to be, because the check was
+    /// written as "starts with a backslash" while its rationale only covered kernel paths — so
+    /// <c>\\server\share\My App\svc.exe</c> reported nothing at all, even though
+    /// <c>CreateProcess</c> prefix-searches it exactly like a drive path and
+    /// <c>\\server\share\My.exe</c> is a real place to plant.
+    /// </remarks>
+    private static bool IsKernelOrDevicePath(string line) =>
+        line.StartsWith(@"\\?\", StringComparison.Ordinal)
+        || line.StartsWith(@"\\.\", StringComparison.Ordinal)
+        || (line.StartsWith('\\') && !line.StartsWith(@"\\", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Whether a prefix names a file someone could actually create.
+    /// </summary>
+    /// <remarks>
+    /// Being rooted is not enough: a root is not a file. <c>C:\</c>, <c>\\server</c> and
+    /// <c>\\server\share</c> are all rooted, and emitting them as candidates would send an operator
+    /// to inspect a path that cannot exist — the specific failure this whole type is written to
+    /// avoid. Requiring the prefix to reach below its own root covers drive and UNC roots with one
+    /// rule instead of two spellings that could drift apart.
+    /// </remarks>
+    private static bool IsPlantablePrefix(string prefix)
+    {
+        if (prefix.Length == 0 || !Path.IsPathRooted(prefix))
+        {
+            return false;
+        }
+        var root = Path.GetPathRoot(prefix);
+        return !string.IsNullOrEmpty(root) && prefix.Length > root.Length;
     }
 
     /// <summary>True when at least one earlier path would be tried before the intended binary.</summary>
@@ -99,22 +155,38 @@ public static class UnquotedPath
     /// same string for a different question and must reach the same answer. It had its own copy of
     /// this parse without the end-of-token rule, so the two disagreed on exactly the inputs this rule
     /// was hardened for — one of them would have named a directory that is not the service's.
+    ///
+    /// <b>Not only <c>.exe</c>.</b> The candidates are always <c>.exe</c>, because that is the
+    /// extension <c>CreateProcess</c> appends to a prefix it is guessing at — but the <i>registered</i>
+    /// image does not have to be one. A command line ending in <c>.bat</c>, <c>.cmd</c>, <c>.com</c>,
+    /// <c>.scr</c> or <c>.pif</c> is prefix-searched identically, and reading none of them meant those
+    /// command lines reported nothing at all.
     /// </remarks>
     internal static string? ExecutableSpan(string line)
     {
-        const string extension = ".exe";
-        var at = line.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
-        while (at >= 0)
+        var earliestEnd = -1;
+        var earliest = int.MaxValue;
+        foreach (var extension in ExecutableExtensions)
         {
-            var end = at + extension.Length;
-            // ".exe" must end a token; "...\foo.exefoo" is not an executable name, but a directory
-            // called "my.exe" followed by a space genuinely is what Windows would try first.
-            if (end == line.Length || line[end] is ' ' or '"')
+            var at = line.IndexOf(extension, StringComparison.OrdinalIgnoreCase);
+            while (at >= 0)
             {
-                return line[..end];
+                var end = at + extension.Length;
+                // The extension must end a token: "...\foo.exefoo" is not an executable name, while
+                // a directory called "my.exe" followed by a space genuinely is what Windows tries
+                // first.
+                if (end == line.Length || line[end] is ' ' or '"')
+                {
+                    if (at < earliest)
+                    {
+                        earliest = at;
+                        earliestEnd = end;
+                    }
+                    break;
+                }
+                at = line.IndexOf(extension, at + 1, StringComparison.OrdinalIgnoreCase);
             }
-            at = line.IndexOf(extension, at + 1, StringComparison.OrdinalIgnoreCase);
         }
-        return null;
+        return earliestEnd < 0 ? null : line[..earliestEnd];
     }
 }
