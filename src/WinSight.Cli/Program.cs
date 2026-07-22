@@ -48,6 +48,30 @@ if (command == "dns" && args.Contains("--watch"))
     return Adapters.WatchDns();
 }
 
+// `process` takes an argument, so it cannot go through Adapters.Run like the snapshot scanners.
+// A bad or absent pid is a usage error, reported as one rather than scanned for.
+if (command == "process")
+{
+    var pidArgument = args.SkipWhile(a => !a.Equals("process", StringComparison.OrdinalIgnoreCase))
+        .Skip(1)
+        .FirstOrDefault(a => !a.StartsWith('-'));
+    if (!int.TryParse(pidArgument, System.Globalization.CultureInfo.InvariantCulture, out var pid) || pid < 0)
+    {
+        Console.Error.WriteLine("usage: winsight process <pid>");
+        return 2;
+    }
+    var drillDown = Adapters.ProcessDrillDown(pid);
+    if (json)
+    {
+        ReportRenderer.RenderJson([drillDown], Console.Out);
+    }
+    else
+    {
+        ReportRenderer.RenderText(drillDown, Console.Out);
+    }
+    return drillDown.NotableCount > 0 ? 1 : 0;
+}
+
 IReadOnlyList<ToolReport> reports;
 try
 {
@@ -58,7 +82,7 @@ try
 catch (ArgumentOutOfRangeException)
 {
     Console.Error.WriteLine(
-        $"unknown command '{command}' (persistence | av | net | dns | firewall | processes | modules | extensions | certs | hosts | input | drivers | all)");
+        $"unknown command '{command}' — run `winsight --help` for the full list");
     return 2;
 }
 

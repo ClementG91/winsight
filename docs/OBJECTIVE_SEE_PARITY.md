@@ -22,7 +22,7 @@ Two structural differences shape everything below:
 | **RansomWhere?** | Ransomware behaviour detection | **Ransomware protection** — canaries, rename/delete burst, entropy-on-write, opt-in | **Parity.** Cannot halt the process mid-encryption (driver). |
 | **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** — live, tray alert, journalled | **Parity** (the host landed 2026-07-21; the detector predated it). |
 | **Netiquette** | Network connection list | **Connections scan** — with process attribution | **Parity.** |
-| **TaskExplorer** | Process explorer with signatures, libraries, network | **Processes + Modules scans** | **Partial** — no single per-process drill-down view. |
+| **TaskExplorer** | Process explorer with signatures, libraries, network | **Processes + Modules scans, plus `process <pid>`** — lineage, unsigned modules and live external sockets in one view | **Parity.** |
 | **What's Your Sign?** | Signature info in the file manager | *(none)* | **Missing** — Explorer shell extension. |
 | **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** — filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
 | **DHS** | Dylib hijack scanner | **Hijack scan** — unquoted command lines, writable service directories and PATH entries, and **phantom imports**; **modules scan** flags unsigned/untrusted loaded modules | **Parity, arguably ahead.** DHS finds weak/rpath dylibs; the Windows equivalents are all covered, each graded by real exploitability on this machine. |
@@ -176,9 +176,38 @@ Known limit, stated rather than implied: this reads the **import table**. A DLL 
 through `LoadLibrary` — which is how several of the classic Windows phantoms are reached — declares
 nothing, so it is not visible here. Covering those needs runtime observation, not static analysis.
 
-### 5. Per-process drill-down (TaskExplorer-class)
-The data mostly exists across the processes, modules and connections scanners; what is missing is
-one view that pivots on a single process. This is UI work, not detection work.
+### ~~5. Per-process drill-down (TaskExplorer-class)~~ — **done, shipped as `winsight process <pid>`**
+Half of "this is UI work, not detection work" was right: the data was already gathered by the
+processes, modules and connections scanners. The other half was not. The **join itself makes
+decisions** — what counts as this process's parent, what is worth surfacing out of hundreds of loaded
+modules, what to do when three snapshots taken seconds apart disagree — and every one of them can be
+wrong in a way that misnames something. So the pivot is a pure function over three snapshots with its
+own tests, and the rendering is a second pure function beside it; only the gather is an edge.
+
+Three decisions worth recording:
+
+**An absent pid answers "not running", never "nothing wrong".** A hollow insight would render as a
+process that exists and has nothing loaded and nothing connected — a confident, reassuring
+description of something that is not there.
+
+**A process is never its own parent.** Not hypothetical: the System Idle Process reports pid 0 with
+parent 0, and WinSight's own reader falls back to 0 for a row whose id it cannot read. An unguarded
+lineage lookup recurses forever in a tree view and claims a process launched itself.
+
+**Modules are counted, not listed.** Measured on this desktop, `explorer.exe` has **353** of them and
+all but a handful are Microsoft-signed. Listing them buries the outlier, so the count is reported and
+only the unsigned ones are named — the same reasoning that grades hijack findings by exploitability.
+
+Reading one process's modules also needed a new entry point: the only one available walked every
+process (57 s, 14 253 modules, 222 processes), which is a fine price for "what is loaded anywhere on
+this machine" and an absurd one for a view opened on one pid.
+
+Measured end to end: **11 s** for a live process, **4 s** for one that is not running — the process
+list is taken first and short-circuits before the expensive scans. The remaining cost is dominated by
+signature verification across the full process and connection lists. Running the three acquisitions
+concurrently would roughly halve it, and is deliberately **not** done yet: the verifier chain is
+shared and its catalog fallback has not been proven thread-safe, and an unproven concurrency change
+inside the trust core is not worth four seconds.
 
 ### 6. Physical-access detection (DoNotDisturb-class)
 Logon failures, USB insertion and lid events while locked, from the Windows event log. Genuinely

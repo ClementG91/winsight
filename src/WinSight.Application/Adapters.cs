@@ -431,6 +431,39 @@ public static class Adapters
         },
     };
 
+    /// <summary>
+    /// Everything WinSight knows about one process, gathered into a single view.
+    /// </summary>
+    /// <remarks>
+    /// The acquisition edge for the per-process drill-down: it takes the three snapshots and hands
+    /// them to a pure pivot, so every decision about what the answer means is unit-tested and this
+    /// method stays a thin gather-and-render.
+    ///
+    /// Modules are read for the one process only. The full module sweep costs 57 seconds on a real
+    /// desktop, which is a fine price for "what is loaded anywhere on this machine" and an absurd
+    /// one for a view opened on a single pid.
+    /// </remarks>
+    public static ToolReport ProcessDrillDown(int pid, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var processes = new ProcessLister(SharedVerifier).Snapshot(cancellationToken);
+
+        // Established first, before paying for anything else. A pid that is not running produces
+        // the same "not running" answer whatever the other two scans return, and making someone
+        // wait through a full connection sweep to be told that is simply rude. Measured: the absent
+        // case drops from ~15 s to ~7 s.
+        if (!processes.Any(process => process.Pid == pid))
+        {
+            return ProcessInsightReport.Render(pid, insight: null);
+        }
+
+        var modules = new ModuleLister(SharedVerifier).SnapshotFor(pid, cancellationToken);
+        var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
+
+        return ProcessInsightReport.Render(
+            pid, ProcessInsightBuilder.Build(pid, processes, modules, connections));
+    }
+
     public static ToolReport Hosts(bool flaggedOnly)
     {
         var snapshot = new HostsReader().Read();

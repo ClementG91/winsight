@@ -2,6 +2,34 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### `winsight process <pid>` — the per-process view, TaskExplorer's last gap
+- Everything WinSight knows about one process in one answer: its image and signer, its lineage
+  (parent, and the children it spawned), the unsigned modules loaded into it, and its live external
+  sockets. Built **test-first**, and both central rules verified by deliberately breaking them.
+- The parity plan called this "UI work, not detection work". Half right — the data was already
+  gathered. The other half was not: **the join itself makes decisions**, and each can misname
+  something. So the pivot is a pure function over three snapshots, the rendering is a second pure
+  function beside it, and only the gather is an edge.
+- **An absent pid answers "not running", never "nothing wrong".** A hollow record renders as a
+  process that exists with nothing loaded and nothing connected — a confident, reassuring description
+  of something that is not there.
+- **A process is never its own parent.** The System Idle Process reports pid 0 with parent 0, and the
+  process reader falls back to 0 for a row whose id it cannot read. An unguarded lookup recurses
+  forever in a tree and claims a process launched itself. Removing the guard fails a test.
+- **Modules are counted, not listed.** `explorer.exe` has **353** on this desktop and all but a
+  handful are Microsoft-signed; listing them buries the outlier. Removing the unsigned-first ranking
+  fails a test.
+- Reading one process's modules needed a new entry point. The only one available walked every
+  process — 57 s, 14 253 modules, 222 processes — which is a good answer to "what is loaded anywhere
+  on this machine" and an absurd one for a view opened on a single pid. Both paths share one
+  collection routine, so the skip-don't-fabricate rule that makes this scanner trustworthy cannot
+  drift between them.
+- **Measured: 11 s live, 4 s for a pid that is not running** (down from 15 s — the process list is
+  taken first and short-circuits before the expensive scans). Running the three acquisitions
+  concurrently would roughly halve the live case and is deliberately **not** done: the verifier chain
+  is shared and its catalog fallback is not proven thread-safe, and an unproven concurrency change
+  inside the trust core is not worth four seconds.
+
 ### An alert with no author now says why it has none
 - Three states hide behind a nameless detection and they call for three different responses: nothing
   was watching, nothing **could** watch because the process is unelevated, or something was watching

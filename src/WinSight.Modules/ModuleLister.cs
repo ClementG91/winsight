@@ -14,10 +14,50 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
 {
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
-    public IReadOnlyList<LoadedModule> Snapshot(CancellationToken cancellationToken = default)
+    public IReadOnlyList<LoadedModule> Snapshot(CancellationToken cancellationToken = default) =>
+        Collect(Process.GetProcesses(), cancellationToken);
+
+    /// <summary>
+    /// The modules of one process, or nothing when it is not running.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this exists beside the full sweep.</b> The per-process drill-down needs exactly one
+    /// process, and <see cref="Snapshot"/> walks every one of them: measured on a real desktop,
+    /// 14 253 modules across 222 processes in 57 seconds. That is a good answer to "what is loaded
+    /// anywhere on this machine" and an unusable one for a view opened on a single pid.
+    ///
+    /// A pid that is not running answers with nothing rather than throwing. That is the normal case
+    /// here, not an edge one: a drill-down is most often opened on a process that just did something
+    /// interesting and exited, which is precisely the case worth investigating.
+    /// </remarks>
+    public IReadOnlyList<LoadedModule> SnapshotFor(int pid, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Process process;
+        try
+        {
+            process = Process.GetProcessById(pid);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return [];
+        }
+        return Collect([process], cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads and verifies the modules of the given processes, disposing every one of them.
+    /// </summary>
+    /// <remarks>
+    /// Shared by both entry points so the single-process path cannot drift from the sweep — the
+    /// skip-don't-fabricate rule below is the whole reason this scanner can be trusted, and a second
+    /// copy of it is a second chance to get it wrong.
+    /// </remarks>
+    private List<LoadedModule> Collect(
+        IReadOnlyList<Process> processes, CancellationToken cancellationToken)
     {
         var raw = new List<(int Pid, string Proc, string Mod, string? Path)>();
-        foreach (var p in Process.GetProcesses())
+        foreach (var p in processes)
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
