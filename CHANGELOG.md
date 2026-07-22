@@ -2,6 +2,26 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### "Windows ships this" could be answered yes for a driver in a download folder
+- `IsWindowsProvided` is what removes a driver from the operator's view: signed by the Windows
+  identity, chain valid, **and inside System32**. The location half is not a formality — a genuinely
+  Microsoft-signed driver running from a user-writable folder is the bring-your-own-vulnerable-driver
+  case exactly: real signature, real Microsoft, loaded on purpose for what it lets an attacker do.
+- The containment test was a raw prefix comparison, and it failed in **both** directions.
+  `C:\Windows\System32\..\..\Users\Public\evil.sys` starts with the System32 prefix while
+  demonstrably living in a user-writable folder — so that driver would have been filed as one Windows
+  ships and hidden. `C:/Windows/System32/...` and `C:\Windows\.\System32\...` name the same place and
+  were rejected, adding in-box drivers to a list several hundred rows long.
+- **Not exploitable through the shipping scanner**, which calls `Path.GetFullPath` before it gets
+  here — checked rather than assumed. That made the rule safe by a caller's habit rather than by its
+  own construction, on a `public` method. Both sides are now resolved before comparison, and an
+  unresolvable path fails **closed**: a driver whose location cannot be established must not be
+  presented as shipped by Windows, and falls through to the signature verdict where it stays visible.
+- 25 tests, including the BYOVD shape stated outright, and the mutation check: restoring the raw
+  prefix fails five of them. `WinSight.Drivers.Tests` 25 → 50 tests.
+- The live scan is unchanged — 450 drivers, 6 flagged — which is the expected result for a fix to a
+  path nothing currently reaches.
+
 ### The WFP exact-shape check was guarded by grepping its own source, and the grep had holes
 - `FilterHasExactShape` is the most consequential pure function in the privileged service:
   `VerifyExact` calls it to decide whether enforcement reads **Active** or collapses to

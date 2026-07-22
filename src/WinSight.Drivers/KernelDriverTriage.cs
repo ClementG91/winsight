@@ -189,14 +189,45 @@ public static class KernelDriverTriage
     /// Whether <paramref name="path"/> sits inside <paramref name="directory"/>. The
     /// separator is part of the comparison, so <c>System32Extra</c> is not System32.
     /// </summary>
+    /// <remarks>
+    /// <b>Both sides are resolved before they are compared.</b> A raw prefix test fails in both
+    /// directions, and one of them fails open: <c>C:\Windows\System32\..\..\Users\Public\evil.sys</c>
+    /// starts with the System32 prefix while demonstrably living in a user-writable folder, so a
+    /// Microsoft-signed driver loaded from there would be filed as one Windows ships and vanish from
+    /// the operator's view — which is precisely the bring-your-own-vulnerable-driver case this check
+    /// exists to keep visible. The other direction is quieter: <c>C:/Windows/System32/...</c> and
+    /// <c>C:\Windows\.\System32\...</c> name the same place and a literal comparison rejects both,
+    /// adding an in-box driver to a list several hundred rows long.
+    ///
+    /// <see cref="KernelDriverScanner"/> already calls <see cref="Path.GetFullPath(string)"/> before
+    /// reaching here, so nothing was exploitable through it. That made the rule safe by a caller's
+    /// habit rather than by its own construction, and this method is public.
+    ///
+    /// An unresolvable path answers <c>false</c>. Failing closed is right: a driver whose location
+    /// cannot be established must not be presented as shipped by Windows. It then falls through to
+    /// the signature-based verdict, where it is reported as context instead of hidden.
+    /// </remarks>
     private static bool IsInside(string? path, string directory)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
             return false;
         }
-        var root = directory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            + Path.DirectorySeparatorChar;
-        return path.StartsWith(root, StringComparison.OrdinalIgnoreCase);
+
+        string resolvedPath;
+        string root;
+        try
+        {
+            resolvedPath = Path.GetFullPath(path);
+            root = Path.GetFullPath(directory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+                + Path.DirectorySeparatorChar;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+
+        return resolvedPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
     }
 }
