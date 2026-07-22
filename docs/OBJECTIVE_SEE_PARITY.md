@@ -95,8 +95,21 @@ Writability is settled by asking the filesystem, never by reconstructing effecti
 DACL, because that is where this class of check quietly gets it wrong. Measured on a real desktop:
 1 finding out of roughly 700 services, correctly graded Latent.
 
-Still open here: DLL search-order analysis proper — writable directories ahead of system ones on a
-process's search path, and phantom DLLs (imported-but-absent) an attacker can drop in.
+The search-order half now covers the two directories that decide it. A program's **own directory**
+is the first place Windows looks for every DLL it loads, so an auto-starting service whose folder is
+writable can have any of its imports answered by a planted file — and its executable replaced
+besides. A writable **machine PATH** entry is the same thing for every process that resolves
+anything by name; an *absent* PATH entry whose parent is writable is that vulnerability one step
+earlier, and is reported too.
+
+Both are silent on a healthy machine by design — measured on a real desktop, 18 machine PATH entries
+and 88 auto-starting services, none writable. That is the right shape for a check like this, and it
+is also why only tests can prove they fire: a silent detector and a broken one look identical from
+outside.
+
+Still open here: **phantom DLLs** — imports a binary declares that are absent from its search path,
+which an attacker can supply. That needs PE import-table parsing and careful handling of delay-loads
+and side-by-side assemblies, or it becomes noise.
 
 ### 5. Per-process drill-down (TaskExplorer-class)
 The data mostly exists across the processes, modules and connections scanners; what is missing is

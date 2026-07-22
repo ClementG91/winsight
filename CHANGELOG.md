@@ -2,6 +2,25 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### `hijack` grows the search-order half: writable service directories and PATH entries
+- A program's **own directory** is the first place Windows looks for every DLL it loads. An
+  auto-starting service whose folder is writable can therefore have any of its imports answered by a
+  planted file — and its executable replaced besides. For a service that means SYSTEM, at boot.
+- A writable **machine PATH** entry is the same thing for every process that resolves anything by
+  name rather than by full path. An *absent* PATH entry whose parent is writable is that
+  vulnerability one step earlier — create the directory, then fill it — and is reported too; an
+  absent entry with a closed parent is just stale configuration and stays quiet.
+- **Measured before being built.** On a real desktop: 18 machine PATH entries and 88 auto-starting
+  services, **none writable**. Both checks are silent on a healthy machine, which is the right shape
+  — and is exactly why only tests can prove they fire at all, since a silent detector and a broken
+  one look identical from outside. That confusion has already cost this project twice.
+- The PATH is read from the registry rather than from this process's environment: the process copy
+  is a snapshot taken at launch and can carry per-user entries, while the registry value is what
+  every service and every new process will actually receive.
+- Only services Windows starts by itself are directory-checked. A manual service that never runs is
+  not a boot-time escalation path, and checking all of them would triple the probe count for no
+  added signal.
+
 ### `hijack`: services another program could run in place of — a vector macOS does not have
 - Parity gap #4, and the one place a Windows tool should be *ahead* of the Objective-See family
   rather than catching up. Windows registers a service as a **command line**, not a path, so an

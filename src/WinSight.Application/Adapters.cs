@@ -397,29 +397,38 @@ public static class Adapters
                 // Program Files where nobody unprivileged can plant anything, and flagging them all
                 // equally would bury the one that is actually exploitable.
                 f.Exposure == HijackExposure.Latent ? Severity.Info : Severity.Notable,
-                $"{f.Service}",
+                $"{f.Kind}/{f.Subject}",
                 HijackDetail(f),
                 new Dictionary<string, string?>
                 {
-                    ["service"] = f.Service,
-                    ["command"] = f.CommandLine,
+                    ["kind"] = f.Kind.ToString(),
+                    ["subject"] = f.Subject,
+                    ["context"] = f.Context,
                     ["exposure"] = f.Exposure.ToString(),
                     ["actionablePath"] = f.ActionablePath,
-                    ["candidates"] = string.Join(" | ", f.Candidates),
+                    ["candidates"] = f.Candidates.Count == 0 ? null : string.Join(" | ", f.Candidates),
                 });
         }
         var exploitable = findings.Count(f => f.Exposure != HijackExposure.Latent);
-        return b.Build(
-            $"{findings.Count} service(s) with a pre-emptable command line, {exploitable} exploitable now");
+        return b.Build(findings.Count == 0
+            ? "nothing found that another program could run in place of"
+            : $"{findings.Count} pre-emptable configuration(s), {exploitable} exploitable now");
     }
 
-    private static string HijackDetail(HijackFinding finding) => finding.Exposure switch
+    private static string HijackDetail(HijackFinding finding) => finding.Kind switch
     {
-        HijackExposure.Occupied =>
-            $"{finding.ActionablePath} already exists and would run instead of {finding.CommandLine}",
-        HijackExposure.Exploitable =>
-            $"anyone who can write {finding.ActionablePath} would run instead of {finding.CommandLine}",
-        _ => $"unquoted path; Windows would try {finding.Candidates[0]} first, but it is not writable",
+        HijackKind.WritableServiceDirectory =>
+            $"{finding.Subject} runs from {finding.Context}, which anyone can write to: a planted DLL there loads before any other copy",
+        HijackKind.WritablePathEntry =>
+            $"{finding.Context}: anyone can plant into {finding.Subject}, so anything resolved by name can be answered from it",
+        _ => finding.Exposure switch
+        {
+            HijackExposure.Occupied =>
+                $"{finding.ActionablePath} already exists and would run instead of {finding.Context}",
+            HijackExposure.Exploitable =>
+                $"anyone who can write {finding.ActionablePath} would run instead of {finding.Context}",
+            _ => $"unquoted path; Windows would try {finding.Candidates[0]} first, but it is not writable",
+        },
     };
 
     public static ToolReport Hosts(bool flaggedOnly)

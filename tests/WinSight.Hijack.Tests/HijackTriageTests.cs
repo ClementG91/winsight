@@ -18,14 +18,14 @@ public sealed class HijackTriageTests
     {
         var triage = new HijackTriage(new NothingWritable());
 
-        Assert.Null(triage.Assess("Svc", @"""C:\Program Files\My App\svc.exe"" -k net"));
+        Assert.Null(triage.AssessCommandLine("Svc", @"""C:\Program Files\My App\svc.exe"" -k net"));
     }
 
     [Fact]
     public void UnquotedButUnwritableIsLatent()
     {
         // The common case on a healthy machine. It is real, and it is not urgent.
-        var finding = new HijackTriage(new NothingWritable()).Assess("Svc", Unquoted);
+        var finding = new HijackTriage(new NothingWritable()).AssessCommandLine("Svc", Unquoted);
 
         Assert.Equal(HijackExposure.Latent, finding?.Exposure);
         Assert.Null(finding?.ActionablePath);
@@ -35,7 +35,7 @@ public sealed class HijackTriageTests
     [Fact]
     public void UnquotedAndWritableIsExploitable()
     {
-        var finding = new HijackTriage(new Writable(@"C:\Program.exe")).Assess("Svc", Unquoted);
+        var finding = new HijackTriage(new Writable(@"C:\Program.exe")).AssessCommandLine("Svc", Unquoted);
 
         Assert.Equal(HijackExposure.Exploitable, finding?.Exposure);
         // The operator needs the exact path, not just the verdict.
@@ -46,7 +46,7 @@ public sealed class HijackTriageTests
     public void ReportsTheFirstWritableCandidate_BecauseThatIsTheOneWindowsWouldRun()
     {
         var finding = new HijackTriage(new Writable(@"C:\Program.exe", @"C:\Program Files\My.exe"))
-            .Assess("Svc", Unquoted);
+            .AssessCommandLine("Svc", Unquoted);
 
         Assert.Equal(@"C:\Program.exe", finding?.ActionablePath);
     }
@@ -55,7 +55,7 @@ public sealed class HijackTriageTests
     public void AWritableLaterCandidateStillCounts()
     {
         // Only one of the candidates needs to be plantable for the service to be hijackable.
-        var finding = new HijackTriage(new Writable(@"C:\Program Files\My.exe")).Assess("Svc", Unquoted);
+        var finding = new HijackTriage(new Writable(@"C:\Program Files\My.exe")).AssessCommandLine("Svc", Unquoted);
 
         Assert.Equal(HijackExposure.Exploitable, finding?.Exposure);
         Assert.Equal(@"C:\Program Files\My.exe", finding?.ActionablePath);
@@ -71,7 +71,7 @@ public sealed class HijackTriageTests
         try
         {
             var commandLine = $"{existing[..^4]} extra\\svc.exe";
-            var finding = new HijackTriage(new Writable(existing)).Assess("Svc", commandLine);
+            var finding = new HijackTriage(new Writable(existing)).AssessCommandLine("Svc", commandLine);
 
             Assert.Equal(HijackExposure.Occupied, finding?.Exposure);
             Assert.Equal(existing, finding?.ActionablePath);
