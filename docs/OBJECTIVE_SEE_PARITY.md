@@ -40,13 +40,38 @@ Two structural differences shape everything below:
 
 Ranked by security value per unit of work, not by how interesting they are to build.
 
-### 1. Process attribution — *in progress*
-Every detection currently says **what** changed, never **who** changed it. This is the single
-biggest weakness: "a Run key appeared" is far less actionable than "`dropper.exe` (PID 4242) wrote
-this Run key". Increment 1 (pure core: kernel-path translation + write correlation) has landed.
-Remaining: the elevated ETW session behind an opt-in, then wiring into Guardian and ransomware
-alerts, the journal and the MCP surface. Follow `WinSight.NetMonitor/OutboundConnectionWatcher.cs`:
-private session name, capture PID→path at process start (never resolve after the fact).
+### 1. Process attribution — *ransomware and persistence now name the writer*
+Detections used to say **what** changed and never **who** changed it. The pure core (kernel-path
+translation, write correlation) and the elevated ETW session behind an opt-in both landed earlier;
+Guardian's persistence alerts have carried an author since. Ransomware now does too, which is where
+it matters most: `CanaryTouched: decoy.docx` says something is wrong, while naming the writing
+process says what to terminate, and ransomware is the one detection where minutes matter.
+
+**The file filter was the missing piece, and it was missing silently.** The watcher records every
+registry write but only the file writes it is told to look for — a busy machine performs thousands of
+file writes a second, and the correlation index is small and time-bounded on purpose, so recording
+everything would evict every useful observation within seconds. The host was constructing that
+watcher with the default filter, which records *nothing*: registry attribution worked, the health
+counters looked healthy, and no file write was ever offered to the index at all. Ransomware, and
+Guardian's file-based startup-folder surface, could never have been attributed.
+
+`AttributionScope` now names the two sets worth recording — the startup folders and, once protection
+plants them, the ransomware decoys. Both are small and precisely known. The protected *directories*
+(Documents, Desktop, Pictures) are deliberately not watched wholesale: they are among the busiest
+paths on a desktop and would reintroduce exactly the flooding the filter exists to prevent. The
+consequence is stated rather than hidden — a touched decoy carries an author, a rename/delete burst
+does not.
+
+**One bug worth recording, because it was invisible and total.** The filter runs on the path as the
+kernel spells it, before normalisation. The previous rule compared that raw path against the full DOS
+folder (`C:\Users\…`), which cannot match once the volume is spelled `\Device\HarddiskVolume3\…` —
+so every startup-folder write would have been dropped and the watch would have looked simply quiet.
+Matching the root-relative tail is correct under either spelling, which is the point: this could not
+be observed from an unelevated machine, so the code is written to be right either way rather than
+betting on which form arrives.
+
+Still open: surfacing attribution health over MCP, so an LLM asking "is attribution watching?" can
+tell "not elevated" from "running and seeing nothing".
 
 ### ~~2. Keylogger / input-hook detection (ReiKey-class)~~ — **done**
 Shipped as the `input` scanner. Worth recording *why it took the shape it did*, because the obvious

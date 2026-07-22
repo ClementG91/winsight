@@ -40,6 +40,10 @@ public partial class MainWindow : Window, IDisposable
     // kernel trace session is privileged, and WinSight is deliberately unprivileged by default, so
     // attribution is a bonus for an elevated run rather than a reason to demand elevation.
     private AttributionHost? _attribution;
+
+    // Which file writes attribution is allowed to remember. Long-lived and shared: the trace thread
+    // reads it on every file event while the UI thread updates it as protection is toggled.
+    private readonly AttributionScope _attributionScope = new();
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -121,7 +125,11 @@ public partial class MainWindow : Window, IDisposable
         {
             return;
         }
-        _attribution = new AttributionHost();
+        // The watcher records every registry write, but files only where it is told to look: a busy
+        // machine writes thousands of files a second and the correlation index is small on purpose.
+        // The scope names the two sets a detection can actually ask about — the startup folders and,
+        // once protection plants them, the ransomware decoys.
+        _attribution = new AttributionHost(new WriteAttributionWatcher(_attributionScope.ShouldRecord));
         _attribution.Start();
     }
 
@@ -193,6 +201,10 @@ public partial class MainWindow : Window, IDisposable
             try
             {
                 monitor.Start();
+                // Only now do the decoy paths exist, so only now can attribution be told to watch
+                // them. Without this the alert names what was touched and never who touched it,
+                // which is the difference between "something is wrong" and "kill this process".
+                _attributionScope.WatchCanaries(monitor.Canaries);
             }
             catch (Exception ex) when (ex is IOException
                                          or UnauthorizedAccessException
@@ -215,6 +227,9 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
         monitor.Detected -= OnRansomwareDetected;
+        // Stop recording writes to decoys that are about to stop existing, so the correlation index
+        // is not held open on paths nothing will ever ask about again.
+        _attributionScope.ForgetCanaries();
         monitor.Dispose(); // removes the decoys
     }
 
@@ -223,7 +238,14 @@ public partial class MainWindow : Window, IDisposable
         // Journal FIRST, balloon second. Windows may suppress the balloon entirely (Focus Assist, or
         // its throttling of an app posting several toasts quickly), and a detection that leaves no
         // trace is indistinguishable from no detection at all.
-        AlertJournal.Append(new SecurityAlert(DateTimeOffset.Now, "Ransomware", e.Kind.ToString(), e.Path));
+        AlertJournal.Append(new SecurityAlert(
+            DateTimeOffset.Now,
+            "Ransomware",
+            e.Kind.ToString(),
+            RansomwarePresenter.AlertDetail(
+                e.Kind,
+                e.Path,
+                _attribution is { } attribution ? attribution.Attribute : null)));
 
         Dispatcher.Invoke(() =>
         {

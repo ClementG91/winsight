@@ -213,14 +213,11 @@ public static class Adapters
             cts.Cancel();
         };
 
-        var startupFolders = new[]
-        {
-            Environment.GetFolderPath(Environment.SpecialFolder.Startup),
-            Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup),
-        }.Where(folder => !string.IsNullOrWhiteSpace(folder)).ToArray();
-
-        bool IsStartupFile(string path) =>
-            startupFolders.Any(folder => path.Contains(folder, StringComparison.OrdinalIgnoreCase));
+        // Shared with the dashboard rather than spelled out again here. The rule this replaced
+        // compared the kernel's raw path against the full DOS folder, which cannot match once the
+        // volume is spelled \Device\HarddiskVolumeN — the failure being total and silent, since a
+        // startup-folder write would simply never be recorded and the watch would look quiet.
+        var scope = new AttributionScope();
 
         Console.WriteLine("Watching registry writes and startup-folder writes (ETW), Ctrl+C to stop.");
         var attributed = 0;
@@ -228,7 +225,7 @@ public static class Adapters
         var unresolvedTarget = 0;
         try
         {
-            new WriteAttributionWatcher(IsStartupFile).Watch(
+            new WriteAttributionWatcher(scope.ShouldRecord).Watch(
                 observation =>
                 {
                     attributed++;

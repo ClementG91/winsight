@@ -2,6 +2,35 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Ransomware alerts now name the process doing the encrypting
+- `CanaryTouched: decoy.docx` says something is wrong. **`— written by C:\Users\me\AppData\Local\Temp\x.exe (pid 8121)`
+  says what to terminate.** Ransomware is the one detection where minutes matter, and it was the one
+  still saying *what* without ever saying *who*.
+- **The file filter was missing, and missing silently.** The watcher records every registry write but
+  only the file writes it is told to look for — a busy machine performs thousands a second and the
+  correlation index is small and time-bounded on purpose. `AttributionHost` was constructing that
+  watcher with the **default filter, which records nothing**. Registry attribution worked, the health
+  counters read healthy, and no file write was ever offered to the index at all. Ransomware and
+  Guardian's startup-folder surface could never have been attributed, and nothing said so.
+- `AttributionScope` names the two sets worth recording: the startup folders, and the ransomware
+  decoys once protection plants them. The protected *directories* — Documents, Desktop, Pictures —
+  are deliberately **not** watched wholesale; they are among the busiest paths on a desktop and would
+  reintroduce the flooding the filter exists to prevent. Consequence stated rather than hidden: a
+  touched decoy carries an author, a rename/delete burst does not.
+- **A total, invisible bug fixed on the way.** The filter runs on the path as the kernel spells it,
+  before normalisation. The previous rule compared that raw path against the full DOS folder
+  (`C:\Users\…`), which cannot match once the volume reads `\Device\HarddiskVolume3\…` — every
+  startup-folder write would have been dropped and `winsight attribution --watch` would have looked
+  merely quiet. Matching the root-relative tail is correct under **either** spelling. This could not
+  be observed from an unelevated machine, so it is written to be right either way rather than betting
+  on which form arrives — and pinned by tests in both spellings, plus `\??\`, `\\?\` and forward
+  slashes.
+- The journal keeps the full path and the author; the balloon still keeps only the file name, because
+  a balloon can be read over someone's shoulder and the journal is opened deliberately by someone who
+  has just been told their files are being encrypted. A bare-name author (`powershell.exe`, how
+  living-off-the-land ransomware runs) is named but marked `full path unknown`, never dressed up as a
+  located file.
+
 ### `hijack` closes the DHS gap: phantom imports
 - A binary declares the modules it needs. When one is answered by **no directory in its search
   order**, the slot is permanently unoccupied — not a race to win but an open invitation: whoever
