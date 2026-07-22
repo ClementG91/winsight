@@ -61,12 +61,40 @@ function Check($name, [scriptblock]$test, $expectation) {
     }
 }
 
+# Runs a native command and hands back everything it said, plus its exit code.
+#
+# The ErrorActionPreference dance is not decoration. This script stops on error, and with `2>&1`
+# PowerShell turns a native command's standard-error output into an ErrorRecord -- so a *refusal*
+# terminated the run. That is precisely backwards here: the refusals are what the protocol is
+# checking for, and the first real run died on the service correctly rejecting an untrusted path,
+# reporting its own success as a crash. Native output is data to this script, never an error.
+function Invoke-Native($exe, [string[]]$nativeArgs) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try
+    {
+        # Standard-error lines arrive as ErrorRecords, and Out-String renders those with PowerShell's
+        # full "Au caractere ... + CategoryInfo" apparatus wrapped around them. The transcript from
+        # this script is meant to be pasted into a report, so the message is taken and the decoration
+        # left behind -- an FWP_E_* code buried in a stack of PowerShell diagnostics is harder to read
+        # and easy to mistake for a fault in the tooling.
+        $output = (& $exe @nativeArgs 2>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) { $_.Exception.Message } else { $_ }
+            } | Out-String)
+        return [pscustomobject]@{ Output = $output; ExitCode = $LASTEXITCODE }
+    }
+    finally
+    {
+        $ErrorActionPreference = $previous
+    }
+}
+
 # Raw output is kept for every probe: a summary loses the FWP_E_* codes that carry the signal.
 function Run($exe, [string[]]$serviceArgs) {
-    $output = & $exe @serviceArgs 2>&1 | Out-String
+    $result = Invoke-Native $exe $serviceArgs
     "  > $(Split-Path -Leaf $exe) $($serviceArgs -join ' ')" | Write-Output
-    ($output.TrimEnd() -split "`n" | ForEach-Object { "    $_" }) | Write-Output
-    return $output
+    ($result.Output.TrimEnd() -split "`n" | ForEach-Object { "    $_" }) | Write-Output
+    return $result.Output
 }
 
 Section "Preconditions"
@@ -108,12 +136,11 @@ New-Item -ItemType Directory -Force -Path $untrusted | Out-Null
 Copy-Item (Join-Path (Split-Path $ServicePath) "*") $untrusted -Recurse -Force -ErrorAction SilentlyContinue
 $untrustedExe = Join-Path $untrusted (Split-Path -Leaf $ServicePath)
 if (Test-Path $untrustedExe) {
-    $refusal = & $untrustedExe install 2>&1 | Out-String
-    $refusalCode = $LASTEXITCODE
+    $refused = Invoke-Native $untrustedExe @("install")
     "  > install from a user-writable path" | Write-Output
-    ($refusal.TrimEnd() -split "`n" | ForEach-Object { "    $_" }) | Write-Output
+    ($refused.Output.TrimEnd() -split "`n" | ForEach-Object { "    $_" }) | Write-Output
     Check "install refused from a user-writable path" `
-        { $refusalCode -ne 0 -and $refusal -match "FW_INSTALL_FAILED|Writable|UntrustedOwner|OutsideProgramData" } `
+        { $refused.ExitCode -ne 0 -and $refused.Output -match "FW_INSTALL_FAILED|Writable|UntrustedOwner|OutsideProgramData" } `
         "[FW_INSTALL_FAILED] and a non-zero exit; the trust codes are UntrustedOwner, WritableByUnprivilegedPrincipal, OutsideProgramData, ReparsePoint, IdentityChanged"
 }
 Remove-Item $untrusted -Recurse -Force -ErrorAction SilentlyContinue
@@ -128,7 +155,7 @@ $wfpStatus = Run $ServicePath @("wfp-status")
 Check "no WFP state before arming" { $wfpStatus -match "absent" } "provider: absent, sublayer: absent on an unarmed machine"
 
 Check "direct WFP mutation is refused" `
-    { (& $ServicePath wfp-block-add "C:\Windows\System32\curl.exe" 2>&1 | Out-String) -match "DIRECT_MUTATION_DISABLED|disabled" } `
+    { (Invoke-Native $ServicePath @("wfp-block-add", "C:\Windows\System32\curl.exe")).Output -match "DIRECT_MUTATION_DISABLED|disabled" } `
     "[FW_DIRECT_MUTATION_DISABLED]; policy mutation must go through authenticated IPC, never the command line"
 
 if ($SkipEnforcement) {
@@ -145,8 +172,18 @@ $target = "C:\curltest\curl.exe"
 New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
 Copy-Item "C:\Windows\System32\curl.exe" $target -Force
 
-$before = & $target -s -o NUL -w "%{http_code}" --max-time 15 https://example.com 2>&1
-Check "target reaches the network before blocking" { "$before" -eq "200" } "http 200 from the unblocked copy; without this the blocked result proves nothing"
+# A blocked curl exits non-zero and writes to standard error -- which is the result being measured,
+# not a fault in the script. Everything here goes through Invoke-Native so a successful block cannot
+# terminate the run that is verifying it.
+function HttpCode($exe)
+{
+    return (Invoke-Native $exe @(
+            "-s", "-o", "NUL", "-w", "%{http_code}", "--max-time", "20", "https://example.com")
+    ).Output.Trim()
+}
+
+$before = HttpCode $target
+Check "target reaches the network before blocking" { $before -eq "200" } "http 200 from the unblocked copy; without this the blocked result proves nothing"
 
 Write-Output ""
 Write-Output "  ACTION REQUIRED -- this cannot be automated by design."
@@ -166,13 +203,13 @@ Check "WFP provider and sublayer exist" { $wfpArmed -match "present" } "provider
 $blockStatus = Run $ServicePath @("wfp-block-status", $target)
 Check "the target reads as blocked" { $blockStatus -match "FW_APP_BLOCKED" } "[FW_APP_BLOCKED]"
 
-$blocked = & $target -s -o NUL -w "%{http_code}" --max-time 20 https://example.com 2>&1
-Check "blocked app cannot reach the network" { "$blocked" -ne "200" } "anything but 200 (x64 yields http 000, exit 2)"
+$blocked = HttpCode $target
+Check "blocked app cannot reach the network" { $blocked -ne "200" } "anything but 200 (x64 yields http 000, exit 2)"
 
 # The unblocked leg matters as much as the blocked one: if both fail, the filter is not app-scoped
 # and that is a bug, not a success.
-$unblocked = & "C:\Windows\System32\curl.exe" -s -o NUL -w "%{http_code}" --max-time 20 https://example.com 2>&1
-Check "an unblocked copy still reaches the network" { "$unblocked" -eq "200" } `
+$unblocked = HttpCode "C:\Windows\System32\curl.exe"
+Check "an unblocked copy still reaches the network" { $unblocked -eq "200" } `
     "http 200 from C:\Windows\System32\curl.exe. If this also fails the block is machine-wide, not per-app -- a defect, however good the blocked leg looks."
 
 Section "Rollback"
@@ -186,16 +223,16 @@ Check "back to audit-only" { $disarmed -match "AuditOnly" } "persisted desired A
 $wfpClean = Run $ServicePath @("wfp-status")
 Check "all WFP state removed" { $wfpClean -match "absent" } "provider: absent, sublayer: absent -- a leftover provider is enforcement state nothing owns"
 
-$restored = & $target -s -o NUL -w "%{http_code}" --max-time 20 https://example.com 2>&1
-Check "the target reaches the network again" { "$restored" -eq "200" } "http 200 once enforcement is lifted"
+$restored = HttpCode $target
+Check "the target reaches the network again" { $restored -eq "200" } "http 200 once enforcement is lifted"
 
 Section "Clean up"
 
-sc.exe stop WinSightFirewall | Out-Null
+$null = Invoke-Native "sc.exe" @("stop", "WinSightFirewall")
 Start-Sleep -Seconds 2
 $null = Run $ServicePath @("uninstall")
-sc.exe query WinSightFirewall 2>&1 | Out-Null
-Check "uninstall leaves no service" { $LASTEXITCODE -eq 1060 } "sc.exe query returns 1060 (service absent)"
+$absent = Invoke-Native "sc.exe" @("query", "WinSightFirewall")
+Check "uninstall leaves no service" { $absent.ExitCode -eq 1060 } "sc.exe query returns 1060 (service absent)"
 Remove-Item (Split-Path $target) -Recurse -Force -ErrorAction SilentlyContinue
 
 Section "Result"
