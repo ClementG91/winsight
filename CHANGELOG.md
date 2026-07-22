@@ -2,6 +2,56 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The coverage gate was measuring one assembly out of twenty-two, and CI never ran it
+- **`Measure-Coverage.ps1` read `Select-Object -First 1`.** The collector writes one cobertura file
+  per test project — 19 of them on this repo — each describing only the assemblies that project
+  happened to load. The gate graded whichever file the filesystem enumerated first. Caught in the
+  act: it printed *"All engine libraries are at or above 80%"* after looking at **100 lines out of
+  11,584**, a single assembly. Every report is now merged, unioning per (assembly, file, line).
+- **No workflow ever invoked it.** Neither `ci.yml` nor `release.yml` called the script, and its
+  `-EngineMinimum` defaulted to `0` — the gate off. The "engine libraries are held to 80%" rule was
+  a number no run could contradict. It now runs inside `build-test`, the required check, **in place
+  of** the plain `dotnet test` rather than beside it, so the suite still runs exactly once.
+- **An unmeasured library is no longer read as a covered one.** If an engine assembly is absent from
+  the merged report the gate fails instead of quietly grading the rest — the same "could not look"
+  distinction the rest of the suite is built on.
+- With the gate finally able to see, it failed honestly: `WinSight.Processes` at **79.5%**. The gap
+  was `ProcessInfo.Unsigned` — the only judgement that module makes — having no test at all, and
+  `ToUint`'s fallback silently attributing an unreadable row to **pid 0**. Both are now pinned;
+  79.5% → **93.2%**. Engine libraries **87.4%**, all twelve above the bar.
+
+### The signature cache could serve a trusted verdict for a file that had been swapped
+- Identity was length plus both timestamps, and all three are attacker-controlled — timestomping
+  (T1070.006) is one API call. A same-length unsigned replacement was served the cached **trusted**
+  verdict for up to five minutes. The window was undocumented, which was the real defect in a trust
+  core. The swap is now performed for real on disk in a test rather than described in prose.
+- **Measured before choosing**, over 300 System32 DLLs: Authenticode verification **19.25 ms/file**,
+  SHA-256 of the content **1.64 ms**, metadata fingerprint **0.052 ms**. Hashing every lookup would
+  add ~23 s to a 57 s `modules` scan to close a window that shuts when the process exits seconds
+  later — so content verification is opt-in, and **Guardian turns it on**. Guardian is the case the
+  cheap fingerprint is wrong for: it runs for days, makes few lookups, and its verdicts sit beside
+  persistence alerts, which is the worst possible place for a stale "signed".
+- `WinSight.Core` had **no test project of its own** — its coverage came from other modules
+  exercising it. The trust core now has one.
+
+### `hijack` was blind to UNC paths and to every image that is not an .exe
+- `\\server\share\My App\svc.exe` reported **nothing**: the guard was written as "starts with a
+  backslash" while its rationale only covered kernel-loaded driver paths. `CreateProcess`
+  prefix-searches a UNC path exactly like a drive path. `\\?\` and `\\.\` stay excluded, now for the
+  reason actually stated.
+- A registered image does not have to be an `.exe`. `.bat`, `.cmd`, `.scr` and `.pif` are
+  prefix-searched identically and were read as nothing at all. `.com` is deliberately **not** in the
+  set: it ends almost every domain name, and service arguments are full of those.
+- **A candidate must sit below its own root.** `C:\`, `\\server` and `\\server\share` are rooted but
+  are not files anyone can plant; emitting them sends an operator to inspect a path that cannot
+  exist. One rule now covers drive and UNC roots instead of two spellings that could drift.
+- Repeated spaces produced `C:\Program .exe`, which Windows can never create. Prefixes are trimmed
+  and de-duplicated.
+- An intermediate attempt at guarding arguments required the extension's token to contain a
+  separator. It looked right and silently broke `...\sub dir\program name.exe` — an executable whose
+  *file name* contains a space, the central case of this feature. Caught by an existing test, and
+  now pinned by an explicit one so it cannot be reintroduced.
+
 ### Adversarial audit: a health signal that could never fire, and two parsers that disagreed
 - **`ComScheduledTaskSource` could never report itself unreadable, and threw instead.** Late binding
   raises COM failures wrapped in `TargetInvocationException`; the catch filters listed only unwrapped

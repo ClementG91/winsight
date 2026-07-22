@@ -63,15 +63,23 @@ jobs:
       - name: Build
         run: dotnet build winsight.sln -c Release --no-restore
 
-      - name: Test
-        run: dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=tests-x64"
+      # Runs the suite once, with coverage, and fails when an engine library drops below the bar the
+      # project claims. Previously this was a plain `dotnet test` and Measure-Coverage.ps1 was never
+      # invoked by any workflow, so engine coverage could regress to zero without a red build.
+      # Folded into the existing test step rather than added beside it: running the suite twice
+      # would double the job that dominates this workflow's wall clock.
+      - name: Test and verify coverage
+        shell: pwsh
+        run: ./scripts/Measure-Coverage.ps1 -EngineMinimum 80 -TrxLogFilePrefix tests-x64
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: test-results-x64
-          path: "**/TestResults/*.trx"
+          path: |
+            **/TestResults/*.trx
+            out/coverage/**/*.trx
           if-no-files-found: ignore
 
   package:

@@ -55,7 +55,18 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
             r.Path is not null && verdicts.TryGetValue(r.Path, out var v) ? v : SignatureVerdict.Missing)).ToList();
     }
 
-    private static uint ToUint(object? value) => value switch
+    /// <summary>
+    /// Reads a WMI numeric property, which arrives boxed as whichever CIM type the provider chose.
+    /// </summary>
+    /// <remarks>
+    /// The <c>_ => 0</c> arm is a deliberate, and deliberately narrow, decision: a process id that
+    /// cannot be read becomes 0, the System Idle Process. That is a real mislabel, so it is pinned
+    /// by a test rather than left as an accident — but it is preferred to throwing, because losing
+    /// the whole process snapshot over one unreadable row is the worse failure. Win32_Process
+    /// declares ProcessId and ParentProcessId as uint32, so every arm above it is the normal path
+    /// and the fallback only fires if a provider returns something undeclared or nothing at all.
+    /// </remarks>
+    internal static uint ToUint(object? value) => value switch
     {
         uint u => u,
         int i => (uint)i,
