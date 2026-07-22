@@ -21,7 +21,15 @@ public static class GuardianHost
         // Use the same robust, cached verifier the on-demand scan uses: WinVerifyTrust with a
         // catalog fallback (so signed OS binaries read as trusted, not "unknown"), and caching so a
         // full re-scan on every change does not re-verify unchanged binaries each time.
-        var verifier = new CachingSignatureVerifier(new NativeSignatureVerifier());
+        //
+        // Content verification is on here and off in the one-shot scans, because Guardian is the
+        // case the cheap fingerprint is wrong for. It runs for days, so a verdict cached against
+        // length and timestamps alone could be served long after the file behind it was swapped —
+        // and Guardian's verdicts are shown beside persistence alerts, which is the worst place for
+        // a stale "signed". The cost is ~1.6 ms per lookup against ~19 ms for the verification it
+        // still avoids, and Guardian re-scans only the surface that changed, so the volume is small.
+        var verifier = new CachingSignatureVerifier(
+            new NativeSignatureVerifier(), verifyContent: true);
         // Scan exactly the given surface subset, so a change re-scans only what actually changed.
         IReadOnlyList<AutostartEntry> Scan(IReadOnlyList<IAutostartEnumerator> surfaces, CancellationToken ct) =>
             new PersistenceScanner(surfaces, verifier).Scan(ct);

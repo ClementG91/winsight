@@ -4,25 +4,52 @@ namespace WinSight.Core;
 
 /// <summary>
 /// A caching decorator over any <see cref="ISignatureVerifier"/>. A file's verdict is
-/// cached by path and file metadata, so unchanged binaries are verified once when
+/// cached by path and file identity, so unchanged binaries are verified once when
 /// several tools inspect them. Entries expire and the least-recently-used entry is
 /// evicted at a fixed bound: a long-running dashboard cannot grow this cache without
 /// limit or treat an old verdict as an authorization decision.
 /// </summary>
+/// <remarks>
+/// <b>What "unchanged" means, exactly.</b> By default a file is considered unchanged when its
+/// length and both timestamps match. All three are attacker-controlled: timestomping
+/// (MITRE T1070.006) is a single API call, so an attacker who replaces a signed binary with an
+/// unsigned one of the same length and restores the timestamps is served the cached <i>trusted</i>
+/// verdict until the entry expires. That window was undocumented, which was the real defect — a
+/// trust core must state the bound it offers.
+///
+/// <b>Why that default is still right for a scan, and wrong for a watcher.</b> Measured on this
+/// machine over 300 System32 DLLs: an Authenticode verification costs 19.25 ms/file, a SHA-256 of
+/// the content 1.64 ms/file, and the metadata fingerprint 0.052 ms/file. A single <c>modules</c> run
+/// performs ~14 000 lookups over a few thousand distinct files, so hashing every lookup would add
+/// roughly 23 s to a 57 s scan for a staleness window that closes when the process exits seconds
+/// later. A long-lived host is the opposite case: it makes few lookups, and its verdicts sit on
+/// screen next to security findings for as long as it runs.
+///
+/// So the strength is a choice, not a default to be guessed: pass
+/// <paramref name="verifyContent"/> <c>true</c> wherever the process outlives the scan.
+/// <see cref="WinSight"/>'s Guardian host does exactly that; the one-shot CLI scans do not.
+/// </remarks>
 public sealed class CachingSignatureVerifier : ISignatureVerifier
 {
     private readonly ISignatureVerifier _inner;
     private readonly int _maxEntries;
     private readonly TimeSpan _maxAge;
+    private readonly bool _verifyContent;
     private readonly object _sync = new();
     private readonly LinkedList<string> _lru = new();
     private readonly Dictionary<string, CacheEntry> _cache =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <param name="verifyContent">
+    /// When true the cached verdict is bound to a SHA-256 of the file's content, so a replaced
+    /// binary is never served a stale verdict however its timestamps are forged. Costs about
+    /// 1.6 ms per lookup; use it in any process that outlives a single scan.
+    /// </param>
     public CachingSignatureVerifier(
         ISignatureVerifier inner,
         int maxEntries = 4096,
-        TimeSpan? maxAge = null)
+        TimeSpan? maxAge = null,
+        bool verifyContent = false)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxEntries);
@@ -33,6 +60,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         _inner = inner;
         _maxEntries = maxEntries;
         _maxAge = maxAge ?? TimeSpan.FromMinutes(5);
+        _verifyContent = verifyContent;
     }
 
     public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
@@ -130,7 +158,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         _lru.Remove(entry.Node);
     }
 
-    private static FileFingerprint? Fingerprint(string path)
+    private FileFingerprint? Fingerprint(string path)
     {
         try
         {
@@ -139,7 +167,16 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
                 return null;
             }
             var file = new FileInfo(path);
-            return new FileFingerprint(file.Length, file.CreationTimeUtc, file.LastWriteTimeUtc);
+            // A null hash in content mode means the file could not be read: treat that as no
+            // fingerprint at all rather than silently falling back to forgeable metadata, which
+            // would reopen the exact window this mode exists to close.
+            if (!_verifyContent)
+            {
+                return new FileFingerprint(file.Length, file.CreationTimeUtc, file.LastWriteTimeUtc, null);
+            }
+            return HashUtil.Sha256File(path) is { } hash
+                ? new FileFingerprint(file.Length, file.CreationTimeUtc, file.LastWriteTimeUtc, hash)
+                : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -153,5 +190,13 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         long CachedAtTimestamp,
         LinkedListNode<string> Node);
 
-    private sealed record FileFingerprint(long Length, DateTime CreationTimeUtc, DateTime LastWriteTimeUtc);
+    /// <param name="ContentSha256">
+    /// Null in metadata mode. When present it is what actually decides identity, so a same-length
+    /// timestomped replacement no longer matches.
+    /// </param>
+    private sealed record FileFingerprint(
+        long Length,
+        DateTime CreationTimeUtc,
+        DateTime LastWriteTimeUtc,
+        string? ContentSha256);
 }

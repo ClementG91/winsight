@@ -245,7 +245,10 @@ public sealed class FirewallRequestDispatcher
             return Failure(request, FirewallProtocolError.NotSupported);
         }
 
-        var configuration = await _authority.EnableEnforcementAsync(cancellationToken).ConfigureAwait(false);
+        // The returned configuration is deliberately discarded: the status reported back is taken
+        // from the authority afterwards, under its own serialization, so the reply can never mix a
+        // pre-transition mode with a post-transition runtime state.
+        _ = await _authority.EnableEnforcementAsync(cancellationToken).ConfigureAwait(false);
 
         return Success(request) with { Status = await DescribeStatusAsync(cancellationToken).ConfigureAwait(false) };
     }
@@ -256,7 +259,7 @@ public sealed class FirewallRequestDispatcher
         // The emergency path always returns the machine to audit-only, whatever the
         // stored mode was, and removes any engine state. It must succeed even from a
         // corrupt store, which LoadOrAuditAsync already guarantees.
-        var configuration = await _authority.EmergencyDisableAsync(cancellationToken).ConfigureAwait(false);
+        _ = await _authority.EmergencyDisableAsync(cancellationToken).ConfigureAwait(false);
 
         return Success(request) with { Status = await DescribeStatusAsync(cancellationToken).ConfigureAwait(false) };
     }
