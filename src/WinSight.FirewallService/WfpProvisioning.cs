@@ -38,7 +38,7 @@ public static partial class WfpProvisioning
     private static readonly Guid AleAuthConnectV6 = new("4a72393b-319f-44bc-84c3-ba54dcb3b6b4");
 
     // FWPM_CONDITION_ALE_APP_ID: matches the connecting application's binary.
-    private static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
+    internal static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
 
     private const string ProviderName = "WinSight";
     private const string ProviderDescription = "WinSight-owned outbound firewall provider.";
@@ -66,13 +66,13 @@ public static partial class WfpProvisioning
 
     // FWP_ACTION_BLOCK = FWP_ACTION_FLAG_TERMINATING (0x1000) | 0x01. This one blocks,
     // but only the connections that match the filter's conditions (a single application).
-    private const uint FwpActionBlock = 0x00001001;
+    internal const uint FwpActionBlock = 0x00001001;
     private const uint FwpEmpty = 0;
 
     // FWP_DATA_TYPE.FWP_BYTE_BLOB_TYPE = 12 (10 is FWP_DOUBLE). The app-id condition
     // value is a byte blob, so this must be 12 or WFP rejects the condition.
-    private const uint FwpByteBlobType = 12;
-    private const uint FwpMatchEqual = 0;
+    internal const uint FwpByteBlobType = 12;
+    internal const uint FwpMatchEqual = 0;
 
     // FWPM_FILTER_FLAG_INDEXED = 0x40. WFP sets this itself, not the caller, on any filter it
     // decides to index for fast matching — which it always does for an app-id condition. A block
@@ -360,7 +360,7 @@ public static partial class WfpProvisioning
         return new Guid(hash.AsSpan(0, 16));
     }
 
-    private static List<DesiredBlock> DesiredBlocks(IReadOnlyList<AppFirewallPolicy> policies)
+    internal static List<DesiredBlock> DesiredBlocks(IReadOnlyList<AppFirewallPolicy> policies)
     {
         var result = new List<DesiredBlock>();
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -578,7 +578,7 @@ public static partial class WfpProvisioning
             filter.Flags, filter.Action.Type, filter.NumFilterConditions, condition);
     }
 
-    private static bool FilterHasExactShape(OwnedFilter filter, ExpectedFilter expected) =>
+    internal static bool FilterHasExactShape(OwnedFilter filter, ExpectedFilter expected) =>
         filter.ProviderKey == ProviderKey
         && filter.SubLayerKey == SublayerKey
         && filter.LayerKey == expected.LayerKey
@@ -630,10 +630,10 @@ public static partial class WfpProvisioning
         }
     }
 
-    private sealed record DesiredBlock(string Path, Guid KeyV4, Guid KeyV6);
-    private sealed record ExpectedFilter(Guid LayerKey, byte[] AppId);
-    private sealed record FilterCondition(Guid FieldKey, uint MatchType, uint Type, byte[]? Value);
-    private sealed record OwnedFilter(
+    internal sealed record DesiredBlock(string Path, Guid KeyV4, Guid KeyV6);
+    internal sealed record ExpectedFilter(Guid LayerKey, byte[] AppId);
+    internal sealed record FilterCondition(Guid FieldKey, uint MatchType, uint Type, byte[]? Value);
+    internal sealed record OwnedFilter(
         Guid FilterKey,
         Guid? ProviderKey,
         Guid LayerKey,

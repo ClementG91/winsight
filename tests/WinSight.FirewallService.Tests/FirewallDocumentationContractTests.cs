@@ -71,6 +71,14 @@ public sealed class FirewallDocumentationContractTests
     {
         // This is deliberately a source-shape guard, not native validation. The x64/Arm64
         // VM gate must still exercise every P/Invoke against real BFE/WFP state.
+        //
+        // It also is not, and never was, a check on what the predicate *does*: it greps for
+        // substrings, so a clause deleted from the expression is invisible to it unless the
+        // substring happens to be listed. Two were not — MatchType and the null-value check — and
+        // removing the MatchType clause left this test green while accepting a filter that matches
+        // on NOT-equal, i.e. one blocking every program except the named one. WfpExactShapeTests
+        // now falsifies every clause behaviourally; the list below is kept as a second, cheaper net
+        // over the native call names this cannot otherwise reach.
         var source = Read("src", "WinSight.FirewallService", "WfpProvisioning.cs");
 
         Assert.Contains("FwpmProviderGetByKey0", source, StringComparison.Ordinal);
@@ -83,6 +91,10 @@ public sealed class FirewallDocumentationContractTests
         Assert.Contains("filter.ActionType == FwpActionBlock", source, StringComparison.Ordinal);
         Assert.Contains("filter.ConditionCount == 1", source, StringComparison.Ordinal);
         Assert.Contains("condition.FieldKey == AleAppIdCondition", source, StringComparison.Ordinal);
+        // Both were missing from this list. Matching on anything but equality inverts the filter,
+        // and a null value would compare an app-id blob that is not there.
+        Assert.Contains("condition.MatchType == FwpMatchEqual", source, StringComparison.Ordinal);
+        Assert.Contains("condition.Value is not null", source, StringComparison.Ordinal);
         Assert.Contains("condition.Type == FwpByteBlobType", source, StringComparison.Ordinal);
         Assert.Contains("condition.Value.AsSpan().SequenceEqual(expected.AppId)", source,
             StringComparison.Ordinal);

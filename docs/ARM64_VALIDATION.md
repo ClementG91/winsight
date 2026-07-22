@@ -40,6 +40,28 @@ This is not box-ticking. The plausible failure modes are specific:
   must be elevated to arm the machine — both are enforced, not conventions.
 - Build from `main`, or grab the `winsight-win-arm64` artifact from CI.
 
+## Run it as a script, not by hand
+
+`scripts/Test-WfpValidation.ps1` executes this protocol and prints a verdict per step. Prefer it to
+the manual walkthrough below — a validation nobody can replay is indistinguishable, six months later,
+from one that was never run, and a transcript with `[PASS]`/`[FAIL]` lines is replayable where a
+recollection is not.
+
+```powershell
+# read-only half: preconditions, service lifecycle, path trust, WFP probe. Arms nothing.
+./scripts/Test-WfpValidation.ps1 -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe' -SkipEnforcement
+
+# full protocol, including real traffic blocking. Take a VM snapshot first.
+./scripts/Test-WfpValidation.ps1 -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+```
+
+It pauses at the two steps that cannot be automated — arming and emergency disable — because
+mutating policy requires authenticated IPC by design, and the command-line verbs for it are refused
+on purpose. It tells you exactly what to click, then verifies the result. It is architecture-agnostic:
+everything below applies to x64 too, and step 5 is the only Arm64-specific part.
+
+The manual protocol is kept below because it explains *why* each step exists, which a script cannot.
+
 ## The protocol
 
 ### 0. Deploy

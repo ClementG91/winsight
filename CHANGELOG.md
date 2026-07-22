@@ -2,6 +2,46 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The WFP exact-shape check was guarded by grepping its own source, and the grep had holes
+- `FilterHasExactShape` is the most consequential pure function in the privileged service:
+  `VerifyExact` calls it to decide whether enforcement reads **Active** or collapses to
+  **Degraded**, and Degraded triggers a rollback that removes every block on the machine. Too strict
+  and working protection is torn down — that has already happened here, when the check required
+  `Flags == 0` and every real block reads back with the INDEXED flag WFP sets itself. Too loose and
+  a filter in the wrong shape is accepted as proof the machine is protected.
+- It was private, so it was guarded by asserting its **source text** contained twelve expected
+  substrings. **Two clauses were missing from that list**: `condition.MatchType == FwpMatchEqual` and
+  `condition.Value is not null`. Demonstrated by deleting the MatchType clause: the source guard
+  stayed **green** while the predicate began accepting a filter matching on NOT-equal — a filter that
+  blocks every program *except* the named one. The behavioural test fails on it immediately.
+- The predicate, its record types and `DesiredBlocks` are now `internal` and falsified clause by
+  clause: wrong provider, no provider, wrong sublayer, wrong layer, permit instead of block, zero or
+  two conditions, a count of one with no condition behind it, wrong field, wrong match type, wrong
+  value type, null value, different value, and a value that is a prefix or extension of the expected
+  app id. Plus both directions asserted in one test, so neither a constant `true` nor a constant
+  `false` can pass.
+- `DesiredBlocks` is covered too: only enabled blocks become filters, paths are canonicalised so one
+  app never gets two filters, and two spellings of one path are **refused** rather than silently
+  collapsed — they derive the same filter key, so applying both would have the second overwrite the
+  first and leave one app unfiltered while both read as blocked.
+- The source guard is kept as a cheaper second net over the native call names, with its two missing
+  assertions added and its limits written down.
+- `winsight-firewall-service` coverage 45.3% → **47.2%**, entirely in the logic that decides whether
+  the machine is actually protected.
+
+### VM validation is now a script that returns a verdict, not a document you follow
+- `scripts/Test-WfpValidation.ps1` executes the protocol in `docs/ARM64_VALIDATION.md` and prints
+  `[PASS]`/`[FAIL]` per step with the raw `FWP_E_*` codes. **A validation nobody can replay is
+  indistinguishable, six months later, from one that was never run** — that was the standing
+  objection to "covered by VM validation", and this closes it without pretending CI can host it.
+- Architecture-agnostic, and `-SkipEnforcement` runs the read-only half (preconditions, service
+  lifecycle, path trust, WFP probe) safely on a working machine without arming anything.
+- It stops at the two steps that cannot be automated — arming and emergency disable — because
+  mutating policy requires authenticated IPC by design and the command-line verbs for it are refused
+  on purpose. It says what to click, then verifies the outcome.
+- The unblocked leg is asserted as hard as the blocked one: if both fail, the filter is machine-wide
+  rather than per-app, which is a defect however convincing the blocked result looks.
+
 ## v0.10.0, 2026-07-22
 
 **Objective-See parity is complete.** Every tool on the comparison list is now at parity or ahead —
