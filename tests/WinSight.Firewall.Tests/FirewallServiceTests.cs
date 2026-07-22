@@ -941,12 +941,25 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         }, serverCancellation.Token);
         var client = TrustedTestClient(pipeName);
 
-        var error = await Assert.ThrowsAsync<TimeoutException>(() => client.SendAsync(
+        // The send is started but not awaited, and the read is confirmed while it is still in
+        // flight — the same shape as the sibling test below, and for a reason this one learned the
+        // hard way. Awaiting a 150 ms deadline first let the client give up and tear down the pipe
+        // before a loaded runner had scheduled the server's read at all: the read then failed, the
+        // signal below never arrived, and the test failed on the wait rather than on anything it was
+        // asserting. It blocked a release exactly once, which is how flaky tests teach people to
+        // re-run until green.
+        //
+        // A second's budget for a scheduler to run a task and read a few hundred bytes is a wide
+        // margin; the deadline still has to fire for the assertion to hold, so the test proves what
+        // its name claims.
+        var send = client.SendAsync(
             new FirewallCommandRequest(FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus),
-            TimeSpan.FromMilliseconds(150)));
+            TimeSpan.FromSeconds(1));
+        await requestRead.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var error = await Assert.ThrowsAsync<TimeoutException>(() => send);
 
         Assert.Equal("The WinSight firewall service did not respond.", error.Message);
-        await requestRead.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await serverCancellation.CancelAsync();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => serverTask);
     }

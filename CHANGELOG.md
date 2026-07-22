@@ -10,6 +10,14 @@ Packaging, found by someone actually trying to validate a release on a clean VM.
   the one thing CI cannot cover meant fetching the script separately — on a machine that by design
   has no `git` and no `gh`. Shipping them beside the executables also guarantees the protocol and the
   binaries come from the same commit, which fetching from `main` would not.
+- **A flaky test blocked this very release.** `TrustedSilentPeer_ReadDeadlineIsFixedTimeout` awaited
+  a 150 ms client deadline *before* confirming the server had read the request. On a loaded runner
+  the client gave up and tore down the pipe first, so the server's read failed, its signal never
+  arrived, and the test failed on a wait rather than on anything it asserts — one leg of the release
+  build, while the other three passed. Restructured to match its own sibling two tests below, which
+  had the correct shape all along: start the send, confirm the read while it is still in flight, then
+  assert the deadline fires. Verified stable over six consecutive runs. A test that fails once in a
+  while is worse than one that fails always, because it teaches people to re-run until green.
 - **`Build-Release.ps1 -SkipSbom` failed on the first line of a clean shell.** After calling
   `Install-InnoSetup.ps1` — a PowerShell script, which never sets an exit code of its own — it tested
   `$LASTEXITCODE`, so it was reading whichever native command had run last, anywhere. With `-SkipSbom`
