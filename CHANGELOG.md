@@ -2,6 +2,37 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### `hijack` closes the DHS gap: phantom imports
+- A binary declares the modules it needs. When one is answered by **no directory in its search
+  order**, the slot is permanently unoccupied — not a race to win but an open invitation: whoever
+  can write that name into any searched directory is loaded into the program at its privilege,
+  every time it starts. This was the last named parity gap against Objective-See's DHS, and the one
+  the plan called "analysis work rather than enumeration".
+- **Imports are parsed, never loaded.** Asking Windows what a binary imports means running its
+  initialisation code, which is unacceptable in a scanner aimed at files it already suspects. The
+  reader bounds-checks every read and caps every count, because it is pointed at files an attacker
+  may have written: a malformed image yields nothing rather than an exception, so one hostile binary
+  cannot end the sweep. Validated against real 64- and 32-bit system binaries — **376 of 400**
+  System32 DLLs parsed, the remaining 24 being resource-only DLLs with no import table, which is the
+  correct answer for them.
+- **The tests build PEs whose RVAs differ from their file offsets.** A parser that skips the section
+  translation agrees with a handcrafted image and disagrees with every binary Windows ships; that is
+  the classic way this kind of parser passes its tests and fails in production.
+- **The api-set prefix was wrong in a way inspection cannot catch.** Written as `api-ms-win-` /
+  `ext-ms-win-` it produced exactly two findings against the live machine:
+  `ext-ms-win32-subsystem-query-l1-1-0.dll` in the print spooler and
+  `ext-ms-onecore-appmodel-staterepository-internal-l1-1-3.dll` in the search indexer — both
+  api-sets, both reported as phantom imports of a SYSTEM service. Two confident false accusations
+  against Windows itself, from four characters. Both are now pinned as test cases.
+- **Measured after the fix: zero findings across ~90 auto-starting services, 377 ms** (the scan was
+  200 ms before). Silent on a healthy machine is the intended shape — and exactly why the rule has
+  tests that make it fire on a machine that does not exist.
+- Writability is asked **once per directory per scan**, not once per import: ~90 services with
+  overlapping search orders would otherwise have written thousands of probe files across the disk.
+- Known limit, stated rather than implied: this reads the import table, so a DLL fetched at runtime
+  through `LoadLibrary` declares nothing and stays invisible. That needs runtime observation.
+- `WinSight.Hijack` coverage 55.6% → **75.6%**.
+
 ### The coverage gate was measuring one assembly out of twenty-two, and CI never ran it
 - **`Measure-Coverage.ps1` read `Select-Object -First 1`.** The collector writes one cobertura file
   per test project — 19 of them on this repo — each describing only the assemblies that project

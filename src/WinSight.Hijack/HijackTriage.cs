@@ -17,6 +17,13 @@ public enum HijackKind
     /// name rather than by full path can be answered from it.
     /// </summary>
     WritablePathEntry,
+
+    /// <summary>
+    /// A program imports a DLL that no directory in its search order provides. The slot is
+    /// permanently unoccupied, so whoever can write that name into a searched directory is loaded
+    /// into the program at its privilege, every time it runs.
+    /// </summary>
+    PhantomImport,
 }
 
 /// <summary>How exposed a finding actually is on this machine.</summary>

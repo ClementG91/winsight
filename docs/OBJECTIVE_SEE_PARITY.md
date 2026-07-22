@@ -25,7 +25,7 @@ Two structural differences shape everything below:
 | **TaskExplorer** | Process explorer with signatures, libraries, network | **Processes + Modules scans** | **Partial** — no single per-process drill-down view. |
 | **What's Your Sign?** | Signature info in the file manager | *(none)* | **Missing** — Explorer shell extension. |
 | **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** — filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
-| **DHS** | Dylib hijack scanner | **Hijack scan** grades pre-emptable service command lines; **modules scan** flags unsigned/untrusted loaded modules | **Partial** — unquoted-path hijacking is covered and graded by real exploitability; DLL search-order and phantom-DLL analysis are not. |
+| **DHS** | Dylib hijack scanner | **Hijack scan** — unquoted command lines, writable service directories and PATH entries, and **phantom imports**; **modules scan** flags unsigned/untrusted loaded modules | **Parity, arguably ahead.** DHS finds weak/rpath dylibs; the Windows equivalents are all covered, each graded by real exploitability on this machine. |
 | **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | *(none)* | **Missing** — lid/logon/USB-while-locked. |
 
@@ -82,7 +82,7 @@ Remaining, lower-value follow-up in the same area: an opt-in elevated pass that 
 resident set, and boot-configuration checks (test signing, DSE state) that give the flagged
 findings their context.
 
-### 4. Hijacking scan (DHS-class) — **partly shipped as the `hijack` scanner**
+### ~~4. Hijacking scan (DHS-class)~~ — **done, shipped as the `hijack` scanner**
 The first and highest-signal half is done: **unquoted service command lines**, which is the
 Windows-specific vector with no macOS analogue at all. Windows registers a service as a command
 line, so `C:\Program Files\My App\svc.exe` unquoted is attempted as `C:\Program.exe` first, and
@@ -107,9 +107,36 @@ and 88 auto-starting services, none writable. That is the right shape for a chec
 is also why only tests can prove they fire: a silent detector and a broken one look identical from
 outside.
 
-Still open here: **phantom DLLs** — imports a binary declares that are absent from its search path,
-which an attacker can supply. That needs PE import-table parsing and careful handling of delay-loads
-and side-by-side assemblies, or it becomes noise.
+**Phantom imports** complete the set. A binary declares the modules it needs; when one of them is
+answered by no directory in its search order, the slot is permanently unoccupied — not a race an
+attacker has to win, but an open invitation. Whoever can write that name into any searched directory
+is loaded into the program at its privilege, every time it starts.
+
+The imports are read by parsing the PE headers, never by loading the image: asking Windows what a
+binary imports means running its initialisation code, which is unacceptable in a scanner aimed at
+files it already suspects. The parser bounds-checks every read and caps every count, because it is
+pointed at files an attacker may have written — a malformed image yields nothing rather than an
+exception, so one hostile binary cannot end the sweep.
+
+**Two exclusions carry the entire signal-to-noise ratio, and one of them was measured the hard way.**
+*API sets* (`api-ms-…`, `ext-ms-…`) are resolved by the loader from a schema and exist as no file
+anywhere; they are the majority of every binary's import table. *KnownDLLs* are mapped from a
+pre-loaded section and never resolved through the search order at all, so planting one earlier
+achieves nothing — and the list is read from the registry rather than hardcoded, because it is
+machine state a tampered machine should reveal.
+
+The api-set prefix was first written as `api-ms-win-`/`ext-ms-win-`, which looks right. Against the
+live machine it produced exactly two findings: `ext-ms-win32-subsystem-query-l1-1-0.dll` in the print
+spooler and `ext-ms-onecore-appmodel-staterepository-internal-l1-1-3.dll` in the search indexer —
+both api-sets, both missed by the narrower prefix, both reported as phantom imports of a SYSTEM
+service. Two confident false accusations against Windows itself, from four characters. With the
+prefixes corrected: **zero findings across ~90 auto-starting services, in 377 ms**. That is the
+intended shape, and it is why the rule has tests that make it fire on a machine that does not exist —
+a silent detector and a broken one are indistinguishable from outside.
+
+Known limit, stated rather than implied: this reads the **import table**. A DLL fetched at runtime
+through `LoadLibrary` — which is how several of the classic Windows phantoms are reached — declares
+nothing, so it is not visible here. Covering those needs runtime observation, not static analysis.
 
 ### 5. Per-process drill-down (TaskExplorer-class)
 The data mostly exists across the processes, modules and connections scanners; what is missing is
@@ -128,8 +155,11 @@ useful, but the lowest signal-to-noise of the list on a machine in daily use.
 
 ## The bar this sets
 
-Beating Objective-See on Windows is not a checklist race. WinSight is now at parity on the seven
-tools that matter most — persistence × 2, firewall, ransomware, camera/mic, keyboard interception
-and kernel drivers — while being one app instead of eight. What still separates it from "a set of
-scanners" is **#1**: naming the process behind a detection. **#4** (DLL hijacking) is the next
-genuine capability win, and unlike the two before it, it is analysis work rather than enumeration.
+Beating Objective-See on Windows is not a checklist race. WinSight is now at parity or ahead on the
+eight tools that matter most — persistence × 2, firewall, ransomware, camera/mic, keyboard
+interception, kernel drivers and hijack analysis — while being one app instead of eight, with an MCP
+server, an alert journal and four scanners Objective-See has no equivalent for.
+
+What still separates it from "a set of scanners" is **#1**: naming the process behind a detection.
+Everything else remaining is either UI work (**#5**) or low signal-to-noise on a machine in daily
+use (**#6**).

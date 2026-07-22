@@ -421,6 +421,9 @@ public static class Adapters
             $"{finding.Subject} runs from {finding.Context}, which anyone can write to: a planted DLL there loads before any other copy",
         HijackKind.WritablePathEntry =>
             $"{finding.Context}: anyone can plant into {finding.Subject}, so anything resolved by name can be answered from it",
+        HijackKind.PhantomImport => finding.ActionablePath is null
+            ? $"{finding.Context} imports {finding.Candidates[0]}, which no directory in its search order provides; nothing writable ahead of it today"
+            : $"{finding.Context} imports {finding.Candidates[0]}, which nothing provides: anyone who can write {finding.ActionablePath}\\{finding.Candidates[0]} is loaded into it",
         _ => finding.Exposure switch
         {
             HijackExposure.Occupied =>

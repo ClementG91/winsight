@@ -117,15 +117,40 @@ public sealed class RegistryMachinePath : IMachinePath
 public sealed class HijackScanner(
     IServiceRegistry? services = null,
     IMachinePath? machinePath = null,
-    IWritabilityProbe? probe = null)
+    IWritabilityProbe? probe = null,
+    IKnownDllSource? knownDlls = null,
+    Func<string, PeImportSet>? readImports = null,
+    Func<string, bool>? fileExists = null)
 {
     private readonly IServiceRegistry _services = services ?? new RegistryServiceSource();
     private readonly IMachinePath _machinePath = machinePath ?? new RegistryMachinePath();
+    private readonly IWritabilityProbe _probe = probe ?? new WritabilityProbe();
+    private readonly IKnownDllSource _knownDlls = knownDlls ?? new RegistryKnownDllSource();
+    private readonly Func<string, PeImportSet> _readImports = readImports ?? PeImports.ReadFile;
+    private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
     private readonly HijackTriage _triage = new(probe);
 
     public IReadOnlyList<HijackFinding> Scan(CancellationToken cancellationToken = default)
     {
         var findings = new List<HijackFinding>();
+        var pathDirectories = _machinePath.Directories();
+        var known = _knownDlls.Read();
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        // Writability is a fact about a directory, not about the service that named it, and the
+        // search orders of ~90 services overlap almost entirely. Asking once per directory keeps
+        // the probe count proportional to the machine rather than to the service list.
+        var plantable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        bool CanPlantIn(string directory)
+        {
+            if (!plantable.TryGetValue(directory, out var writable))
+            {
+                writable = Directory.Exists(directory)
+                    && _probe.CanCreate(Path.Combine(directory, "winsight-probe.dll"));
+                plantable[directory] = writable;
+            }
+            return writable;
+        }
 
         foreach (var service in _services.Enumerate())
         {
@@ -137,15 +162,22 @@ public sealed class HijackScanner(
             // Only services Windows starts by itself: a manual service that never runs is not a
             // boot-time escalation path, and checking all of them would triple the probe count for
             // no added signal.
-            if (service.AutoStarts
-                && ExecutableDirectory(service.CommandLine) is { } directory
-                && _triage.AssessServiceDirectory(service.Name, directory) is { } writable)
+            if (!service.AutoStarts)
+            {
+                continue;
+            }
+            if (ExecutableDirectory(service.CommandLine) is not { } directory)
+            {
+                continue;
+            }
+            if (_triage.AssessServiceDirectory(service.Name, directory) is { } writable)
             {
                 findings.Add(writable);
             }
+            findings.AddRange(AssessImports(service, directory, system, windows, pathDirectories, known, CanPlantIn));
         }
 
-        foreach (var directory in _machinePath.Directories())
+        foreach (var directory in pathDirectories)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_triage.AssessPathEntry(directory) is { } entry)
@@ -183,6 +215,80 @@ public sealed class HijackScanner(
     /// and on a writable machine accuse, a directory the service does not live in. Two readings of
     /// one string in one feature have to agree, or the harder-won one is wasted.
     /// </remarks>
+    /// <summary>
+    /// The phantom imports of one auto-starting service's executable.
+    /// </summary>
+    /// <remarks>
+    /// Restricted to auto-start services for the same reason the directory check is: a phantom
+    /// import in a program that never runs is not a boot-time escalation path, and reading every
+    /// registered service's image would multiply the I/O for no added signal.
+    /// </remarks>
+    private IEnumerable<HijackFinding> AssessImports(
+        RegisteredService service,
+        string directory,
+        string system,
+        string windows,
+        IReadOnlyList<string> pathDirectories,
+        IReadOnlySet<string> known,
+        Func<string, bool> canPlantIn)
+    {
+        if (ExecutablePath(service.CommandLine) is not { } image || !_fileExists(image))
+        {
+            yield break;
+        }
+        var imports = _readImports(image);
+        if (imports.IsEmpty)
+        {
+            yield break;
+        }
+
+        var order = DllSearchOrder.For(directory, system, windows, pathDirectories);
+        foreach (var phantom in PhantomDllRule.Find(imports, order, known, _fileExists, canPlantIn))
+        {
+            yield return new HijackFinding(
+                HijackKind.PhantomImport,
+                $"{service.Name}:{phantom.Dll}",
+                image,
+                // Nothing occupies a phantom slot by definition, so the grade is only ever whether
+                // someone can fill it today.
+                phantom.PlantableAt is null ? HijackExposure.Latent : HijackExposure.Exploitable,
+                [phantom.Dll],
+                phantom.PlantableAt);
+        }
+    }
+
+    /// <summary>
+    /// The executable a command line names, or null when it does not name one this can be sure of.
+    /// </summary>
+    internal static string? ExecutablePath(string? commandLine)
+    {
+        var line = commandLine?.Trim();
+        if (string.IsNullOrEmpty(line) || line.StartsWith('\\'))
+        {
+            return null;
+        }
+        string? executable;
+        if (line.StartsWith('"'))
+        {
+            var close = line.IndexOf('"', 1);
+            executable = close <= 1 ? null : line[1..close];
+        }
+        else
+        {
+            executable = UnquotedPath.ExecutableSpan(line);
+        }
+        try
+        {
+            return executable is not null && Path.IsPathFullyQualified(executable)
+                ? Environment.ExpandEnvironmentVariables(executable)
+                : null;
+        }
+        catch (Exception ex) when (ex is ArgumentException or PathTooLongException)
+        {
+            return null;
+        }
+    }
+
     internal static string? ExecutableDirectory(string? commandLine)
     {
         var line = commandLine?.Trim();
