@@ -16,6 +16,45 @@ public sealed class AdaptersTests
         Assert.Equal(expected.Order(), Adapters.SnapshotCommands.Order());
     }
 
+    /// <summary>
+    /// Every command the suite dispatches has to be discoverable from <c>--help</c>.
+    /// </summary>
+    /// <remarks>
+    /// The <c>hijack</c> scanner shipped wired into the dispatcher, the default overview, the MCP
+    /// catalog and the dashboard — and missing from <c>--help</c>. Nothing failed, because the help
+    /// text was a hand-maintained copy nothing compared against. A scanner an operator cannot find
+    /// is, for them, a scanner that does not exist.
+    /// </remarks>
+    [Fact]
+    public void EverySnapshotCommand_IsDocumentedInHelp()
+    {
+        var undocumented = Adapters.SnapshotCommands
+            .Where(command => !CliHelp.DocumentedCommands.Contains(command))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            undocumented.Length == 0,
+            $"`winsight --help` documents no way to run: {string.Join(", ", undocumented)}.");
+    }
+
+    /// <summary>
+    /// Guards the parser itself: a <see cref="CliHelp.DocumentedCommands"/> that silently matched
+    /// nothing would make the test above pass for every possible help text.
+    /// </summary>
+    [Fact]
+    public void HelpParsing_RecognisesBothUsageForms()
+    {
+        // Grouped form, `winsight [persistence|av|net|dns|all]`.
+        Assert.Contains("persistence", CliHelp.DocumentedCommands);
+        // Plain form, `winsight drivers`.
+        Assert.Contains("drivers", CliHelp.DocumentedCommands);
+        // The overview is not a scanner and must not be mistaken for one.
+        Assert.DoesNotContain("all", CliHelp.DocumentedCommands);
+        // A word that appears in prose but never as a command must not register.
+        Assert.DoesNotContain("kernel", CliHelp.DocumentedCommands);
+    }
+
     [Fact]
     public void OverviewCommands_AreSupportedAndUnique()
     {

@@ -2,6 +2,45 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Adversarial audit: a health signal that could never fire, and two parsers that disagreed
+- **`ComScheduledTaskSource` could never report itself unreadable, and threw instead.** Late binding
+  raises COM failures wrapped in `TargetInvocationException`; the catch filters listed only unwrapped
+  types, so **no COM failure matched any of them**. A stopped or restricted Task Scheduler service
+  therefore threw straight out of `Enumerate` and took the whole persistence scan — 4 354 items on
+  this desktop — with it, while `Unreadable`, the flag whose entire purpose is to say "an empty list
+  is not a fact about this machine", stayed `false`. Measured, not reasoned: asking the live service
+  for a missing folder surfaced `TargetInvocationException` (0x80131604), never `COMException`.
+  This is the same defect class the component was written to fix, one layer down — the health signal
+  was structurally incapable of reporting the blind spot it guards.
+- **The regression test guarding it was passing for the wrong reason.** It drove a `ScriptedSource`
+  that simply *returns* `unreadable: true`, proving the enumerator propagates the flag while never
+  touching the only implementation that ships. Classification is now a named, directly tested
+  predicate driven with the exception shapes the runtime actually produces, plus a contract test
+  holding the real source to "either it saw tasks or it says it could not look" — never
+  "empty and fine". Both fail against the old filter; verified by mutation.
+- The CLR maps well-known HRESULTs before wrapping, so `ERROR_FILE_NOT_FOUND` arrives as
+  `FileNotFoundException` and `E_ACCESSDENIED` as `UnauthorizedAccessException`. The recoverable set
+  covers those too. The root `ITaskFolder` was also never released, and the empty `if (depth > 0)`
+  block asserted a contract nothing honoured; both fixed. Measured leak: 1 handle across 25
+  enumerations after a forced GC — real but GC-bounded, so severity is hygiene, not exhaustion.
+- **`HijackScanner.ExecutableDirectory` and `UnquotedPath.ExecutableSpan` read the same string and
+  disagreed.** Only one got the end-of-token hardening; the other still took the first `.exe`
+  anywhere in the line, so `C:\Tools\7z.exe.bak\svc.exe -k` resolved to `C:\Tools` — probing, and on
+  a writable machine **accusing, a directory the service does not live in**. That function is what
+  decides which directory a finding names, it was `internal` with no `InternalsVisibleTo`, and it had
+  **zero** coverage. Both readings now share one parser, the seam is open to tests, and 17 tests pin
+  it including UNC, `\??\`, `.bat`, unbalanced quotes and relative paths. Verified by mutation.
+- **`winsight hijack` was undiscoverable.** The scanner shipped wired into the dispatcher, the
+  default overview, the MCP catalog and the dashboard — and was absent from `--help`, because the
+  help text was a hand-maintained copy nothing compared against. The scanner list already had four
+  pinning sites that must move together; rather than add a fifth to remember, the help now lives
+  beside the dispatcher and its documented commands are **parsed back out of the text**, so a
+  scanner without a help line fails a test instead of shipping invisible.
+- **Measured, all 14 snapshot scanners unelevated**, to look for surfaces that render nothing
+  without elevation: persistence 4 354, av 73, net 151, dns 26, firewall 420, processes 372,
+  modules 540, extensions 20, certs 128, hosts 2, input 2, drivers 450, integrity 5, hijack 1.
+  None is structurally empty in the default mode.
+
 ### `hijack` grows the search-order half: writable service directories and PATH entries
 - A program's **own directory** is the first place Windows looks for every DLL it loads. An
   auto-starting service whose folder is writable can therefore have any of its imports answered by a

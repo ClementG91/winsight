@@ -7,23 +7,10 @@ using WinSight.Reporting;
 // tool, emitting a shared report shape as human text or the stable --json contract.
 // Read-only.
 //
-// Usage:
-//   winsight [persistence|av|net|dns|all]   (default: all)
-//   winsight firewall                   list Windows Firewall rules
-//   winsight processes                  running processes + signatures
-//   winsight modules                    unsigned DLLs loaded into processes
-//   winsight extensions                 browser extensions + risky permissions
-//   winsight certs                      trusted root CAs + rogue-root signals
-//   winsight hosts                      hosts-file hijack / AV-block detection
-//   winsight input                      kernel drivers on the keyboard/mouse path
-//   winsight integrity                  driver signing, memory integrity, Secure Boot
-//   winsight drivers                    registered kernel drivers + signature verdicts
-//   winsight mcp                        local read-only MCP stdio server
-//   winsight av --watch                 live camera/mic alerts (until Ctrl+C)
-//   winsight dns --watch                live DNS queries via ETW (Administrator)
-//   winsight attribution --watch        who writes autostart entries, via ETW (Administrator)
-//   winsight ... --flagged              only noteworthy items
-//   winsight ... --json                 machine-readable output (GUI/automation)
+// The command list deliberately lives in one place only, next to the dispatcher it has to
+// agree with: see WinSight.Application.CliHelp. A copy here drifted once already — the
+// hijack scanner shipped undiscoverable because this comment and --help were updated by
+// hand and the dispatcher was not.
 
 if (args.Contains("--version"))
 {
@@ -32,31 +19,7 @@ if (args.Contains("--version"))
 }
 if (args.Contains("--help") || args.Contains("-h"))
 {
-    Console.WriteLine("""
-        winsight, free, open-source security tools for Windows.
-
-        Usage:
-          winsight [persistence|av|net|dns|all]   run checks (default: all)
-          winsight firewall                       list Windows Firewall rules
-          winsight processes                      running processes + signatures
-          winsight modules                        unsigned DLLs loaded into processes
-          winsight extensions                     browser extensions + risky permissions
-          winsight certs                          trusted root CAs + rogue-root signals
-          winsight hosts                          hosts-file hijack / AV-block detection
-          winsight input                          kernel drivers on the keyboard/mouse path
-          winsight integrity                      driver signing, memory integrity, Secure Boot
-          winsight drivers                        registered kernel drivers + signature verdicts
-          winsight mcp                            local read-only MCP stdio server
-          winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
-          winsight dns --watch                    live DNS queries via ETW (Administrator)
-          winsight attribution --watch            who writes autostart entries (Administrator)
-
-        Options:
-          --flagged     only noteworthy items
-          --json        machine-readable output
-          --version     print version
-          --help, -h    show this help
-        """);
+    Console.WriteLine(CliHelp.Text);
     return 0;
 }
 
