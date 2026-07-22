@@ -46,27 +46,52 @@ Validating an artifact you have not verified proves something about a file, not 
 release carries a SHA-256 and a **build provenance attestation**, so both are worth the thirty
 seconds — and a security tool asking you to skip that check would be a poor advertisement for itself.
 
+Nothing below needs anything Windows does not already ship. **Do not assume the GitHub CLI is
+present** — a validation VM is a clean machine, which is the entire point of using one, and an early
+draft of this section opened with `gh release download` and failed on the first line for exactly that
+reason.
+
 ```powershell
-# Latest release, x64. Use -win-arm64 on Arm hardware.
-gh release download --repo ClementG91/winsight --pattern "*win-x64.zip*" --dir C:\winsight-dl
-cd C:\winsight-dl
+# Set the version once. Use -win-arm64 in place of -win-x64 on Arm hardware.
+$version = "v0.10.1"
+$name    = "winsight-$version-win-x64.zip"
+$base    = "https://github.com/ClementG91/winsight/releases/download/$version"
 
-# 1. Checksum: the published digest must match the file you actually have.
-$zip      = (Get-Item *win-x64.zip).FullName
-$expected = (Get-Content *win-x64.zip.sha256).Split(' ')[0].Trim()
-$actual   = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+New-Item -ItemType Directory -Force C:\winsight-dl | Out-Null
+Invoke-WebRequest "$base/$name"        -OutFile "C:\winsight-dl\$name"        -UseBasicParsing
+Invoke-WebRequest "$base/$name.sha256" -OutFile "C:\winsight-dl\$name.sha256" -UseBasicParsing
+
+# Checksum: the published digest must match the file you actually have.
+$expected = (Get-Content "C:\winsight-dl\$name.sha256").Split(' ')[0].Trim()
+$actual   = (Get-FileHash "C:\winsight-dl\$name" -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "checksum mismatch" } else { "checksum OK" }
+```
 
-# 2. Provenance: proves GitHub Actions built it from this repository, not that someone
-#    with the signing key produced it. This is the check a supply-chain attack fails.
-gh attestation verify $zip --repo ClementG91/winsight
+**What that check is and is not worth.** It proves the file matches the digest published beside it —
+which is enough to catch a truncated download or a corrupted mirror, and not enough to catch anyone
+who could replace both. Build provenance is the check that fails a supply-chain attack, because it
+proves GitHub Actions built the artifact from this repository. It needs the GitHub CLI, which is one
+line to install and entirely reasonable on a VM you are about to discard:
+
+```powershell
+winget install --id GitHub.cli --silent --accept-source-agreements --accept-package-agreements
+gh attestation verify "C:\winsight-dl\$name" --repo ClementG91/winsight
+```
+
+**The validation script is not in the release archive** — the archive carries the three executables
+and the docs, nothing else. Fetch it from the tag you are validating, so the script and the binaries
+come from the same commit:
+
+```powershell
+Invoke-WebRequest "https://raw.githubusercontent.com/ClementG91/winsight/$version/scripts/Test-WfpValidation.ps1" `
+  -OutFile C:\winsight-dl\Test-WfpValidation.ps1 -UseBasicParsing
 ```
 
 Then extract and deploy into a trusted location — the service refuses to install from anywhere an
 unprivileged user can write, which is step 1 of the protocol, not a formality:
 
 ```powershell
-Expand-Archive .\winsight-*-win-x64.zip -DestinationPath C:\winsight-stage -Force
+Expand-Archive "C:\winsight-dl\$name" -DestinationPath C:\winsight-stage -Force
 New-Item -ItemType Directory -Force -Path 'C:\Program Files\WinSight-VM' | Out-Null
 Copy-Item C:\winsight-stage\* 'C:\Program Files\WinSight-VM\' -Recurse -Force
 $svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
@@ -83,11 +108,20 @@ from one that was never run, and a transcript with `[PASS]`/`[FAIL]` lines is re
 recollection is not.
 
 ```powershell
+$svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+
 # read-only half: preconditions, service lifecycle, path trust, WFP probe. Arms nothing.
-./scripts/Test-WfpValidation.ps1 -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe' -SkipEnforcement
+C:\winsight-dl\Test-WfpValidation.ps1 -ServicePath $svc -SkipEnforcement
 
 # full protocol, including real traffic blocking. Take a VM snapshot first.
-./scripts/Test-WfpValidation.ps1 -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+C:\winsight-dl\Test-WfpValidation.ps1 -ServicePath $svc
+```
+
+If PowerShell refuses to run it — a downloaded script is blocked by default, which is correct
+behaviour and not a fault — unblock that one file rather than weakening the machine's policy:
+
+```powershell
+Unblock-File C:\winsight-dl\Test-WfpValidation.ps1
 ```
 
 It pauses at the two steps that cannot be automated — arming and emergency disable — because
