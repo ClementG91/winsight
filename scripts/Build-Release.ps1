@@ -47,7 +47,7 @@ if (-not $SkipInstaller)
     if ([string]::IsNullOrWhiteSpace($InnoCompiler))
     {
         # Validate what we depend on, not $LASTEXITCODE. Install-InnoSetup.ps1 is a PowerShell
-        # script, so it never sets an exit code of its own — the check here read whichever native
+        # script, so it never sets an exit code of its own -- the check here read whichever native
         # command ran last, anywhere. On a clean shell with -SkipSbom nothing had run at all and
         # StrictMode failed on the unset variable, which is how this surfaced. The script stops on
         # error by itself; what matters afterwards is whether it handed back a usable path.
@@ -98,7 +98,7 @@ foreach ($architecture in $Architectures)
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\MCP.md") -Destination $packageRoot
     # The runtime validation protocol travels with the build it validates. Shipping the artifact
     # without it meant a validator had to clone the repository to exercise the one thing CI cannot
-    # cover — and a clean VM, which is exactly where this belongs, has neither git nor gh.
+    # cover -- and a clean VM, which is exactly where this belongs, has neither git nor gh.
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\ARM64_VALIDATION.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-WfpValidation.ps1") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "assets\branding") `

@@ -7,8 +7,8 @@
     reference is needed.
 
     Read the per-assembly numbers, not the total. WinSight's uncovered code is concentrated in
-    places a unit test genuinely cannot reach — WFP P/Invoke declarations, the Windows service
-    host, and WPF code-behind — which are covered by VM validation and the packaged-installer
+    places a unit test genuinely cannot reach -- WFP P/Invoke declarations, the Windows service
+    host, and WPF code-behind -- which are covered by VM validation and the packaged-installer
     tests instead. Chasing a single global percentage would mean writing assertions against
     P/Invoke signatures, which buys a number rather than confidence. The detection engine
     libraries are the ones worth holding to a real bar.
@@ -29,7 +29,7 @@ param(
 
     # Fails the run if any engine library drops below this line coverage. 0 disables the gate.
     #
-    # Defaults to the bar the project claims rather than to 0. It defaulted to 0 — the gate off —
+    # Defaults to the bar the project claims rather than to 0. It defaulted to 0 -- the gate off --
     # and nothing in CI passed a value, so the "engine libraries are held to 80%" rule was a number
     # in a document that no run could ever contradict. A bar nothing enforces is not a bar.
     [ValidateRange(0, 100)]
@@ -89,7 +89,7 @@ try
 
     # The collector writes one cobertura file per test project, and each describes only the
     # assemblies that project happened to load. This used to read `Select-Object -First 1`, so the
-    # gate measured whichever file the filesystem enumerated first — on one local run that was a
+    # gate measured whichever file the filesystem enumerated first -- on one local run that was a
     # single assembly, 100 lines out of 11,584, and it still printed "all engine libraries are at or
     # above 80%". A gate that reports a pass while looking at 1% of the code is worse than no gate.
     #
@@ -178,7 +178,7 @@ try
     if ($EngineMinimum -gt 0)
     {
         # An engine library absent from the merged report was never measured, which is not the same
-        # as being covered — and it is exactly how a gate ends up passing while looking at nothing.
+        # as being covered -- and it is exactly how a gate ends up passing while looking at nothing.
         # Naming the expected set turns a silent omission into a red build.
         $measured = @($engine | ForEach-Object { $_.Assembly })
         $unmeasured = @($engineAssemblies | Where-Object { $measured -notcontains $_ })

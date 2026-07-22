@@ -9,7 +9,7 @@
     the result is a transcript with verdicts rather than an account of what somebody remembers doing.
 
     That distinction is the point. A validation nobody can replay is indistinguishable from one that
-    was never run, six months later — and the three defects fixed in #61, #62 and #63 were all
+    was never run, six months later -- and the three defects fixed in #61, #62 and #63 were all
     invisible to the unit suite and only appeared against a real machine.
 
     Everything here is read-only or reversible, and the arming step is deliberately NOT automated:
@@ -122,7 +122,7 @@ Section "WFP engine, read-only"
 
 $selfTest = Run $ServicePath @("wfp-selftest")
 Check "WFP engine opens" { $selfTest -notmatch "FWP_E_" -and $selfTest -match "\d" } `
-    "an engine session and a filter count, with no FWP_E_* error. THIS IS THE INTEROP SIGNAL: if it fails here, stop and report it — that result is worth more than the rest of the protocol."
+    "an engine session and a filter count, with no FWP_E_* error. THIS IS THE INTEROP SIGNAL: if it fails here, stop and report it -- that result is worth more than the rest of the protocol."
 
 $wfpStatus = Run $ServicePath @("wfp-status")
 Check "no WFP state before arming" { $wfpStatus -match "absent" } "provider: absent, sublayer: absent on an unarmed machine"
@@ -137,7 +137,7 @@ if ($SkipEnforcement) {
     exit ([int]($script:Failures -gt 0))
 }
 
-Section "Enforcement — manual gate"
+Section "Enforcement -- manual gate"
 
 # curl, never ping: ping sends ICMP through the IP Helper service, so an app-id filter never matches
 # it and the test would be measuring nothing.
@@ -149,7 +149,7 @@ $before = & $target -s -o NUL -w "%{http_code}" --max-time 15 https://example.co
 Check "target reaches the network before blocking" { "$before" -eq "200" } "http 200 from the unblocked copy; without this the blocked result proves nothing"
 
 Write-Output ""
-Write-Output "  ACTION REQUIRED — this cannot be automated by design."
+Write-Output "  ACTION REQUIRED -- this cannot be automated by design."
 Write-Output "  Mutating policy requires authenticated IPC, so do this in an ELEVATED dashboard:"
 Write-Output "    1. Outbound firewall -> Start analysis"
 Write-Output "    2. Block an app...   -> $target"
@@ -173,7 +173,7 @@ Check "blocked app cannot reach the network" { "$blocked" -ne "200" } "anything 
 # and that is a bug, not a success.
 $unblocked = & "C:\Windows\System32\curl.exe" -s -o NUL -w "%{http_code}" --max-time 20 https://example.com 2>&1
 Check "an unblocked copy still reaches the network" { "$unblocked" -eq "200" } `
-    "http 200 from C:\Windows\System32\curl.exe. If this also fails the block is machine-wide, not per-app — a defect, however good the blocked leg looks."
+    "http 200 from C:\Windows\System32\curl.exe. If this also fails the block is machine-wide, not per-app -- a defect, however good the blocked leg looks."
 
 Section "Rollback"
 
@@ -184,7 +184,7 @@ $disarmed = Run $ServicePath @("enforce-status")
 Check "back to audit-only" { $disarmed -match "AuditOnly" } "persisted desired AuditOnly"
 
 $wfpClean = Run $ServicePath @("wfp-status")
-Check "all WFP state removed" { $wfpClean -match "absent" } "provider: absent, sublayer: absent — a leftover provider is enforcement state nothing owns"
+Check "all WFP state removed" { $wfpClean -match "absent" } "provider: absent, sublayer: absent -- a leftover provider is enforcement state nothing owns"
 
 $restored = & $target -s -o NUL -w "%{http_code}" --max-time 20 https://example.com 2>&1
 Check "the target reaches the network again" { "$restored" -eq "200" } "http 200 once enforcement is lifted"

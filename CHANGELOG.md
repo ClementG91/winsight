@@ -2,6 +2,32 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.10.3, 2026-07-22
+
+Three shipped scripts could not be parsed by the shell a clean Windows opens. Found by someone
+running the validation protocol on a real VM, which is the first time anything here met
+Windows PowerShell 5.1.
+
+- **An em dash in a comment broke the whole file.** 5.1 reads a `.ps1` with no byte-order mark as
+  *ANSI*. A UTF-8 em dash is three bytes ending in `0x94`, which in code page 1252 is a right double
+  quotation mark — and PowerShell opens a string on smart quotes. One em dash in a comment therefore
+  opened a string that was never closed, and the file failed to parse with an error pointing at an
+  unrelated line near the end. `Build-Release.ps1`, `Measure-Coverage.ps1` and, worst of all,
+  `Test-WfpValidation.ps1` — the script whose entire purpose is to run on a freshly imaged VM.
+- **CI could not have caught this.** Every workflow step runs `shell: pwsh`, and PowerShell 7 reads
+  scripts as UTF-8. The class of bug is invisible from there and from any machine where `pwsh` is the
+  habit. A test now asserts every shipped script is ASCII-only or carries a BOM, with a second test
+  showing the byte that causes the reinterpretation is really produced — so the rule cannot quietly
+  stop describing anything. All nine scripts verified to parse under real 5.1.
+- ASCII was chosen over adding a BOM: correct under every encoding, every code page and every tool,
+  at the cost of a hyphen.
+- The deployment step in the protocol now says it needs an elevated console. Writing under
+  `Program Files` does, and without it the copy fails per file with `UnauthorizedAccessException`,
+  which reads as a broken command rather than a missing privilege.
+- Downloading is documented with `curl.exe`, and the `Invoke-WebRequest` alternative now silences the
+  progress bar first: 5.1 redraws it on every chunk, and on the 170 MB archive the rendering, not the
+  network, is the bottleneck. Measured **4 seconds** against minutes, byte-identical output.
+
 ## v0.10.2, 2026-07-22
 
 Packaging, found by someone actually trying to validate a release on a clean VM.

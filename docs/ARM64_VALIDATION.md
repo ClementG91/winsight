@@ -102,8 +102,11 @@ Invoke-WebRequest "https://raw.githubusercontent.com/ClementG91/winsight/$versio
   -OutFile C:\winsight-dl\Test-WfpValidation.ps1 -UseBasicParsing
 ```
 
-Then extract and deploy into a trusted location — the service refuses to install from anywhere an
-unprivileged user can write, which is step 1 of the protocol, not a formality:
+Then extract and deploy into a trusted location. **This step needs an elevated console** — writing
+under `Program Files` requires it, and the copy fails per-file with `UnauthorizedAccessException` if
+it is not, which reads as a broken command rather than a missing privilege. That the location is
+privileged is the point: the service refuses to install from anywhere an unprivileged user can write,
+and step 1 of the protocol exercises that refusal deliberately.
 
 ```powershell
 Expand-Archive "C:\winsight-dl\$name" -DestinationPath C:\winsight-stage -Force
