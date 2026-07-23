@@ -2,6 +2,28 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### An adversarial gate for service-path trust
+- `scripts/Test-TrustBoundary.ps1` builds the hostile filesystem states CI cannot create - a
+  user-writable plant, a missing component, a TrustedInstaller-owned leaf, a reparse point inside a
+  protected root, a foreign-owned leaf - and drives the candidate's read-only
+  `install-path-trust-check` against each. It never installs a service and never touches WFP.
+- Two measured results look like defects and are not, so both are documented rather than left to be
+  rediscovered: a System32 executable is refused with `UNTRUSTED_OWNER`, because TrustedInstaller is a
+  trusted owner for parent directories but never for the leaf binary; and a junction resolves to its
+  target, so a junction in a user-writable tree reports `WRITABLE_BY_UNPRIVILEGED` rather than
+  `REPARSE_POINT`. Both were established by running the probe, not by reading the policy.
+- The race renames the trusted file aside, plants a user-writable one at the same path, probes, and
+  restores - repeatedly. Two properties must hold together: the planted file is never reported
+  trusted, **and** the honest file still reads trusted every time. Without the second, the first would
+  pass for the boring reason that the probe refuses everything.
+- Codes not previously measured are recorded rather than asserted, and the script prints which typed
+  code fired. Asserting a code nobody has observed would be inventing evidence; the assertion that
+  does hold is that the result is one of the eight typed denials with exit 1, never trusted, never
+  empty, never a crash.
+- No closures. `GetNewClosure()` captures variables but not functions, which is what killed the WFP
+  protocol on a real VM. Verified to parse and run under Windows PowerShell 5.1 through both `-File`
+  and the call operator before being committed.
+
 ### The corrected protocol passed on a real VM: 25 checks, 0 failures
 - The full strict protocol completed on a clean Windows VM against candidate `f0a3f16`, bound to CI
   run `30024427883`, using the protocol script shipped inside that same package. Recorded in

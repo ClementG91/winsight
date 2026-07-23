@@ -155,6 +155,39 @@ The single most important line in the output is `an unblocked copy still reaches
 proves the block is scoped to one application rather than being a machine-wide cut. If the blocked
 leg passes while that line fails, the result is a **defect**, not a success.
 
+### 4.4 Service-path trust boundary (elevated, read-only probe, no SCM and no WFP)
+
+This is the adversarial half. It builds hostile filesystem states that CI cannot create - foreign
+owners, reparse points, a user-writable plant - and drives the candidate's read-only
+`install-path-trust-check` verb against each. Nothing here installs, starts or stops a service, and
+nothing touches WFP.
+
+```powershell
+& 'C:\Program Files\WinSight-VM\Test-TrustBoundary.ps1' -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+```
+
+Add `-HostileAccount <standard user>` to include the foreign-owner case; without it that one case is
+reported as skipped rather than silently dropped.
+
+Two results look like defects and are not:
+
+- **A System32 executable is refused** with `[FW_INSTALL_PATH_UNTRUSTED_OWNER]`. TrustedInstaller is a
+  trusted owner for parent directories but never for the leaf binary, which must be owned by SYSTEM or
+  Administrators. That is the policy, deliberately.
+- **A junction resolves to its target**, so a junction inside a user-writable tree reports
+  `WRITABLE_BY_UNPRIVILEGED`, not `REPARSE_POINT`. Only a reparse point whose resolved chain is
+  otherwise trusted can surface `REPARSE_POINT`, which is why the script builds one inside a protected
+  root.
+
+The race section renames the trusted file aside and plants a user-writable one at the same path, then
+probes, then restores - repeatedly. Two properties must hold together: the planted file is **never**
+reported trusted, and the honest file still reads trusted every time. The second is what stops the
+first from passing for the boring reason that the probe refuses everything.
+
+Codes that had not been measured before this gate existed are **recorded rather than asserted**, and
+the script prints which typed code fired. Tighten those to exact codes in a follow-up once the first
+run has recorded them; do not tighten them to a code you have not seen.
+
 ## 5. Record the result
 
 A run nobody can replay is a story. Capture the full transcript:
