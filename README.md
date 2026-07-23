@@ -293,9 +293,13 @@ investigate rather than proof of malware.
 `allow/block/ask` policies, a LocalSystem mutation authority, authenticated named-pipe
 IPC and an opt-in WFP engine. Protocol v3 binds every paginated list to a complete
 snapshot; SCM boot persistence and desired/effective state are part of the serialized
-transition. Direct mutation CLI aliases are disabled. Real SCM, multi-user IPC, DACL,
-WFP and Arm64 behavior still requires the isolated-VM gates before production use. See
-[`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
+transition. Direct mutation CLI aliases are disabled. Real SCM lifecycle, WFP
+enforcement and rollback, adversarial service-path trust, and the multi-user IPC
+capability boundary have now been qualified on a clean x64 VM, each bound to a commit
+and the CI run that built it — see
+[`docs/validation/`](docs/validation/README.md). Native Arm64, installer/signing/release
+and the localized surfaces are still unqualified, so production readiness is not
+established. See [`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
 signature-performance optimization. Driver-backed BlockBlock/RansomWhere features
 remain deliberately deferred because production drivers require signing and a
 separate safety program.

@@ -2,6 +2,24 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### An index for the validation records, and an honest note on three signatures
+- Four validation records existed with no way to see at a glance what was actually proven, against
+  which commit. [`docs/validation/README.md`](docs/validation/README.md) indexes them: what is closed
+  on x64 with its commit and CI-run binding, what is superseded, and what has not been run. The
+  README's qualification paragraph said real SCM, multi-user IPC, DACL and WFP "still requires the
+  isolated-VM gates" — that had been true when written and was not any more.
+- **Three commits on `main` are unsigned**: `214a25f`, `d5ee120` and `e964779`, from a pull request
+  merged with `--rebase`. GitHub replays rebased commits without signing them, and they landed on a
+  branch with `required_signatures: true` because `enforce_admins` is false. Every commit before and
+  after them verifies; squash merges are signed by GitHub, which is why every later merge is clean.
+- They are **deliberately not re-signed**. A signature is part of the commit object, so signing them
+  changes their hashes and every descendant hash — including `f0a3f16`, `f84ac36` and `c9177cd`, the
+  three commits a real VM actually qualified. Rewriting would either leave the validation records
+  pointing at commits no longer in the branch, or require editing those records to hashes that did not
+  exist when the VM ran. The second is falsification and the first destroys the binding that makes the
+  evidence worth anything. An unsigned-but-honest history beats a signed-but-unverifiable one.
+- The rule this establishes: **squash, never rebase**, on this repository.
+
 ### The multi-user IPC boundary passed on a real VM: 7 checks, 0 failures
 - The authenticated pipe gates capability per caller, proven end to end on a clean VM against candidate
   `c9177cd`, x64. Recorded in
