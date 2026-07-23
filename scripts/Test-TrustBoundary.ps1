@@ -73,8 +73,11 @@ function Write-Check([string]$name, [bool]$ok, [string]$expectation, [string]$ob
 }
 
 function Invoke-Probe([string]$candidate, [string]$target) {
-    # The probe is read-only. Native stderr is folded in deliberately: a refusal is data here, not a
-    # terminating error, which is the mistake that killed an earlier revision of the WFP protocol.
+    # The probe is read-only. Native stderr is captured, not treated as a terminating error - that
+    # mistake killed an earlier WFP revision. But the refusal is a single [FW_...] token, and PS 5.1
+    # decorates native stderr merged with 2>&1 ("<exe> : ...", "Au caractere ... + $raw = ..."). That
+    # decoration is not part of the verdict, so extract the token instead of string-comparing the
+    # whole capture. A real VM run failed five checks on that decoration while the service was correct.
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
@@ -82,14 +85,15 @@ function Invoke-Probe([string]$candidate, [string]$target) {
         $code = $LASTEXITCODE
     }
     finally { $ErrorActionPreference = $previous }
-    $text = ($raw | Out-String).Trim()
-    return [pscustomobject]@{ Text = $text; ExitCode = $code }
+    $text = ($raw | Out-String)
+    $token = [regex]::Match($text, '\[FW_[A-Z_]+\]').Value
+    return [pscustomobject]@{ Code = $token; Raw = $text.Trim(); ExitCode = $code }
 }
 
 function Test-ExactCode([string]$name, [string]$candidate, [string]$target, [string]$expected, [int]$expectedExit) {
     $r = Invoke-Probe $candidate $target
-    $ok = ($r.Text -ceq $expected) -and ($r.ExitCode -eq $expectedExit)
-    Write-Check $name $ok ('{0} and exit {1}' -f $expected, $expectedExit) ('"{0}" and exit {1}' -f $r.Text, $r.ExitCode)
+    $ok = ($r.Code -ceq $expected) -and ($r.ExitCode -eq $expectedExit)
+    Write-Check $name $ok ('{0} and exit {1}' -f $expected, $expectedExit) ('"{0}" and exit {1}' -f $r.Code, $r.ExitCode)
     return $r
 }
 
@@ -97,9 +101,9 @@ function Test-AnyDenial([string]$name, [string]$candidate, [string]$target) {
     # Not a loose predicate: this excludes trusted, empty output, a crash, an untyped message and
     # exit 0. It records which typed code fired so the record can be tightened to it afterwards.
     $r = Invoke-Probe $candidate $target
-    $ok = ($DenialCodes -ccontains $r.Text) -and ($r.ExitCode -eq 1)
-    Write-Check $name $ok 'one typed denial code and exit 1' ('"{0}" and exit {1}' -f $r.Text, $r.ExitCode)
-    if ($ok) { Write-Host ('         code: {0}' -f $r.Text) }
+    $ok = ($DenialCodes -ccontains $r.Code) -and ($r.ExitCode -eq 1)
+    Write-Check $name $ok 'one typed denial code and exit 1' ('"{0}" and exit {1}' -f $r.Code, $r.ExitCode)
+    if ($ok) { Write-Host ('         code: {0}' -f $r.Code) }
     return $r
 }
 
@@ -166,12 +170,15 @@ try {
     Copy-Item -LiteralPath $candidate -Destination $protectedLeaf -Force
     Test-ExactCode 'a copy in a protected root is trusted' $candidate $protectedLeaf $TrustedCode 0 | Out-Null
 
-    # 6. A reparse point inside the protected root pointing at the user-writable tree. The exact code
-    #    is recorded rather than asserted, because it was not measured before this run.
+    # 6. A reparse point inside the protected root pointing at the user-writable tree. Measured on a
+    #    real VM as REPARSE_POINT, so it is now asserted exactly. On a machine whose %TEMP% is itself
+    #    inside a user-writable tree, the junction leaf can instead resolve to WRITABLE_BY_UNPRIVILEGED
+    #    before reparse detection fires; both are refusals, but the VM measurement was REPARSE_POINT.
     $junction = Join-Path $ScratchRoot 'junction'
     cmd /c ('mklink /J "{0}" "{1}"' -f $junction, $userRoot) | Out-Null
     [void]$script:Created.Add($junction)
-    Test-AnyDenial 'a reparse point in a protected root is refused' $candidate (Join-Path $junction 'planted.exe') | Out-Null
+    Test-ExactCode 'a reparse point in a protected root is refused' $candidate `
+        (Join-Path $junction 'planted.exe') '[FW_INSTALL_PATH_REPARSE_POINT]' 1 | Out-Null
 
     # 7. A leaf inside the protected root owned by an unprivileged account.
     if ([string]::IsNullOrWhiteSpace($HostileAccount)) {
@@ -184,36 +191,41 @@ try {
         Test-AnyDenial 'a foreign-owned leaf in a protected root is refused' $candidate $foreign | Out-Null
     }
 
-    # 8. The race. The trusted copy is renamed aside and an untrusted file is planted at the same
-    #    path, repeatedly, while the probe runs against that path. The property under test is not
-    #    "which code" but the absolute one: the planted file must never be reported trusted.
+    # 8. The race. One honest file in the protected root, whose ACL is flipped between "an unprivileged
+    #    principal can write" and "protected" on every iteration, with a probe in each state. This is
+    #    the property that matters: the trusted verdict must track the real security state and never
+    #    lag into a stale TRUSTED while the file is writable. An earlier version copied user-writable
+    #    *content* into the protected root and was surprised the *path* read trusted - the path model
+    #    evaluates the path's ACLs, not where the bytes came from, so that test proved nothing.
+    #
+    #    BUILTIN\Users is the well-known SID S-1-5-32-545, so this needs no separate account and is
+    #    locale-independent. icacls resolves absolutely from System32.
+    $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    $usersSid = '*S-1-5-32-545'
     $racePath = Join-Path $ScratchRoot 'race-target.exe'
-    $aside = Join-Path $ScratchRoot 'race-aside.exe'
     Copy-Item -LiteralPath $candidate -Destination $racePath -Force
-    $trustedObservations = 0
-    $plantedTrusted = 0
-    $observations = New-Object System.Collections.ArrayList
+    $writableTrusted = 0
+    $protectedTrusted = 0
+    $writableCodes = New-Object System.Collections.ArrayList
     for ($i = 0; $i -lt $RaceIterations; $i++) {
-        # Swap the trusted file aside and plant the user-writable one at the same path.
-        Move-Item -LiteralPath $racePath -Destination $aside -Force
-        Copy-Item -LiteralPath $writable -Destination $racePath -Force
-        $r = Invoke-Probe $candidate $racePath
-        [void]$observations.Add($r.Text)
-        if ($r.Text -ceq $TrustedCode) { $plantedTrusted++ }
-        # Restore, and confirm the honest file still reads trusted so the loop is not merely
-        # refusing everything for an unrelated reason.
-        Remove-Item -LiteralPath $racePath -Force
-        Move-Item -LiteralPath $aside -Destination $racePath -Force
-        $back = Invoke-Probe $candidate $racePath
-        if ($back.Text -ceq $TrustedCode) { $trustedObservations++ }
+        # Grant an unprivileged principal write, then probe: must never read trusted.
+        & $icacls $racePath /grant ('{0}:(W)' -f $usersSid) | Out-Null
+        $hostile = Invoke-Probe $candidate $racePath
+        [void]$writableCodes.Add($hostile.Code)
+        if ($hostile.Code -ceq $TrustedCode) { $writableTrusted++ }
+        # Revoke it, then probe: must read trusted again, so the loop is not merely refusing
+        # everything for some unrelated reason.
+        & $icacls $racePath /remove:g $usersSid | Out-Null
+        $honest = Invoke-Probe $candidate $racePath
+        if ($honest.Code -ceq $TrustedCode) { $protectedTrusted++ }
     }
-    Write-Check ('the planted file is never trusted across {0} swaps' -f $RaceIterations) `
-        ($plantedTrusted -eq 0) 'zero trusted observations of the planted file' ('{0} trusted' -f $plantedTrusted)
-    Write-Check ('the honest file still reads trusted across {0} swaps' -f $RaceIterations) `
-        ($trustedObservations -eq $RaceIterations) `
-        ('{0} trusted observations' -f $RaceIterations) ('{0} trusted' -f $trustedObservations)
-    $distinct = ($observations | Sort-Object -Unique) -join ', '
-    Write-Host ('         planted-file codes observed: {0}' -f $distinct)
+    Write-Check ('the user-writable leaf is never trusted across {0} ACL flips' -f $RaceIterations) `
+        ($writableTrusted -eq 0) 'zero trusted observations while user-writable' ('{0} trusted' -f $writableTrusted)
+    Write-Check ('the protected leaf still reads trusted across {0} ACL flips' -f $RaceIterations) `
+        ($protectedTrusted -eq $RaceIterations) `
+        ('{0} trusted observations' -f $RaceIterations) ('{0} trusted' -f $protectedTrusted)
+    $distinct = ($writableCodes | Sort-Object -Unique) -join ', '
+    Write-Host ('         user-writable codes observed: {0}' -f $distinct)
 }
 finally {
     Remove-Tracked

@@ -179,14 +179,19 @@ Two results look like defects and are not:
   otherwise trusted can surface `REPARSE_POINT`, which is why the script builds one inside a protected
   root.
 
-The race section renames the trusted file aside and plants a user-writable one at the same path, then
-probes, then restores - repeatedly. Two properties must hold together: the planted file is **never**
-reported trusted, and the honest file still reads trusted every time. The second is what stops the
-first from passing for the boring reason that the probe refuses everything.
+The race section flips one honest file's ACL between "an unprivileged principal can write" and
+"protected" on every iteration, probing in each state. Two properties must hold together: while
+writable the file is **never** reported trusted, and while protected it still reads trusted every
+time. The second is what stops the first from passing for the boring reason that the probe refuses
+everything. An earlier version copied user-writable *content* into the protected root and was
+surprised the *path* read trusted - the path model evaluates the path's ACLs, not where the bytes came
+from, so that version proved nothing. It uses the well-known `BUILTIN\Users` SID, so it needs no
+separate account.
 
-Codes that had not been measured before this gate existed are **recorded rather than asserted**, and
-the script prints which typed code fired. Tighten those to exact codes in a follow-up once the first
-run has recorded them; do not tighten them to a code you have not seen.
+The refusal is a single `[FW_...]` token, and the probe extracts it rather than string-comparing the
+whole capture. Windows PowerShell 5.1 decorates native stderr merged with `2>&1` (`<exe> : ...`,
+`Au caractere ... + $raw = ...`), and a real VM run failed five checks on that decoration while the
+service was entirely correct. The decoration is not part of the verdict.
 
 ## 5. Record the result
 

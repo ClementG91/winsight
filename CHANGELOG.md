@@ -2,6 +2,24 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The trust gate met a real VM, and the VM broke the test - correctly
+- The trust-boundary gate ran on a real VM and reported 5 failures. The service was right on every
+  one of them; both defects were in the test harness, which is exactly what an adversarial gate is
+  supposed to expose about itself.
+- Four failures were output-capture pollution. The refusal is a single `[FW_...]` token written to
+  stderr, and Windows PowerShell 5.1 decorates native stderr merged with `2>&1` (`<exe> : ...`,
+  `Au caractere ... + $raw = ...`). The script compared the whole decorated capture instead of the
+  token. It now extracts the token with a regex, verified on the host to survive the exact decoration
+  the VM produced. The VM even surfaced `REPARSE_POINT`, which the host could not reproduce, so that
+  case is now asserted to its measured code rather than to "any denial".
+- The fifth failure was a meaningless race. It copied user-writable *content* into the *protected*
+  root and then treated the trusted verdict as a bug - but the path model evaluates the path's ACLs,
+  not where the bytes came from, so a file in a protected directory is correctly trusted. The race is
+  rebuilt to flip one file's ACL between "an unprivileged principal can write" and "protected" on
+  every iteration, asserting the verdict tracks the real security state and never lags into a stale
+  trusted. It uses the well-known `BUILTIN\Users` SID, so it needs no separate account.
+- Net: the service passed the adversarial gate on first contact; the gate's own bugs are fixed.
+
 ### An adversarial gate for service-path trust
 - `scripts/Test-TrustBoundary.ps1` builds the hostile filesystem states CI cannot create - a
   user-writable plant, a missing component, a TrustedInstaller-owned leaf, a reparse point inside a
