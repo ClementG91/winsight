@@ -10,7 +10,11 @@ param(
     [string]$OutputPath = "out\release",
     [string]$InnoCompiler,
     [switch]$SkipInstaller,
-    [switch]$SkipSbom
+    [switch]$SkipSbom,
+
+    # Fail the build if no signing certificate is configured. Off by default so development and
+    # community builds work unsigned; the release workflow turns it on for a tagged version.
+    [switch]$RequireSignature
 )
 
 $ErrorActionPreference = "Stop"
@@ -163,6 +167,20 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destina
         Set-Content -LiteralPath "$sbomPath.sha256" -Value "$sbomHash  $sbomName" -Encoding ascii
     }
 
+    # Sign before compressing and before any hash is taken, so the archive carries signed bytes and
+    # every published checksum covers them. Signing afterwards would quietly invalidate both.
+    $signTargets = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -Filter '*.exe' |
+        ForEach-Object { $_.FullName })
+    if ($signTargets.Count -eq 0)
+    {
+        throw "No executables found to sign under $packageRoot."
+    }
+    & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") -Path $signTargets -RequireSignature:$RequireSignature
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Signing stage failed for $rid."
+    }
+
     $archiveName = "winsight-v$Version-$rid.zip"
     $archivePath = Join-Path $outputRoot $archiveName
     Compress-Archive -Path (Join-Path $packageRoot "*") -DestinationPath $archivePath -CompressionLevel Optimal
@@ -221,6 +239,15 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destina
         & (Join-Path $PSScriptRoot "Test-Branding.ps1") `
             -BrandingPath (Join-Path $packageRoot "assets\branding") `
             -ExecutablePaths @($installerPath)
+
+        # The installer is produced after the archive, so it needs its own signing pass - again
+        # before its checksum, for the same reason.
+        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") -Path @($installerPath) -RequireSignature:$RequireSignature
+        if ($LASTEXITCODE -ne 0)
+        {
+            throw "Signing stage failed for the $rid installer."
+        }
+
         $installerHash = (Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash.ToLowerInvariant()
         Set-Content -LiteralPath "$installerPath.sha256" -Value "$installerHash  $installerName" -Encoding ascii
     }

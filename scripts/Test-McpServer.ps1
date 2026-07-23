@@ -20,7 +20,11 @@ if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne "winsight $Version")
 
 $start = [Diagnostics.ProcessStartInfo]::new()
 $start.FileName = $server
-$start.ArgumentList.Add("mcp")
+# .Arguments, not .ArgumentList: the collection form only exists on .NET (Core), so ArgumentList
+# throws under Windows PowerShell 5.1, which runs on .NET Framework. CI uses pwsh and never sees it,
+# but a maintainer building a release in the console Windows opens by default would. One token with
+# no spaces makes the two forms equivalent.
+$start.Arguments = "mcp"
 $start.UseShellExecute = $false
 $start.CreateNoWindow = $true
 $start.RedirectStandardInput = $true
