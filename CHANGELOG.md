@@ -2,6 +2,26 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The corrected protocol passed on a real VM: 25 checks, 0 failures
+- The full strict protocol completed on a clean Windows VM against candidate `f0a3f16`, bound to CI
+  run `30024427883`, using the protocol script shipped inside that same package. Recorded in
+  [`docs/validation/2026-07-23-wfp-qualification-f0a3f16.md`](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md).
+  This supersedes the historical `18/18` transcript, which stays invalid and stays in the repository.
+- What it closes on x64: real SCM lifecycle from empty (`1060`) through install, canonical-candidate
+  binding, start, stop and uninstall back to `1060`; the typed path-trust refusal
+  `[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]`; a read-only WFP open showing 573 existing filters
+  changed by nothing; `[FW_DIRECT_MUTATION_DISABLED]` followed by an inventory proving the refusal
+  left no partial state; the exact armed inventory; and complete rollback with connectivity restored.
+- The line that actually matters is the control leg. While System32 `curl.exe` was blocked (http 000,
+  exit 7), an independent Windows PowerShell HTTP request still returned 200. Had that failed too,
+  the "per-app block" would have been a machine-wide cut wearing a per-app label.
+- One gap in the record, found by reading the transcript rather than the result: the architecture line
+  was **empty**, because `RuntimeInformation::OSArchitecture` returned nothing in that 5.1 session.
+  So the run establishes x64 *package* behaviour but does not by itself prove the host was native x64
+  rather than Arm64 under emulation. The kit now prescribes `Win32_Processor`, which an emulated
+  process cannot misreport, and states plainly that `$env:PROCESSOR_ARCHITECTURE` alone cannot satisfy
+  the Arm64 gate - an emulated x64 process reports `AMD64` there.
+
 ### The qualification protocol died on a real VM while the contract read 24/24
 - Run on an actual VM the way an operator runs a script - `& 'C:\...\Test-WfpValidation.ps1'` from an
   open elevated console - the protocol died on its very first output call:

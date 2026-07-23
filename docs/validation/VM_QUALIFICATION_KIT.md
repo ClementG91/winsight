@@ -163,10 +163,29 @@ A run nobody can replay is a story. Capture the full transcript:
 & 'C:\Program Files\WinSight-VM\Test-WfpValidation.ps1' -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe' *>&1 | Tee-Object C:\winsight-run.txt
 ```
 
+Record the architecture with this, **not** with `RuntimeInformation::OSArchitecture` - that returned
+an empty string on a real 5.1 session and silently left the architecture out of a run's record:
+
+```powershell
+$cpu = (Get-CimInstance Win32_Processor | Select-Object -First 1).Architecture
+$osArch = switch ($cpu) { 0 {'x86'} 5 {'ARM'} 9 {'x64'} 12 {'ARM64'} default {"unknown($cpu)"} }
+Write-Host "OS/CPU architecture : $osArch"
+Write-Host "PowerShell process  : $env:PROCESSOR_ARCHITECTURE"
+```
+
+> [!WARNING]
+> **`$env:PROCESSOR_ARCHITECTURE` alone cannot satisfy the Arm64 gate.** An x64 process running under
+> emulation on an Arm64 machine reports `AMD64`, so a run that records only the process architecture
+> can look like native x64 when it is not. `Win32_Processor` reports the real CPU (`12` = ARM64) and
+> an emulated process cannot misreport it. For the Arm64 gate the OS/CPU line must read `ARM64` and
+> the package must be `winsight-win-arm64`.
+
 A result is only qualifying evidence if it records all of: the candidate commit, the CI run id, the
 architecture, whether the VM was clean, the exact check counts, and every failure. Add it to
-`docs/validation/` beside this file. If any gate failed, record that too - an honest red transcript
-is worth more than a green one nobody can reproduce.
+`docs/validation/` beside this file - see
+[`2026-07-23-wfp-qualification-f0a3f16.md`](2026-07-23-wfp-qualification-f0a3f16.md) for the shape.
+If any gate failed, record that too - an honest red transcript is worth more than a green one nobody
+can reproduce.
 
 ## 6. What these gates do and do not close
 

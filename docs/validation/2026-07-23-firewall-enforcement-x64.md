@@ -1,5 +1,11 @@
 # WFP enforcement — runtime validation, x64
 
+> [!NOTE]
+> **Superseded.** The corrected strict protocol has since completed on a candidate-bound binary:
+> [`2026-07-23-wfp-qualification-f0a3f16.md`](2026-07-23-wfp-qualification-f0a3f16.md), **25 checks,
+> 0 failures**. Read that file for the current evidence. This one is kept only as a record of what
+> the older script printed.
+
 > [!WARNING]
 > **Historical observation only — not a production qualification gate.** This run used
 > `Test-WfpValidation.ps1` revision `76b5481`. Its reported **18/18** is invalid as strict evidence:
