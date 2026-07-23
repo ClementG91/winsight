@@ -2,6 +2,25 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The pipe ACL could be widened without any test noticing
+- The multi-user IPC boundary rests on the named-pipe DACL (SYSTEM and Administrators full, Interactive
+  read/write, Network denied) and on the per-caller capability mapping. The DACL test asserted the
+  right principals were *present* with `Assert.Contains`, which stays green even if a broad allow ACE -
+  Everyone, Anonymous, Authenticated Users - is *also* added. The control channel could have been
+  opened to every local account and nothing would have failed. That is the audit motif applied to the
+  test itself: the health signal was structurally unable to see the widening.
+- Closed with an allow-list assertion: the only allowed principals are SYSTEM, Administrators and
+  Interactive, and a separate test rejects World/Anonymous/AuthenticatedUsers/Network as allow ACEs.
+  Proven by mutation - adding `Everyone:FullControl` to the source fails both new tests while the
+  original `Assert.Contains` test stayed green, confirming the gap was real.
+- The capability mapping was only tested null->false and current->true. Added direct tests: a null
+  identity maps to `None` (the fail-closed sentinel), and the current identity maps to exactly the
+  capability its elevation earns - `MutateMachinePolicy` for an administrator, `ReadStatus` otherwise,
+  never `None`. Mutation-verified on both branches (elevated and non-elevated hosts each catch a
+  mis-mapping of the branch they exercise).
+- This is the CI-pinnable half of the multi-user IPC gate, bound to every commit. The end-to-end run
+  across real elevated/unelevated/standard-user tokens remains a VM gate.
+
 ### The corrected trust gate passed on a real VM: 11 checks, 0 failures
 - The adversarial service-path trust boundary completed on a clean VM against candidate `f84ac36`,
   bound to CI run `30032903041`. Recorded in
