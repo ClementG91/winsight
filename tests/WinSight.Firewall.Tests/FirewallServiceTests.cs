@@ -692,6 +692,63 @@ public sealed class FirewallServiceSecurityTests
         Assert.False(interactiveRule.PipeAccessRights.HasFlag(PipeAccessRights.CreateNewInstance));
     }
 
+    // The GrantsTrustedPrincipals test above uses Assert.Contains, which is satisfied even if a
+    // broad allow ACE is ALSO present. That is the exact audit motif: a widened pipe ACL - Everyone,
+    // Anonymous, Authenticated Users - would let every existing assertion still pass while opening the
+    // control channel to any local account. This pins the allow-list closed: the only allowed
+    // principals are SYSTEM, Administrators and Interactive, and nothing else.
+    [Fact]
+    public void CreateHardenedSecurity_AllowsOnlyThreeTrustedPrincipals()
+    {
+        var security = FirewallServiceSecurity.CreateHardenedSecurity();
+        var allowed = security
+            .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier))
+            .Cast<PipeAccessRule>()
+            .Where(rule => rule.AccessControlType == AccessControlType.Allow)
+            .Select(rule => (SecurityIdentifier)rule.IdentityReference)
+            .ToList();
+
+        var permitted = new[]
+        {
+            new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+            new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null),
+            new SecurityIdentifier(WellKnownSidType.InteractiveSid, null),
+        };
+
+        var unexpected = allowed.Where(sid => !permitted.Contains(sid)).ToList();
+        Assert.True(
+            unexpected.Count == 0,
+            "The pipe ACL grants an unexpected principal: " + string.Join(", ", unexpected));
+    }
+
+    [Fact]
+    public void CreateHardenedSecurity_DoesNotGrantWorldOrAnonymous()
+    {
+        var security = FirewallServiceSecurity.CreateHardenedSecurity();
+        var allowed = security
+            .GetAccessRules(includeExplicit: true, includeInherited: false, typeof(SecurityIdentifier))
+            .Cast<PipeAccessRule>()
+            .Where(rule => rule.AccessControlType == AccessControlType.Allow)
+            .Select(rule => (SecurityIdentifier)rule.IdentityReference)
+            .ToList();
+
+        foreach (var forbidden in new[]
+        {
+            WellKnownSidType.WorldSid,
+            WellKnownSidType.AnonymousSid,
+            WellKnownSidType.AuthenticatedUserSid,
+            WellKnownSidType.NetworkSid,
+        })
+        {
+            var sid = new SecurityIdentifier(forbidden, null);
+            Assert.DoesNotContain(sid, allowed);
+        }
+    }
+
+    [Fact]
+    public void GetCallerCapability_NullIdentity_IsNone() =>
+        Assert.Equal(FirewallCallerCapability.None, FirewallServiceSecurity.GetCallerCapability(null));
+
     [Fact]
     public void IsAuthorisedCaller_NullIdentity_IsFalse() =>
         Assert.False(FirewallServiceSecurity.IsAuthorisedCaller(null));
@@ -701,6 +758,24 @@ public sealed class FirewallServiceSecurityTests
     {
         using var identity = WindowsIdentity.GetCurrent();
         Assert.True(FirewallServiceSecurity.IsAuthorisedCaller(identity));
+    }
+
+    // The current identity is a real, authenticated, local, non-anonymous account, so it must map to
+    // a real capability - and to exactly the one its elevation earns. An admin (elevated test host)
+    // gets MutateMachinePolicy; a standard user gets ReadStatus. Either way it is never None, which
+    // is the fail-closed sentinel reserved for identities that cannot be trusted at all.
+    [Fact]
+    public void GetCallerCapability_CurrentIdentity_MatchesItsElevation()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var isAdministrator = new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+
+        var capability = FirewallServiceSecurity.GetCallerCapability(identity);
+
+        Assert.NotEqual(FirewallCallerCapability.None, capability);
+        Assert.Equal(
+            isAdministrator ? FirewallCallerCapability.MutateMachinePolicy : FirewallCallerCapability.ReadStatus,
+            capability);
     }
 }
 
