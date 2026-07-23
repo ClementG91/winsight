@@ -2,6 +2,22 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The signature requirement now applies to the person who can violate it
+- `main` required signed commits and did not get them: three commits from a `--rebase` merge landed
+  unsigned. The rule was real, the enforcement was not - `enforce_admins` was false, so branch
+  protection exempted the only account able to bypass it. A control that does not bind the one actor
+  capable of breaking it is theatre, and this is the audit motif applied to repository configuration
+  rather than code.
+- `enforce_admins` is now enabled. Normal work is unaffected: branch, pull request, CI, squash merge.
+  Only bypassing is blocked.
+- **Verified by behaviour, not by reading the setting back.** Reading configuration is exactly the
+  weak signal that failed here — `required_signatures` read `true` throughout the period it was not
+  enforced. A direct push of a probe commit to `main` was attempted and rejected:
+  `Changes must be made through a pull request` and
+  `Required status check "build-test" is expected`. The probe was discarded and the tree reset.
+- The three unsigned commits stay unsigned, for the reason recorded below. This closes the hole going
+  forward rather than rewriting the past over it.
+
 ### An index for the validation records, and an honest note on three signatures
 - Four validation records existed with no way to see at a glance what was actually proven, against
   which commit. [`docs/validation/README.md`](docs/validation/README.md) indexes them: what is closed
