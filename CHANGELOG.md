@@ -2,6 +2,22 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The VM qualification steps are in the repository now, bound to a commit
+- Everything CI cannot reach - real SCM, real WFP, real traffic - needs a VM and a human, and the
+  instructions for it lived only in an untracked working directory. Nobody outside this machine could
+  replay them. `docs/validation/VM_QUALIFICATION_KIT.md` puts them under version control.
+- The kit binds the candidate before it downloads anything. The defect that invalidated the previous
+  qualification run was that nothing tied the observed behaviour to a known binary, and a protocol
+  that qualifies whatever service happens to be installed qualifies nothing. So the first step proves
+  the CI run's `head_sha` matches the intended commit. It also warns that the artifact still unpacks
+  as `winsight-v0.10.3-win-x64` while being a build of a later commit: the file name is not the
+  candidate's identity, and treating it as such is how the wrong binary gets validated.
+- The protocol script ships inside the package, built from the same commit as the service binary, so
+  the two cannot drift. The kit uses that copy rather than a separate download from `main`.
+- Recorded because both have cost real time on a clean VM: Windows PowerShell 5.1 renders
+  `Invoke-WebRequest` progress synchronously and makes a 120 MB download look frozen, and a clean VM
+  has no `gh` at all.
+
 ### The storage trust guard had no coverage at all
 - `FirewallStorageTrustGuard` stands between privileged policy storage and the trust inspector, and
   coverage measured it at 0%. Nothing would have noticed if it started failing open. Seventeen tests
