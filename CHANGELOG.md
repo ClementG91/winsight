@@ -2,6 +2,26 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Two independent reviews came back, and their findings are closed
+- Fresh independent security and quality reviews of the AC85-AC89 candidate both returned PASS_LOCAL
+  with no CRITICAL or HIGH finding. Both independently reproduced the two mutations this milestone
+  exists for, and both confirmed they now fail. Their remaining findings are closed here.
+- The install route caught `InvalidOperationException or Win32Exception` only, while the read-only
+  probe beside it caught everything. Tracing the call graph confirms nothing currently throws
+  anything else - which is precisely why nobody would have noticed the day something did. The
+  failure mode is the CLR printing an exception type, message and stack trace, including the
+  executable path, to stderr instead of `[FW_INSTALL_FAILED]`. The filter is gone; five exception
+  types that previously escaped are now pinned by test, and they failed before the fix.
+- The contract test resolved its shell as "Windows PowerShell 5.1 if present, otherwise `pwsh` off
+  ambient PATH". That test exists because 5.1 is where reading an unmarked file as ANSI turned a
+  smart quote into an unterminated string, and where `$ErrorActionPreference = 'Stop'` plus `2>&1`
+  turned native stderr into a terminating error. Silently running PowerShell 7 instead would have let
+  both defects ship behind a green test. Absent 5.1, the test now fails instead of measuring
+  something else.
+- `FirewallServiceInstallerTests.cs` had grown to 1,521 lines holding six unrelated test classes,
+  against an 800-line guideline. Split one class per file, mirroring the production layout. No test
+  was changed in the move; the count went 1,489 to 1,494 purely from the five new ones.
+
 ### The VM qualification steps are in the repository now, bound to a commit
 - Everything CI cannot reach - real SCM, real WFP, real traffic - needs a VM and a human, and the
   instructions for it lived only in an untracked working directory. Nobody outside this machine could

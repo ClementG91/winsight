@@ -110,7 +110,12 @@ public sealed class FirewallServiceCommandHost
                 return CommandResult.Failure(
                     ServicePathTrustDiagnosticCodes.ForInstallDenial(refusal.Code));
             }
-            catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+            // Deliberately unfiltered, matching the probe handler. A narrower filter only holds
+            // while the call graph below happens not to throw anything else, and the failure mode
+            // when that changes is the CLR printing the type, message and stack trace - including
+            // the executable path - to stderr. Typed trust refusals are already handled above, so
+            // everything reaching here is an install failure with nothing safe to say about it.
+            catch (Exception)
             {
                 return CommandResult.Failure(InstallFailed);
             }
