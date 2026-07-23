@@ -43,6 +43,24 @@ installers and GitHub release workflows. Of particular interest:
   bypasses of evidence limits/redaction/sensitive-field gating, and any AI-exposed
   mutation primitive.
 
+The opt-in outbound firewall adds a LocalSystem service, and it is the most
+privileged surface in the project. Of particular interest there:
+
+- Privilege escalation through the service, its SCM registration, or its named pipe.
+- Bypassing the IPC capability boundary — anything that lets a caller without
+  `MutateMachinePolicy` change policy, or that widens the pipe ACL beyond SYSTEM,
+  Administrators and Interactive.
+- Defeating service-path trust: persuading the service to accept a binary from a
+  location an unprivileged principal can write, or winning the inspect-to-use race.
+- **Making WinSight misreport its own enforcement state** — claiming a machine is
+  filtered when it is not, or unfiltered when it is. For a security tool that is a
+  vulnerability, not a display bug, because an operator acts on it.
+- Policy-store tampering that survives the storage trust checks.
+- An uninstall or rollback that leaves a running service or live WFP filters behind.
+
+See [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) for the trust boundaries, the
+adversaries considered, and what is explicitly out of scope.
+
 Third-party dependency vulnerabilities should normally be reported upstream, but a
 WinSight-specific exploitable integration remains in scope. Public release binaries
 currently lack Authenticode signing because the project does not own a public
@@ -50,3 +68,8 @@ code-signing certificate; checksum or SmartScreen warnings caused solely by that
 documented limitation are not vulnerabilities. Integrity is currently supplied by
 SHA-256 files, GitHub build-provenance/SBOM attestations, and signed Git commits and
 tags.
+
+The signing chain itself is implemented and waiting on that certificate: supplying
+`WINSIGHT_SIGNING_CERT_BASE64` activates it, and the build announces `UNSIGNED`
+explicitly when it is absent rather than leaving the state to be discovered. See
+[`docs/RELEASE.md`](docs/RELEASE.md).
