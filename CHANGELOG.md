@@ -2,6 +2,18 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The multi-user IPC boundary passed on a real VM: 7 checks, 0 failures
+- The authenticated pipe gates capability per caller, proven end to end on a clean VM against candidate
+  `c9177cd`, x64. Recorded in
+  [`docs/validation/2026-07-23-ipc-boundary-c9177cd.md`](docs/validation/2026-07-23-ipc-boundary-c9177cd.md).
+- The elevated console read status and mutated policy over the real pipe (`CanMutate`, `Applied`); a
+  SAFER basic-user token via `runas /trustlevel` - password-free, no second account - read status but
+  was refused the mutation (`CanReadOnly`, `Unauthorized`). That refused mutation is the whole point:
+  an unprivileged caller can look but not touch.
+- Closes the multi-user IPC boundary on x64. The unelevated-admin case is covered by proxy (a SAFER
+  basic-user token is the same non-admin capability class), and the network-logon deny by the pipe
+  DACL unit test; neither is a dedicated live logon here. Native Arm64 remains a separate gate.
+
 ### The IPC gate's restricted leg read the output file a beat too early
 - On a real VM the elevated leg passed cleanly - `outcome=CanMutate`, `mutation=Applied` over the real
   pipe - but the restricted leg reported three empty observations. The service was fine; the harness
