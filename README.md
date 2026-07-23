@@ -119,9 +119,12 @@ DNS visibility) **+ a single, friendly, transparent suite UX**.
   decoys, rename/delete-burst detection, entropy-on-write scoring (gated so saving a .docx or a
   .jpg never trips it), and an opt-in dashboard toggle with a loud alert. True *interception*
   needs a minifilter (cert required). See `docs/RANSOMWARE_DESIGN.md`.
-- **Next, and both elevation-gated:** naming the *process* behind a detection (which PID wrote the
-  autostart entry or encrypted the files) needs an ETW file/registry provider or a driver; and
-  Arm64 runtime validation still has no hardware to run on — see `docs/ARM64_VALIDATION.md`.
+- **Next, and elevation-gated:** naming the *process* behind a detection (which PID wrote the
+  autostart entry or encrypted the files) needs an ETW file/registry provider or a driver.
+- **Arm64:** build, PE architecture, packaging and the full installer lifecycle are verified on a
+  **native** Arm64 runner on every CI run. What remains unverified is the privileged runtime — WFP,
+  SCM, path trust, IPC — which needs an elevated isolated VM rather than a CI runner. See
+  [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md) and `docs/ARM64_VALIDATION.md`.
 
 ## Stack (locked, see `docs/ARCHITECTURE.md`)
 
@@ -297,9 +300,12 @@ transition. Direct mutation CLI aliases are disabled. Real SCM lifecycle, WFP
 enforcement and rollback, adversarial service-path trust, and the multi-user IPC
 capability boundary have now been qualified on a clean x64 VM, each bound to a commit
 and the CI run that built it — see
-[`docs/validation/`](docs/validation/README.md). Native Arm64, installer/signing/release
-and the localized surfaces are still unqualified, so production readiness is not
-established. See [`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
+[`docs/validation/`](docs/validation/README.md). **x64 is production-ready** with two
+stated limitations; **native Arm64 privileged behaviour remains unqualified**. The
+authoritative per-architecture statement, with the evidence behind every claim, is
+[`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md). See also
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) and
+[`docs/WFP_DESIGN.md`](docs/WFP_DESIGN.md). Native `WTGetSignatureInfo` remains a
 signature-performance optimization. Driver-backed BlockBlock/RansomWhere features
 remain deliberately deferred because production drivers require signing and a
 separate safety program.
