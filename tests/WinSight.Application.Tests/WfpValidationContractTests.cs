@@ -38,9 +38,19 @@ public sealed class WfpValidationContractTests
         var script = Path.Combine(RepositoryRoot, "scripts", "Test-WfpValidation.ps1");
         Assert.True(File.Exists(script), $"Missing WFP validation script: {script}");
 
-        var windowsPowerShell = Path.Combine(
+        // Windows PowerShell 5.1 by absolute path, with no fallback. The point of this contract is
+        // that the script parses and runs under 5.1 specifically - that is the shell where reading
+        // an unmarked file as ANSI turned a smart quote into an unterminated string, and where
+        // $ErrorActionPreference = 'Stop' plus 2>&1 turned native stderr into a terminating error.
+        // Quietly running PowerShell 7 instead would let both defects ship behind a green test, and
+        // resolving the shell from ambient PATH would decide which one at the mercy of the
+        // environment. Absent 5.1, this test has to fail rather than measure something else.
+        var shell = Path.Combine(
             Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
-        var shell = File.Exists(windowsPowerShell) ? windowsPowerShell : "pwsh";
+        Assert.True(
+            File.Exists(shell),
+            $"Windows PowerShell 5.1 is required to validate this script and was not found at: {shell}");
+
         var start = new ProcessStartInfo(shell)
         {
             UseShellExecute = false,
