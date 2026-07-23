@@ -52,19 +52,8 @@ public static partial class FirewallServiceInstaller
         IServicePathTrustInspector trustInspector,
         IServiceControlManager serviceControlManager)
     {
-        ArgumentNullException.ThrowIfNull(trustInspector);
         ArgumentNullException.ThrowIfNull(serviceControlManager);
-        var evidence = trustInspector.InspectExecutableEvidence(executablePath);
-        if (!evidence.Decision.IsTrusted)
-        {
-            throw new InvalidOperationException(
-                $"Service path rejected [{evidence.Decision.Code}]: {evidence.Decision.Message}");
-        }
-        var preUse = trustInspector.Revalidate(evidence);
-        if (!preUse.IsTrusted)
-        {
-            throw new InvalidOperationException($"Service path rejected [{preUse.Code}]: {preUse.Message}");
-        }
+        var evidence = InspectAndRevalidateExecutable(executablePath, trustInspector);
         var binaryPath = BuildBinaryPath(evidence.CanonicalPath);
         using var registration = serviceControlManager.Create(binaryPath);
         try
@@ -90,6 +79,24 @@ public static partial class FirewallServiceInstaller
                 ServiceInstallTrustCode.PathChangedRolledBack,
                 $"Service path rejected [{postUse.Code}] and registration was rolled back.");
         }
+    }
+
+    internal static PathTrustEvidence InspectAndRevalidateExecutable(
+        string executablePath,
+        IServicePathTrustInspector trustInspector)
+    {
+        ArgumentNullException.ThrowIfNull(trustInspector);
+        var evidence = trustInspector.InspectExecutableEvidence(executablePath);
+        if (!evidence.Decision.IsTrusted)
+        {
+            throw new ServicePathTrustException(evidence.Decision.Code);
+        }
+        var preUse = trustInspector.Revalidate(evidence);
+        if (!preUse.IsTrusted)
+        {
+            throw new ServicePathTrustException(preUse.Code);
+        }
+        return evidence;
     }
 
     [System.Diagnostics.CodeAnalysis.DoesNotReturn]
@@ -334,6 +341,43 @@ public sealed class ServiceInstallTrustException : InvalidOperationException
     public ServiceInstallTrustException(ServiceInstallTrustCode code, string message, Exception? innerException)
         : base(message, innerException) => Code = code;
     public ServiceInstallTrustCode Code { get; }
+}
+
+/// <summary>A structured executable-path refusal raised before the SCM is called.</summary>
+public sealed class ServicePathTrustException : InvalidOperationException
+{
+    public ServicePathTrustException(PathTrustCode code)
+        : base("Service path trust validation failed before SCM registration.") => Code = code;
+
+    public PathTrustCode Code { get; }
+}
+
+/// <summary>Fixed external diagnostics for pre-SCM executable-path refusals.</summary>
+public static class ServicePathTrustDiagnosticCodes
+{
+    public const string Trusted = "[FW_INSTALL_PATH_TRUSTED]";
+    public const string InvalidPath = "[FW_INSTALL_PATH_INVALID]";
+    public const string OutsideMachineData = "[FW_INSTALL_PATH_OUTSIDE_MACHINE_DATA]";
+    public const string MissingComponent = "[FW_INSTALL_PATH_MISSING_COMPONENT]";
+    public const string ReparsePoint = "[FW_INSTALL_PATH_REPARSE_POINT]";
+    public const string UntrustedOwner = "[FW_INSTALL_PATH_UNTRUSTED_OWNER]";
+    public const string WritableByUnprivileged = "[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]";
+    public const string IdentityChanged = "[FW_INSTALL_PATH_IDENTITY_CHANGED]";
+    public const string InspectionFailed = "[FW_INSTALL_PATH_INSPECTION_FAILED]";
+
+    public static string ForInstallDenial(PathTrustCode code) => code switch
+    {
+        PathTrustCode.InvalidPath => InvalidPath,
+        PathTrustCode.OutsideProgramData => OutsideMachineData,
+        PathTrustCode.MissingComponent => MissingComponent,
+        PathTrustCode.ReparsePoint => ReparsePoint,
+        PathTrustCode.UntrustedOwner => UntrustedOwner,
+        PathTrustCode.WritableByUnprivilegedPrincipal => WritableByUnprivileged,
+        PathTrustCode.IdentityChanged => IdentityChanged,
+        PathTrustCode.InspectionFailed => InspectionFailed,
+        PathTrustCode.Trusted => InspectionFailed,
+        _ => InspectionFailed,
+    };
 }
 
 public interface IServiceRegistration : IDisposable

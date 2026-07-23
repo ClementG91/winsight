@@ -9,6 +9,9 @@ public enum FirewallServiceVerb
     /// <summary>Register the Windows service (requires elevation).</summary>
     Install,
 
+    /// <summary>Read-only install-path trust inspection. The supplied path is data and is never executed.</summary>
+    InstallPathTrustCheck,
+
     /// <summary>Remove the Windows service (requires elevation).</summary>
     Uninstall,
 
@@ -75,6 +78,7 @@ public static class FirewallServiceCommandLine
         {
             "run" => FirewallServiceVerb.Run,
             "install" => FirewallServiceVerb.Install,
+            "install-path-trust-check" => FirewallServiceVerb.InstallPathTrustCheck,
             "uninstall" or "remove" => FirewallServiceVerb.Uninstall,
             "status" => FirewallServiceVerb.Status,
             "wfp-selftest" => FirewallServiceVerb.WfpSelfTest,

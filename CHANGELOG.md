@@ -2,21 +2,98 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
-### The outbound firewall is validated end-to-end on a real machine, and the proof is in the repo
-- The one thing CI structurally cannot cover — arming WFP and cutting real traffic through P/Invoke —
-  now has a **recorded, reproducible transcript**:
-  [`docs/validation/2026-07-23-firewall-enforcement-x64.md`](docs/validation/2026-07-23-firewall-enforcement-x64.md).
-  **18 checks, 0 failures**, run on a clean x64 VM against the published binaries, armed through the
-  real dashboard → authenticated IPC → service path.
-- The load-bearing result is **per-app scoping**: the blocked copy of curl could not reach the
-  network while a second, unblocked copy still could. A machine-wide cut that happened to block the
-  target would have passed the naive check and failed this one. It passed the real one.
-- Provider/sublayer created on arm, **all WFP state removed on emergency disable**, traffic restored,
-  service uninstalled clean — the machine returns exactly to its prior state.
-- This closes a standing gap in the project's own honesty: "covered by VM validation" was true but
-  left nothing a third party could check. Now it does. The enforcement code is byte-identical from
-  `v0.10.2` through `HEAD`, so the record describes the current path. Arm64 and the adversarial
-  service-path TOCTOU race remain explicitly out of scope and are called out in the record.
+### The qualification protocol was broken on purpose, and one gate had never run
+- The previous correction attempt failed review for a reason no green count can surface: two specific
+  mutations left every gate passing. Both were re-applied to the new composition and both now fail --
+  replacing the real `PollStopped` with a constant costs 8 contract failures, and routing the
+  `install-path-trust-check` verb to Install costs 20 of 321 firewall-service tests. Six more
+  mutations were run to close the inventory: an ambient `sc.exe` instead of the absolute System32
+  path, an absence poll aimed at the wrong service name, uninstall moved above the Stopped poll, and
+  a refusal that reaches stdout, exits 0, or collapses the eight denial codes into one. Every one is
+  caught. The wrong-service-name mutation is the one worth naming: it makes the post-uninstall check
+  report "no service" while a real SYSTEM service is still installed.
+- Collapsing the denial codes did not compile at first -- `refusal` became unused and warnings are
+  errors here. That is the compiler catching it, not the tests, so the mutation was made compilable
+  before being measured. A mutation that cannot build has not been tested.
+- The coverage gate had never run on this candidate. There were 22 TRX and no coverage directory
+  beside them, so the sequence read as complete while one gate left no artifact at all -- the same
+  shape of defect this milestone is about, one level up. It now runs: engine libraries 87.9% with
+  every engine at or above 80%, overall production 73.0%. `winsight-firewall-service` is 53.6%, still
+  the least-covered assembly of the ones running as SYSTEM, and it is not an engine library so no
+  gate holds it to a bar.
+- All of this is portable and non-privileged. It closes no native gate, and no independent security
+  review, quality review or judgment has run on this candidate.
+
+### WFP qualification now fails closed and binds SCM to the exact candidate
+- `Test-WfpValidation.ps1` parses the provider, sublayer and permit-filter fields as one exact
+  structured state. Mixed state, a failed native command or an unexpected output shape is failure;
+  each native exit code and its normalized output remain visible together. PowerShell converts an
+  `ErrorRecord` to its message, collects through `Out-String`, then trims and prefixes lines for
+  display; this is normalized presentation rather than the original native byte stream. Path trust
+  stages only one user-writable sentinel as data, then calls the protected candidate's
+  `install-path-trust-check <sentinel>` command. The staged service/DLL set is never executed or
+  loaded. Candidate provenance, protected deployment and immutable dependencies are operator-owned
+  prerequisites and are not self-proven by this command.
+- A clean snapshot must have no pre-existing WinSight service. After installation, the SCM
+  `PathName` must equal the canonical `-ServicePath` plus the `run` verb, and start/query results must
+  succeed before any WFP claim is accepted. Any failed pre-arm check or failed connectivity baseline
+  forbids the manual arming prompt. Pre-SCM trust denials are typed product outcomes mapped to eight
+  fixed `[FW_INSTALL_PATH_*]` codes; unrelated installation/SCM failures remain
+  `[FW_INSTALL_FAILED]`, with no exception message or path printed.
+- `-SkipEnforcement` means no WFP arming, not no machine changes: it is an isolated-VM mode that
+  installs and starts the candidate, then must stop it, uninstall it and prove SCM error 1060 before
+  success. The skip path has exactly **16** mandatory checks; the full path has **25**, and the
+  normal non-privileged contract self-test passes **24/24**, while its deliberate lifecycle-order
+  negative control exits 1. The former 14/14 and the first local report that accepted it are
+  permanently invalid, non-qualifying evidence: a diagnostic-plus-false array had cast to true.
+  The intermediate 15/15 was a transient development count, not qualification evidence.
+- One `New-ValidationAdapter` owns every command, staging operation, lifecycle poll and workflow
+  operation. Real and scripted modes inject only elementary host effects. Scripted effects consume
+  one closed ordered queue that rejects any unexpected path, argument, order, cardinality or result
+  type; they expose no fabricated `PollRunning`, `PollStopped`, `PollAbsent` or other business
+  result. The contract matrices drive Running, Stopped and SCM-absent through that production
+  adapter, including delayed success, timeout, exact ten-attempt bounds and rollback ordering.
+  Strict typed cardinality remains mandatory: effects emit zero success objects and decisions
+  exactly one value of the required type.
+- Every elevated OS executable is an absolute protected System32 path: `sc.exe`, `curl.exe` and
+  `WindowsPowerShell\v1.0\powershell.exe`; ambient `PATH` is never used. System32 curl is the blocked
+  target and PowerShell is a separate control, with both baselined before arming and both required to
+  recover afterward. Direct-mutation refusal requires exact output/exit 1 and an immediate exact
+  absent/absent/absent WFP inventory. Enforcement status, WFP self-test and block-status outputs are
+  exact closed shapes, not substring matches.
+- One injected bounded poll owns Running, Stopped and SCM-absence transitions. Cleanup never
+  uninstalls before Stopped; after an emergency-disable failure, non-AuditOnly result, non-empty WFP
+  tuple or unrestored target/control connectivity, uninstall is unreachable and snapshot recovery is
+  mandatory.
+- The public `FirewallServiceCommandHost.Execute` route now owns parse, routing, arity, fixed
+  result mapping and `TextWriter` stdout/stderr selection. `Program` constructs the Windows
+  capabilities and calls that route exactly once, then uses its parsed-verb/handled/exit outcome for
+  remaining verbs without reparsing. The path probe handler receives only
+  `IServicePathTrustInspector` and directly shares Install's inspect/revalidate primitive; it has no
+  install, elevation, process-path, SCM or WFP capability. Tests call that same public `Execute`
+  route with recording capabilities, and a non-privileged subprocess smoke proves invalid probe
+  arity returns the exact inspection-failed stderr/exit 1 without filesystem inspection or machine
+  mutation.
+- The recorded 2026-07-23 x64 run used script revision `76b5481` and printed **18/18**. It remains a
+  useful historical observation of per-app blocking and restoration, but it is not a production
+  qualification gate: that script could accept mixed WFP state, skip a failed path probe, hide
+  normalized native output and observe a different pre-existing SCM binary. No strict
+  candidate-bound x64 or native Arm64 rerun has occurred.
+
+### Path trust now binds the complete cross-filesystem file identity
+- Path revalidation now calls `GetFileInformationByHandleEx(FileIdInfo)` through the existing
+  no-follow `SafeFileHandle`. Its stable identity contains the 64-bit volume serial and every bit of
+  the 128-bit file identifier. A failed or unsupported query denies inspection; there is no legacy
+  64-bit fallback and no `Pack = 4` repair of `BY_HANDLE_FILE_INFORMATION`.
+- The ABI is explicit and testable: a 16-byte explicit-layout identifier made of two `ulong` values,
+  inside a 24-byte sequential `FILE_ID_INFO` whose fields begin at offsets 0 and 8. The fixed-width
+  representation carries all **192** identity bits deterministically.
+- Exactly **10** non-privileged ABI/real-filesystem tests cover layout, stable reads of an unchanged
+  file, simultaneous distinct files and rename-aside/plant detection. A deterministic sentinel
+  independently proves the exact 64-bit volume, `Part0` and `Part1` contribution to the stable
+  192-bit representation. The tests do not assume that a volume serial is non-zero or that a deleted
+  identifier can never be reused. A live adversarial replacement during the in-process
+  inspection/SCM window remains an isolated-VM gate.
 
 ## v0.10.3, 2026-07-22
 
@@ -187,11 +264,12 @@ accepting a filter that blocks every program *except* the named one.
 
 ### VM validation is now a script that returns a verdict, not a document you follow
 - `scripts/Test-WfpValidation.ps1` executes the protocol in `docs/ARM64_VALIDATION.md` and prints
-  `[PASS]`/`[FAIL]` per step with the raw `FWP_E_*` codes. **A validation nobody can replay is
+  `[PASS]`/`[FAIL]` per step with the visible normalized `FWP_E_*` codes. **A validation nobody can replay is
   indistinguishable, six months later, from one that was never run** — that was the standing
   objection to "covered by VM validation", and this closes it without pretending CI can host it.
-- Architecture-agnostic, and `-SkipEnforcement` runs the read-only half (preconditions, service
-  lifecycle, path trust, WFP probe) safely on a working machine without arming anything.
+- **Historical statement invalidated:** the old text called `-SkipEnforcement` a read-only half safe
+  on a working machine. It installs, starts, stops and uninstalls SCM state and therefore belongs
+  only in a disposable isolated VM with a clean snapshot, even though it never arms WFP.
 - It stops at the two steps that cannot be automated — arming and emergency disable — because
   mutating policy requires authenticated IPC by design and the command-line verbs for it are refused
   on purpose. It says what to click, then verifies the outcome.

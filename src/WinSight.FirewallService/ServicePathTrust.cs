@@ -327,6 +327,28 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
         path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
 }
 
+[StructLayout(LayoutKind.Explicit, Size = 16)]
+internal struct FileId128
+{
+    [FieldOffset(0)]
+    public ulong Part0;
+
+    [FieldOffset(8)]
+    public ulong Part1;
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct FileIdInfo
+{
+    public ulong VolumeSerialNumber;
+    public FileId128 FileId;
+}
+
+internal enum FileInfoByHandleClass
+{
+    FileIdInfo = 18,
+}
+
 public sealed partial class WindowsPathMetadataSource : IPathMetadataSource
 {
     public string Canonicalize(string path)
@@ -378,23 +400,20 @@ public sealed partial class WindowsPathMetadataSource : IPathMetadataSource
     {
         using var handle = CreateFileW(path, 0x80, 0x7, IntPtr.Zero, 3,
             0x00200000u | (directory ? 0x02000000u : 0), IntPtr.Zero);
-        if (handle.IsInvalid || !GetFileInformationByHandle(handle, out var info))
+        if (handle.IsInvalid || !GetFileInformationByHandleEx(handle, FileInfoByHandleClass.FileIdInfo,
+                out var info, checked((uint)Marshal.SizeOf<FileIdInfo>())))
             throw new IOException("Stable path identity inspection failed.");
-        return $"{info.VolumeSerialNumber:X8}:{info.FileIndexHigh:X8}{info.FileIndexLow:X8}";
+        return FormatStableIdentity(info);
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
-    {
-        public uint FileAttributes; public long CreationTime; public long LastAccessTime; public long LastWriteTime;
-        public uint VolumeSerialNumber; public uint FileSizeHigh; public uint FileSizeLow; public uint NumberOfLinks;
-        public uint FileIndexHigh; public uint FileIndexLow;
-    }
+    internal static string FormatStableIdentity(FileIdInfo info) =>
+        $"{info.VolumeSerialNumber:X16}:{info.FileId.Part0:X16}{info.FileId.Part1:X16}";
 
     [LibraryImport("kernel32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     private static partial SafeFileHandle CreateFileW(string fileName, uint desiredAccess, uint shareMode,
         IntPtr securityAttributes, uint creationDisposition, uint flagsAndAttributes, IntPtr templateFile);
     [LibraryImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation information);
+    private static partial bool GetFileInformationByHandleEx(SafeFileHandle file,
+        FileInfoByHandleClass fileInformationClass, out FileIdInfo information, uint bufferSize);
 }

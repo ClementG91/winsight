@@ -11,6 +11,8 @@ public sealed class FirewallServiceCommandLineTests
     [InlineData("run", FirewallServiceVerb.Run)]
     [InlineData("install", FirewallServiceVerb.Install)]
     [InlineData("INSTALL", FirewallServiceVerb.Install)]
+    [InlineData("install-path-trust-check", FirewallServiceVerb.InstallPathTrustCheck)]
+    [InlineData("INSTALL-PATH-TRUST-CHECK", FirewallServiceVerb.InstallPathTrustCheck)]
     [InlineData("uninstall", FirewallServiceVerb.Uninstall)]
     [InlineData("remove", FirewallServiceVerb.Uninstall)]
     [InlineData("status", FirewallServiceVerb.Status)]
@@ -44,9 +46,22 @@ public sealed class FirewallServiceCommandLineTests
     {
         var programPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "src", "WinSight.FirewallService", "Program.cs"));
-        var source = File.ReadAllText(programPath);
+        var commandHostPath = Path.Combine(Path.GetDirectoryName(programPath)!, "FirewallServiceCommandHost.cs");
+        var programSource = File.ReadAllText(programPath);
+        var commandHostSource = File.ReadAllText(commandHostPath);
+        var diagnosticSources = programSource + commandHostSource;
 
-        Assert.DoesNotContain("Console.Error.WriteLine($", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("Console.Error.WriteLine($", programSource, StringComparison.Ordinal);
+        Assert.Contains(
+            "new FirewallServiceCommandHost(",
+            programSource,
+            StringComparison.Ordinal);
+        Assert.Contains(".Execute(args, Console.Out, Console.Error);", programSource, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "FirewallServiceVerb.InstallPathTrustCheck =>",
+            programSource,
+            StringComparison.Ordinal);
+        Assert.Contains("standardError.WriteLine(result.StandardError);", commandHostSource, StringComparison.Ordinal);
         foreach (var code in new[]
         {
             "[FW_INSTALL_FAILED]", "[FW_UNINSTALL_FAILED]", "[FW_SERVICE_STATUS_UNAVAILABLE]",
@@ -54,7 +69,382 @@ public sealed class FirewallServiceCommandLineTests
             "[FW_ENFORCEMENT_STATUS_UNAVAILABLE]",
         })
         {
-            Assert.Contains($"Console.Error.WriteLine(\"{code}\")", source, StringComparison.Ordinal);
+            Assert.Contains(code, diagnosticSources, StringComparison.Ordinal);
+        }
+    }
+}
+
+public sealed class FirewallServiceCommandHostTests
+{
+    private const string ProbePath = @"C:\Users\standard\sentinel.exe";
+
+    [Fact]
+    public void Execute_TrustedProbe_UsesInspectionOnlyAndReturnsExactStdout()
+    {
+        var capability = new RecordingInstallCapability();
+        var inspector = new RecordingPathTrustInspector();
+        var execution = Execute(capability, inspector, ["install-path-trust-check", ProbePath]);
+
+        Assert.Equal(FirewallServiceVerb.InstallPathTrustCheck, execution.Dispatch.Verb);
+        Assert.True(execution.Dispatch.Handled);
+        Assert.Equal(0, execution.Dispatch.ExitCode);
+        Assert.Equal(ServicePathTrustDiagnosticCodes.Trusted + Environment.NewLine, execution.StandardOutput);
+        Assert.Empty(execution.StandardError);
+        Assert.Equal(ProbePath, Assert.Single(inspector.InspectedPaths));
+        Assert.Equal(1, inspector.RevalidationCount);
+        AssertNoInstallCapabilityCalls(capability);
+    }
+
+    [Theory]
+    [InlineData(PathTrustCode.InvalidPath, ServicePathTrustDiagnosticCodes.InvalidPath)]
+    [InlineData(PathTrustCode.OutsideProgramData, ServicePathTrustDiagnosticCodes.OutsideMachineData)]
+    [InlineData(PathTrustCode.MissingComponent, ServicePathTrustDiagnosticCodes.MissingComponent)]
+    [InlineData(PathTrustCode.ReparsePoint, ServicePathTrustDiagnosticCodes.ReparsePoint)]
+    [InlineData(PathTrustCode.UntrustedOwner, ServicePathTrustDiagnosticCodes.UntrustedOwner)]
+    [InlineData(PathTrustCode.WritableByUnprivilegedPrincipal, ServicePathTrustDiagnosticCodes.WritableByUnprivileged)]
+    [InlineData(PathTrustCode.IdentityChanged, ServicePathTrustDiagnosticCodes.IdentityChanged)]
+    [InlineData(PathTrustCode.InspectionFailed, ServicePathTrustDiagnosticCodes.InspectionFailed)]
+    public void Execute_AllProbeDenialsReturnExactStderrAndNeverReachInstall(
+        PathTrustCode code,
+        string expectedDiagnostic)
+    {
+        var capability = new RecordingInstallCapability();
+        var inspector = new RecordingPathTrustInspector
+        {
+            InspectResult = PathTrustDecision.Deny(code),
+        };
+        var execution = Execute(capability, inspector, ["install-path-trust-check", ProbePath]);
+
+        Assert.Equal(FirewallServiceVerb.InstallPathTrustCheck, execution.Dispatch.Verb);
+        Assert.True(execution.Dispatch.Handled);
+        Assert.Equal(1, execution.Dispatch.ExitCode);
+        Assert.Empty(execution.StandardOutput);
+        Assert.Equal(expectedDiagnostic + Environment.NewLine, execution.StandardError);
+        Assert.DoesNotContain(ProbePath, execution.StandardError, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(ProbePath, Assert.Single(inspector.InspectedPaths));
+        Assert.Equal(0, inspector.RevalidationCount);
+        AssertNoInstallCapabilityCalls(capability);
+    }
+
+    [Theory]
+    [InlineData(PathTrustCode.InvalidPath, ServicePathTrustDiagnosticCodes.InvalidPath)]
+    [InlineData(PathTrustCode.OutsideProgramData, ServicePathTrustDiagnosticCodes.OutsideMachineData)]
+    [InlineData(PathTrustCode.MissingComponent, ServicePathTrustDiagnosticCodes.MissingComponent)]
+    [InlineData(PathTrustCode.ReparsePoint, ServicePathTrustDiagnosticCodes.ReparsePoint)]
+    [InlineData(PathTrustCode.UntrustedOwner, ServicePathTrustDiagnosticCodes.UntrustedOwner)]
+    [InlineData(PathTrustCode.WritableByUnprivilegedPrincipal, ServicePathTrustDiagnosticCodes.WritableByUnprivileged)]
+    [InlineData(PathTrustCode.IdentityChanged, ServicePathTrustDiagnosticCodes.IdentityChanged)]
+    [InlineData(PathTrustCode.InspectionFailed, ServicePathTrustDiagnosticCodes.InspectionFailed)]
+    public void Execute_AllProbeRevalidationDenialsReturnExactStderrAndNeverReachInstall(
+        PathTrustCode code,
+        string expectedDiagnostic)
+    {
+        var capability = new RecordingInstallCapability();
+        var inspector = new RecordingPathTrustInspector
+        {
+            RevalidateResult = PathTrustDecision.Deny(code),
+        };
+        var execution = Execute(capability, inspector, ["install-path-trust-check", ProbePath]);
+
+        Assert.Equal(1, execution.Dispatch.ExitCode);
+        Assert.Empty(execution.StandardOutput);
+        Assert.Equal(expectedDiagnostic + Environment.NewLine, execution.StandardError);
+        Assert.Equal(ProbePath, Assert.Single(inspector.InspectedPaths));
+        Assert.Equal(1, inspector.RevalidationCount);
+        AssertNoInstallCapabilityCalls(capability);
+    }
+
+    [Fact]
+    public void Execute_InvalidProbeArityNeverInvokesInspectorOrInstallAndFailsClosed()
+    {
+        IReadOnlyList<string>[] invalidArguments =
+        [
+            ["install-path-trust-check"],
+            ["install-path-trust-check", "   "],
+            ["install-path-trust-check", ProbePath, "extra"],
+        ];
+
+        foreach (var arguments in invalidArguments)
+        {
+            var capability = new RecordingInstallCapability();
+            var inspector = new RecordingPathTrustInspector();
+            var execution = Execute(capability, inspector, arguments);
+
+            Assert.Equal(FirewallServiceVerb.InstallPathTrustCheck, execution.Dispatch.Verb);
+            Assert.True(execution.Dispatch.Handled);
+            Assert.Equal(1, execution.Dispatch.ExitCode);
+            Assert.Empty(execution.StandardOutput);
+            Assert.Equal(
+                ServicePathTrustDiagnosticCodes.InspectionFailed + Environment.NewLine,
+                execution.StandardError);
+            Assert.Empty(inspector.InspectedPaths);
+            Assert.Equal(0, inspector.RevalidationCount);
+            AssertNoInstallCapabilityCalls(capability);
+        }
+    }
+
+    [Fact]
+    public void Execute_UnexpectedProbeFailureIsRedactedAndNeverReachesInstall()
+    {
+        var capability = new RecordingInstallCapability();
+        var inspector = new RecordingPathTrustInspector
+        {
+            InspectException = new IOException($"native details for {ProbePath}"),
+        };
+        var execution = Execute(capability, inspector, ["install-path-trust-check", ProbePath]);
+
+        Assert.Equal(1, execution.Dispatch.ExitCode);
+        Assert.Empty(execution.StandardOutput);
+        Assert.Equal(
+            ServicePathTrustDiagnosticCodes.InspectionFailed + Environment.NewLine,
+            execution.StandardError);
+        Assert.DoesNotContain(ProbePath, execution.StandardError, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("native", execution.StandardError, StringComparison.OrdinalIgnoreCase);
+        AssertNoInstallCapabilityCalls(capability);
+    }
+
+    [Fact]
+    public void Execute_InstallRoutesOnlyToInstallCapability()
+    {
+        var capability = new RecordingInstallCapability
+        {
+            Elevated = true,
+            ProcessPath = ProbePath,
+        };
+        var inspector = new RecordingPathTrustInspector
+        {
+            InspectException = new Xunit.Sdk.XunitException("install must not inspect"),
+        };
+        var execution = Execute(capability, inspector, ["install"]);
+
+        Assert.Equal(FirewallServiceVerb.Install, execution.Dispatch.Verb);
+        Assert.True(execution.Dispatch.Handled);
+        Assert.Equal(0, execution.Dispatch.ExitCode);
+        Assert.Equal(
+            $"Installed '{FirewallServiceInstaller.DisplayName}' (demand-start; enforcement is opt-in and runtime state is reported separately).{Environment.NewLine}" +
+            $"Start it with:  sc start {FirewallServiceInstaller.ServiceName}{Environment.NewLine}",
+            execution.StandardOutput);
+        Assert.Empty(execution.StandardError);
+        Assert.Equal(1, capability.ElevationCalls);
+        Assert.Equal(1, capability.ProcessPathCalls);
+        Assert.Equal(ProbePath, Assert.Single(capability.InstalledPaths));
+        Assert.Empty(inspector.InspectedPaths);
+    }
+
+    [Theory]
+    [InlineData(PathTrustCode.InvalidPath, ServicePathTrustDiagnosticCodes.InvalidPath)]
+    [InlineData(PathTrustCode.OutsideProgramData, ServicePathTrustDiagnosticCodes.OutsideMachineData)]
+    [InlineData(PathTrustCode.MissingComponent, ServicePathTrustDiagnosticCodes.MissingComponent)]
+    [InlineData(PathTrustCode.ReparsePoint, ServicePathTrustDiagnosticCodes.ReparsePoint)]
+    [InlineData(PathTrustCode.UntrustedOwner, ServicePathTrustDiagnosticCodes.UntrustedOwner)]
+    [InlineData(PathTrustCode.WritableByUnprivilegedPrincipal, ServicePathTrustDiagnosticCodes.WritableByUnprivileged)]
+    [InlineData(PathTrustCode.IdentityChanged, ServicePathTrustDiagnosticCodes.IdentityChanged)]
+    [InlineData(PathTrustCode.InspectionFailed, ServicePathTrustDiagnosticCodes.InspectionFailed)]
+    public void Execute_InstallPathDenialsPreserveTypedCodeWithoutInspectorOrPathLeak(
+        PathTrustCode code,
+        string expectedDiagnostic)
+    {
+        var capability = new RecordingInstallCapability
+        {
+            Elevated = true,
+            ProcessPath = ProbePath,
+            InstallException = new ServicePathTrustException(code),
+        };
+        var inspector = new RecordingPathTrustInspector();
+        var execution = Execute(capability, inspector, ["install"]);
+
+        Assert.Equal(1, execution.Dispatch.ExitCode);
+        Assert.Empty(execution.StandardOutput);
+        Assert.Equal(expectedDiagnostic + Environment.NewLine, execution.StandardError);
+        Assert.DoesNotContain(ProbePath, execution.StandardError, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(inspector.InspectedPaths);
+    }
+
+    [Fact]
+    public void Execute_ExpectedInstallFailuresAreClosedAndRedacted()
+    {
+        var notElevatedCapability = new RecordingInstallCapability();
+        var notElevated = Execute(
+            notElevatedCapability,
+            new RecordingPathTrustInspector(),
+            ["install"]);
+        Assert.Equal(1, notElevated.Dispatch.ExitCode);
+        Assert.Empty(notElevated.StandardOutput);
+        Assert.Equal(
+            "Installing the WinSight firewall service requires an elevated (Administrator) console." +
+            Environment.NewLine,
+            notElevated.StandardError);
+        Assert.Equal(1, notElevatedCapability.ElevationCalls);
+        Assert.Equal(0, notElevatedCapability.ProcessPathCalls);
+        Assert.Empty(notElevatedCapability.InstalledPaths);
+
+        var noPathCapability = new RecordingInstallCapability { Elevated = true };
+        var noProcessPath = Execute(
+            noPathCapability,
+            new RecordingPathTrustInspector(),
+            ["install"]);
+        Assert.Equal(1, noProcessPath.Dispatch.ExitCode);
+        Assert.Empty(noProcessPath.StandardOutput);
+        Assert.Equal(
+            "Could not resolve the service executable path." + Environment.NewLine,
+            noProcessPath.StandardError);
+        Assert.Empty(noPathCapability.InstalledPaths);
+
+        foreach (var exception in new Exception[]
+        {
+            new InvalidOperationException($"generic failure at {ProbePath}"),
+            new Win32Exception(5, $"native failure at {ProbePath}"),
+        })
+        {
+            var capability = new RecordingInstallCapability
+            {
+                Elevated = true,
+                ProcessPath = ProbePath,
+                InstallException = exception,
+            };
+            var generic = Execute(capability, new RecordingPathTrustInspector(), ["install"]);
+            Assert.Equal(1, generic.Dispatch.ExitCode);
+            Assert.Empty(generic.StandardOutput);
+            Assert.Equal("[FW_INSTALL_FAILED]" + Environment.NewLine, generic.StandardError);
+            Assert.DoesNotContain(ProbePath, generic.StandardError, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("native", generic.StandardError, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public void Execute_UnhandledVerbWritesNothingAndTouchesNoCapability()
+    {
+        var capability = new RecordingInstallCapability();
+        var inspector = new RecordingPathTrustInspector();
+        var execution = Execute(capability, inspector, ["status"]);
+
+        Assert.Equal(new(FirewallServiceVerb.Status, Handled: false, ExitCode: 0), execution.Dispatch);
+        Assert.Empty(execution.StandardOutput);
+        Assert.Empty(execution.StandardError);
+        AssertNoInstallCapabilityCalls(capability);
+        Assert.Empty(inspector.InspectedPaths);
+    }
+
+    [Fact(Timeout = 30000)]
+    public async Task Program_InvalidProbeAritySmokeUsesPublicRouteWithoutInspection()
+    {
+        var outputDirectory = new DirectoryInfo(AppContext.BaseDirectory);
+        var targetFramework = outputDirectory.Name;
+        var configuration = outputDirectory.Parent!.Name;
+        var repositoryRoot = Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+        var executable = Path.Combine(
+            repositoryRoot,
+            "src",
+            "WinSight.FirewallService",
+            "bin",
+            configuration,
+            targetFramework,
+            "winsight-firewall-service.exe");
+        Assert.True(File.Exists(executable), $"Missing built service apphost: {executable}");
+
+        var start = new System.Diagnostics.ProcessStartInfo(
+            executable,
+            "install-path-trust-check")
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var process = System.Diagnostics.Process.Start(start) ??
+            throw new InvalidOperationException("Unable to start service apphost.");
+        var stdoutTask = process.StandardOutput.ReadToEndAsync();
+        var stderrTask = process.StandardError.ReadToEndAsync();
+        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(20));
+
+        Assert.Equal(1, process.ExitCode);
+        Assert.Empty(await stdoutTask);
+        Assert.Equal(
+            ServicePathTrustDiagnosticCodes.InspectionFailed + Environment.NewLine,
+            await stderrTask);
+    }
+
+    private static HostExecution Execute(
+        RecordingInstallCapability capability,
+        RecordingPathTrustInspector inspector,
+        IReadOnlyList<string>? arguments)
+    {
+        using var standardOutput = new StringWriter();
+        using var standardError = new StringWriter();
+        var dispatch = new FirewallServiceCommandHost(capability, inspector)
+            .Execute(arguments, standardOutput, standardError);
+        return new(dispatch, standardOutput.ToString(), standardError.ToString());
+    }
+
+    private static void AssertNoInstallCapabilityCalls(RecordingInstallCapability capability)
+    {
+        Assert.Equal(0, capability.ElevationCalls);
+        Assert.Equal(0, capability.ProcessPathCalls);
+        Assert.Empty(capability.InstalledPaths);
+    }
+
+    private sealed record HostExecution(
+        FirewallServiceCommandDispatch Dispatch,
+        string StandardOutput,
+        string StandardError);
+
+    private sealed class RecordingInstallCapability : IFirewallServiceInstallCapability
+    {
+        public bool Elevated { get; init; }
+        public string? ProcessPath { get; init; }
+        public Exception? InstallException { get; init; }
+        public int ElevationCalls { get; private set; }
+        public int ProcessPathCalls { get; private set; }
+        public List<string> InstalledPaths { get; } = [];
+
+        public bool IsElevated()
+        {
+            ElevationCalls++;
+            return Elevated;
+        }
+
+        public string? GetProcessPath()
+        {
+            ProcessPathCalls++;
+            return ProcessPath;
+        }
+
+        public void Install(string executablePath)
+        {
+            InstalledPaths.Add(executablePath);
+            if (InstallException is not null) throw InstallException;
+        }
+    }
+
+    private sealed class RecordingPathTrustInspector : IServicePathTrustInspector
+    {
+        public PathTrustDecision InspectResult { get; init; } = PathTrustDecision.Allow();
+        public PathTrustDecision RevalidateResult { get; init; } = PathTrustDecision.Allow();
+        public Exception? InspectException { get; init; }
+        public List<string> InspectedPaths { get; } = [];
+        public int RevalidationCount { get; private set; }
+
+        public PathTrustDecision InspectExecutable(string path) =>
+            InspectExecutableEvidence(path).Decision;
+
+        public PathTrustEvidence InspectExecutableEvidence(string path)
+        {
+            InspectedPaths.Add(path);
+            if (InspectException is not null) throw InspectException;
+            return new(
+                InspectResult,
+                path,
+                new Dictionary<string, string>(StringComparer.Ordinal));
+        }
+
+        public PathTrustDecision InspectPolicyStorage(string directory, string policyFile) =>
+            throw new Xunit.Sdk.XunitException("Probe host must not inspect policy storage.");
+
+        public PathTrustDecision Revalidate(PathTrustEvidence evidence)
+        {
+            RevalidationCount++;
+            return RevalidateResult;
         }
     }
 }
@@ -167,12 +557,64 @@ public sealed class FirewallServiceInstallerTests
     [InlineData(PathTrustCode.InspectionFailed)]
     public void Install_TrustDenial_FailsBeforeScm(PathTrustCode code)
     {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
+        var exception = Assert.Throws<ServicePathTrustException>(() =>
             FirewallServiceInstaller.Install(@"C:\untrusted\service.exe", new DenyingInspector(code)));
 
-        Assert.Contains($"[{code}]", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(code, exception.Code);
         Assert.DoesNotContain(@"C:\untrusted\service.exe", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Theory]
+    [InlineData(PathTrustCode.InvalidPath)]
+    [InlineData(PathTrustCode.OutsideProgramData)]
+    [InlineData(PathTrustCode.MissingComponent)]
+    [InlineData(PathTrustCode.ReparsePoint)]
+    [InlineData(PathTrustCode.UntrustedOwner)]
+    [InlineData(PathTrustCode.WritableByUnprivilegedPrincipal)]
+    [InlineData(PathTrustCode.IdentityChanged)]
+    [InlineData(PathTrustCode.InspectionFailed)]
+    public void Install_TrustDenial_NeverCallsInjectedScm(PathTrustCode code)
+    {
+        var scm = new RecordingScm(deleteResult: true);
+
+        Assert.Throws<ServicePathTrustException>(() => FirewallServiceInstaller.Install(
+            @"C:\untrusted\service.exe",
+            new DenyingInspector(code),
+            scm));
+
+        Assert.Equal(0, scm.CreateCalls);
+        Assert.Null(scm.BinaryPath);
+    }
+
+    [Fact]
+    public void InspectAndRevalidateExecutable_UsesOnlyInspectorAndReturnsCanonicalEvidence()
+    {
+        var inspector = new ScriptedInspector(
+            @"C:\canonical\service.exe",
+            PathTrustDecision.Allow(),
+            PathTrustDecision.Allow());
+
+        var evidence = FirewallServiceInstaller.InspectAndRevalidateExecutable(
+            @"C:\syntactic\..\service.exe",
+            inspector);
+
+        Assert.Equal(@"C:\canonical\service.exe", evidence.CanonicalPath);
+        Assert.Equal(1, inspector.InspectEvidenceCalls);
+        Assert.Equal(1, inspector.RevalidationCalls);
+    }
+
+    [Theory]
+    [InlineData(PathTrustCode.InvalidPath, ServicePathTrustDiagnosticCodes.InvalidPath)]
+    [InlineData(PathTrustCode.OutsideProgramData, ServicePathTrustDiagnosticCodes.OutsideMachineData)]
+    [InlineData(PathTrustCode.MissingComponent, ServicePathTrustDiagnosticCodes.MissingComponent)]
+    [InlineData(PathTrustCode.ReparsePoint, ServicePathTrustDiagnosticCodes.ReparsePoint)]
+    [InlineData(PathTrustCode.UntrustedOwner, ServicePathTrustDiagnosticCodes.UntrustedOwner)]
+    [InlineData(PathTrustCode.WritableByUnprivilegedPrincipal, ServicePathTrustDiagnosticCodes.WritableByUnprivileged)]
+    [InlineData(PathTrustCode.IdentityChanged, ServicePathTrustDiagnosticCodes.IdentityChanged)]
+    [InlineData(PathTrustCode.InspectionFailed, ServicePathTrustDiagnosticCodes.InspectionFailed)]
+    [InlineData(PathTrustCode.Trusted, ServicePathTrustDiagnosticCodes.InspectionFailed)]
+    public void InstallTrustDiagnosticCodes_AreClosedAndAllowlisted(PathTrustCode code, string expected) =>
+        Assert.Equal(expected, ServicePathTrustDiagnosticCodes.ForInstallDenial(code));
 
     [Theory]
     [InlineData(PathTrustCode.InvalidPath, "The path is invalid.")]
@@ -267,10 +709,15 @@ public sealed class FirewallServiceInstallerTests
         PathTrustDecision postUse) : IServicePathTrustInspector
     {
         private int _revalidations;
+        public int InspectEvidenceCalls { get; private set; }
+        public int RevalidationCalls => _revalidations;
         public PathTrustDecision InspectExecutable(string path) => PathTrustDecision.Allow();
         public PathTrustDecision InspectPolicyStorage(string directory, string policyFile) => PathTrustDecision.Allow();
-        public PathTrustEvidence InspectExecutableEvidence(string path) =>
-            new(PathTrustDecision.Allow(), canonicalPath, new Dictionary<string, string>());
+        public PathTrustEvidence InspectExecutableEvidence(string path)
+        {
+            InspectEvidenceCalls++;
+            return new(PathTrustDecision.Allow(), canonicalPath, new Dictionary<string, string>());
+        }
         public PathTrustDecision Revalidate(PathTrustEvidence evidence) =>
             Interlocked.Increment(ref _revalidations) == 1 ? preUse : postUse;
     }
@@ -281,9 +728,11 @@ public sealed class FirewallServiceInstallerTests
         bool deleteThrows = false) : IServiceControlManager
     {
         public string? BinaryPath { get; private set; }
+        public int CreateCalls { get; private set; }
         public RecordingRegistration Registration { get; } = new(deleteResult, descriptionThrows, deleteThrows);
         public IServiceRegistration Create(string binaryPath)
         {
+            CreateCalls++;
             BinaryPath = binaryPath;
             return Registration;
         }

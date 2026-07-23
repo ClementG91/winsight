@@ -32,17 +32,33 @@ process ids or display names, which are transient or ambiguous.
   before the SCM call. Missing components, reparse points, owners outside the explicit
   SYSTEM/Administrators policy (TrustedInstaller is accepted only for system ancestors),
   unprivileged write/create/delete/replace rights, and indeterminate inspection deny the
-  operation with a stable code and redacted message.
+  operation with a stable code and redacted message. The two denial points before SCM creation raise
+  a typed `ServicePathTrustException` carrying `PathTrustCode`; the CLI maps it to one of eight fixed
+  `[FW_INSTALL_PATH_*]` allowlisted codes. Unknown/`Trusted` denial values fail closed to
+  `[FW_INSTALL_PATH_INSPECTION_FAILED]`. Generic install/SCM failures remain
+  `[FW_INSTALL_FAILED]`; neither sink prints an exception message or path.
 - ACL evaluation is deterministic and follows DACL order: an earlier applicable Deny ACE
   removes matching dangerous rights before a later Allow is considered, while a later deny
   cannot revoke rights already allowed. Exact SID and well-known broad-group applicability
   are resolved directly; arbitrary group expansion is injectable for tests, and unknown
   membership is never used to turn a dangerous Allow into trust.
-- Inspection produces stable volume/file identities from no-follow handles. The installer
-  revalidates those identities immediately before SCM use and after registration; a
-  mismatch rolls the new registration back. Storage guards similarly bind each load/save
-  to pre-use metadata and post-open/pre-replace identity checks. These checks narrow but
-  do not replace the outstanding adversarial TOCTOU validation in an isolated VM.
+- Inspection obtains `FILE_ID_INFO` from a no-follow `SafeFileHandle` with
+  `GetFileInformationByHandleEx(FileIdInfo)`. The stable identity contains the 64-bit volume serial
+  and the complete 128-bit file identifier, so it does not assume the accepted service path is NTFS
+  or retain the legacy 64-bit ReFS blind spot. Failed, unsupported or partial queries deny
+  inspection; there is no `BY_HANDLE_FILE_INFORMATION`/`Pack = 4` fallback. The blittable ABI is
+  pinned directly: a 16-byte explicit-layout identifier made of two `ulong` values inside a 24-byte
+  sequential `FILE_ID_INFO`, with the outer fields at offsets 0 and 8. Its fixed-width stable string
+  includes all 192 bits deterministically.
+- Ten non-privileged ABI and real-filesystem tests cover those sizes/offsets, unchanged identity,
+  simultaneous distinct files and rename-aside/plant detection. One deterministic sentinel proves
+  the exact 64-bit volume, `Part0` and `Part1` contributions to the fixed-width 192-bit string. The
+  tests deliberately do not require a non-zero volume serial or assume that a deleted identifier
+  cannot be reused later. The installer revalidates identities immediately before SCM use and after
+  registration; storage guards similarly bind each load/save to pre-use metadata and
+  post-open/pre-replace checks. A live adversarial replacement inside the remaining in-process
+  inspection/SCM window is still an isolated-VM gate; the deterministic tests do not claim to close
+  that race.
 - SCM receives only the canonical path carried by the inspected evidence. Registration is
   behind a testable SCM boundary; if post-registration revalidation fails, deletion is
   verified. Every operation after Create, including description configuration, is inside
@@ -122,10 +138,73 @@ process ids or display names, which are transient or ambiguous.
   demand-start; if that last SCM operation fails, filters remain off and AuditOnly remains durable,
   but runtime status becomes `Degraded` and the transition fails. It never reapplies filters.
 
-The following evidence remains blocked pending explicit human execution in an isolated
-Windows VM: real SCM lifecycle and no-call-on-denial observation; owner/DACL and nested
-reparse/TOCTOU cases; standard/elevated/SYSTEM multi-user pipe tokens; WFP enumeration,
-startup recovery and rollback; and IPv4/IPv6/DNS/DHCP/loopback connectivity.
+### Native qualification protocol
+
+- `Test-WfpValidation.ps1` is an isolated-VM protocol, not a production mutation interface. It
+  requires a clean snapshot with no pre-existing WinSight service. Path trust stages only a
+  user-writable sentinel as data, then the already protected candidate executes
+  `install-path-trust-check <sentinel>`. That read-only command shares Install's inspect+revalidate
+  primitive, emits only `[FW_INSTALL_PATH_TRUSTED]`/0 or one closed denial/1, and cannot call SCM/WFP
+  or execute/load the sentinel. No staged service executable or DLL is launched. The candidate's
+  provenance, protected deployment and immutable dependencies are an out-of-band operator trust
+  root, not a self-proof and not an invented ProgramData executable restriction.
+- After the probe, the protocol installs the requested candidate and verifies that SCM's canonical
+  binary path plus `run` verb exactly match `-ServicePath`. Every elevated OS executable is resolved
+  by protected absolute System32 path: `sc.exe`, `curl.exe` and
+  `WindowsPowerShell\v1.0\powershell.exe`; ambient `PATH` is never consulted.
+- Each native exit code remains paired with visible normalized output. The PowerShell adapter turns
+  `ErrorRecord` into its message, collects with `Out-String`, and trims/prefixes lines for display;
+  this is normalized presentation rather than the original native byte stream. Provider, sublayer and permit-filter state is
+  parsed as an exact three-field value; mixed/partial state and non-zero native exits fail. Curl
+  success and blocking each require the expected HTTP code *and* exit code.
+- No manual arming prompt is reachable after a failed pre-arm check or failed connectivity baseline.
+  `-SkipEnforcement` skips WFP arming only: in the VM it still installs/starts the candidate, then
+  stops and uninstalls it and requires SCM error 1060. It is not a machine-read-only mode. The skip
+  path requires exactly 16 checks and the full path 25. The normal non-privileged
+  `ContractSelfTest` passes 24/24; its deliberate lifecycle-order negative control exits 1. The
+  former 14/14 and the first local report based on it are invalid and non-qualifying. The
+  intermediate 15/15 was a transient development count and is not evidence.
+- One `New-ValidationAdapter` constructs the commands, staging, all three lifecycle polls and
+  workflow operations. Real and scripted modes provide only elementary host effects. Scripted
+  effects consume a closed exact ordered queue and reject an unexpected path, argument, order,
+  cardinality or result type; they cannot return a precomputed `PollRunning`, `PollStopped`,
+  `PollAbsent` or any other business decision. Running, Stopped and SCM-absent matrices therefore
+  traverse the same production adapter, including delayed transitions, timeouts, exact ten-attempt
+  bounds and the rule that uninstall is unreachable before Stopped. Effects still produce zero
+  success values and decisions exactly one value of the expected type.
+- Direct mutation refusal is exactly `[FW_DIRECT_MUTATION_DISABLED]` with exit 1 and is followed
+  immediately by an exact absent/absent/absent WFP inventory. Enforcement status, WFP self-test and
+  block-status each require their complete fixed output shape and exit code. System32 curl and the
+  separate System32 Windows PowerShell HTTP control both require 200/exit 0 before arming; when curl
+  is blocked only its exact 000/non-zero result is accepted while the control stays 200/0. Both must
+  return to 200/0 after rollback.
+- Cleanup replaces fixed sleeps with bounded locale-invariant stopped/absent polling. The full flow
+  reaches uninstall only after emergency disable reports AuditOnly, the exact WFP tuple is fully
+  absent and target connectivity is restored. If any rollback proof fails, uninstall is forbidden
+  and the operator is directed to restore the clean VM snapshot.
+- The same injected bounded polling primitive owns delayed Running, Stopped and SCM-absence
+  transitions with exact attempt limits. StartPending is not an immediate failure, and uninstall is
+  never reached before Stopped.
+- `FirewallServiceCommandHost` is the single public CLI composition route. It owns parsing, routing,
+  arity, fixed diagnostic/exit mapping and `TextWriter` channel selection. `Program` constructs the
+  Windows capabilities, invokes `Execute` once and consumes its parsed verb/handled/exit outcome
+  without a parallel Install or path-probe route. The probe handler receives only
+  `IServicePathTrustInspector` and directly invokes the shared inspect/revalidate primitive; it has
+  no install/elevation/process-path/SCM/WFP capability. Portable tests call this same public
+  `Execute` with recording dependencies for trusted, eight-denial, invalid-arity and unexpected
+  failure cases. A non-privileged subprocess smoke traverses the real `Program` root and proves that
+  invalid probe arity yields exact inspection-failed stderr/exit 1 without inspection or machine
+  mutation.
+- The 2026-07-23 x64 transcript from script revision `76b5481` is historical observation only. Its
+  reported 18/18 cannot qualify a production candidate because the old predicates could accept
+  mixed WFP state, skip a failed probe, suppress visible native output and observe a different SCM
+  binary. No corrected candidate-bound x64 or native Arm64 run has been executed.
+
+Qualification status remains explicitly `NOT_RUN`/`BLOCKED` pending human execution in isolated
+VMs: the corrected strict candidate-bound x64 rerun; native Arm64; real SCM lifecycle and
+no-call-on-denial; owner/DACL/nested-reparse/live-TOCTOU; standard/elevated/SYSTEM multi-user pipe
+tokens; native WFP enumeration/startup recovery/rollback; IPv4/IPv6/DNS/DHCP/loopback connectivity;
+and EN/FR/ES human presentation. Local and scripted checks cannot convert any of these to PASS.
 
 - `FirewallPolicyStore` persists a schema-versioned snapshot through a flushed
   temporary file and atomic same-volume replacement. It canonicalizes and
