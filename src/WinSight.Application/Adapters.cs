@@ -286,6 +286,30 @@ public static class Adapters
         }
     }
 
+    /// <summary>
+    /// Diagnostic: reports what the authenticated firewall pipe grants the caller's Windows identity,
+    /// without changing machine state. Prints one stable token line for scripted VM checks. Exit code
+    /// 0 when the service is reachable (any of read-only, can-mutate, or read-only-because-armed),
+    /// 3 when it is not - so a multi-user gate can drive this exe under different tokens and assert
+    /// that an unprivileged caller reads <c>outcome=CanReadOnly</c> while an elevated one may read
+    /// <c>outcome=CanMutate</c>.
+    /// </summary>
+    public static async Task<int> FirewallIpcSelfTestAsync(CancellationToken cancellationToken = default)
+    {
+        var result = await FirewallIpcSelfTest.RunAsync(
+            FirewallServiceAdapter.CreateGateway(), cancellationToken).ConfigureAwait(false);
+
+        Console.WriteLine(
+            "[IPC_SELFTEST] outcome={0} serviceAvailable={1} mode={2} effectiveState={3} mutation={4}",
+            result.Outcome,
+            result.ServiceAvailable.ToString().ToLowerInvariant(),
+            result.Mode,
+            result.EffectiveState,
+            result.MutationProbe?.ToString() ?? "none");
+
+        return result.Outcome == IpcSelfTestOutcome.ServiceUnavailable ? 3 : 0;
+    }
+
     public static ToolReport CameraMic(bool flaggedOnly)
     {
         var usages = new CapabilityAccessReader().Read();
