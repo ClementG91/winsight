@@ -56,11 +56,23 @@ jobs:
           dotnet format winsight.sln --verify-no-changes --no-restore
           ./scripts/Test-VulnerablePackages.ps1
 
+      # Signing happens inside Build-Release.ps1, before archives are compressed and before any
+      # checksum is taken, so every published hash covers the signed bytes. With no certificate
+      # configured the build still succeeds but announces UNSIGNED in the log; set the repository
+      # variable REQUIRE_SIGNED_RELEASE=true to turn a missing certificate into a hard failure so a
+      # release can never silently lose its signature. See docs/RELEASE.md.
       - name: Build release artifacts
         shell: pwsh
+        env:
+          WINSIGHT_SIGNING_CERT_BASE64: ${{ secrets.WINSIGHT_SIGNING_CERT_BASE64 }}
+          WINSIGHT_SIGNING_CERT_PASSWORD: ${{ secrets.WINSIGHT_SIGNING_CERT_PASSWORD }}
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
-          ./scripts/Build-Release.ps1 -Version $version -Architectures ${{ matrix.architecture }}
+          $requireSignature = "${{ vars.REQUIRE_SIGNED_RELEASE }}" -eq "true"
+          ./scripts/Build-Release.ps1 `
+            -Version $version `
+            -Architectures ${{ matrix.architecture }} `
+            -RequireSignature:$requireSignature
 
       - name: Test native installer lifecycle
         shell: pwsh

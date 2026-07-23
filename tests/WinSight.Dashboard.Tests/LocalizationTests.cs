@@ -86,6 +86,81 @@ public sealed class LocalizationTests
         }
     }
 
+    /// <summary>
+    /// Keys whose translation is deliberately byte-identical to English, and why. Everything here is
+    /// either a pure format string with no prose, or a Windows proper noun that must not be
+    /// translated because it names a real registry key or mechanism an operator will search for.
+    /// </summary>
+    private static readonly HashSet<string> DeliberatelyUntranslated = new(StringComparer.Ordinal)
+    {
+        // Pure format strings: placeholders and punctuation only, no words to translate.
+        "ConnectionProcessState",
+        "FindingSelectionFormat",
+        "FirewallRuleTitle",
+        "ModuleLoadedByProcess",
+        "ProcessWithPid",
+        "ProgressFormat",
+        "ResultsSummary",
+        "SensorItemTitle",
+        // Windows mechanism names. Translating these would stop an operator finding them in
+        // regedit, Autoruns or Microsoft's own documentation.
+        "PersistenceVectorActiveSetup",
+        "PersistenceVectorBootExecute",
+        "PersistenceVectorWinlogon",
+        // Words that are genuinely spelled the same in the target language.
+        "InfoSeverity",
+        "RansomwareProtectionShort",
+        "SensorMicrophone",
+    };
+
+    /// <summary>
+    /// The sibling test only proves a translation is non-empty. Copying the English string into
+    /// fr/es satisfies that while shipping an untranslated UI, so a new key can rot in silently.
+    /// This pins the identical set: a new untranslated key fails, and a key that later gets a real
+    /// translation must be removed from the list, which keeps the list from becoming a dumping
+    /// ground.
+    /// </summary>
+    [Theory]
+    [InlineData("fr")]
+    [InlineData("es")]
+    public void SatelliteResource_HasNoUndeclaredUntranslatedString(string cultureName)
+    {
+        var resources = new ResourceManager(
+            "WinSight.Dashboard.Localization.Strings",
+            typeof(LocalizationManager).Assembly);
+        var neutral = resources.GetResourceSet(CultureInfo.InvariantCulture, true, false);
+        var localized = resources.GetResourceSet(CultureInfo.GetCultureInfo(cultureName), true, false);
+
+        Assert.NotNull(neutral);
+        Assert.NotNull(localized);
+
+        var undeclared = new List<string>();
+        foreach (DictionaryEntry entry in neutral)
+        {
+            var key = (string)entry.Key;
+            if (entry.Value is not string english || localized.GetString(key) is not { } translated)
+            {
+                continue;
+            }
+            if (string.Equals(english, translated, StringComparison.Ordinal)
+                && !DeliberatelyUntranslated.Contains(key))
+            {
+                undeclared.Add($"{key} = \"{english}\"");
+            }
+        }
+
+        // Deliberately one-directional. The reverse check - "this key is in the list but is now
+        // translated, so remove it" - cannot be done per-culture against a set that is the union of
+        // both languages: a word identical in French and translated in Spanish would fail it for no
+        // reason. A slightly generous list is a hygiene matter; an untranslated string reaching a
+        // user is the defect worth failing on.
+        Assert.True(
+            undeclared.Count == 0,
+            $"These {cultureName} strings are identical to English but not declared deliberate. "
+            + "Translate them, or add them to DeliberatelyUntranslated with a reason: "
+            + string.Join("; ", undeclared));
+    }
+
     [Theory]
     [InlineData("en")]
     [InlineData("fr")]
