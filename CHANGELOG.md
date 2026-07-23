@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The corrected trust gate passed on a real VM: 11 checks, 0 failures
+- The adversarial service-path trust boundary completed on a clean VM against candidate `f84ac36`,
+  bound to CI run `30032903041`. Recorded in
+  [`docs/validation/2026-07-23-trust-boundary-f84ac36.md`](docs/validation/2026-07-23-trust-boundary-f84ac36.md).
+- Every hostile state returned its correct typed code: user-writable leaf, missing component,
+  TrustedInstaller-owned leaf (`UNTRUSTED_OWNER`, correct by policy), a protected copy (trusted), and
+  a reparse point (`REPARSE_POINT`). The 40-iteration ACL-flip race held both properties together -
+  never trusted while user-writable, always trusted while protected - so the verdict tracks the real
+  security state and never lags into a stale trusted.
+- This closes the adversarial trust/TOCTOU boundary on x64, except the explicit foreign-owner-SID
+  variant, which needs a standard account via `-HostileAccount`. The owner-trust path is already
+  proven by the TrustedInstaller leaf refusal; the remaining variant is one skipped check away.
+
 ### The trust gate met a real VM, and the VM broke the test - correctly
 - The trust-boundary gate ran on a real VM and reported 5 failures. The service was right on every
   one of them; both defects were in the test harness, which is exactly what an adversarial gate is
