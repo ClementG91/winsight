@@ -18,9 +18,15 @@ qualifies nothing. So the first step is not a download, it is a binding.
 
 | Field | Value |
 |---|---|
-| Candidate commit | `e964779b3c485d4ac8127c047d2305d43ab35199` |
-| CI run that built it | `29999452305` |
+| Candidate commit | `f0a3f16d982c4b687b53caeb314f2ce505fa5e91` |
+| CI run that built it | `30024427883` |
 | Artifacts | `winsight-win-x64`, `winsight-win-arm64` |
+
+> [!IMPORTANT]
+> **Do not reuse a package fetched before this commit.** Earlier candidates carry a defect that kills
+> the protocol on its first output call, printing
+> `Result: 0 checks, 1 failure(s). output operation violated the zero-output contract`. If you see
+> that, the package is stale - re-fetch, do not debug it.
 
 > [!WARNING]
 > **The file name lies about the version.** `Directory.Build.props` still reads `0.10.3`, so the
@@ -31,10 +37,10 @@ qualifies nothing. So the first step is not a download, it is a binding.
 Prove the run built the commit you think it did, from any machine:
 
 ```powershell
-gh api repos/ClementG91/winsight/actions/runs/29999452305 --jq '.head_sha, .conclusion'
+gh api repos/ClementG91/winsight/actions/runs/30024427883 --jq '.head_sha, .conclusion'
 ```
 
-It must print `e964779b3c485d4ac8127c047d2305d43ab35199` and `success`. If it does not, stop; you are
+It must print `f0a3f16d982c4b687b53caeb314f2ce505fa5e91` and `success`. If it does not, stop; you are
 about to qualify something else.
 
 ## 2. Prepare a clean VM
@@ -65,7 +71,7 @@ gh auth login --hostname github.com --git-protocol https --web
 ```powershell
 $ProgressPreference = 'SilentlyContinue'
 New-Item -ItemType Directory -Force C:\winsight-dl | Out-Null
-gh run download 29999452305 --repo ClementG91/winsight -n winsight-win-x64 -D C:\winsight-dl
+gh run download 30024427883 --repo ClementG91/winsight -n winsight-win-x64 -D C:\winsight-dl
 ```
 
 On a native Arm64 VM, substitute `-n winsight-win-arm64`. Do not run the x64 package on Arm64 and
