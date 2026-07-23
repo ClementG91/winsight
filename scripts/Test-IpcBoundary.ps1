@@ -67,21 +67,35 @@ function Invoke-Elevated([string]$cli) {
 
 # Launches the same exe under a SAFER basic-user (non-administrator) token. runas /trustlevel needs no
 # password. Output is redirected to a file by a tiny cmd wrapper because the restricted process runs
-# detached; the wrapper avoids nested-quote parsing in runas.
+# detached. The wrapper writes a separate DONE marker only after the diagnostic has fully exited:
+# cmd creates the redirect target the instant the line starts, so waiting on the output file itself
+# would read it empty. Waiting on the marker waits for completion.
 function Invoke-Restricted([string]$cli) {
-    $outFile = Join-Path $env:TEMP ('winsight-ipc-restricted-' + [guid]::NewGuid().ToString('N') + '.txt')
-    $wrapper = Join-Path $env:TEMP ('winsight-ipc-restricted-' + [guid]::NewGuid().ToString('N') + '.cmd')
+    $token = [guid]::NewGuid().ToString('N')
+    $outFile = Join-Path $env:TEMP ("winsight-ipc-out-$token.txt")
+    $doneFile = Join-Path $env:TEMP ("winsight-ipc-done-$token.txt")
+    $wrapper = Join-Path $env:TEMP ("winsight-ipc-run-$token.cmd")
     try {
         Set-Content -Path $wrapper -Encoding Ascii -Value @(
             '@echo off',
-            ('"{0}" firewall-ipc-selftest > "{1}" 2>&1' -f $cli, $outFile))
+            ('"{0}" firewall-ipc-selftest > "{1}" 2>&1' -f $cli, $outFile),
+            ('echo done> "{0}"' -f $doneFile))
         & (Join-Path $env:SystemRoot 'System32\runas.exe') /trustlevel:0x20000 $wrapper | Out-Null
-        for ($i = 0; $i -lt 50 -and -not (Test-Path -LiteralPath $outFile); $i++) { Start-Sleep -Milliseconds 200 }
+        $deadline = (Get-Date).AddSeconds(20)
+        while (-not (Test-Path -LiteralPath $doneFile) -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 200
+        }
+        if (-not (Test-Path -LiteralPath $doneFile)) {
+            return [pscustomobject]@{
+                Outcome = ''; Available = ''; Mutation = ''
+                Raw = '(restricted launch did not complete; is the Secondary Logon service running?)'
+            }
+        }
         $text = if (Test-Path -LiteralPath $outFile) { Get-Content -LiteralPath $outFile -Raw } else { '' }
         return Invoke-SelfTest $text
     }
     finally {
-        Remove-Item -LiteralPath $outFile, $wrapper -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $outFile, $doneFile, $wrapper -Force -ErrorAction SilentlyContinue
     }
 }
 
