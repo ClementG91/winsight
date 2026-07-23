@@ -2,6 +2,18 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The storage trust guard had no coverage at all
+- `FirewallStorageTrustGuard` stands between privileged policy storage and the trust inspector, and
+  coverage measured it at 0%. Nothing would have noticed if it started failing open. Seventeen tests
+  now pin the two properties that make it a guard rather than a pass-through: a lease whose evidence
+  it cannot verify fails closed with `InspectionFailed` without ever consulting the inspector, and
+  revalidation stays bound to the evidence captured at inspection time. Re-inspecting instead would
+  reopen the very TOCTOU window that evidence exists to close.
+- Both properties were mutation-checked: returning the caller's own claim on unverifiable evidence
+  costs 2 tests, re-inspecting instead of using the bound evidence costs 1. `winsight-firewall-service`
+  goes 53.6% to 54.3%, overall production 73.0% to 73.2%. The rest of the uncovered code in that
+  assembly is real SCM and WFP P/Invoke, which needs a privileged VM gate rather than more unit tests.
+
 ### The qualification protocol was broken on purpose, and one gate had never run
 - The previous correction attempt failed review for a reason no green count can surface: two specific
   mutations left every gate passing. Both were re-applied to the new composition and both now fail --
