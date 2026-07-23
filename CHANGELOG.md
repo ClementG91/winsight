@@ -2,6 +2,18 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The IPC gate's restricted leg read the output file a beat too early
+- On a real VM the elevated leg passed cleanly - `outcome=CanMutate`, `mutation=Applied` over the real
+  pipe - but the restricted leg reported three empty observations. The service was fine; the harness
+  read too early. `cmd`'s `>` creates the redirect target the instant the command starts, so waiting
+  on the output file's existence found it immediately, empty, before the diagnostic under the
+  restricted token had written its line.
+- Fixed with a separate DONE marker the wrapper writes only after the diagnostic has fully exited; the
+  script now waits on that marker, not on the output file. Verified on the host: the wait blocks until
+  the restricted process actually finishes (~3s) and then reads the complete line. If the marker never
+  appears within the deadline, the script now says so - and names the Secondary Logon service, whose
+  absence would stop `runas /trustlevel` - rather than reporting empty tokens.
+
 ### A shipped IPC self-test, so the multi-user boundary can be run on a VM
 - The multi-user IPC gate had no runnable end-to-end check because only the dashboard ever spoke to
   the pipe. `winsight firewall-ipc-selftest` is a shipped diagnostic that reports what capability the
