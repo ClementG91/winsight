@@ -387,12 +387,13 @@ function New-ScriptedHostEffects([HostExpectation[]]$expectations, [string]$wind
     $queue = New-Object System.Collections.Queue
     foreach ($expectation in $expectations) { $queue.Enqueue($expectation) }
     $state = [pscustomobject]@{ Mismatch = ''; Calls = (New-Object System.Collections.ArrayList) }
+    $testHostCall = ${function:Test-HostCall}
     $invoke = {
         param([HostCall]$call)
         [void]$state.Calls.Add($call)
         if ($queue.Count -eq 0) { $state.Mismatch = 'unexpected-call'; throw $state.Mismatch }
         $expected = [HostExpectation]$queue.Dequeue()
-        if (-not (Test-HostCall $call $expected.Call)) {
+        if (-not (& $testHostCall $call $expected.Call)) {
             $state.Mismatch = 'expected {0}:{1} [{2}], got {3}:{4} [{5}]' -f
                 $expected.Call.Kind, $expected.Call.Path, ($expected.Call.Arguments -join '|'),
                 $call.Kind, $call.Path, ($call.Arguments -join '|')
@@ -407,6 +408,12 @@ function New-ScriptedHostEffects([HostExpectation[]]$expectations, [string]$wind
 }
 
 function New-ValidationAdapter($HostEffects, [string]$candidateServicePath) {
+    # GetNewClosure() captures variables, never functions. Under `-File` the script is the top-level
+    # scope and a closure can still resolve script functions; invoked with `&` from an existing
+    # session the script gets a child scope and every such call throws "is not recognized". Capturing
+    # the function as a scriptblock local makes the closure carry it either way.
+    $strictCapture = ${function:Invoke-StrictCapture}
+    $testServiceBinding = ${function:Test-ServiceBinding}
     $canonicalPath = [IO.Path]::GetFullPath($candidateServicePath)
     $scPath = Join-Path $HostEffects.WindowsRoot 'System32\sc.exe'
     $targetPath = Join-Path $HostEffects.WindowsRoot 'System32\curl.exe'
@@ -418,14 +425,14 @@ function New-ValidationAdapter($HostEffects, [string]$candidateServicePath) {
     $hostDecision = {
         param([string]$kind, [string]$path, [string[]]$arguments, [type]$expectedType)
         $call = [HostCall]::new($kind, $path, $arguments)
-        $capture = Invoke-StrictCapture $HostEffects.Invoke $expectedType 1 @($call)
+        $capture = & $strictCapture $HostEffects.Invoke $expectedType 1 @($call)
         if (-not $capture.Valid) { throw ('Host decision contract failed: {0}' -f $capture.Reason) }
         return $capture.Value
     }.GetNewClosure()
     $hostEffect = {
         param([string]$kind, [string]$path, [string[]]$arguments)
         $call = [HostCall]::new($kind, $path, $arguments)
-        $capture = Invoke-StrictCapture $HostEffects.Invoke $null 0 @($call)
+        $capture = & $strictCapture $HostEffects.Invoke $null 0 @($call)
         if (-not $capture.Valid) { throw ('Host effect contract failed: {0}' -f $capture.Reason) }
     }.GetNewClosure()
     $observe = { return (& $hostDecision 'ObserveService' $serviceName @() ([ServiceObservation])) }.GetNewClosure()
@@ -482,7 +489,7 @@ function New-ValidationAdapter($HostEffects, [string]$candidateServicePath) {
         }.GetNewClosure()
         CleanSnapshot = { $query = & $native $scPath @('query', $serviceName); return [bool]($query.ExitCode -eq 1060) }.GetNewClosure()
         Install = { return (& $native $canonicalPath @('install')) }.GetNewClosure()
-        Binding = { $observation = [ServiceObservation](& $observe); return [bool]($observation.Found -and (Test-ServiceBinding $observation.PathName $canonicalPath)) }.GetNewClosure()
+        Binding = { $observation = [ServiceObservation](& $observe); return [bool]($observation.Found -and (& $testServiceBinding $observation.PathName $canonicalPath)) }.GetNewClosure()
         Start = { return (& $native $scPath @('start', $serviceName)) }.GetNewClosure()
         PollRunning = { return [bool](& $pollLifecycle 'State' 'Running') }.GetNewClosure()
         Audit = { return (& $native $canonicalPath @('enforce-status')) }.GetNewClosure()
@@ -673,7 +680,8 @@ function New-ScriptedPlan(
 function Invoke-ScriptedPlan($plan, [switch]$QuietFailure) {
     $effects = New-ScriptedHostEffects $plan.Expectations
     $adapter = New-ValidationAdapter $effects $plan.Paths.Candidate
-    $invoke = { return Invoke-WfpValidationWorkflow $adapter -SkipEnforcement:(-not $plan.Full) }.GetNewClosure()
+    $runWorkflow = ${function:Invoke-WfpValidationWorkflow}
+    $invoke = { return & $runWorkflow $adapter -SkipEnforcement:(-not $plan.Full) }.GetNewClosure()
     $capture = Invoke-StrictCapture $invoke ([WorkflowResult]) 1
     $result = if ($capture.Valid) { [WorkflowResult]$capture.Value } else { $null }
     $ok = $capture.Valid -and

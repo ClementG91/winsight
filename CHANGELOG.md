@@ -2,6 +2,29 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The qualification protocol died on a real VM while the contract read 24/24
+- Run on an actual VM the way an operator runs a script - `& 'C:\...\Test-WfpValidation.ps1'` from an
+  open elevated console - the protocol died on its very first output call:
+  `Result: 0 checks, 1 failure(s). output operation violated the zero-output contract`, with
+  `Invoke-StrictCapture is not recognized` underneath. Every local gate was green at the time.
+- Cause: `GetNewClosure()` captures variables, never functions. Under `-File` the script is the
+  top-level scope and a closure can still resolve the script's own functions. Invoked with `&` from
+  an existing session the script gets a child scope, and every function call inside a closure throws.
+  The adapter is built entirely from such closures, so the whole protocol was one invocation style
+  away from not running at all. Confirmed with a five-line reproduction before anything was changed.
+- Fixed at the five call sites an AST sweep identified, by capturing the function as a scriptblock
+  local that the closure can carry. The same sweep now reports zero remaining, and no other script in
+  `scripts/` uses closures at all.
+- The real defect was the blind spot, not the bug. `-File` was the only mode ever executed, and the
+  contract self-test only ever builds *scripted* host effects - `New-RealHostEffects` and the real
+  adapter closures were never run by any test. Both gaps are closed: the contract now runs under both
+  invocation modes, and a new test drives the real adapter against a candidate path that does not
+  exist, so it stops in the precondition block. Every SCM operation lives strictly after that check,
+  so it stays safe even on an elevated runner.
+- Reintroducing the defect fails both new call-operator cases, and the real-adapter one reproduces the
+  VM's output string exactly. The first attempt at that mutation only reverted one of the two sites
+  and produced a single failure - a half-applied mutation proves half as much as it appears to.
+
 ### Two independent reviews came back, and their findings are closed
 - Fresh independent security and quality reviews of the AC85-AC89 candidate both returned PASS_LOCAL
   with no CRITICAL or HIGH finding. Both independently reproduced the two mutations this milestone
