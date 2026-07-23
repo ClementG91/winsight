@@ -16,14 +16,22 @@ using WinSight.NetMonitor;
 // Verbs:
 //   run         host the service (how the SCM and console debugging start it) [default]
 //   install     register the Windows service (Administrator required)
+//   install-path-trust-check <path>  inspect a path as data without SCM/WFP or elevation
 //   uninstall   remove the Windows service (Administrator required)
 //   status      report whether the service is installed
 //
 // The service is opt-in: the per-user application setup never installs it.
 
-return await (FirewallServiceCommandLine.Parse(args) switch
+var commandDispatch = new FirewallServiceCommandHost(
+    new WindowsFirewallServiceInstallCapability(),
+    new WindowsServicePathTrustInspector()).Execute(args, Console.Out, Console.Error);
+if (commandDispatch.Handled)
 {
-    FirewallServiceVerb.Install => Task.FromResult(Install()),
+    return commandDispatch.ExitCode;
+}
+
+return await (commandDispatch.Verb switch
+{
     FirewallServiceVerb.Uninstall => Task.FromResult(Uninstall()),
     FirewallServiceVerb.Status => Task.FromResult(Status()),
     FirewallServiceVerb.WfpSelfTest => Task.FromResult(WfpProbe()),
@@ -43,37 +51,6 @@ return await (FirewallServiceCommandLine.Parse(args) switch
     FirewallServiceVerb.Unknown => Task.FromResult(Usage()),
     _ => RunHostAsync(),
 }).ConfigureAwait(false);
-
-static int Install()
-{
-    if (!FirewallServiceInstaller.IsElevated())
-    {
-        Console.Error.WriteLine(
-            "Installing the WinSight firewall service requires an elevated (Administrator) console.");
-        return 1;
-    }
-
-    var executable = Environment.ProcessPath;
-    if (string.IsNullOrEmpty(executable))
-    {
-        Console.Error.WriteLine("Could not resolve the service executable path.");
-        return 1;
-    }
-
-    try
-    {
-        FirewallServiceInstaller.Install(executable);
-        Console.WriteLine(
-            $"Installed '{FirewallServiceInstaller.DisplayName}' (demand-start; enforcement is opt-in and runtime state is reported separately).");
-        Console.WriteLine($"Start it with:  sc start {FirewallServiceInstaller.ServiceName}");
-        return 0;
-    }
-    catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-    {
-        Console.Error.WriteLine("[FW_INSTALL_FAILED]");
-        return 1;
-    }
-}
 
 static int DisabledLowLevelMutation()
 {
@@ -272,7 +249,7 @@ static FirewallPolicyStore CreateTrustedStore() => new(
 static int Usage()
 {
     Console.Error.WriteLine(
-        "Usage: winsight-firewall-service [run|install|uninstall|status|wfp-selftest|wfp-status|wfp-block-status <path>|enforce-status]");
+        "Usage: winsight-firewall-service [run|install|install-path-trust-check <path>|uninstall|status|wfp-selftest|wfp-status|wfp-block-status <path>|enforce-status]");
     Console.Error.WriteLine(
         "Direct mutation aliases (wfp-provision/deprovision/filter-add/filter-remove/block-add/block-remove, enforce-enable/disable, block-app, allow-app) are disabled; use the authenticated service IPC through the dashboard.");
     return 2;

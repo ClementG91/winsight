@@ -18,7 +18,7 @@ Two structural differences shape everything below:
 |---|---|---|---|
 | **BlockBlock** | Real-time persistence alerts | **Guardian** — ~17 live registry/file surfaces, tray alert, journalled | **Parity.** Cannot block the write (driver). |
 | **KnockKnock** | One-shot persistence enumeration | **Persistence scan** — 22 autostart surfaces with signature verdicts | **Parity, arguably ahead** (more surfaces, Authenticode + catalog). |
-| **LuLu** | Per-app outbound firewall | **Outbound firewall** — WFP per-app, enforcement opt-in, survives reboot | **Parity.** Real blocking, no driver needed — [validated end-to-end on an x64 VM](validation/2026-07-23-firewall-enforcement-x64.md), per-app scoping included. |
+| **LuLu** | Per-app outbound firewall | **Outbound firewall** — WFP per-app, enforcement opt-in, survives reboot | **Feature parity in code; native qualification pending.** A [historical x64 observation](validation/2026-07-23-firewall-enforcement-x64.md) recorded per-app blocking, but it is not a strict production gate. Corrected candidate-bound x64 and native Arm64 runs remain pending. |
 | **RansomWhere?** | Ransomware behaviour detection | **Ransomware protection** — canaries, rename/delete burst, entropy-on-write, opt-in | **Parity.** Cannot halt the process mid-encryption (driver). |
 | **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** — live, tray alert, journalled | **Parity** (the host landed 2026-07-21; the detector predated it). |
 | **Netiquette** | Network connection list | **Connections scan** — with process attribution | **Parity.** |
@@ -28,6 +28,21 @@ Two structural differences shape everything below:
 | **DHS** | Dylib hijack scanner | **Hijack scan** — unquoted command lines, writable service directories and PATH entries, and **phantom imports**; **modules scan** flags unsigned/untrusted loaded modules | **Parity, arguably ahead.** DHS finds weak/rpath dylibs; the Windows equivalents are all covered, each graded by real exploitability on this machine. |
 | **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | **Presence scan** — resume timeline with Windows' wake source, flagging only wakes attributable to a human hand | **Parity, with a narrower honest claim.** A lid open is unambiguous; a Windows wake source is `Unknown` half the time, and the scan says so rather than guessing. |
+
+Firewall qualification remains explicitly `NOT_RUN`/`BLOCKED`: corrected candidate-bound x64,
+native Arm64, real SCM/WFP, owner/DACL/nested-reparse/live-TOCTOU, connectivity and EN/FR/ES human
+presentation have not passed their isolated-VM gates. The feature comparison above and historical
+x64 observation do not imply production readiness. The current local protocol's normal contract
+self-test is 24/24 and its deliberate lifecycle-order negative control exits 1, but those
+non-privileged checks do not promote any native gate. The former 14/14 and historical 18/18 remain
+invalid as qualification; the intermediate 15/15 was transient and is not evidence. One production
+validation adapter now owns commands, staging and all three lifecycle polls while real/scripted modes
+inject only elementary host effects through a closed exact queue. One public command host is likewise
+shared by `Program` and probe tests; its probe handler has inspection capability only, with a
+non-privileged invalid-arity subprocess smoke covering the real root. The path boundary still uses a
+protected candidate to inspect only a user-writable sentinel; no staged service or DLL is executed.
+That candidate remains an operator-provided trust-root prerequisite, not something the probe can
+prove about itself.
 
 ### What WinSight has that Objective-See does not
 
@@ -250,13 +265,17 @@ timeline you consult when you suspect somebody was at your desk, not a routine c
 
 ## The bar this sets
 
-Beating Objective-See on Windows is not a checklist race. WinSight is now at parity or ahead on the
-eight tools that matter most — persistence × 2, firewall, ransomware, camera/mic, keyboard
-interception, kernel drivers and hijack analysis — while being one app instead of eight, with an MCP
-server, an alert journal and four scanners Objective-See has no equivalent for.
+Beating Objective-See on Windows is not a checklist race. WinSight has feature coverage at parity or
+ahead on the eight tools that matter most — persistence × 2, firewall, ransomware, camera/mic,
+keyboard interception, kernel drivers and hijack analysis — while being one app instead of eight,
+with an MCP server, an alert journal and four scanners Objective-See has no equivalent for. That is
+a product-capability comparison, not a claim that every privileged path is production-qualified:
+the firewall still needs the strict candidate-bound x64 and native Arm64 gates.
 
-**Every tool on the list above is now at parity or ahead**, in one app instead of eight, with an MCP
-server, an alert journal, four scanners Objective-See has no equivalent for, and three languages.
+**Every tool on the list above now has parity-or-better feature coverage**, in one app instead of
+eight, with an MCP server, an alert journal, four scanners Objective-See has no equivalent for, and
+three languages. The wording does not convert the historical x64 observation into production
+qualification.
 
 What is left is not parity work. It is depth: the elevated resident-driver pass, boot-configuration
 context for the driver findings, per-device-instance input filters, and runtime observation for the
