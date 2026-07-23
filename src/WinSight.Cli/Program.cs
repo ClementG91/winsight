@@ -48,6 +48,15 @@ if (command == "dns" && args.Contains("--watch"))
     return Adapters.WatchDns();
 }
 
+// Undocumented diagnostic, like the dashboard's --smoke-test: reports what the authenticated
+// firewall pipe grants this caller's identity, without changing machine state. Used by the VM
+// multi-user IPC gate to prove an unprivileged caller is refused a mutation. Not a scanner, so it
+// is intentionally absent from the --help catalog and the snapshot dispatcher.
+if (command == "firewall-ipc-selftest")
+{
+    return await Adapters.FirewallIpcSelfTestAsync();
+}
+
 // `process` takes an argument, so it cannot go through Adapters.Run like the snapshot scanners.
 // A bad or absent pid is a usage error, reported as one rather than scanned for.
 if (command == "process")

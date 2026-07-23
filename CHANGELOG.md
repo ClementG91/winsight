@@ -2,6 +2,24 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### A shipped IPC self-test, so the multi-user boundary can be run on a VM
+- The multi-user IPC gate had no runnable end-to-end check because only the dashboard ever spoke to
+  the pipe. `winsight firewall-ipc-selftest` is a shipped diagnostic that reports what capability the
+  authenticated pipe grants the caller's identity, over the real client the dashboard uses, without
+  changing machine state. It reads status, and its single mutation probe removes the policy for a
+  path that is never a real application - a no-op for an authorized caller, refused before dispatch
+  for an unauthorized one - and is skipped entirely when the machine is armed, because a diagnostic
+  must never reconcile WFP on a live machine.
+- The classification is mutation-verified: removing the armed-machine guard makes the safety test
+  fail, and swapping the `Unauthorized -> CanReadOnly` mapping makes the boundary test fail. Five
+  unit tests drive the real gateway through a fake client.
+- `Test-IpcBoundary.ps1` (VM-only, shipped in the package) runs two passes against one service: the
+  elevated console (expected to mutate, or read an armed machine), and the same executable under a
+  SAFER basic-user token via `runas /trustlevel` - password-free, no second account. The restricted
+  leg is the security-critical one: an unprivileged caller must read status yet be refused the
+  mutation (`outcome=CanReadOnly`, `mutation=Unauthorized`). No closures, ASCII, verified under
+  Windows PowerShell 5.1 through both `-File` and the call operator.
+
 ### The pipe ACL could be widened without any test noticing
 - The multi-user IPC boundary rests on the named-pipe DACL (SYSTEM and Administrators full, Interactive
   read/write, Network denied) and on the per-caller capability mapping. The DACL test asserted the

@@ -193,6 +193,36 @@ whole capture. Windows PowerShell 5.1 decorates native stderr merged with `2>&1`
 `Au caractere ... + $raw = ...`), and a real VM run failed five checks on that decoration while the
 service was entirely correct. The decoration is not part of the verdict.
 
+### 4.5 Multi-user IPC boundary (elevated + a restricted token, read-only)
+
+This proves the authenticated pipe grants the right capability per caller: an unprivileged caller may
+read status but is refused a policy mutation. It needs the service **installed and running** (its
+pipe present) - install it with the pre-arm step (4.2) first, or leave it running from that step.
+Nothing here changes machine state; the diagnostic reads, and its one mutation probe removes the
+policy for a path that is never a real application (a no-op for an authorized caller) and is skipped
+entirely when the machine is armed.
+
+```powershell
+& 'C:\Program Files\WinSight-VM\Test-IpcBoundary.ps1'
+```
+
+It runs two passes against the one running service:
+
+- **elevated** - the current administrator console. Expected `outcome=CanMutate` (or
+  `ReadableMutateSkipped` if you left the machine armed).
+- **restricted** - the same `winsight.exe` under a SAFER basic-user token via `runas /trustlevel`,
+  password-free. This is the security-critical leg: `outcome=CanReadOnly` and `mutation=Unauthorized`.
+  A restricted caller that could mutate, or that could not even read, would be a defect.
+
+Expect **7 checks, 0 failures**. If the elevated pass reports `serviceAvailable=false`, the service
+is not running - install and start it with the pre-arm step and re-run.
+
+You can also run the diagnostic directly under any token to see one line:
+
+```powershell
+winsight firewall-ipc-selftest
+```
+
 ## 5. Record the result
 
 A run nobody can replay is a story. Capture the full transcript:
