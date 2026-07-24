@@ -124,13 +124,13 @@ jobs:
             release-assets/*-setup.exe
 
       - name: Attest x64 SBOM
-        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: release-assets/winsight-${{ github.ref_name }}-win-x64.zip
           sbom-path: release-assets/winsight-${{ github.ref_name }}-win-x64.spdx.json
 
       - name: Attest Arm64 SBOM
-        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
           subject-path: release-assets/winsight-${{ github.ref_name }}-win-arm64.zip
           sbom-path: release-assets/winsight-${{ github.ref_name }}-win-arm64.spdx.json
