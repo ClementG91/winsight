@@ -18,7 +18,7 @@ Two structural differences shape everything below:
 |---|---|---|---|
 | **BlockBlock** | Real-time persistence alerts | **Guardian** — ~17 live registry/file surfaces, tray alert, journalled | **Parity.** Cannot block the write (driver). |
 | **KnockKnock** | One-shot persistence enumeration | **Persistence scan** — 22 autostart surfaces with signature verdicts | **Parity, arguably ahead** (more surfaces, Authenticode + catalog). |
-| **LuLu** | Per-app outbound firewall | **Outbound firewall** — WFP per-app, enforcement opt-in, survives reboot | **Feature parity in code; native qualification pending.** A [historical x64 observation](validation/2026-07-23-firewall-enforcement-x64.md) recorded per-app blocking, but it is not a strict production gate. Corrected candidate-bound x64 and native Arm64 runs remain pending. |
+| **LuLu** | Per-app outbound firewall | **Outbound firewall** — WFP per-app, enforcement opt-in, survives reboot | **Feature parity in code; privileged x64 gates qualified, native Arm64 pending.** The corrected candidate-bound x64 records cover WFP/SCM/rollback/per-app scoping, adversarial trust and IPC. They do not establish product-wide production readiness. |
 | **RansomWhere?** | Ransomware behaviour detection | **Ransomware protection** — canaries, rename/delete burst, entropy-on-write, opt-in | **Parity.** Cannot halt the process mid-encryption (driver). |
 | **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** — live, tray alert, journalled | **Parity** (the host landed 2026-07-21; the detector predated it). |
 | **Netiquette** | Network connection list | **Connections scan** — with process attribution | **Parity.** |
@@ -29,18 +29,24 @@ Two structural differences shape everything below:
 | **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | **Presence scan** — resume timeline with Windows' wake source, flagging only wakes attributable to a human hand | **Parity, with a narrower honest claim.** A lid open is unambiguous; a Windows wake source is `Unknown` half the time, and the scan says so rather than guessing. |
 
-Firewall qualification remains explicitly `NOT_RUN`/`BLOCKED`: corrected candidate-bound x64,
-native Arm64, real SCM/WFP, owner/DACL/nested-reparse/live-TOCTOU, connectivity and EN/FR/ES human
-presentation have not passed their isolated-VM gates. The feature comparison above and historical
-x64 observation do not imply production readiness. The current local protocol's normal contract
-self-test is 24/24 and its deliberate lifecycle-order negative control exits 1, but those
-non-privileged checks do not promote any native gate. The former 14/14 and historical 18/18 remain
-invalid as qualification; the intermediate 15/15 was transient and is not evidence. One production
-validation adapter now owns commands, staging and all three lifecycle polls while real/scripted modes
-inject only elementary host effects through a closed exact queue. One public command host is likewise
-shared by `Program` and probe tests; its probe handler has inspection capability only, with a
-non-privileged invalid-arity subprocess smoke covering the real root. The path boundary still uses a
-protected candidate to inspect only a user-writable sentinel; no staged service or DLL is executed.
+The corrected candidate-bound x64 gates are real: WFP enforcement, SCM lifecycle, rollback,
+connectivity and per-app scoping passed 25/25 on `f0a3f16`; adversarial path trust passed 11/11 on
+`f84ac36`; and the multi-user IPC capability boundary passed 7/7 on `c9177cd`. Each record qualifies
+its exact candidate. Applying it to a later revision requires a candidate-aware delta review of the
+relevant surface and a rerun when that surface changed or the impact is uncertain. The former 14/14
+and historical 18/18 remain invalid as qualification; the intermediate 15/15 was transient and is
+not evidence.
+
+Product-wide production readiness is nevertheless not established. Native Arm64 privileged
+behaviour, the foreign-owner-SID trust case, dedicated unelevated-administrator and network-logon IPC
+sessions, real Authenticode signing and external release/deployment remain open.
+
+The current local protocol's 24/24 contract self-test and deliberate exit-1 negative control preserve
+portable regression evidence but cannot promote candidate CI, CodeQL, package, signing,
+privileged-runtime, release qualification or any other separate technical gate.
+
+User attestation for EN/FR/ES human presentation was completed on 2026-07-26; this is not independent
+evidence.
 That candidate remains an operator-provided trust-root prerequisite, not something the probe can
 prove about itself.
 
@@ -49,6 +55,11 @@ prove about itself.
 - **An MCP server**, so any LLM can run the read-only scanners and read the detection history.
 - **DNS cache, browser extensions, trusted-root certificates, hosts file** scanners.
 - **A local alert journal** surviving suppressed toasts, surfaced in-app and over MCP.
+- **A Controlled Folder Access posture report.** RansomWhere? detects; it does not point you at an OS
+  blocker, because macOS has no built-in equivalent. Windows does, and WinSight — which likewise
+  cannot block without a driver — reports Defender Controlled Folder Access's configured and
+  observed operational posture and links to the Windows control. It does not treat a configured
+  value alone as proof that a particular write will be blocked.
 - **Three languages**, and a single unified UI.
 
 ## What is missing, in priority order
@@ -269,13 +280,13 @@ Beating Objective-See on Windows is not a checklist race. WinSight has feature c
 ahead on the eight tools that matter most — persistence × 2, firewall, ransomware, camera/mic,
 keyboard interception, kernel drivers and hijack analysis — while being one app instead of eight,
 with an MCP server, an alert journal and four scanners Objective-See has no equivalent for. That is
-a product-capability comparison, not a claim that every privileged path is production-qualified:
-the firewall still needs the strict candidate-bound x64 and native Arm64 gates.
+a product-capability comparison, not a product-readiness verdict: the corrected x64 privileged gates
+are qualified, while native Arm64 and the remaining product-level gates are still open.
 
 **Every tool on the list above now has parity-or-better feature coverage**, in one app instead of
 eight, with an MCP server, an alert journal, four scanners Objective-See has no equivalent for, and
-three languages. The wording does not convert the historical x64 observation into production
-qualification.
+three languages. The wording does not convert feature parity or the three real x64 records into a
+product-wide production-readiness claim.
 
 What is left is not parity work. It is depth: the elevated resident-driver pass, boot-configuration
 context for the driver findings, per-device-instance input filters, and runtime observation for the

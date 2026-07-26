@@ -34,7 +34,7 @@ public static class McpCatalog
         new("certs", "Trusted root certificates and risky trust-store properties.", true),
         new("hosts", "Hosts-file redirects and security-service blocking signals.", true),
         new("input", "Kernel drivers positioned to see every keystroke or mouse movement.", true),
-        new("integrity", "Whether driver signing, memory integrity and Secure Boot are actually enforced.", true),
+        new("integrity", "Configured and operational posture for driver signing, memory integrity, Secure Boot and Defender Controlled Folder Access (the ransomware shield); this is not a guarantee of enforcement.", true),
         new("drivers", "Registered kernel-mode drivers, their load disposition and signature verdicts.", false),
         new("hijack", "Services whose unquoted command line lets an earlier executable run in their place.", true),
         new("presence", "Resume-from-sleep history, and which wakes indicate someone was physically at the machine.", false),

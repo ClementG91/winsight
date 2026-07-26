@@ -3,6 +3,12 @@
     <RootNamespace>WinSight.Ransomware</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <!-- Controlled Folder Access posture is read from the Defender WMI provider (MSFT_MpPreference),
+         the same source Get-MpPreference uses. Version is pinned centrally in Directory.Packages.props. -->
+    <PackageReference Include="System.Management" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="WinSight.Ransomware.Tests" />
+    <InternalsVisibleTo Include="WinSight.Application.Tests" />
   </ItemGroup>
 </Project>

@@ -42,8 +42,9 @@ jobs:
   #
   # Why a matrix at all: until the scanners were executed end to end, the suite could not tell
   # whether WinSight works anywhere but a developer's desk. It now runs all fifteen for real, and
-  # that evidence is only worth what the machine underneath it is worth. `windows-latest` resolves
-  # to Server 2025; `windows-2022` is a genuinely different build, with a different registry layout
+  # that evidence is only worth what the machine underneath it is worth. `windows-2025` is pinned
+  # explicitly rather than following the moving `windows-latest` label; `windows-2022` is a
+  # genuinely different build, with a different registry layout
   # and a different set of components present. A scanner that reads a key one of them does not have
   # fails here rather than at a user.
   #
@@ -53,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, windows-2022]
+        os: [windows-2025, windows-2022]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -80,6 +81,15 @@ jobs:
       - name: Build
         run: dotnet build winsight.sln -c Release --no-restore
 
+      # This exercises the built CLI's read-only Controlled Folder Access provider contract. Keep
+      # its proof per matrix leg so a failure can be diagnosed without conflating runner evidence.
+      - name: Verify Controlled Folder Access provider
+        shell: pwsh
+        run: |
+          ./scripts/Test-CfaProvider.ps1 `
+            -CliPath "src/WinSight.Cli/bin/Release/net10.0-windows10.0.19041.0/winsight.exe" `
+            -OutputPath "out/cfa-provider/${{ matrix.os }}.json"
+
       # Runs the suite once, with coverage, and fails when an engine library drops below the bar the
       # project claims. Previously this was a plain `dotnet test` and Measure-Coverage.ps1 was never
       # invoked by any workflow, so engine coverage could regress to zero without a red build.
@@ -98,6 +108,7 @@ jobs:
           path: |
             **/TestResults/*.trx
             out/coverage/**/*.trx
+            out/cfa-provider/${{ matrix.os }}.json
           if-no-files-found: ignore
 
   # The status-check name main's branch protection requires.

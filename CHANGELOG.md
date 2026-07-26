@@ -2,6 +2,42 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### v0.10.4 public unsigned-release waiver
+- The user explicitly authorized a public **unsigned** v0.10.4 release on 2026-07-26. No production
+  Authenticode certificate is configured, so the release is expected to trigger the normal Windows
+  unknown-publisher warning.
+- This one-release waiver does not establish the Authenticode production chain or product-wide
+  production readiness. It preserves the recorded local `PASS_LOCAL` / global not-production-ready
+  distinction and closes no privileged Arm64 or other independent gate.
+
+### The ransomware shield WinSight cannot be: it now reports whether Windows' can
+- WinSight's ransomware feature detects an encryption wave with decoys and heuristics, in user mode,
+  and by design **cannot block** the write — halting a process mid-encryption needs a signed kernel
+  minifilter WinSight does not ship. Windows already has that blocker: Microsoft Defender's
+  **Controlled Folder Access** refuses untrusted writes to Documents, Pictures and Desktop at the
+  kernel. The gap was that nothing told an operator whether it was switched on — measured on the
+  development machine, it was **off**, and WinSight's own detection was the only thing standing there.
+- The `integrity` scan (already in the balanced overview) now carries Controlled Folder Access's
+  configured and observed operational posture beside driver signing, memory integrity and Secure Boot.
+  Disabled, audit and disk-modification-only modes are `Notable`, with the Windows Security deep link
+  (`windowsdefender://RansomwareProtection`) for operator review. `Protecting` requires Enabled plus
+  Defender `AMRunningMode=Normal`, antivirus enabled and real-time protection enabled; this is not a
+  guarantee that every attempted write is blocked.
+- **Read-only, and it stays that way.** The posture is read from the Defender WMI provider
+  (`MSFT_MpPreference`/`MSFT_MpComputerStatus`, the same source as `Get-MpPreference`), without
+  elevation. WinSight reports the setting and points at the Windows control; it never changes Defender
+  configuration itself — the operator flips it. This keeps the "everything observes, nothing acts"
+  posture: the only WinSight features that write anything remain the opt-in firewall and the ransomware
+  decoys.
+- Runtime evidence that is passive, disabled, missing or contradictory is never used to infer that a
+  third-party product owns protection; it simply does not establish a Defender-protecting posture.
+  The provider may refuse the **allowed-applications** list to a non-elevated caller, so that carve-out
+  list is marked "requires elevation" rather than shown as empty; malformed or unavailable list data
+  makes the overall posture unavailable. A successfully read unsupported CFA mode remains a distinct
+  notable unknown mode with its numeric value; a missing or failing provider produces `Unavailable`. Pure
+  `ControlledFolderAccessTriage` and the SELECT-only WMI reader (finite enumeration timeout and no
+  explicit scope connect) are split for deterministic tests without depending on the host's Defender state.
+
 ### The signature requirement now applies to the person who can violate it
 - `main` required signed commits and did not get them: three commits from a `--rebase` merge landed
   unsigned. The rule was real, the enforcement was not - `enforce_admins` was false, so branch

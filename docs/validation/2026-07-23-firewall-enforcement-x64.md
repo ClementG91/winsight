@@ -11,8 +11,9 @@
 > `Test-WfpValidation.ps1` revision `76b5481`. Its reported **18/18** is invalid as strict evidence:
 > that revision could accept mixed WFP state, skip a path-trust probe whose staging failed, ignore
 > native failures or hide visible native output, and observe a pre-existing service registered to a different
-> binary. The transcript still records useful x64 behavior, but no corrected candidate-bound x64 or
-> native Arm64 rerun has occurred.
+> binary. The transcript still records useful x64 behavior. At the time of this execution, no
+> corrected candidate-bound x64 or native Arm64 rerun had occurred; the superseding note above links
+> the later strict x64 25/25 record.
 
 CI cannot cover the part of the firewall that reaches WFP through P/Invoke and cuts real traffic.
 This file therefore preserves what the 2026-07-23 run printed, including its limitations, rather
@@ -67,10 +68,12 @@ candidate.
   open — see [`ARM64_VALIDATION.md`](../ARM64_VALIDATION.md).
 - **The adversarial TOCTOU race** on service-path trust (WFP_DESIGN.md) is a separate, narrower
   validation and is not exercised here.
-- **`NOT_RUN`/`BLOCKED`: strict candidate qualification.** The corrected protocol has not run on a
-  clean x64 VM or native Arm64 VM. Real SCM/WFP, owner/DACL/nested-reparse/live-TOCTOU, connectivity
-  and EN/FR/ES human-presentation gates also remain blocked; this historical transcript closes none
-  of them.
+- User attestation for EN/FR/ES human presentation was completed on 2026-07-26; this is not
+  independent evidence and does not change the historical limitations of this transcript.
+- **This transcript closes no strict gate.** A corrected candidate-bound x64 protocol later passed
+  25/25 on `f0a3f16`, as linked by the superseding note above; separate trust and IPC records later
+  passed 11/11 on `f84ac36` and 7/7 on `c9177cd`. Native Arm64 and the named hostile-user sub-cases
+  remain open.
 
 ## Reproduce
 

@@ -163,6 +163,38 @@ public sealed class FirewallServiceCommandHostTests
     }
 
     [Theory]
+    [MemberData(nameof(InvalidInstallArguments))]
+    public void Execute_InvalidInstallArityFailsClosedBeforeAnyCapability(
+        IReadOnlyList<string> arguments)
+    {
+        var capability = new RecordingInstallCapability
+        {
+            Elevated = true,
+            ProcessPath = ProbePath,
+        };
+        var inspector = new RecordingPathTrustInspector();
+
+        var execution = Execute(capability, inspector, arguments);
+
+        Assert.Equal(FirewallServiceVerb.Install, execution.Dispatch.Verb);
+        Assert.True(execution.Dispatch.Handled);
+        Assert.Equal(1, execution.Dispatch.ExitCode);
+        Assert.Empty(execution.StandardOutput);
+        Assert.Equal("[FW_INSTALL_FAILED]" + Environment.NewLine, execution.StandardError);
+        AssertNoInstallCapabilityCalls(capability);
+        Assert.Empty(inspector.InspectedPaths);
+        Assert.Equal(0, inspector.RevalidationCount);
+    }
+
+    public static TheoryData<IReadOnlyList<string>> InvalidInstallArguments()
+    {
+        var invalidArguments = new TheoryData<IReadOnlyList<string>>();
+        invalidArguments.Add(["install", "unexpected"]);
+        invalidArguments.Add(["INSTALL", "unexpected", "another-unexpected-argument"]);
+        return invalidArguments;
+    }
+
+    [Theory]
     [InlineData(PathTrustCode.InvalidPath, ServicePathTrustDiagnosticCodes.InvalidPath)]
     [InlineData(PathTrustCode.OutsideProgramData, ServicePathTrustDiagnosticCodes.OutsideMachineData)]
     [InlineData(PathTrustCode.MissingComponent, ServicePathTrustDiagnosticCodes.MissingComponent)]

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 
 using Xunit;
 
@@ -17,7 +18,7 @@ public sealed class WfpValidationContractTests
     // not equivalent - `-File` makes the script the top-level scope, while `&` gives it a child
     // scope whose functions a GetNewClosure() closure cannot resolve. On a real VM that difference
     // killed the protocol on its first output call, at "0 checks", while this suite stayed green at
-    // 24/24. Both modes are now measured, because the mode nobody tested is the mode people use.
+    // 26/26. Both modes are now measured, because the mode nobody tested is the mode people use.
     [Theory(Timeout = 60000)]
     [InlineData(false)]
     [InlineData(true)]
@@ -26,7 +27,7 @@ public sealed class WfpValidationContractTests
         var normal = await RunContractAsync(negativeControl: false, useCallOperator);
 
         Assert.True(normal.ExitCode == 0, FormatFailure("Normal contract", normal));
-        Assert.Contains("[CONTRACT-SELFTEST PASS] 24 checks", normal.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("[CONTRACT-SELFTEST PASS] 26 checks", normal.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("[FAIL]", normal.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("n'est pas reconnu", normal.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("is not recognized", normal.StandardOutput, StringComparison.Ordinal);
@@ -69,7 +70,7 @@ public sealed class WfpValidationContractTests
         var normal = await RunContractAsync(negativeControl: false);
 
         Assert.True(normal.ExitCode == 0, FormatFailure("Normal contract", normal));
-        Assert.Contains("[CONTRACT-SELFTEST PASS] 24 checks", normal.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("[CONTRACT-SELFTEST PASS] 26 checks", normal.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("NATIVE-NORMALIZED-MARKER", normal.StandardOutput, StringComparison.Ordinal);
         Assert.DoesNotContain("[FAIL]", normal.StandardOutput, StringComparison.Ordinal);
 
@@ -84,6 +85,37 @@ public sealed class WfpValidationContractTests
         Assert.DoesNotContain("operation-threw", negative.StandardOutput, StringComparison.Ordinal);
     }
 
+    [Fact(Timeout = 30000)]
+    public async Task ContractSelfTestFailsWhenExactScmAbsencePredicatesAreBroadened()
+    {
+        const string exactPredicate = "$query.ExitCode -eq 1060";
+        const string broadenedPredicate = "$query.ExitCode -ne 0";
+        var source = Path.Combine(RepositoryRoot, "scripts", "Test-WfpValidation.ps1");
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "winsight-wfp-contract-" + Guid.NewGuid());
+        var mutatedScript = Path.Combine(temporaryDirectory, "Test-WfpValidation.ps1");
+
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            var script = await File.ReadAllTextAsync(source);
+            Assert.Equal(2, CountOccurrences(script, exactPredicate));
+            var mutated = script.Replace(exactPredicate, broadenedPredicate, StringComparison.Ordinal);
+            Assert.Equal(0, CountOccurrences(mutated, exactPredicate));
+            Assert.Equal(2, CountOccurrences(mutated, broadenedPredicate));
+            await File.WriteAllTextAsync(mutatedScript, mutated, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+            var run = await RunScriptAtAsync(false, mutatedScript, "-ContractSelfTest");
+
+            Assert.Equal(1, run.ExitCode);
+            Assert.Contains("[CONTRACT-SELFTEST FAIL]", run.StandardOutput, StringComparison.Ordinal);
+            Assert.DoesNotContain("operation-threw", run.StandardOutput, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryDirectory)) Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
     private static Task<ContractProcessResult> RunContractAsync(
         bool negativeControl,
         bool useCallOperator = false) =>
@@ -93,9 +125,17 @@ public sealed class WfpValidationContractTests
 
     private static async Task<ContractProcessResult> RunScriptAsync(
         bool useCallOperator,
+        params string[] scriptArguments) =>
+        await RunScriptAtAsync(
+            useCallOperator,
+            Path.Combine(RepositoryRoot, "scripts", "Test-WfpValidation.ps1"),
+            scriptArguments);
+
+    private static async Task<ContractProcessResult> RunScriptAtAsync(
+        bool useCallOperator,
+        string script,
         params string[] scriptArguments)
     {
-        var script = Path.Combine(RepositoryRoot, "scripts", "Test-WfpValidation.ps1");
         Assert.True(File.Exists(script), $"Missing WFP validation script: {script}");
 
         // Windows PowerShell 5.1 by absolute path, with no fallback. The point of this contract is
@@ -145,6 +185,18 @@ public sealed class WfpValidationContractTests
         var stderrTask = process.StandardError.ReadToEndAsync();
         await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25));
         return new ContractProcessResult(process.ExitCode, await stdoutTask, await stderrTask);
+    }
+
+    private static int CountOccurrences(string value, string needle)
+    {
+        var count = 0;
+        var start = 0;
+        while ((start = value.IndexOf(needle, start, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            start += needle.Length;
+        }
+        return count;
     }
 
     private static string FormatFailure(string label, ContractProcessResult result) =>

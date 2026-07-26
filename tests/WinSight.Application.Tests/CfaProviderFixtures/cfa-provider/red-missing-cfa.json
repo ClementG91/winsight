@@ -1,0 +1,11 @@
+{
+  "exitCode": 0,
+  "stdout": "[{\"tool\":\"integrity\",\"summary\":\"none\",\"items\":[],\"notableCount\":0}]",
+  "stderr": "",
+  "operatingSystem": {
+    "product": "Fixture Windows 11",
+    "version": "10.0.99999.0",
+    "build": "99999",
+    "architecture": "x64"
+  }
+}

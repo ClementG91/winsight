@@ -1,0 +1,11 @@
+{
+  "exitCode": 2,
+  "stdout": "[]",
+  "stderr": "",
+  "operatingSystem": {
+    "product": "Fixture Windows 11",
+    "version": "10.0.99999.0",
+    "build": "99999",
+    "architecture": "x64"
+  }
+}

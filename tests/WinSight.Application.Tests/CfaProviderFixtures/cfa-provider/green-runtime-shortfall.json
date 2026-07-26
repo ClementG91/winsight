@@ -1,0 +1,11 @@
+{
+  "exitCode": 1,
+  "stdout": "[{\"tool\":\"integrity\",\"summary\":\"one protection checked\",\"items\":[{\"severity\":\"notable\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"runtime shortfall\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"RuntimeRequirementsNotMet\",\"runtimeSupportsProtection\":\"False\",\"amRunningMode\":\"Passive Mode\",\"antivirusEnabled\":\"False\",\"realTimeProtectionEnabled\":\"False\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\"}}],\"notableCount\":1}]",
+  "stderr": "",
+  "operatingSystem": {
+    "product": "Fixture Windows 11",
+    "version": "10.0.99999.0",
+    "build": "99999",
+    "architecture": "x64"
+  }
+}

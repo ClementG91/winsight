@@ -89,7 +89,15 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
   `Active` state. Native SCM, IPC, DACL and WFP behavior remains unqualified until the
   isolated-VM protocol passes.
 - Real-time persistence blocking and ransomware interception require a separately
-  signed and safety-reviewed driver and are not shipped.
+  signed and safety-reviewed driver and are not shipped. WinSight's own ransomware
+  feature therefore detects and alerts but does not block. It does, however, **report**
+  whether Windows' own kernel-level blocker — Microsoft Defender **Controlled Folder
+  Access** — configured and operational posture can be read: the `integrity` check uses
+  Defender WMI (unelevated) and distinguishes Disabled, Audit, block/audit disk-modification-only,
+  and a fully observed Enabled posture. The latter requires Defender `AMRunningMode=Normal`,
+  antivirus enabled and real-time protection enabled; unavailable provider/runtime evidence remains
+  a notable unavailable result. WinSight only reads and reports this setting; it never enables,
+  disables or otherwise configures Controlled Folder Access — the operator changes it in Windows.
 - VirusTotal is opt-in and user-keyed. WinSight enforces Community ceilings across
   its processes (4/rolling minute, 500/UTC day, 15,500/UTC month), never retries a
   quota response, and documents that Community access is non-commercial. Sending a

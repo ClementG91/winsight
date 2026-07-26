@@ -85,7 +85,15 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
 - **It detects and alerts; it does not stop the encryption.** Halting a process mid-write needs a
   kernel **minifilter** (`FltRegisterFilter`) with the authority to block file I/O, which needs an
   EV certificate + Microsoft attestation signing. Explicitly deferred, exactly as for Guardian's
-  blocking.
+  blocking. **Windows already ships that blocker** — Microsoft Defender's Controlled Folder Access
+  refuses untrusted writes to protected folders at the kernel — so rather than half-build a competing
+  driver, WinSight reports its *configured and observed operational posture*. The `integrity` scan
+  reads Defender WMI unelevated and only reports Protecting when CFA is Enabled and Defender reports
+  `AMRunningMode=Normal`, antivirus enabled and real-time protection enabled. Disabled, audit and
+  disk-modification-only modes are notable; missing/malformed provider evidence is explicitly
+  unavailable and notable. This reports posture, not a guarantee of a particular blocked write.
+  WinSight reads and reports; it never toggles Controlled Folder Access itself.
+  See `ControlledFolderAccessReader`/`ControlledFolderAccessTriage`.
 - **Process attribution is limited without elevation.** A `FileSystemWatcher` reports *what*
   changed, not *which process* changed it; attributing the burst to a PID needs an ETW file
   provider or the minifilter, both elevated. The canary and burst signals fire on the behavior
