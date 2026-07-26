@@ -5,8 +5,8 @@ is closed only when someone can re-run it and get the same answer.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Ready**, with the two named limitations below |
-| **Arm64 (native)** | **Not qualified** — build and packaging verified on native hardware, privileged runtime behaviour unverified |
+| **x64** | **Not production-ready** — three privileged boundaries are qualified, but product-level gates remain open |
+| **Arm64 (native)** | **Not production-ready** — build and packaging verified in CI, privileged runtime behaviour unverified |
 
 ## x64
 
@@ -22,9 +22,15 @@ Records: [`docs/validation/`](validation/README.md). Each ran on a clean Windows
 PowerShell 5.1, elevated, using the protocol script shipped **inside the same package** as the binary
 under test.
 
-### Closed in CI, every commit
+Each record qualifies only the exact candidate named in its row. Before applying one to a later
+revision, perform a candidate-aware delta review of the relevant service, trust-boundary or IPC
+surface. If that surface changed or the impact is uncertain, rerun its gate and bind the new record
+to the new candidate. These records are not an automatic inheritance rule or a product-wide
+production-readiness verdict.
 
-- Full suite, both `windows-latest` and `windows-2022`
+### Automated CI evidence
+
+- Full suite, both explicitly pinned `windows-2025` and `windows-2022`
 - Engine-library line coverage gate: every engine library at or above 80%
 - Formatting, dependency vulnerability audit, whitespace
 - Installer lifecycle: install, version, MCP contract, dashboard smoke in en/fr/es, SBOM and asset
@@ -35,19 +41,40 @@ under test.
 - Signed commits enforced on `main`, including for administrators, verified by an actually-rejected
   direct push
 
-### Limitations that remain on x64
+Repository security features are enabled: GitHub private vulnerability reporting, Dependabot alerts
+and CodeQL default setup. CodeQL run `30204877420` independently completed successfully for C# and
+Actions at `4359e87`, with zero open CodeQL or Dependabot alerts. That evidence is candidate-bound:
+a new candidate still needs its own green scan.
 
-1. **Released binaries are unsigned.** The Authenticode chain is implemented and verified — it signs,
-   timestamps and independently verifies — but the project holds no code-signing certificate. Windows
-   will warn on first run. Supplying `WINSIGHT_SIGNING_CERT_BASE64` activates it; see
+The unsigned public v0.10.3 release pipeline was exercised successfully: it published x64 and Arm64
+assets with GitHub build-provenance and SBOM attestations. CI packaging and installer lifecycle also
+prove that generated packages can install, run their automated smoke contracts and uninstall on the
+runners. This does not prove the signed Authenticode production chain, safe external deployment or
+human operator acceptance.
+
+### Product-level gates that remain open
+
+1. **Authenticode is not closed.** The released v0.10.3 x64 artifact was independently observed as
+   `NotSigned`. The repository variable `REQUIRE_SIGNED_RELEASE=true` was set and re-read on
+   2026-07-26, so the release workflow now fails closed when signing is unavailable. Neither
+   `WINSIGHT_SIGNING_CERT_BASE64` nor `WINSIGHT_SIGNING_CERT_PASSWORD` is configured, so a signed
+   release remains blocked until a real certificate is configured and verified. See
    [`RELEASE.md`](RELEASE.md).
 2. **Three commits in history are unsigned** (`214a25f`, `d5ee120`, `e964779`), from a pull request
    merged with `--rebase`. They are deliberately not re-signed: doing so changes their hashes and
    every descendant hash, including the three commits a real VM qualified, which would either orphan
    the validation records or require editing them to hashes that did not exist when the VM ran. The
    hole is closed going forward by `enforce_admins`.
-
-Neither prevents x64 production use; both are stated so nobody discovers them by surprise.
+3. **Some privileged identity cases remain live-test gaps.** The foreign-owner-SID trust case needs
+   a second standard account. Dedicated unelevated-administrator and network-logon IPC sessions are
+   represented by a capability-equivalent SAFER token and a DACL unit test, not by those exact live
+   logons.
+4. **Presentation attestation and release gates.** A user-supplied attestation dated 2026-07-26 says
+   that EN/FR/ES human presentation was completed. This is not independent validation evidence.
+   The signed Authenticode production chain has never been exercised end to end and remains blocking;
+   the successful unsigned v0.10.3 public release does not close that gate.
+Until these gates close, the honest x64 verdict is not production-ready despite the three qualified
+privileged boundaries.
 
 ## Arm64
 
@@ -73,7 +100,8 @@ not any more.
 ### Not verified on Arm64
 
 Everything requiring an elevated, isolated VM — a CI runner cannot safely install a SYSTEM service
-and cut real traffic:
+and cut real traffic — remains `NOT_RUN` under an accepted deferral because no native Arm64 hardware
+is currently available for that privileged validation:
 
 - WFP enforcement, rollback, per-app scoping
 - Real SCM service lifecycle
@@ -81,6 +109,9 @@ and cut real traffic:
 - Multi-user IPC capability boundary
 - **Emulated-x64 application identity.** WFP app-id resolution for an emulated x64 process on Arm64 is
   the one behaviour with no x64 analogue, so the x64 records say nothing about it.
+
+The native Arm64 build and installer lifecycle remain CI-verified; that evidence does not promote the
+deferred privileged WFP, SCM, trust, IPC/session or emulated-x64 gates.
 
 ### What a future native Arm64 run needs
 
@@ -98,7 +129,8 @@ Arm64 package:
 5. Expect `24/24 + exit 1`, `16`, `25`, `11`, `7`. Record the transcript in `docs/validation/` bound to
    the commit and CI run.
 
-Then this file's Arm64 verdict changes, and not before.
+That run would close the named Arm64 privileged-runtime gates, and not before. It would not by itself
+change the product-wide verdict while signing, release and human-review gates remain open.
 
 ## How to challenge any claim here
 

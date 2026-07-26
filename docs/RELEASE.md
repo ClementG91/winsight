@@ -38,7 +38,21 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-### What the maintainer must supply
+The unsigned public v0.10.3 release pipeline successfully published x64 and Arm64 assets with GitHub
+build-provenance and SBOM attestations; its x64 artifact was independently observed as `NotSigned`.
+The signed Authenticode production chain has never been exercised end to end, so signing is not a
+closed release gate. The repository variable `REQUIRE_SIGNED_RELEASE=true` was set and re-read at
+2026-07-26T14:55:05Z, so the release workflow now fails closed when signing is unavailable. Neither
+`WINSIGHT_SIGNING_CERT_BASE64` nor `WINSIGHT_SIGNING_CERT_PASSWORD` is configured. A signed release
+remains blocked until a real certificate is configured and verified.
+
+The user explicitly authorized a public unsigned v0.10.4 release under a one-release waiver dated
+2026-07-26. `REQUIRE_SIGNED_RELEASE` will be intentionally disabled for that waived release so the
+known absence of a certificate does not stop it. The resulting artifacts are expected to be unsigned
+and to trigger the normal Windows unknown-publisher warning. This exception does not exercise or
+establish the signed Authenticode production chain, and it does not establish product readiness.
+
+### Values required to enable the signing path
 
 A code-signing certificate cannot live in a public repository. Provide it as repository secrets:
 
@@ -64,8 +78,9 @@ The build still succeeds, and says so loudly:
 [SIGNING] 12 file(s) will ship UNSIGNED. Windows will warn users on first run.
 ```
 
-It is never silent. To make a missing certificate a hard failure — so a release cannot quietly lose
-its signature — set the repository variable `REQUIRE_SIGNED_RELEASE` to `true`.
+It is never silent. The normal repository setting `REQUIRE_SIGNED_RELEASE=true` makes a missing
+certificate a hard failure, so the release workflow cannot quietly lose its signature. It will be
+intentionally disabled only for the explicitly waived unsigned v0.10.4 release described above.
 
 ### Why signing is verified, not assumed
 
@@ -138,5 +153,5 @@ trustworthy at the time.
 - [ ] Validation records in `docs/validation/` still bind to reachable commits
 - [ ] `production_ready` statement in `docs/PRODUCTION_READINESS.md` reflects reality
 - [ ] Tag pushed; `release.yml` green on both architectures
-- [ ] Signing status confirmed in the build log (signed, or knowingly unsigned)
+- [ ] Signing verified with a real certificate, or an explicit unsigned-release waiver recorded
 - [ ] Downloaded assets verified with the four checks above

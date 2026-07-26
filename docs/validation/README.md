@@ -17,6 +17,10 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 Each of these ran on a clean Windows 11 VM under Windows PowerShell 5.1, elevated, using the protocol
 script shipped **inside the same package** as the binary under test, so the two cannot drift apart.
+Each record qualifies only its named candidate. A later revision requires a candidate-aware delta
+review of the relevant service, trust-boundary or IPC surface and a new run if that surface changed
+or the impact is uncertain. These are qualification records for three exact x64 candidates, not
+automatic inheritance or a product-wide production-readiness verdict.
 
 ## Superseded
 
@@ -32,11 +36,12 @@ kept as a record of what that script printed, not as evidence.
 | Native Arm64 | Needs Arm64 hardware. The x64 records prove x64 package behaviour only. See [`../ARM64_VALIDATION.md`](../ARM64_VALIDATION.md). |
 | Foreign-owner-SID path trust | Needs a second standard account (`-HostileAccount`). The owner-trust path itself is proven by the TrustedInstaller leaf refusal. |
 | Dedicated unelevated-admin and network-logon IPC | Covered by proxy (a SAFER basic-user token is the same non-admin capability class) and by the pipe DACL unit test, not by a live logon of each kind. |
-| Installer, signing, deployment, release | Product decisions, not yet exercised end to end. |
-| EN/FR/ES presentation | Needs human review of the localized surfaces. |
+| Production Authenticode signing, external release and deployment | CI exercises x64/Arm64 packaging plus installer install/smoke/uninstall, but the project has no production signing certificate, released artifacts remain unsigned, and the external release/deployment path has not been exercised end to end. |
+| EN/FR/ES presentation | User attestation completed on 2026-07-26; this is not independent evidence. |
 
 **Production readiness is not established.** These records close the largest gates on x64; they do not
-close the list above.
+close the list above. In particular, a green CI installer lifecycle is automation evidence, not proof
+of real Authenticode signing, an externally published release or production deployment.
 
 ## Why three of these records exist at all
 

@@ -56,7 +56,7 @@ public sealed class FirewallServiceCommandHost
         var verb = FirewallServiceCommandLine.Parse(arguments);
         CommandResult? result = verb switch
         {
-            FirewallServiceVerb.Install => _installHandler.Execute(),
+            FirewallServiceVerb.Install => _installHandler.Execute(arguments),
             FirewallServiceVerb.InstallPathTrustCheck => _pathTrustProbeHandler.Execute(arguments),
             _ => null,
         };
@@ -84,8 +84,13 @@ public sealed class FirewallServiceCommandHost
         private const string ProcessPathUnavailable = "Could not resolve the service executable path.";
         private const string InstallFailed = "[FW_INSTALL_FAILED]";
 
-        public CommandResult Execute()
+        public CommandResult Execute(IReadOnlyList<string>? arguments)
         {
+            if (arguments is null || arguments.Count != 1)
+            {
+                return CommandResult.Failure(InstallFailed);
+            }
+
             try
             {
                 if (!capability.IsElevated())

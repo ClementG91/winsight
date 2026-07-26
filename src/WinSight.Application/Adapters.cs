@@ -14,6 +14,7 @@ using WinSight.NetMonitor;
 using WinSight.Persistence;
 using WinSight.Presence;
 using WinSight.Processes;
+using WinSight.Ransomware;
 using WinSight.Reporting;
 
 namespace WinSight.Application;
@@ -733,14 +734,31 @@ public static class Adapters
     /// registered" reads very differently on a machine in test signing, where loading unsigned
     /// drivers is the documented consequence of a setting rather than an anomaly. It is small and
     /// cheap, so it belongs in the balanced overview despite being only a handful of lines.
+    ///
+    /// It also carries Microsoft Defender's <b>Controlled Folder Access</b> posture, for the same
+    /// reason: it is the same genre of "is this Windows self-protection actually switched on", and it
+    /// is the one place WinSight can point at the kernel-level BLOCK that its own user-mode ransomware
+    /// decoys deliberately cannot perform. WinSight only reads and reports the setting; it never
+    /// changes it — the operator flips it in Windows Security via the deep link on the finding.
     /// </remarks>
-    public static ToolReport CodeIntegrity(bool flaggedOnly)
+    public static ToolReport CodeIntegrity(bool flaggedOnly) =>
+        CodeIntegrity(flaggedOnly, new ControlledFolderAccessReader());
+
+    /// <summary>
+    /// Composes the code-integrity report with an already-created CFA reader. Internal so tests can
+    /// exercise report composition without consulting the host Defender provider.
+    /// </summary>
+    internal static ToolReport CodeIntegrity(bool flaggedOnly, ControlledFolderAccessReader controlledFolderAccessReader)
     {
+        ArgumentNullException.ThrowIfNull(controlledFolderAccessReader);
         var findings = CodeIntegrityTriage.Evaluate(new CodeIntegrityReader().Read());
         var b = new ToolReport.Builder("integrity");
+        var checkedCount = 0;
         var notable = 0;
+        var unavailable = 0;
         foreach (var finding in findings)
         {
+            checkedCount++;
             var isNotable = CodeIntegrityTriage.IsNotable(finding.Concern);
             if (isNotable)
             {
@@ -760,8 +778,80 @@ public static class Adapters
                     ["concern"] = finding.Concern.ToString(),
                 });
         }
-        return b.Build($"{findings.Count} protection(s) checked, {notable} weakened or not enabled");
+
+        var shield = controlledFolderAccessReader.Read();
+        if (shield.State == ControlledFolderAccessState.Unavailable)
+        {
+            unavailable++;
+        }
+        else
+        {
+            checkedCount++;
+        }
+        if (shield.IsNotable)
+        {
+            notable++;
+        }
+        if (!flaggedOnly || shield.IsNotable)
+        {
+            b.Add(
+                shield.IsNotable ? Severity.Notable : Severity.Info,
+                "Controlled Folder Access (ransomware shield)",
+                DescribeShield(shield),
+                new Dictionary<string, string?>
+                {
+                    ["protection"] = "Controlled Folder Access",
+                    ["state"] = shield.State.ToString(),
+                    ["rawStateValue"] = shield.RawStateValue?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    ["concern"] = shield.Concern.ToString(),
+                    ["runtimeSupportsProtection"] = shield.RuntimeSupportsProtection.ToString(),
+                    ["amRunningMode"] = shield.RuntimeEvidence.AMRunningMode,
+                    ["antivirusEnabled"] = shield.RuntimeEvidence.AntivirusEnabled?.ToString(),
+                    ["realTimeProtectionEnabled"] = shield.RuntimeEvidence.RealTimeProtectionEnabled?.ToString(),
+                    ["protectedFolders"] = shield.ProtectedFolders.Count.ToString(),
+                    ["allowedApplicationsVisibility"] = shield.AllowedApplications.Visibility.ToString(),
+                    ["settingsDeepLink"] = ControlledFolderAccessReader.SettingsDeepLink,
+                });
+        }
+
+        return b.Build(
+            $"{checkedCount} protection(s) checked, {notable} requiring attention, {unavailable} unavailable");
     }
+
+    /// <summary>
+    /// Plain-language line for a Controlled Folder Access posture. Names the concrete gap and, when
+    /// there is one, the Windows Security deep link the operator uses to close it themselves.
+    /// </summary>
+    private static string DescribeShield(ControlledFolderAccessPosture shield) => shield.Concern switch
+    {
+        ControlledFolderAccessConcern.Off =>
+            "disabled — Windows' built-in ransomware shield is off, so untrusted programs are not blocked "
+            + "from modifying your Documents, Pictures and Desktop; WinSight's decoys detect an attack but "
+            + $"cannot stop it. Turn it on in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+        ControlledFolderAccessConcern.AuditOnly =>
+            "audit only — Windows records what it would have blocked but blocks nothing. Switch it on in "
+            + $"Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+        ControlledFolderAccessConcern.BlockDiskModificationOnly =>
+            "block disk modification only — this mode does not establish protection for folders such as "
+            + "Documents, Pictures and Desktop. Review the configured mode in Windows Security "
+            + $"({ControlledFolderAccessReader.SettingsDeepLink}).",
+        ControlledFolderAccessConcern.AuditDiskModificationOnly =>
+            "audit disk modification only — this mode records disk modifications but does not establish folder "
+            + "protection. Review the configured mode in Windows Security "
+            + $"({ControlledFolderAccessReader.SettingsDeepLink}).",
+        ControlledFolderAccessConcern.Protecting =>
+            "configured enabled and Defender runtime prerequisites observed — this reports configured and "
+            + "operational posture, not a guarantee that every attempted write will be blocked.",
+        ControlledFolderAccessConcern.RuntimeRequirementsNotMet =>
+            "enabled, but current Defender runtime evidence does not establish Normal mode with antivirus and "
+            + "real-time protection enabled. The configured setting alone is not evidence of operational folder protection.",
+        ControlledFolderAccessConcern.UnknownMode =>
+            $"unsupported mode value {shield.RawStateValue} read; protection not established. Review the configured "
+            + $"mode in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+        _ =>
+            "unavailable — the Controlled Folder Access configured or operational posture could not be read on this "
+            + "machine, so WinSight cannot establish folder protection.",
+    };
 
     public static ToolReport Certificates(bool flaggedOnly)
     {

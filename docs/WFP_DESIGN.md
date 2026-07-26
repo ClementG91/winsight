@@ -195,16 +195,27 @@ process ids or display names, which are transient or ambiguous.
   failure cases. A non-privileged subprocess smoke traverses the real `Program` root and proves that
   invalid probe arity yields exact inspection-failed stderr/exit 1 without inspection or machine
   mutation.
-- The 2026-07-23 x64 transcript from script revision `76b5481` is historical observation only. Its
-  reported 18/18 cannot qualify a production candidate because the old predicates could accept
-  mixed WFP state, skip a failed probe, suppress visible native output and observe a different SCM
-  binary. No corrected candidate-bound x64 or native Arm64 run has been executed.
+- The first 2026-07-23 x64 transcript from script revision `76b5481` remains historical observation
+  only. Its reported 18/18 cannot qualify a production candidate because the old predicates could
+  accept mixed WFP state, skip a failed probe, suppress visible native output and observe a
+  different SCM binary.
+- The corrected candidate-bound x64 gates are real qualification evidence: WFP enforcement, SCM
+  lifecycle, rollback, connectivity and per-application scoping passed 25/25 on candidate
+  `f0a3f16`; adversarial service-path trust passed 11/11 on `f84ac36`; and the multi-user IPC
+  capability boundary passed 7/7 on `c9177cd`. Each record qualifies its exact candidate. A later
+  revision needs a candidate-aware delta review of the relevant boundary and a new run if the
+  boundary changed or its impact is uncertain. No record is inherited automatically, and none
+  retroactively validates the invalid 18/18 transcript.
 
-Qualification status remains explicitly `NOT_RUN`/`BLOCKED` pending human execution in isolated
-VMs: the corrected strict candidate-bound x64 rerun; native Arm64; real SCM lifecycle and
-no-call-on-denial; owner/DACL/nested-reparse/live-TOCTOU; standard/elevated/SYSTEM multi-user pipe
-tokens; native WFP enumeration/startup recovery/rollback; IPv4/IPv6/DNS/DHCP/loopback connectivity;
-and EN/FR/ES human presentation. Local and scripted checks cannot convert any of these to PASS.
+Qualification remains explicitly `NOT_RUN`/`BLOCKED` for native Arm64, the foreign-owner-SID trust
+sub-case, and dedicated unelevated-administrator and network-logon IPC sessions. The x64 trust record
+covers the owner-trust path through a TrustedInstaller-owned leaf refusal, but not the separate
+hostile-account variant; the x64 IPC record uses a SAFER basic-user token as the non-administrator
+capability class, while the network-logon deny remains unit-tested rather than live. The three x64
+records cannot convert those remaining native or independent gates to PASS.
+
+User attestation for EN/FR/ES human presentation was completed on 2026-07-26; this is not independent
+evidence.
 
 - `FirewallPolicyStore` persists a schema-versioned snapshot through a flushed
   temporary file and atomic same-volume replacement. It canonicalizes and
@@ -257,24 +268,30 @@ and EN/FR/ES human presentation. Local and scripted checks cannot convert any of
   recovery client can invoke the same serialized authority without any direct WFP alias.
 - Test on an isolated Windows VM before enabling persistent filters.
 
-## Remaining Phase 2 increments
+## Phase 2 implementation and qualification state
 
-1. Done in code, pending native evidence. The named-pipe host, hardened ACL,
+1. Done in code. The named-pipe host, hardened ACL,
    impersonated-identity authentication, dispatcher, and service authority are hosted by a
    least-privilege Windows service worker (`WinSight.FirewallService`) that provisions an
    ACL-protected policy directory under ProgramData. The dashboard consumes structured pipe
    status through `FirewallServiceGateway`/`FirewallServiceAdapter`; an unreachable pipe is
    presented as unavailable, never as an unverified SCM installation state. The executable has
-   opt-in, elevated `install`/`uninstall` verbs; the per-user setup never installs it.
-2. Done in code, pending native evidence. WFP engine/session/provider/sublayer interop
+   opt-in, elevated `install`/`uninstall` verbs; the per-user setup never installs it. The x64 IPC
+   capability boundary passed 7/7 on candidate `c9177cd`; native Arm64, dedicated
+   unelevated-administrator and network-logon sessions remain pending.
+2. Done in code. WFP engine/session/provider/sublayer interop
    applies per-application IPv4 and IPv6 block filters after an explicit elevated
-   enforcement transition. It must be exercised in an isolated Windows VM before merge;
-   unit tests do not establish that a native filter was installed.
+   enforcement transition. Candidate `f0a3f16` passed the candidate-bound x64 WFP/SCM,
+   rollback, connectivity and per-application-scoping gate 25/25. Native Arm64 remains pending;
+   unit tests alone do not establish that a native filter was installed.
 3. Prompt flow using the implemented durable policy store.
-4. Done in code, pending native evidence. Enforcement opt-in, recovery command, and
-   installer/uninstaller integration. The effective state is `Active` only after a
-   successful apply; unavailable or degraded is never presented as installed or filtering.
+4. Done in code. Enforcement opt-in, recovery command, and installer/uninstaller integration were
+   exercised by the same 25/25 x64 record on candidate `f0a3f16`. The effective state is `Active`
+   only after a successful apply; unavailable or degraded is never presented as installed or
+   filtering.
 
-No kernel callout driver is required for this user-mode outbound-control scope. Native
-filtering remains blocked from production qualification until isolated-VM validation
+Each record qualifies only its named candidate. A later revision needs a candidate-aware delta
+review of the relevant boundary and a new run if that boundary changed or its impact is uncertain;
+there is no automatic inheritance. No kernel callout driver is required for this user-mode
+outbound-control scope. Native Arm64 filtering remains unqualified until its isolated-VM protocol
 proves the required WFP and connectivity scenarios.

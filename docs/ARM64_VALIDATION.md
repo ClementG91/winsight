@@ -1,13 +1,19 @@
 # Arm64 runtime validation (help wanted)
 
-**Status: strict native qualification pending.** WinSight's outbound firewall has not passed the
-current candidate-bound protocol on Arm64 Windows. The 2026-07-23 x64 transcript is historical
-observation only, so corrected strict runs are pending on both x64 and native Arm64. This document
-describes the Arm64 gate; it does not claim production qualification.
+**Status: strict native Arm64 qualification pending.** Corrected candidate-bound x64 gates have run:
+WFP enforcement/SCM/rollback/connectivity/per-app scoping passed 25/25 on `f0a3f16`, adversarial
+service-path trust passed 11/11 on `f84ac36`, and the multi-user IPC boundary passed 7/7 on
+`c9177cd`. Each record qualifies only that exact candidate; applying it to a later revision requires
+a candidate-aware delta review and a rerun when the relevant surface changed or the impact is
+uncertain. This document describes the remaining Arm64 gate; it does not claim product readiness.
 
-Explicit gate state: `NOT_RUN`/`BLOCKED` for the corrected x64 rerun, native Arm64, real SCM/WFP,
-owner/DACL/nested-reparse/live-TOCTOU, connectivity and EN/FR/ES human presentation. Local tests and
-the old x64 transcript cannot promote any of them.
+Explicit gate state remains `NOT_RUN` under an accepted deferral because no native Arm64 hardware is
+currently available for the privileged run: WFP/SCM/trust/IPC behaviour, the foreign-owner-SID trust
+sub-case, dedicated unelevated-administrator and network-logon IPC sessions, and the protected
+emulated-x64 target. Native Arm64 build and installer lifecycle coverage remains CI-verified, but it
+does not promote these gates. A user-supplied attestation dated 2026-07-26 records completed EN/FR/ES
+human presentation; it is not independent validation evidence. The invalid old x64 18/18 transcript
+promotes none of these gates.
 
 ## What CI already covers, and what it cannot
 

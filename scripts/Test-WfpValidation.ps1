@@ -807,6 +807,35 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         return [bool]((Invoke-ScriptedPlan (New-ScriptedPlan $false @('Running') @('Stopped') @(0,0,1060))) -and
             (Invoke-ScriptedPlan (New-ScriptedPlan $false @('Running') @('Stopped') (@(0) * 10))))
     }
+    Contract 'non-1060 clean snapshot SCM failure stops before candidate install' {
+        $plan = New-ScriptedPlan $false
+        $plan.Expectations = Copy-Expectations $plan.Expectations
+        $clean = Find-HostExpectationIndex $plan 'Native' $plan.Paths.Sc 'query' 0
+        $plan.Expectations[$clean].Results = @([NativeResult]::new('SCM_ACCESS_DENIED', 5))
+        $tail = New-Object System.Collections.ArrayList
+        Add-OutputExpectation $tail '  [FAIL] clean snapshot has no WinSight service: absolute sc.exe query returns 1060 before install'
+        Add-HostExpectation $tail 'RemoveDirectory' $plan.Paths.Directory @() @()
+        Add-OutputExpectation $tail 'STOP: service already exists or SCM query failed before candidate installation.'
+        Set-ScriptedPlanTail $plan $clean @($tail) 4 $false $true 1
+        return [bool]((Invoke-ScriptedPlan $plan) -and
+            @($plan.Expectations | Where-Object {
+                $_.Call.Kind -ceq 'Native' -and $_.Call.Path -ceq $plan.Paths.Candidate -and
+                $_.Call.Arguments[0] -ceq 'install' }).Count -eq 0)
+    }
+    Contract 'non-1060 absence SCM failures never mean absent and stop after uninstall' {
+        $plan = New-ScriptedPlan $false @('Running') @('Stopped') (@(5) * 10)
+        $queries = @($plan.Expectations | Where-Object {
+            $_.Call.Kind -ceq 'Native' -and $_.Call.Path -ceq $plan.Paths.Sc -and
+            $_.Call.Arguments[0] -ceq 'query' })
+        $absenceQueries = @($queries | Select-Object -Skip 1)
+        return [bool]($absenceQueries.Count -eq 10 -and
+            (@($absenceQueries | Where-Object {
+                ([NativeResult]$_.Results[0]).ExitCode -eq 5 }).Count -eq 10) -and
+            @($plan.Expectations | Where-Object {
+                $_.Call.Kind -ceq 'Native' -and $_.Call.Path -ceq $plan.Paths.Candidate -and
+                $_.Call.Arguments[0] -ceq 'uninstall' }).Count -eq 1 -and
+            (Invoke-ScriptedPlan $plan))
+    }
     Contract 'delayed primitive queues reject constant Stopped and Absent implementations' {
         return [bool]((Invoke-ScriptedPlan (New-ScriptedPlan $false @('Running') @('StopPending','Stopped'))) -and
             (Invoke-ScriptedPlan (New-ScriptedPlan $false @('Running') @('Stopped') @(0,1060))))
@@ -1120,7 +1149,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         return [bool]($capture.Valid -and $effects.Queue.Count -eq 0 -and [string]::IsNullOrEmpty($effects.State.Mismatch))
     }
 
-    $expectedChecks = 24
+    $expectedChecks = 26
     if ($script:ContractChecks -ne $expectedChecks) {
         $script:ContractFailures++; Write-Host ('  [FAIL] mandatory contract count expected {0}, ran {1}' -f $expectedChecks, $script:ContractChecks)
     }

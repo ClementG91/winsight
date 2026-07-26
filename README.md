@@ -14,7 +14,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-informational" alt="Platform: Windows" />
   <img src="https://img.shields.io/badge/.NET-10.0_LTS-512bd4" alt=".NET 10 LTS" />
-  <img src="https://img.shields.io/badge/x64-production%20ready-success" alt="x64 production ready" />
+  <img src="https://img.shields.io/badge/production%20readiness-not%20established-critical" alt="Production readiness not established" />
 </p>
 
 WinSight is a suite of small, single-purpose, auditable security tools under one roof — in the spirit
@@ -47,7 +47,11 @@ traffic at the kernel filtering layer.
 Beyond the macOS originals: **write attribution** names the program behind a persistence or
 ransomware alert when running elevated (`written by setup.exe (pid 4242)`) and says why it cannot when
 it is not, rather than staying silent. **Per-process drill-down** (`winsight process <pid>`) and
-**physical-access detection** (`winsight presence`) have no Objective-See counterpart.
+**physical-access detection** (`winsight presence`) have no Objective-See counterpart. And because
+WinSight's decoys *detect* ransomware but cannot *block* it without a driver, the overview also
+**reports its configured and observed operational posture** — read-only, including explicit
+unavailability when Defender cannot be queried. It points to the Windows control; WinSight never
+changes that setting itself and does not guarantee enforcement of an individual write.
 
 Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-tool comparison:
 [`docs/OBJECTIVE_SEE_PARITY.md`](docs/OBJECTIVE_SEE_PARITY.md).
@@ -130,18 +134,25 @@ Threat model, trust boundaries and what is explicitly out of scope:
 
 | Target | Status |
 |---|---|
-| **x64** | **Production ready**, with two stated limitations |
-| **Arm64 (native)** | Build, packaging and installer verified on native hardware; **privileged runtime unqualified** |
+| **x64** | Privileged WFP/trust/IPC gates qualified; **product readiness not established** |
+| **Arm64 (native)** | Build, packaging and installer verified in CI; **privileged runtime unqualified and product readiness not established** |
 
 The privileged behaviour CI cannot reach — real WFP enforcement and rollback, SCM lifecycle,
-adversarial path-trust/TOCTOU, and the multi-user IPC boundary — has been qualified on a clean x64 VM,
-each run bound to a commit and to the CI run that built it so anyone can re-verify:
+adversarial path-trust/TOCTOU, and the multi-user IPC boundary — has real qualification evidence from
+clean x64 VMs, each run bound to a commit and to the CI run that built it:
 
 | Gate | Result | Record |
 |---|---|---|
 | WFP enforcement, SCM, rollback, per-app scoping | 25 checks, 0 failures | [record](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md) |
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
+
+Each record qualifies its exact candidate. A later revision needs a candidate-aware delta review of
+the affected service, trust-boundary or IPC surface; an affected or uncertain gate must be rerun.
+There is no automatic inheritance, and these three records do not establish product-wide readiness.
+Released artifacts still lack a real Authenticode certificate/signature, privileged Arm64 and named
+hostile-user sub-cases remain open. The user attested that EN/FR/ES human presentation was completed
+on 2026-07-26; this is not independent evidence. External release/deployment has not closed.
 
 The authoritative statement, with every limitation named:
 [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
