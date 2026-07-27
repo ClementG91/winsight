@@ -906,48 +906,48 @@ public static class Adapters
     private static string DescribeShield(
         ControlledFolderAccessPosture shield,
         SecurityProductInventory inventory) => shield.Concern switch
-    {
-        ControlledFolderAccessConcern.Off =>
-            "disabled — Windows' built-in ransomware shield is off, so untrusted programs are not blocked "
-            + "from modifying your Documents, Pictures and Desktop; WinSight's decoys detect an attack but "
-            + $"cannot stop it. Turn it on in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
-        ControlledFolderAccessConcern.AuditOnly =>
-            "audit only — Windows records what it would have blocked but blocks nothing. Switch it on in "
-            + $"Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
-        ControlledFolderAccessConcern.BlockDiskModificationOnly =>
-            "block disk modification only — this mode does not establish protection for folders such as "
-            + "Documents, Pictures and Desktop. Review the configured mode in Windows Security "
-            + $"({ControlledFolderAccessReader.SettingsDeepLink}).",
-        ControlledFolderAccessConcern.AuditDiskModificationOnly =>
-            "audit disk modification only — this mode records disk modifications but does not establish folder "
-            + "protection. Review the configured mode in Windows Security "
-            + $"({ControlledFolderAccessReader.SettingsDeepLink}).",
-        ControlledFolderAccessConcern.Protecting =>
-            "configured enabled and Defender runtime prerequisites observed — this reports configured and "
-            + "operational posture, not a guarantee that every attempted write will be blocked.",
-        ControlledFolderAccessConcern.RuntimeRequirementsNotMet =>
-            "enabled, but current Defender runtime evidence does not establish Normal mode with antivirus and "
-            + "real-time protection enabled. The configured setting alone is not evidence of operational folder protection.",
-        // Named rather than left as a shrug: on a machine whose antivirus is not Microsoft's, "the
-        // ransomware shield is off" is true and misleading unless it also says what IS protecting you.
-        ControlledFolderAccessConcern.DefenderNotRunning when inventory.HasActiveNonMicrosoftAntiVirus =>
-            "not active — Microsoft Defender reports that it is not running because "
-            + $"{NamesOf(inventory.ActiveAntiVirusProducts)} is your antivirus. Controlled Folder Access is a "
-            + "Defender feature, so this specific folder shield is not protecting you; your antivirus may offer "
-            + "its own ransomware protection, which WinSight cannot read. This is a normal configuration, not a "
-            + "fault — but check that your product's own ransomware protection is switched on.",
-        ControlledFolderAccessConcern.DefenderNotRunning =>
-            "not protecting — Microsoft Defender antivirus reports that it is not running, and Windows Security "
-            + "Center does not show another antivirus actively scanning either. Controlled Folder Access is a "
-            + "Defender feature, so no configured value protects your folders until Defender runs again; check "
-            + $"which antivirus is active in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
-        ControlledFolderAccessConcern.UnknownMode =>
-            $"unsupported mode value {shield.RawStateValue} read; protection not established. Review the configured "
-            + $"mode in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
-        _ =>
-            "unavailable — the Controlled Folder Access configured or operational posture could not be read on this "
-            + "machine, so WinSight cannot establish folder protection.",
-    };
+        {
+            ControlledFolderAccessConcern.Off =>
+                "disabled — Windows' built-in ransomware shield is off, so untrusted programs are not blocked "
+                + "from modifying your Documents, Pictures and Desktop; WinSight's decoys detect an attack but "
+                + $"cannot stop it. Turn it on in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+            ControlledFolderAccessConcern.AuditOnly =>
+                "audit only — Windows records what it would have blocked but blocks nothing. Switch it on in "
+                + $"Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+            ControlledFolderAccessConcern.BlockDiskModificationOnly =>
+                "block disk modification only — this mode does not establish protection for folders such as "
+                + "Documents, Pictures and Desktop. Review the configured mode in Windows Security "
+                + $"({ControlledFolderAccessReader.SettingsDeepLink}).",
+            ControlledFolderAccessConcern.AuditDiskModificationOnly =>
+                "audit disk modification only — this mode records disk modifications but does not establish folder "
+                + "protection. Review the configured mode in Windows Security "
+                + $"({ControlledFolderAccessReader.SettingsDeepLink}).",
+            ControlledFolderAccessConcern.Protecting =>
+                "configured enabled and Defender runtime prerequisites observed — this reports configured and "
+                + "operational posture, not a guarantee that every attempted write will be blocked.",
+            ControlledFolderAccessConcern.RuntimeRequirementsNotMet =>
+                "enabled, but current Defender runtime evidence does not establish Normal mode with antivirus and "
+                + "real-time protection enabled. The configured setting alone is not evidence of operational folder protection.",
+            // Named rather than left as a shrug: on a machine whose antivirus is not Microsoft's, "the
+            // ransomware shield is off" is true and misleading unless it also says what IS protecting you.
+            ControlledFolderAccessConcern.DefenderNotRunning when inventory.HasActiveNonMicrosoftAntiVirus =>
+                "not active — Microsoft Defender reports that it is not running because "
+                + $"{NamesOf(inventory.ActiveAntiVirusProducts)} is your antivirus. Controlled Folder Access is a "
+                + "Defender feature, so this specific folder shield is not protecting you; your antivirus may offer "
+                + "its own ransomware protection, which WinSight cannot read. This is a normal configuration, not a "
+                + "fault — but check that your product's own ransomware protection is switched on.",
+            ControlledFolderAccessConcern.DefenderNotRunning =>
+                "not protecting — Microsoft Defender antivirus reports that it is not running, and Windows Security "
+                + "Center does not show another antivirus actively scanning either. Controlled Folder Access is a "
+                + "Defender feature, so no configured value protects your folders until Defender runs again; check "
+                + $"which antivirus is active in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+            ControlledFolderAccessConcern.UnknownMode =>
+                $"unsupported mode value {shield.RawStateValue} read; protection not established. Review the configured "
+                + $"mode in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+            _ =>
+                "unavailable — the Controlled Folder Access configured or operational posture could not be read on this "
+                + "machine, so WinSight cannot establish folder protection.",
+        };
 
     public static ToolReport Certificates(bool flaggedOnly)
     {
