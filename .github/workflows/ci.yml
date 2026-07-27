@@ -50,19 +50,36 @@ jobs:
   #
   # fail-fast is off on purpose: when one Windows breaks, the interesting question is immediately
   # whether the other one did too, and cancelling the sibling throws that away.
+  #
+  # `windows-11-arm` runs the suite on **native Arm64**, and it earned its place the hard way. Until
+  # it existed, CI tested only x64: `package` built an Arm64 installer without ever running a test on
+  # that architecture, so the only Arm64 test run in the whole project happened inside `release.yml`,
+  # after a tag. On 2026-07-27 that is exactly where a thread-pool starvation defect surfaced — a
+  # release build failed on a defect no pull request could have caught, because no pull request ever
+  # ran a test on Arm64. Finding it at tag time is finding it at the worst possible time.
   verify:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, windows-2022]
+        include:
+          - os: windows-2025
+            architecture: x64
+          - os: windows-2022
+            architecture: x64
+          - os: windows-11-arm
+            architecture: arm64
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # Arm64 runners are slower than the x64 images and this job builds, runs the whole suite and
+    # collects coverage; the previous 30 was sized for x64 alone.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.301"
-          architecture: x64
+          # Matrix-driven rather than hardcoded x64: installing an x64 SDK on the Arm64 runner would
+          # silently test the emulated target and prove nothing about native Arm64.
+          architecture: ${{ matrix.architecture }}
           cache: true
           cache-dependency-path: Directory.Packages.props
 
@@ -97,7 +114,7 @@ jobs:
       # would double the job that dominates this workflow's wall clock.
       - name: Test and verify coverage
         shell: pwsh
-        run: ./scripts/Measure-Coverage.ps1 -EngineMinimum 80 -TrxLogFilePrefix tests-x64
+        run: ./scripts/Measure-Coverage.ps1 -EngineMinimum 80 -TrxLogFilePrefix tests-${{ matrix.architecture }}
 
       - name: Upload test results
         if: always()

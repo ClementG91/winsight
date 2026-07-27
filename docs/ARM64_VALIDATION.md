@@ -10,8 +10,8 @@ uncertain. This document describes the remaining Arm64 gate; it does not claim p
 Explicit gate state remains `NOT_RUN` under an accepted deferral because no native Arm64 hardware is
 currently available for the privileged run: WFP/SCM/trust/IPC behaviour, the foreign-owner-SID trust
 sub-case, dedicated unelevated-administrator and network-logon IPC sessions, and the protected
-emulated-x64 target. Native Arm64 build and installer lifecycle coverage remains CI-verified, but it
-does not promote these gates. A user-supplied attestation dated 2026-07-26 records completed EN/FR/ES
+emulated-x64 target. Native Arm64 build, unit-test and installer lifecycle coverage remains
+CI-verified, but it does not promote these gates. A user-supplied attestation dated 2026-07-26 records completed EN/FR/ES
 human presentation; it is not independent validation evidence. The invalid old x64 18/18 transcript
 promotes none of these gates.
 
@@ -21,7 +21,10 @@ CI runs a native `windows-11-arm` runner, so this is **already automated** — p
 time re-doing it:
 
 - native Arm64 build of every project,
-- the unit test suite (on tagged releases),
+- **the full unit test suite with the coverage floor, on every pull request** — not only on tagged
+  releases. It used to be release-only, which meant the sole Arm64 test run in the whole project
+  happened after a tag; on 2026-07-27 a thread-pool starvation defect surfaced exactly there and
+  failed a release build that no pull request could have caught,
 - the installer lifecycle: a real install and uninstall of the packaged Arm64 build.
 
 What CI **cannot** cover is the part that actually filters traffic. The firewall reaches WFP

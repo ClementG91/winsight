@@ -96,6 +96,37 @@ public sealed class AvWatchHostTests
         Assert.Equal(@"C:\apps\recorder.exe", observed.Usage.App);
     }
 
+    /// <summary>
+    /// Regression guard for the defect that failed the v0.10.5 release build on 2026-07-27.
+    /// </summary>
+    /// <remarks>
+    /// The watch loop blocks until shutdown. Parking it on the thread pool held a pool thread for the
+    /// life of the dashboard <b>and</b> left the loop itself queued behind a saturated pool, waiting
+    /// seconds for a thread it would then never give back. The end-to-end test above only saw that as
+    /// an occasional timeout — a symptom that reads as flakiness and invites a re-run. This asserts
+    /// the property directly, so the defect cannot come back disguised as an intermittent failure.
+    /// </remarks>
+    [Fact]
+    public void TheWatchLoopDoesNotRunOnAThreadPoolThread()
+    {
+        using var polled = new ManualResetEventSlim();
+        var onPoolThread = true;
+        var reader = new ThreadRecordingReader(() =>
+        {
+            onPoolThread = Thread.CurrentThread.IsThreadPoolThread;
+            polled.Set();
+        });
+        using var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(15)));
+
+        host.Start();
+
+        Assert.True(polled.Wait(TimeSpan.FromSeconds(10)), "The poll loop never ran at all.");
+        Assert.False(
+            onPoolThread,
+            "The watch loop is running on a thread-pool thread. It blocks until shutdown, so it holds "
+            + "that thread for the life of the process and starves every other pool user.");
+    }
+
     [Fact]
     public void ADeviceAlreadyInUseAtStartupIsNotReportedAsNew()
     {
@@ -133,6 +164,21 @@ public sealed class AvWatchHostTests
             var current = snapshots[Math.Min(_index, snapshots.Length - 1)];
             _index++;
             return current;
+        }
+    }
+
+    /// <summary>Reports which thread the poll loop is actually running on, once, on its first read.</summary>
+    private sealed class ThreadRecordingReader(Action onFirstRead) : ICapabilityAccessReader
+    {
+        private int _reads;
+
+        public IReadOnlyList<DeviceUsage> Read()
+        {
+            if (Interlocked.Increment(ref _reads) == 1)
+            {
+                onFirstRead();
+            }
+            return [];
         }
     }
 }

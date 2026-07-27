@@ -2,6 +2,32 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Arm64 is tested before a tag, not after one
+- **CI tested only x64.** `package` built an Arm64 installer without ever running a test on that
+  architecture, so the only Arm64 test run in the entire project happened inside `release.yml`, after
+  a tag had been pushed. On 2026-07-27 that is precisely where a thread-pool starvation defect
+  surfaced and failed a release build — a defect no pull request could have caught, because no pull
+  request ever ran a test on Arm64. Finding it at tag time is finding it at the worst possible time.
+- `verify` now has a third leg on native **`windows-11-arm`**, running the full suite and the coverage
+  floor on every pull request. The SDK architecture is matrix-driven rather than hardcoded `x64`:
+  installing an x64 SDK on the Arm64 runner would have silently tested the emulated target and proved
+  nothing about native Arm64. The job timeout moved to 45 minutes, sized for the slower runner.
+- The `build-test` gate needs no change to enforce it — it requires the whole `verify` matrix, which
+  is the reason it exists as a gate rather than as individually required legs.
+- **A deterministic guard replaces a symptom.** The end-to-end camera/microphone test saw the
+  starvation only as an occasional timeout, which reads as flakiness and invites a re-run — the exact
+  mechanism by which a real regression eventually gets waved through. There is now an assertion on the
+  property itself: the watch loop must not be running on a thread-pool thread.
+- **Pinning a label is not pinning an image, and `RELEASE.md` now says so.** GitHub migrated both
+  `windows-latest` and `windows-2025` to a Visual Studio 2026 image in June 2026, and hosted images
+  are re-cut weekly regardless; `windows-2025` is a slowly moving target, not a frozen one. No
+  immutable hosted-image label exists, so the mitigation is evidence rather than a stronger pin: every
+  release build job now records `ImageOS` and `ImageVersion` in the run summary, which turns "built on
+  windows-2025" into an exact image a future reader can pin a behavioural difference to.
+- Arm64 claims in `ARM64_VALIDATION.md` and `PRODUCTION_READINESS.md` updated to say exactly this much
+  and no more: unit tests on native Arm64 are now per-pull-request evidence, and they still do not
+  promote any privileged runtime gate.
+
 ### v0.10.5 public unsigned-release waiver
 - A second public **unsigned** release was explicitly authorized on 2026-07-27. No production
   Authenticode certificate is configured, so the release triggers the normal Windows

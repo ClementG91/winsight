@@ -39,6 +39,18 @@ jobs:
           cache: true
           cache-dependency-path: Directory.Packages.props
 
+      # Pinning the label is not the same as pinning the image. GitHub migrated both `windows-latest`
+      # and `windows-2025` to a Visual Studio 2026 image in June 2026, and hosted images are re-cut
+      # weekly regardless — so `runs-on: windows-2025` names a moving target, just a slowly moving
+      # one. Recording the exact image beside the artifacts costs one step and turns "built on
+      # windows-2025" into something a future reader can actually pin a difference to.
+      - name: Record the runner image that built this
+        shell: pwsh
+        run: |
+          $line = "``${{ matrix.architecture }}``: $env:ImageOS / image version ``$env:ImageVersion``"
+          Write-Host $line
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- $line"
+
       - name: Validate tag version
         shell: pwsh
         run: |
