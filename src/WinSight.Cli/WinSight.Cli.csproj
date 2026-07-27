@@ -3,6 +3,7 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>WinSight.Cli</RootNamespace>
     <AssemblyName>winsight</AssemblyName>
+    <AssemblyTitle>WinSight Command-Line Scanner</AssemblyTitle>
     <ApplicationIcon>..\..\assets\branding\winsight.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
