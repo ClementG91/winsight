@@ -61,7 +61,7 @@ public sealed class AttributionHost : IDisposable
     private readonly WriteAttributionIndex _index;
     private readonly Lock _gate = new();
     private CancellationTokenSource? _cancellation;
-    private Task? _worker;
+    private Thread? _worker;
     private bool _disposed;
     private long _attributed;
     private long _unknownProcess;
@@ -123,37 +123,43 @@ public sealed class AttributionHost : IDisposable
             token = _cancellation.Token;
         }
 
-        // The session blocks its thread until stopped, so it cannot run on the caller's.
-        var worker = Task.Run(
-            () =>
+        // The session blocks its thread until stopped, so it cannot run on the caller's — and for the
+        // same reason as AvWatchHost it must not run on the thread pool: a work item that never
+        // returns holds a pool thread for the life of the dashboard, and a saturated pool hands one
+        // out only slowly. An ETW trace session that runs until shutdown owns a thread of its own.
+        var worker = new Thread(() =>
+        {
+            var refused = false;
+            try
             {
-                var refused = false;
-                try
+                _watcher.Watch(OnWrite, OnUnattributed, token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown.
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Not elevated. Recorded as a refusal rather than silence, so a caller can say
+                // "attribution is unavailable" instead of "nothing was written".
+                refused = true;
+            }
+            finally
+            {
+                // Both under one lock: a reader that sees the refusal must never also see a
+                // watch still claiming to run.
+                lock (_gate)
                 {
-                    _watcher.Watch(OnWrite, OnUnattributed, token);
+                    _refused = refused;
+                    _running = false;
                 }
-                catch (OperationCanceledException)
-                {
-                    // Normal shutdown.
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    // Not elevated. Recorded as a refusal rather than silence, so a caller can say
-                    // "attribution is unavailable" instead of "nothing was written".
-                    refused = true;
-                }
-                finally
-                {
-                    // Both under one lock: a reader that sees the refusal must never also see a
-                    // watch still claiming to run.
-                    lock (_gate)
-                    {
-                        _refused = refused;
-                        _running = false;
-                    }
-                }
-            },
-            CancellationToken.None);
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "winsight-attribution-watch",
+        };
+        worker.Start();
 
         lock (_gate)
         {
@@ -176,7 +182,7 @@ public sealed class AttributionHost : IDisposable
     public void Dispose()
     {
         CancellationTokenSource? cancellation;
-        Task? worker;
+        Thread? worker;
         lock (_gate)
         {
             if (_disposed)
@@ -199,7 +205,7 @@ public sealed class AttributionHost : IDisposable
         // Waiting before disposing the source matters: the watch is blocked on this token's wait
         // handle, and disposing it out from under that thread is how a clean shutdown turns into an
         // ObjectDisposedException on a background thread nobody is watching.
-        worker?.Wait(StopTimeout);
+        worker?.Join(StopTimeout);
         cancellation.Dispose();
     }
 
