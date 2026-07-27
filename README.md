@@ -138,6 +138,12 @@ run — that warning is accurate and this project will not pretend otherwise. Ev
 SHA-256 checksums plus GitHub **build provenance** and **SBOM** attestations, which prove the bytes
 came from this repository's release workflow at a named commit; verify them before running anything.
 
+WinSight has **applied to the [SignPath Foundation](https://signpath.org/)** free code signing
+programme for open-source projects. If the application is granted, release binaries will be signed
+through SignPath.io with a certificate issued in SignPath Foundation's name, and this section will say
+so instead of what it says now. Until then, treat the checksums and attestations as the only integrity
+evidence — because they are.
+
 Who may authorise a signature, what one would and would not prove, and how to check a release
 yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 

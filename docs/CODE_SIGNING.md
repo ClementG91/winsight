@@ -11,6 +11,22 @@ For how a release is cut, hashed and attested, see [RELEASE.md](RELEASE.md).
 **WinSight releases are not yet Authenticode-signed.** This is stated plainly rather than buried:
 Windows shows an unknown-publisher warning on first run, and that warning is accurate.
 
+WinSight has **applied to the [SignPath Foundation](https://signpath.org/)**, which provides free code
+signing to open-source projects through the SignPath.io platform. If the application is granted:
+
+- Release binaries will be signed by **SignPath.io**, with a certificate issued in **SignPath
+  Foundation's name** — not in the maintainer's. A SignPath-issued signature attests that the binary
+  came from this project's reviewed release pipeline under the Foundation's terms; it is not a
+  statement by the Foundation about the software's quality or fitness.
+- The certificate may be **revoked by the Foundation** if this project violates those terms.
+- No signing key will exist in this repository or on any developer machine. Signing is requested by the
+  release workflow and performed on SignPath's infrastructure.
+- This document and the README will be updated to describe the arrangement in the present tense, and
+  the roles below become the roles SignPath holds this project to.
+
+Until then, the checksums and attestations described below are the only integrity evidence, and this
+document says so rather than implying a signature that does not exist.
+
 What every release *does* carry today:
 
 - **SHA-256 checksums** for every artifact, generated in the build job and **re-verified in a separate
