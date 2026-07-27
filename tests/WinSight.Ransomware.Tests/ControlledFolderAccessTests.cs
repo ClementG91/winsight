@@ -91,11 +91,96 @@ public sealed class ControlledFolderAccessTriageTests
     [InlineData(ControlledFolderAccessConcern.BlockDiskModificationOnly, true)]
     [InlineData(ControlledFolderAccessConcern.AuditDiskModificationOnly, true)]
     [InlineData(ControlledFolderAccessConcern.RuntimeRequirementsNotMet, true)]
+    [InlineData(ControlledFolderAccessConcern.DefenderNotRunning, true)]
     [InlineData(ControlledFolderAccessConcern.Unavailable, true)]
     public void IsNotable_ExposesEveryGapAndOnlyProtectingIsQuiet(
         ControlledFolderAccessConcern concern,
         bool expected) =>
         Assert.Equal(expected, ControlledFolderAccessTriage.IsNotable(concern));
+
+    /// <summary>
+    /// Every mode Defender documents is a successful read. Treating one as unrecognized reports
+    /// "we could not look" on a machine that answered — the worst way for this reader to be wrong,
+    /// and what happened on any machine whose antivirus is not Defender.
+    /// </summary>
+    [Theory]
+    [InlineData("Normal")]
+    [InlineData("Passive")]
+    [InlineData("Passive Mode")]
+    [InlineData("SxS Passive Mode")]
+    [InlineData("EDR Block Mode")]
+    [InlineData("Not running")]
+    [InlineData(" Normal ")]
+    [InlineData("not running")]
+    public void EveryDocumentedRunningMode_IsARecognizedRead(string mode)
+    {
+        var evidence = new DefenderRuntimeEvidence(mode, AntivirusEnabled: true, RealTimeProtectionEnabled: true);
+
+        Assert.True(evidence.IsRecognizedRunningMode);
+        Assert.NotEqual(
+            ControlledFolderAccessConcern.Unavailable,
+            ControlledFolderAccessTriage.Concern(ControlledFolderAccessState.Enabled, evidence));
+    }
+
+    [Theory]
+    [InlineData("Fortress Mode")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void UndocumentedRunningMode_StaysUnavailable_RatherThanBeingGuessedAt(string mode)
+    {
+        var evidence = new DefenderRuntimeEvidence(mode, AntivirusEnabled: true, RealTimeProtectionEnabled: true);
+
+        Assert.False(evidence.IsRecognizedRunningMode);
+        Assert.Equal(
+            ControlledFolderAccessConcern.Unavailable,
+            ControlledFolderAccessTriage.Concern(ControlledFolderAccessState.Enabled, evidence));
+    }
+
+    /// <summary>
+    /// Controlled Folder Access is a Defender feature, so a stopped antivirus outranks whatever value
+    /// is configured. Reporting a configured 0 as a plain "turn it on" would point the operator at a
+    /// switch that changes nothing until Defender runs again.
+    /// </summary>
+    [Theory]
+    [InlineData(ControlledFolderAccessState.Disabled)]
+    [InlineData(ControlledFolderAccessState.Enabled)]
+    [InlineData(ControlledFolderAccessState.Audit)]
+    [InlineData(ControlledFolderAccessState.BlockDiskModificationOnly)]
+    [InlineData(ControlledFolderAccessState.AuditDiskModificationOnly)]
+    [InlineData(ControlledFolderAccessState.Unknown)]
+    public void DefenderNotRunning_OutranksTheConfiguredMode(ControlledFolderAccessState state)
+    {
+        var evidence = new DefenderRuntimeEvidence(
+            "Not running", AntivirusEnabled: false, RealTimeProtectionEnabled: false);
+
+        Assert.True(evidence.IsAntivirusNotRunning);
+        Assert.False(evidence.SupportsControlledFolderAccessProtection);
+        Assert.Equal(
+            ControlledFolderAccessConcern.DefenderNotRunning,
+            ControlledFolderAccessTriage.Concern(state, evidence));
+    }
+
+    /// <summary>
+    /// A stray space around Defender's own string must not downgrade a successful read, and must not
+    /// promote a non-Normal mode into protection either.
+    /// </summary>
+    [Fact]
+    public void RunningModeComparison_IgnoresSurroundingWhitespaceAndCase()
+    {
+        var normal = new DefenderRuntimeEvidence(
+            " normal ", AntivirusEnabled: true, RealTimeProtectionEnabled: true);
+        var passive = new DefenderRuntimeEvidence(
+            " Passive ", AntivirusEnabled: true, RealTimeProtectionEnabled: true);
+
+        Assert.True(normal.SupportsControlledFolderAccessProtection);
+        Assert.Equal(
+            ControlledFolderAccessConcern.Protecting,
+            ControlledFolderAccessTriage.Concern(ControlledFolderAccessState.Enabled, normal));
+        Assert.False(passive.SupportsControlledFolderAccessProtection);
+        Assert.Equal(
+            ControlledFolderAccessConcern.RuntimeRequirementsNotMet,
+            ControlledFolderAccessTriage.Concern(ControlledFolderAccessState.Enabled, passive));
+    }
 }
 
 public sealed class ControlledFolderAccessReaderTests

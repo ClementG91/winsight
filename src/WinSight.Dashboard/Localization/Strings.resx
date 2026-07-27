@@ -118,6 +118,8 @@
   <data name="Exported" xml:space="preserve"><value>Report exported: {0}</value></data>
   <data name="LocationOpened" xml:space="preserve"><value>Location opened in File Explorer.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Windows tool opened.</value></data>
+  <data name="AlertOpenedFromNotification" xml:space="preserve"><value>Opened from the notification you clicked.</value></data>
+  <data name="AlertPendingScan" xml:space="preserve"><value>A scan is running. The detection is recorded — open Alerts once it finishes.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Action unavailable: {0}</value></data>
   <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>File missing, signature not checked</value></data>
   <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Signature valid</value></data>

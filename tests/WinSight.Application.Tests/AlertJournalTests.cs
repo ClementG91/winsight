@@ -34,6 +34,37 @@ public sealed class AlertJournalTests
         Assert.Equal(alert.Detail, parsed.Detail);
     }
 
+    /// <summary>
+    /// The dashboard identifies a journalled detection by its round-trip timestamp: clicking a tray
+    /// notification opens the Alerts view and selects the row whose <c>time</c> field equals the one
+    /// the in-memory alert renders. That only works while a journalled alert reads back with a
+    /// byte-identical <c>"O"</c> stamp, so this pins it rather than leaving the click to rot silently
+    /// back into a notification that opens the app on nothing in particular.
+    /// </summary>
+    [Fact]
+    public void JournalledAlert_ReadsBackWithAnIdenticalRoundTripTimestamp()
+    {
+        var path = TempJournal();
+        try
+        {
+            // The detection handlers stamp with DateTimeOffset.Now, so the offset is local and the
+            // sub-second precision is whatever the clock gave: both must survive the round trip.
+            var alert = new SecurityAlert(
+                DateTimeOffset.Now, "Ransomware", "CanaryTouched", @"C:\Users\me\Desktop\decoy.xlsx");
+            AlertJournal.Append(alert, path);
+
+            var read = Assert.Single(AlertJournal.Read(path, 10));
+
+            Assert.Equal(
+                alert.TimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture),
+                read.TimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
     [Fact]
     public void Format_FieldsContainingTabsOrNewlines_StayOnOneParseableLine()
     {

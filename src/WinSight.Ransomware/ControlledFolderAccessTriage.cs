@@ -20,6 +20,15 @@ public static class ControlledFolderAccessTriage
             return ControlledFolderAccessConcern.Unavailable;
         }
 
+        // Defender reporting that it is not running outranks the configured value. Controlled Folder
+        // Access is a Defender feature, so with the antivirus stopped no configured value protects
+        // anything, and reporting a configured 0 as a plain "turn it on" would send the operator to a
+        // switch that changes nothing until Defender itself is running again.
+        if (runtimeEvidence.IsAntivirusNotRunning)
+        {
+            return ControlledFolderAccessConcern.DefenderNotRunning;
+        }
+
         return state switch
         {
             ControlledFolderAccessState.Enabled when runtimeEvidence.SupportsControlledFolderAccessProtection =>

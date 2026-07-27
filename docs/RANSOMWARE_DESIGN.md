@@ -90,7 +90,9 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
   driver, WinSight reports its *configured and observed operational posture*. The `integrity` scan
   reads Defender WMI unelevated and only reports Protecting when CFA is Enabled and Defender reports
   `AMRunningMode=Normal`, antivirus enabled and real-time protection enabled. Disabled, audit and
-  disk-modification-only modes are notable; missing/malformed provider evidence is explicitly
+  disk-modification-only modes are notable; a machine whose antivirus is a non-Microsoft product
+  reports `AMRunningMode=Not running` and is reported as **Defender not running**, notable, rather
+  than as an unreadable posture; missing/malformed provider evidence is explicitly
   unavailable and notable. This reports posture, not a guarantee of a particular blocked write.
   WinSight reads and reports; it never toggles Controlled Folder Access itself.
   See `ControlledFolderAccessReader`/`ControlledFolderAccessTriage`.

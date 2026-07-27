@@ -118,6 +118,8 @@
   <data name="Exported" xml:space="preserve"><value>Informe exportado: {0}</value></data>
   <data name="LocationOpened" xml:space="preserve"><value>Ubicación abierta en el Explorador de archivos.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Herramienta de Windows abierta.</value></data>
+  <data name="AlertOpenedFromNotification" xml:space="preserve"><value>Abierto desde la notificación en la que hizo clic.</value></data>
+  <data name="AlertPendingScan" xml:space="preserve"><value>Hay un análisis en curso. La detección está registrada: abra Alertas cuando termine.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Acción no disponible: {0}</value></data>
   <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Falta el archivo, firma no comprobada</value></data>
   <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Firma válida</value></data>

@@ -28,9 +28,15 @@ Plus GitHub **build provenance** and **SBOM attestations**, signed by GitHub's O
 git tag v0.11.0 && git push origin v0.11.0
 ```
 
-`release.yml` then builds both architectures — x64 on `windows-latest`, Arm64 on the **native**
-`windows-11-arm` runner — runs the full installer lifecycle on each, signs, checksums, attests and
-publishes.
+`release.yml` then builds both architectures — x64 on the pinned `windows-2025` image, Arm64 on the
+**native** `windows-11-arm` runner — runs the full installer lifecycle on each, signs, checksums,
+attests and publishes.
+
+Runner images are pinned rather than following `windows-latest`. The label resolves to `windows-2025`
+today, so the pin changes nothing now — that is the point. It moves on GitHub's schedule, and this
+workflow produces the binaries someone downloads and runs; a release built on an image no CI leg ever
+exercised is an unreviewed change to the artifact arriving without a commit. `ci.yml` pins the same
+image and covers `windows-2022` beside it. Moving to a newer image is a deliberate one-line commit.
 
 ## Authenticode signing
 

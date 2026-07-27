@@ -371,9 +371,16 @@ public static class Adapters
     /// by definition, something WinSight considered worth interrupting the operator for; the
     /// flagged-only filter therefore does not hide anything here.
     /// </remarks>
-    public static ToolReport Alerts(int max = 200)
+    public static ToolReport Alerts(int max = 200) => Alerts(AlertJournal.DefaultPath, max);
+
+    /// <summary>
+    /// Composes the report from a named journal. Internal so tests exercise the real composition
+    /// against a fixture journal rather than whatever the machine running them happens to have
+    /// recorded — and so they never write into the operator's own journal to get a fixture.
+    /// </summary>
+    internal static ToolReport Alerts(string journalPath, int max)
     {
-        var alerts = AlertJournal.Read(max);
+        var alerts = AlertJournal.Read(journalPath, max);
         var b = new ToolReport.Builder("alerts");
         foreach (var alert in alerts)
         {
@@ -845,6 +852,11 @@ public static class Adapters
         ControlledFolderAccessConcern.RuntimeRequirementsNotMet =>
             "enabled, but current Defender runtime evidence does not establish Normal mode with antivirus and "
             + "real-time protection enabled. The configured setting alone is not evidence of operational folder protection.",
+        ControlledFolderAccessConcern.DefenderNotRunning =>
+            "not protecting — Microsoft Defender antivirus reports that it is not running, which is the usual "
+            + "result of another antivirus taking over. Controlled Folder Access is a Defender feature, so no "
+            + "configured value protects your folders until Defender runs again; check which antivirus is active "
+            + $"in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
         ControlledFolderAccessConcern.UnknownMode =>
             $"unsupported mode value {shield.RawStateValue} read; protection not established. Review the configured "
             + $"mode in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",

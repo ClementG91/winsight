@@ -95,8 +95,12 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
   Access** — configured and operational posture can be read: the `integrity` check uses
   Defender WMI (unelevated) and distinguishes Disabled, Audit, block/audit disk-modification-only,
   and a fully observed Enabled posture. The latter requires Defender `AMRunningMode=Normal`,
-  antivirus enabled and real-time protection enabled; unavailable provider/runtime evidence remains
-  a notable unavailable result. WinSight only reads and reports this setting; it never enables,
+  antivirus enabled and real-time protection enabled. Every operating mode Defender documents —
+  `Normal`, `Passive`, `Passive Mode`, `SxS Passive Mode`, `EDR Block Mode` and `Not running` — counts
+  as a successful read; `Not running` reports as **Defender not running** rather than as a configured
+  mode, because Controlled Folder Access is a Defender feature and no configured value protects
+  anything while the antivirus is stopped. Only genuinely missing or undocumented provider/runtime
+  evidence remains a notable unavailable result. WinSight only reads and reports this setting; it never enables,
   disables or otherwise configures Controlled Folder Access — the operator changes it in Windows.
 - VirusTotal is opt-in and user-keyed. WinSight enforces Community ceilings across
   its processes (4/rolling minute, 500/UTC day, 15,500/UTC month), never retries a
