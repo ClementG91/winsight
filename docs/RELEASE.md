@@ -58,6 +58,31 @@ known absence of a certificate does not stop it. The resulting artifacts are exp
 and to trigger the normal Windows unknown-publisher warning. This exception does not exercise or
 establish the signed Authenticode production chain, and it does not establish product readiness.
 
+#### Second unsigned waiver — v0.10.5, dated 2026-07-27
+
+A second unsigned public release was explicitly authorized on 2026-07-27, on the same terms and with
+the same limits. Recording it honestly matters more than the tidiness of having said "one release
+only" the first time: this is now a **pattern**, not an exception, and the document should say so
+rather than let a reader infer a discipline that is not being kept.
+
+Why it was granted, so the trade is auditable rather than assumed:
+
+- v0.10.5 carries three user-affecting corrections — a detection notification that could not be
+  clicked open, a Controlled Folder Access posture that read "unavailable" on machines running a
+  non-Microsoft antivirus, and the Security Center inventory that stops the ransomware-shield verdict
+  from leaving a false impression on exactly those machines.
+- **v0.10.4 already shipped unsigned.** An unsigned v0.10.5 is therefore not a regression in posture;
+  it is the same posture carrying fixes. Withholding the fixes would have been the larger harm.
+- An application to the SignPath Foundation free code-signing programme for open-source projects is
+  pending. It had not been answered when this release was cut, and its outcome is not certain.
+
+`REQUIRE_SIGNED_RELEASE` is set back to `true` immediately after publication. It is a gate that fails
+closed by default, opened deliberately and briefly, and closed again — not a setting left off.
+
+**This waiver expires with v0.10.5.** A third unsigned release should not be waved through on the
+strength of the first two; if signing is still unavailable by then, the honest response is to fix the
+signing path rather than to keep writing paragraphs like this one.
+
 ### Values required to enable the signing path
 
 A code-signing certificate cannot live in a public repository. Provide it as repository secrets:
@@ -85,8 +110,9 @@ The build still succeeds, and says so loudly:
 ```
 
 It is never silent. The normal repository setting `REQUIRE_SIGNED_RELEASE=true` makes a missing
-certificate a hard failure, so the release workflow cannot quietly lose its signature. It will be
-intentionally disabled only for the explicitly waived unsigned v0.10.4 release described above.
+certificate a hard failure, so the release workflow cannot quietly lose its signature. It has been
+intentionally disabled only for the two explicitly waived unsigned releases described above — v0.10.4
+and v0.10.5 — and set back to `true` immediately after each was published.
 
 ### Why signing is verified, not assumed
 
