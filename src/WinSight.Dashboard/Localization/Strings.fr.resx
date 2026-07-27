@@ -118,6 +118,8 @@
   <data name="Exported" xml:space="preserve"><value>Rapport exporté : {0}</value></data>
   <data name="LocationOpened" xml:space="preserve"><value>Emplacement ouvert dans l’Explorateur.</value></data>
   <data name="WindowsToolOpened" xml:space="preserve"><value>Outil Windows ouvert.</value></data>
+  <data name="AlertOpenedFromNotification" xml:space="preserve"><value>Ouvert depuis la notification sur laquelle vous avez cliqué.</value></data>
+  <data name="AlertPendingScan" xml:space="preserve"><value>Une analyse est en cours. La détection est enregistrée — ouvrez Alertes une fois terminée.</value></data>
   <data name="ActionFailed" xml:space="preserve"><value>Action impossible : {0}</value></data>
   <data name="PersistenceStatusFileMissing" xml:space="preserve"><value>Fichier absent, signature non vérifiée</value></data>
   <data name="PersistenceStatusSignatureValid" xml:space="preserve"><value>Signature valide</value></data>

@@ -134,13 +134,17 @@ jobs:
           echo "verify: ${{ needs.verify.result }}"
           test "${{ needs.verify.result }}" = "success"
 
+  # Pinned to the same image `verify` runs on, and for the same reason release.yml is pinned: this job
+  # is the installer-lifecycle rehearsal for the release, so it is only a rehearsal while it runs on
+  # the image the release will actually use. `windows-latest` resolves to `windows-2025` today, so the
+  # pin changes nothing now — it stops the two from silently diverging the day the label moves.
   package:
     strategy:
       fail-fast: false
       matrix:
         include:
           - architecture: x64
-            runner: windows-latest
+            runner: windows-2025
             installer_language: french
           - architecture: arm64
             runner: windows-11-arm

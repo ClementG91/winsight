@@ -50,9 +50,15 @@ $script:States = @(
 )
 $script:Concerns = @(
     'Protecting', 'Off', 'AuditOnly', 'BlockDiskModificationOnly',
-    'AuditDiskModificationOnly', 'RuntimeRequirementsNotMet', 'UnknownMode', 'Unavailable'
+    'AuditDiskModificationOnly', 'RuntimeRequirementsNotMet', 'DefenderNotRunning',
+    'UnknownMode', 'Unavailable'
 )
-$script:RuntimeModes = @('Normal', 'Passive Mode', 'SxS Passive Mode', 'EDR Block Mode')
+# Every operating mode Defender documents for AMRunningMode. The passive spelling differs across
+# the Windows versions WinSight supports, and 'Not running' is the ordinary reading on a machine
+# whose antivirus is a non-Microsoft product. Mirrors DefenderRuntimeEvidence.DocumentedRunningModes.
+$script:RuntimeModes = @(
+    'Normal', 'Passive', 'Passive Mode', 'SxS Passive Mode', 'EDR Block Mode', 'Not running'
+)
 $script:Visibilities = @('Visible', 'RequiresElevation', 'Unavailable')
 $script:MaximumCaptureCharacters = $TestMaximumCaptureCharacters
 $script:MaximumFixtureCharacters = 1048576
@@ -676,7 +682,26 @@ function Assert-CfaItem([object]$Item) {
         'BlockDiskModificationOnly' = @{ Raw = 3; Concern = 'BlockDiskModificationOnly' }
         'AuditDiskModificationOnly' = @{ Raw = 4; Concern = 'AuditDiskModificationOnly' }
     }
-    if ($state -ceq 'Unknown') {
+    # Defender reporting that it is not running outranks the configured value, exactly as
+    # ControlledFolderAccessTriage.Concern does: CFA is a Defender feature, so with the antivirus
+    # stopped no configured mode protects anything. The raw value must still survive the read.
+    if ($fields.amRunningMode -ceq 'Not running') {
+        if ($concern -cne 'DefenderNotRunning' -or $fields.runtimeSupportsProtection -cne 'False') {
+            Fail-Contract 'Defender reporting Not running is not reported as DefenderNotRunning'
+        }
+        $rawByState = @{
+            'Disabled' = 0; 'Enabled' = 1; 'Audit' = 2
+            'BlockDiskModificationOnly' = 3; 'AuditDiskModificationOnly' = 4
+        }
+        if ($state -ceq 'Unknown') {
+            if ($rawState -in @(0, 1, 2, 3, 4)) {
+                Fail-Contract 'Unknown CFA state does not retain an unsupported raw value'
+            }
+        }
+        elseif (-not $rawByState.ContainsKey($state)) { Fail-Contract 'CFA state is unsupported by this contract' }
+        elseif ($rawState -ne $rawByState[$state]) { Fail-Contract "$state CFA has an invalid rawStateValue" }
+    }
+    elseif ($state -ceq 'Unknown') {
         if ($rawState -in @(0, 1, 2, 3, 4) -or $concern -cne 'UnknownMode') {
             Fail-Contract 'Unknown CFA state does not retain an unsupported raw value'
         }

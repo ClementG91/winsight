@@ -10,13 +10,20 @@ permissions:
   attestations: write
 
 jobs:
+  # Runner images are pinned, not floated. `windows-latest` currently resolves to `windows-2025`, so
+  # this changes nothing today — that is the point. The label moves on GitHub's schedule, not ours,
+  # and this workflow is what produces the signed, attested binaries someone downloads and runs with
+  # their security posture riding on it. A release built on an image no CI leg ever exercised is an
+  # unreviewed change to the artifact, arriving without a commit. ci.yml pins the same way and covers
+  # `windows-2022` beside it, so the image this release is built on is one the suite has actually run
+  # on. Moving to a newer image is then a deliberate one-line commit here, reviewed like any other.
   build:
     strategy:
       fail-fast: false
       matrix:
         include:
           - architecture: x64
-            runner: windows-latest
+            runner: windows-2025
             installer_language: french
           - architecture: arm64
             runner: windows-11-arm
@@ -95,9 +102,11 @@ jobs:
             out/release/*.sha256
           if-no-files-found: error
 
+  # Pinned for the same reason as `build`: this job re-verifies the checksums and creates the public
+  # release, so the image it runs on is part of how the artifacts are attested.
   publish:
     needs: build
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

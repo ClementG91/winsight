@@ -49,6 +49,16 @@ public partial class MainWindow : Window, IDisposable
     private bool _initializing = true;
     private bool _shownTrayHint;
 
+    /// <summary>
+    /// The detection the balloon currently on screen is about, so clicking it can land the operator on
+    /// that entry rather than on the dashboard's front page. Null when the balloon carries no alert
+    /// (the "still running in the notification area" hint), which must not navigate anywhere.
+    /// </summary>
+    private SecurityAlert? _balloonAlert;
+
+    /// <summary>The catalog command whose report renders <see cref="AlertJournal"/>.</summary>
+    private const string AlertsCommand = "alerts";
+
     public MainWindow()
     {
         InitializeComponent();
@@ -68,6 +78,10 @@ public partial class MainWindow : Window, IDisposable
             ContextMenuStrip = menu,
         };
         _trayIcon.DoubleClick += (_, _) => Dispatcher.Invoke(ShowFromTray);
+        // A detection balloon that cannot be clicked open is a dead end: it names a threat, vanishes
+        // after a few seconds, and leaves the operator to find the matching entry themselves. Clicking
+        // it opens the dashboard on that exact alert.
+        _trayIcon.BalloonTipClicked += (_, _) => Dispatcher.Invoke(ShowAlertFromBalloon);
         StateChanged += (_, _) =>
         {
             if (WindowState == WindowState.Minimized)
@@ -153,11 +167,12 @@ public partial class MainWindow : Window, IDisposable
         var usage = e.Usage;
         // Journal first, for the same reason as every other detection: Windows may drop the balloon
         // and a detection that leaves no trace is indistinguishable from no detection.
-        AlertJournal.Append(new SecurityAlert(
+        var alert = new SecurityAlert(
             DateTimeOffset.Now,
             "Camera/Mic",
             $"{usage.Kind}{(e.Kind == AvEventKind.Activated ? "Activated" : "Deactivated")}",
-            usage.App));
+            usage.App);
+        AlertJournal.Append(alert);
 
         if (e.Kind != AvEventKind.Activated)
         {
@@ -173,6 +188,7 @@ public partial class MainWindow : Window, IDisposable
             {
                 return;
             }
+            _balloonAlert = alert;
             _trayIcon.ShowBalloonTip(
                 5000,
                 Text["AvBalloonTitle"],
@@ -238,7 +254,7 @@ public partial class MainWindow : Window, IDisposable
         // Journal FIRST, balloon second. Windows may suppress the balloon entirely (Focus Assist, or
         // its throttling of an app posting several toasts quickly), and a detection that leaves no
         // trace is indistinguishable from no detection at all.
-        AlertJournal.Append(new SecurityAlert(
+        var alert = new SecurityAlert(
             DateTimeOffset.Now,
             "Ransomware",
             e.Kind.ToString(),
@@ -250,7 +266,8 @@ public partial class MainWindow : Window, IDisposable
                 // Carried so a nameless alert says why it is nameless. "Not elevated" and "watching
                 // and saw nothing" call for different responses, and a silent absence reads as the
                 // second when it is usually the first.
-                health: _attribution?.Health)));
+                health: _attribution?.Health));
+        AlertJournal.Append(alert);
 
         Dispatcher.Invoke(() =>
         {
@@ -258,6 +275,7 @@ public partial class MainWindow : Window, IDisposable
             {
                 return;
             }
+            _balloonAlert = alert;
             // Louder and longer than a persistence alert: this is the one event where minutes matter.
             _trayIcon.ShowBalloonTip(
                 10000,
@@ -270,14 +288,15 @@ public partial class MainWindow : Window, IDisposable
     private void OnGuardianDetected(object? sender, PersistenceDetectedEventArgs e)
     {
         var detection = e.Detected;
-        AlertJournal.Append(new SecurityAlert(
+        var alert = new SecurityAlert(
             DateTimeOffset.Now,
             "Guardian",
             detection.Entry.Vector.ToString(),
             PersistenceMonitorPresenter.AlertDetail(
                 detection,
                 _attribution is { } attribution ? attribution.Attribute : null,
-                _attribution?.Health)));
+                _attribution?.Health));
+        AlertJournal.Append(alert);
 
         Dispatcher.Invoke(() =>
         {
@@ -285,6 +304,7 @@ public partial class MainWindow : Window, IDisposable
             {
                 return;
             }
+            _balloonAlert = alert;
             _trayIcon.ShowBalloonTip(
                 5000,
                 Text["GuardianBalloonTitle"],
@@ -842,11 +862,88 @@ public partial class MainWindow : Window, IDisposable
         Activate();
     }
 
+    /// <summary>
+    /// Opens the dashboard on the detection whose balloon was just clicked.
+    /// </summary>
+    /// <remarks>
+    /// A balloon is a few seconds of text that then disappears; acting on it means finding the entry
+    /// again, and until this existed clicking one did nothing at all. Reading the journal is a local
+    /// file read rather than a scan, so it runs inline and the alert is already selected by the time
+    /// the window finishes appearing.
+    ///
+    /// The window is raised whatever else happens: even if the entry cannot be matched — a journal
+    /// that failed to write, or one trimmed past this alert — a click must still open the app rather
+    /// than appear to be ignored.
+    /// </remarks>
+    private void ShowAlertFromBalloon()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        ShowFromTray();
+        if (_balloonAlert is not { } alert || DashboardTools.ForCommand(AlertsCommand) is not { } alertsTool)
+        {
+            return;
+        }
+
+        // A scan in flight owns the results grid and the tool selection: it will assign both when it
+        // completes. Navigating over it would show the alert for a moment and then have the finishing
+        // scan overwrite it, which reads as the click having been undone. The window is already up, so
+        // say where the alert is instead of racing a scan the operator started themselves.
+        if (_scanCancellation is not null)
+        {
+            SummaryText.Text = Text["AlertPendingScan"];
+            return;
+        }
+
+        TryUserAction(
+            () =>
+            {
+                _reports = [Adapters.Run(AlertsCommand, flaggedOnly: false)];
+                _lastScanCommand = AlertsCommand;
+                // Assigning the selection only refreshes the grid when it actually changes, so the
+                // context is shown explicitly for the case where Alerts was already the open tool.
+                ToolPicker.SelectedItem = alertsTool;
+                ShowToolContext(alertsTool);
+                SelectJournalledAlert(alert);
+            },
+            Text["AlertOpenedFromNotification"]);
+    }
+
+    /// <summary>
+    /// Selects the row for one journalled detection. The timestamp is the identity: the journal writes
+    /// it round-trippable and the report carries it back unchanged.
+    /// </summary>
+    private void SelectJournalledAlert(SecurityAlert alert)
+    {
+        if (ResultsGrid.ItemsSource is not IEnumerable<FindingView> findings)
+        {
+            return;
+        }
+
+        var stamp = alert.TimeUtc.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        var match = findings.FirstOrDefault(finding =>
+            finding.Item.Fields.TryGetValue("time", out var time)
+            && string.Equals(time, stamp, StringComparison.Ordinal));
+        if (match is null)
+        {
+            return;
+        }
+
+        ResultsGrid.SelectedItem = match; // raises ResultsGrid_SelectionChanged, which fills the detail pane
+        ResultsGrid.ScrollIntoView(match);
+    }
+
     private void HideToTray()
     {
         Hide();
         if (!_shownTrayHint)
         {
+            // Carries no detection, so a click on it must open the dashboard without jumping to an
+            // unrelated older alert.
+            _balloonAlert = null;
             _trayIcon.ShowBalloonTip(2500, "WinSight", Text["TrayHintMessage"], Forms.ToolTipIcon.Info);
             _shownTrayHint = true;
         }

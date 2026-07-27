@@ -2,6 +2,48 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### A notification you can click, and a CFA read that works when Defender is not the antivirus
+- **Clicking a detection notification did nothing.** The tray balloon named the threat, stayed a few
+  seconds, and vanished; `BalloonTipClicked` was never subscribed, so the one gesture every operator
+  makes on a security alert — click it — left the app hidden in the tray and the operator hunting for
+  the matching entry. Clicking a balloon now opens the dashboard on the **Alerts** view with that exact
+  detection selected. The alert is matched by its round-trip journal timestamp, and the window is
+  raised even when the entry cannot be matched, so a click is never silently ignored.
+- **The Controlled Folder Access posture read "unavailable" on ordinary machines.** The reader accepted
+  only four spellings of Defender's `AMRunningMode` and treated anything else as a provider it could not
+  read. Microsoft documents `Normal`, `Passive`, `Passive Mode`, `SxS Passive Mode`, `EDR Block Mode` and
+  `Not running`; the two missing ones are exactly what a machine running a non-Microsoft antivirus
+  reports. The commonest non-default configuration therefore rendered as "we could not look" when
+  WinSight had looked successfully — the worst way for this reader to be wrong, since it hides the
+  machine that has *no* kernel-level ransomware blocker at all behind a shrug.
+- `Not running` now reports as a distinct **Defender not running** concern that outranks the configured
+  CFA value: Controlled Folder Access is a Defender feature, so with the antivirus stopped no configured
+  mode protects anything, and telling the operator to "turn CFA on" would point them at a switch that
+  changes nothing. Comparison also tolerates surrounding whitespace. Genuinely undocumented modes still
+  read as unavailable rather than being guessed at.
+- Pinned by unit tests over every documented mode and by two new green provider-contract fixtures
+  (`Not running`, and the `Passive` spelling) plus a red one that rejects `Not running` being reported as
+  a plain configured "off"; the PowerShell provider contract carries the same vocabulary as the C# triage.
+- **The alerts report had no deterministic test.** All four existing tests read whatever the host
+  machine happened to have journalled, so on a clean checkout they passed over an empty list and proved
+  nothing — including that the view shows every recorded detection. `Adapters.Alerts` gained an internal
+  overload taking the journal path, and the report is now proven to surface all 25 entries of a fixture
+  journal, newest first, without writing into the operator's own. The timestamp join the notification
+  click selects by is pinned there too: if the adapter ever reformatted that stamp, the click would open
+  the app on nothing and no other test would notice.
+- A notification clicked **during a scan** no longer hijacks the results grid. The running scan owns the
+  grid and assigns it on completion, so navigating over it would show the alert for a moment and then have
+  the finishing scan overwrite it — reading as the click being undone. The window still opens, and the
+  status line says where the detection is.
+- **Release runner images are pinned, not floated.** `release.yml` built on `windows-latest` while
+  `ci.yml` deliberately pinned `windows-2025` beside `windows-2022` — backwards, since the release
+  pipeline is the one producing the signed, attested binaries a user actually downloads. `windows-latest`
+  resolves to `windows-2025` today, so this changes nothing now; it stops the image the release is built
+  on from moving on GitHub's schedule to one no CI leg has ever exercised. The release build matrix, the
+  publish job, and CI's `package` job — the installer-lifecycle rehearsal for the release, which is only
+  a rehearsal while it runs on the image the release uses — are all pinned. No floating Windows label
+  remains in either workflow.
+
 ### v0.10.4 public unsigned-release waiver
 - The user explicitly authorized a public **unsigned** v0.10.4 release on 2026-07-26. No production
   Authenticode certificate is configured, so the release is expected to trigger the normal Windows

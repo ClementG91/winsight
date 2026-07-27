@@ -170,11 +170,17 @@ $cases = @(
     @{ Name = 'green-runtime-shortfall.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Enabled'; Concern = 'RuntimeRequirementsNotMet'; RawStateValue = 1; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 0 },
     @{ Name = 'green-audit.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Audit'; Concern = 'AuditOnly'; RawStateValue = 2; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 0 },
     @{ Name = 'green-unavailable.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Unavailable'; Concern = 'Unavailable'; RawStateValue = $null; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Unavailable'; ProtectedFolderCount = 0 },
+    # A machine whose antivirus is a non-Microsoft product. Both of these were rejected as unknown
+    # vocabulary before the running-mode set covered every mode Defender documents, which turned the
+    # commonest non-default configuration into an unreadable posture.
+    @{ Name = 'green-defender-not-running.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Disabled'; Concern = 'DefenderNotRunning'; RawStateValue = 0; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 0 },
+    @{ Name = 'green-passive-spelling.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Enabled'; Concern = 'RuntimeRequirementsNotMet'; RawStateValue = 1; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 1 },
     @{ Name = 'red-missing-cfa.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-duplicate-cfa.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-unknown-vocabulary.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-protecting-runtime.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-unavailable-hidden.json'; ExpectedExit = 1; ExpectedEvidence = $false },
+    @{ Name = 'red-not-running-reported-as-off.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-invalid-raw.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-notable-count-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-sensitive-field.json'; ExpectedExit = 1; ExpectedEvidence = $false },
