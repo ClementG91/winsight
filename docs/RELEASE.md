@@ -36,7 +36,16 @@ Runner images are pinned rather than following `windows-latest`. The label resol
 today, so the pin changes nothing now — that is the point. It moves on GitHub's schedule, and this
 workflow produces the binaries someone downloads and runs; a release built on an image no CI leg ever
 exercised is an unreviewed change to the artifact arriving without a commit. `ci.yml` pins the same
-image and covers `windows-2022` beside it. Moving to a newer image is a deliberate one-line commit.
+image and covers `windows-2022` and native `windows-11-arm` beside it. Moving to a newer image is a
+deliberate one-line commit.
+
+**Pinning the label is not the same as pinning the image**, and this document should not pretend
+otherwise. GitHub migrated both `windows-latest` and `windows-2025` to a Visual Studio 2026 image in
+June 2026, and hosted images are re-cut weekly regardless — so `runs-on: windows-2025` names a moving
+target, just a slowly moving one that only moves when GitHub says so rather than continuously. There
+is no immutable hosted-image label to reach for, so the mitigation is evidence rather than a stronger
+pin: each build job records `ImageOS` and `ImageVersion` in the workflow run summary, which turns
+"built on windows-2025" into an exact image a future reader can pin a behavioural difference to.
 
 ## Authenticode signing
 

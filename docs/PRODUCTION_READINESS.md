@@ -6,7 +6,7 @@ is closed only when someone can re-run it and get the same answer.
 | Target | Verdict |
 |---|---|
 | **x64** | **Not production-ready** — three privileged boundaries are qualified, but product-level gates remain open |
-| **Arm64 (native)** | **Not production-ready** — build and packaging verified in CI, privileged runtime behaviour unverified |
+| **Arm64 (native)** | **Not production-ready** — build, unit tests and packaging verified in CI on every pull request, privileged runtime behaviour unverified |
 
 ## x64
 
