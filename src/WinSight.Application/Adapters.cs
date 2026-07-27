@@ -755,12 +755,20 @@ public static class Adapters
     /// Composes the code-integrity report with already-created readers. Internal so tests can exercise
     /// report composition without consulting the host's Defender provider or Security Center.
     /// </summary>
+    /// <remarks>
+    /// Both readers are required, deliberately. An earlier version defaulted the Security Center
+    /// reader to null and constructed a real one when it was, which silently voided the
+    /// host-independence this seam exists to provide: composition tests kept passing on a developer
+    /// machine and failed on Windows Server, which does not ship Security Center at all. A seam that
+    /// quietly falls back to the host is worse than no seam, because it looks injected.
+    /// </remarks>
     internal static ToolReport CodeIntegrity(
         bool flaggedOnly,
         ControlledFolderAccessReader controlledFolderAccessReader,
-        SecurityCenterReader? securityCenterReader = null)
+        SecurityCenterReader securityCenterReader)
     {
         ArgumentNullException.ThrowIfNull(controlledFolderAccessReader);
+        ArgumentNullException.ThrowIfNull(securityCenterReader);
         var findings = CodeIntegrityTriage.Evaluate(new CodeIntegrityReader().Read());
         var b = new ToolReport.Builder("integrity");
         var checkedCount = 0;
@@ -793,7 +801,7 @@ public static class Adapters
         // posture because the CFA verdict is only honest in its light: "the ransomware shield is not
         // protecting you" is an accurate sentence that leaves a false impression on a machine whose
         // antivirus is Norton and is working fine.
-        var inventory = (securityCenterReader ?? new SecurityCenterReader()).Read();
+        var inventory = securityCenterReader.Read();
         var antivirusConcern = SecurityProductTriage.Concern(inventory);
         var antivirusNotable = SecurityProductTriage.IsNotable(antivirusConcern);
         if (inventory.Reading == SecurityCenterReading.Unavailable)
