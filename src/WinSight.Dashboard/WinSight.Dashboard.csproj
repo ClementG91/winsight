@@ -3,6 +3,10 @@
     <OutputType>WinExe</OutputType>
     <RootNamespace>WinSight.Dashboard</RootNamespace>
     <AssemblyName>winsight-dashboard</AssemblyName>
+    <!-- What Windows shows the user: Task Manager, the UAC prompt and the SmartScreen dialog all
+         read FileDescription, which defaults to the assembly name. "winsight-dashboard" is a
+         filename, not an answer to "what is asking for permission?". -->
+    <AssemblyTitle>WinSight Dashboard</AssemblyTitle>
     <ApplicationIcon>..\..\assets\branding\winsight.ico</ApplicationIcon>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>

@@ -3,6 +3,9 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>WinSight.FirewallService</RootNamespace>
     <AssemblyName>winsight-firewall-service</AssemblyName>
+    <!-- This one runs as SYSTEM. Anyone auditing what is privileged on their machine reads this
+         string in Task Manager and in the service list; it must say what it is. -->
+    <AssemblyTitle>WinSight Outbound Firewall Service</AssemblyTitle>
     <!-- The LibraryImport source generator emits unsafe marshalling stubs. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

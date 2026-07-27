@@ -10,6 +10,19 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <Version>0.10.5</Version>
     <Deterministic>true</Deterministic>
+    <!-- Product identity, set centrally rather than derived from each assembly's name.
+         Without this every binary reported ProductName/CompanyName as "winsight-dashboard" with no
+         copyright at all: the name Windows put in front of the user in the UAC and SmartScreen
+         prompts was a build artifact's filename. It is also what a signing policy pins to decide
+         whether a binary presented for signature is the product it claims to be, so it has to be
+         deliberate. See docs/CODE_SIGNING.md. -->
+    <Product>WinSight</Product>
+    <Company>eDeveloppe</Company>
+    <Authors>Clément Genest</Authors>
+    <Copyright>Copyright © 2026 Clément Genest</Copyright>
+    <PackageProjectUrl>https://github.com/ClementG91/winsight</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ClementG91/winsight</RepositoryUrl>
+    <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
   </PropertyGroup>

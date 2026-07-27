@@ -128,7 +128,18 @@ service and mutates WFP, which should be an explicit decision. See
 
 Threat model, trust boundaries and what is explicitly out of scope:
 [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md). Reporting a vulnerability:
-[`SECURITY.md`](SECURITY.md).
+[`SECURITY.md`](SECURITY.md). What leaves your machine, in full:
+[`PRIVACY.md`](PRIVACY.md).
+
+### Code signing
+
+Releases are **not yet Authenticode-signed**, so Windows shows an unknown-publisher warning on first
+run — that warning is accurate and this project will not pretend otherwise. Every release does carry
+SHA-256 checksums plus GitHub **build provenance** and **SBOM** attestations, which prove the bytes
+came from this repository's release workflow at a named commit; verify them before running anything.
+
+Who may authorise a signature, what one would and would not prove, and how to check a release
+yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 ## Production readiness
 
@@ -165,6 +176,7 @@ The authoritative statement, with every limitation named:
 | Something is wrong now | [RECOVERY.md](docs/RECOVERY.md) |
 | What it detects | [DETECTIONS.md](docs/DETECTIONS.md) |
 | Security | [SECURITY.md](SECURITY.md), [THREAT_MODEL.md](docs/THREAT_MODEL.md) |
+| Privacy and code signing | [PRIVACY.md](PRIVACY.md), [CODE_SIGNING.md](docs/CODE_SIGNING.md) |
 | How it is built | [ARCHITECTURE.md](docs/ARCHITECTURE.md), [WFP_DESIGN.md](docs/WFP_DESIGN.md) |
 | Releasing and verifying | [RELEASE.md](docs/RELEASE.md) |
 | Evidence | [validation/](docs/validation/README.md) |

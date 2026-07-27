@@ -2,6 +2,30 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The binaries now say who made them, and the project says what leaves your machine
+- **Every shipped binary reported itself as a filename.** `ProductName`, `CompanyName` and
+  `FileDescription` were all the literal string `winsight-dashboard`, with no copyright at all, because
+  nothing set them and .NET derives them from the assembly name. That string is what Windows puts in
+  front of the user in the UAC prompt, the SmartScreen dialog and Task Manager — so a tool that asks
+  people to trust it was introducing itself with a build artifact's filename. Product identity is now
+  set centrally, and the three executables describe what they are ("WinSight Dashboard", "WinSight
+  Command-Line Scanner", "WinSight Outbound Firewall Service" — the last of which runs as SYSTEM and is
+  read by anyone auditing what is privileged on their machine).
+- **`PRIVACY.md`**, and it is precise rather than reassuring. "No telemetry" was already true and stated
+  in several places, but the project had no single page saying what happens to data — and a blanket "no
+  data leaves your machine" would have been **false**: the opt-in VirusTotal integration sends a SHA-256
+  to a third party. The policy names that one flow exactly (`GET /api/v3/files/{sha256}`, hash only,
+  never file contents, your own API key, DPAPI-encrypted, off until you switch it on) and says plainly
+  why a hash is not nothing: a file unique to you has a hash unique to you.
+- **`docs/CODE_SIGNING.md`** — who may authorise a signature, what one would and would not prove, and how
+  to verify a release without trusting the document. The maintainer is one person holding Author,
+  Reviewer and Approver, which is disclosed as a single point of trust rather than dressed up as a
+  process: the compensating controls are technical (MFA, signed commits binding the maintainer's own
+  account via `enforce_admins`, signing only in CI from a tagged commit, no signing key on any developer
+  machine, tag/version agreement enforced by the workflow).
+- The README's security section now links both, and states the unsigned status where a downloader will
+  actually read it rather than leaving them to discover it at the Windows warning.
+
 ### A notification you can click, and a CFA read that works when Defender is not the antivirus
 - **Clicking a detection notification did nothing.** The tray balloon named the threat, stayed a few
   seconds, and vanished; `BalloonTipClicked` was never subscribed, so the one gesture every operator
