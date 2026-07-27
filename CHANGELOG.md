@@ -2,6 +2,21 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### v0.10.5 public unsigned-release waiver
+- A second public **unsigned** release was explicitly authorized on 2026-07-27. No production
+  Authenticode certificate is configured, so the release triggers the normal Windows
+  unknown-publisher warning, and this is stated on the download page rather than left to be
+  discovered at that warning.
+- **The first waiver said "one release only". This is the second, so the pattern is recorded as a
+  pattern rather than as another exception.** The trade was: v0.10.5 carries three user-affecting
+  corrections, v0.10.4 already shipped unsigned so this is not a regression in posture, and the
+  SignPath Foundation application was still unanswered. Withholding the fixes was judged the larger
+  harm. `docs/RELEASE.md` carries the full reasoning and states that the waiver expires with v0.10.5.
+- `REQUIRE_SIGNED_RELEASE` is opened deliberately for the tagged build and set back to `true`
+  immediately after publication — a gate that fails closed, opened briefly, then closed again.
+- This exception neither exercises nor establishes the signed Authenticode production chain, and does
+  not change the recorded production-readiness verdict.
+
 ### WinSight now knows what is protecting the machine, not just whether Microsoft won
 - **The tool was Defender-shaped.** It could report Microsoft Defender's Controlled Folder Access
   posture and nothing else, so on a machine protected by Norton, Bitdefender or CrowdStrike it said
