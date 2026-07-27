@@ -2,6 +2,33 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### WinSight now knows what is protecting the machine, not just whether Microsoft won
+- **The tool was Defender-shaped.** It could report Microsoft Defender's Controlled Folder Access
+  posture and nothing else, so on a machine protected by Norton, Bitdefender or CrowdStrike it said
+  "the ransomware shield is not protecting you" and said nothing at all about the product that actually
+  was. Every word of that was true and the impression it left was false — which this project treats as
+  worse than silence, and which is exactly the failure it audits other tools for.
+- **`root\SecurityCenter2` is the vendor-neutral answer.** Every antivirus that wants Windows to stop
+  nagging registers there, so Security Center is the one place that knows what is really running. The
+  `integrity` scan now reports every registered product, which of them report themselves as actively
+  scanning, and whether their definitions are current. Nothing scanning, or every scanner reporting
+  stale definitions, is `Notable`.
+- **The CFA verdict is now reported in that light.** When another antivirus is actively scanning, the
+  Controlled Folder Access line names it and says this is a normal configuration rather than a fault —
+  while stating plainly that WinSight cannot read that product's own ransomware protection, so the
+  operator should confirm it is switched on. On a machine with nothing scanning at all, the wording
+  stays as blunt as it was.
+- **The `productState` encoding is undocumented by Microsoft, and is treated as such.** It was verified
+  against a live machine before being relied on — Defender, active with current definitions, reports
+  `0x061100` — and any byte outside the values this reader knows decodes to `Unknown` rather than being
+  rounded to the nearest guess. A tool that reads "probably enabled" out of a byte it does not recognise
+  is inventing protection. An undecodable product is still listed, because "something is registered and
+  we could not read its state" is information the operator needs; it simply never counts as protection.
+- Distinctions held deliberately apart, each with a test: **Security Center unreadable** (the normal
+  state on Windows Server, which does not ship it) is not **no antivirus registered**, which is not
+  **registered but not scanning**. "Bitdefender" contains "defender", so the Microsoft-product match is
+  anchored on the full vendor names and pinned against exactly that trap.
+
 ### The binaries now say who made them, and the project says what leaves your machine
 - **Every shipped binary reported itself as a filename.** `ProductName`, `CompanyName` and
   `FileDescription` were all the literal string `winsight-dashboard`, with no copyright at all, because
