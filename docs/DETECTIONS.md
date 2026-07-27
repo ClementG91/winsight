@@ -18,6 +18,7 @@ VirusTotal lookup, analysis stays on the device.
 | Processes | Process path, parent, command line and Authenticode status. | Investigate unsigned or untrusted images and open Task Manager. |
 | Loaded modules | Unsigned/untrusted DLLs loaded by accessible processes. | Investigate injection or side-loading and open Task Manager; protected processes may be inaccessible. |
 | Firewall rules | Enabled Windows Defender Firewall rules, program and port filters when available. | Review in the Windows Firewall console. |
+| Antivirus protection | Every product registered with **Windows Security Center** (`root\SecurityCenter2`), vendor-neutral: which are registered, which report themselves as actively scanning, and whether their definitions are current. Nothing scanning, or every scanner reporting stale definitions, is notable. | Open Windows Security, or the product's own console, to see why nothing is scanning. |
 
 The default **Overview** intentionally runs the balanced, lower-noise set:
 persistence, camera/microphone, connections, DNS, extensions, hosts and certificates.
@@ -100,7 +101,15 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
   as a successful read; `Not running` reports as **Defender not running** rather than as a configured
   mode, because Controlled Folder Access is a Defender feature and no configured value protects
   anything while the antivirus is stopped. Only genuinely missing or undocumented provider/runtime
-  evidence remains a notable unavailable result. WinSight only reads and reports this setting; it never enables,
+  evidence remains a notable unavailable result.
+
+  **This verdict is reported beside the machine's real antivirus, never alone.** Controlled Folder
+  Access is a Microsoft Defender feature, so on a machine protected by another vendor it is legitimately
+  inactive. Reporting only "the ransomware shield is not protecting you" would be accurate and would
+  leave a false impression, so the `integrity` scan also reads Windows Security Center and, when another
+  antivirus is actively scanning, the CFA line names it and says this is a normal configuration rather
+  than a fault — while pointing out that WinSight cannot read that product's own ransomware protection
+  and the operator should confirm it is on. WinSight only reads and reports this setting; it never enables,
   disables or otherwise configures Controlled Folder Access — the operator changes it in Windows.
 - VirusTotal is opt-in and user-keyed. WinSight enforces Community ceilings across
   its processes (4/rolling minute, 500/UTC day, 15,500/UTC month), never retries a

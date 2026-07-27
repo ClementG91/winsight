@@ -749,13 +749,16 @@ public static class Adapters
     /// changes it — the operator flips it in Windows Security via the deep link on the finding.
     /// </remarks>
     public static ToolReport CodeIntegrity(bool flaggedOnly) =>
-        CodeIntegrity(flaggedOnly, new ControlledFolderAccessReader());
+        CodeIntegrity(flaggedOnly, new ControlledFolderAccessReader(), new SecurityCenterReader());
 
     /// <summary>
-    /// Composes the code-integrity report with an already-created CFA reader. Internal so tests can
-    /// exercise report composition without consulting the host Defender provider.
+    /// Composes the code-integrity report with already-created readers. Internal so tests can exercise
+    /// report composition without consulting the host's Defender provider or Security Center.
     /// </summary>
-    internal static ToolReport CodeIntegrity(bool flaggedOnly, ControlledFolderAccessReader controlledFolderAccessReader)
+    internal static ToolReport CodeIntegrity(
+        bool flaggedOnly,
+        ControlledFolderAccessReader controlledFolderAccessReader,
+        SecurityCenterReader? securityCenterReader = null)
     {
         ArgumentNullException.ThrowIfNull(controlledFolderAccessReader);
         var findings = CodeIntegrityTriage.Evaluate(new CodeIntegrityReader().Read());
@@ -786,6 +789,46 @@ public static class Adapters
                 });
         }
 
+        // What Windows Security Center says is actually protecting this machine. Read before the CFA
+        // posture because the CFA verdict is only honest in its light: "the ransomware shield is not
+        // protecting you" is an accurate sentence that leaves a false impression on a machine whose
+        // antivirus is Norton and is working fine.
+        var inventory = (securityCenterReader ?? new SecurityCenterReader()).Read();
+        var antivirusConcern = SecurityProductTriage.Concern(inventory);
+        var antivirusNotable = SecurityProductTriage.IsNotable(antivirusConcern);
+        if (inventory.Reading == SecurityCenterReading.Unavailable)
+        {
+            unavailable++;
+        }
+        else
+        {
+            checkedCount++;
+        }
+        if (antivirusNotable)
+        {
+            notable++;
+        }
+        if (!flaggedOnly || antivirusNotable)
+        {
+            b.Add(
+                antivirusNotable ? Severity.Notable : Severity.Info,
+                "Antivirus protection (Windows Security Center)",
+                DescribeAntivirus(inventory, antivirusConcern),
+                new Dictionary<string, string?>
+                {
+                    ["protection"] = "Antivirus",
+                    ["concern"] = antivirusConcern.ToString(),
+                    ["reading"] = inventory.Reading.ToString(),
+                    ["registeredAntivirus"] = NamesOf(inventory.AntiVirusProducts),
+                    ["activeAntivirus"] = NamesOf(inventory.ActiveAntiVirusProducts),
+                    ["registeredAntivirusCount"] = inventory.AntiVirusProducts.Count.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                    ["activeAntivirusCount"] = inventory.ActiveAntiVirusProducts.Count.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture),
+                    ["hasActiveNonMicrosoftAntivirus"] = inventory.HasActiveNonMicrosoftAntiVirus.ToString(),
+                });
+        }
+
         var shield = controlledFolderAccessReader.Read();
         if (shield.State == ControlledFolderAccessState.Unavailable)
         {
@@ -804,7 +847,7 @@ public static class Adapters
             b.Add(
                 shield.IsNotable ? Severity.Notable : Severity.Info,
                 "Controlled Folder Access (ransomware shield)",
-                DescribeShield(shield),
+                DescribeShield(shield, inventory),
                 new Dictionary<string, string?>
                 {
                     ["protection"] = "Controlled Folder Access",
@@ -829,7 +872,40 @@ public static class Adapters
     /// Plain-language line for a Controlled Folder Access posture. Names the concrete gap and, when
     /// there is one, the Windows Security deep link the operator uses to close it themselves.
     /// </summary>
-    private static string DescribeShield(ControlledFolderAccessPosture shield) => shield.Concern switch
+    /// <summary>Comma-joined registered names, or null when there are none to name.</summary>
+    private static string? NamesOf(IReadOnlyList<SecurityProduct> products) =>
+        products.Count == 0 ? null : string.Join(", ", products.Select(product => product.DisplayName));
+
+    /// <summary>
+    /// Plain-language line for what Windows Security Center reports is protecting this machine.
+    /// </summary>
+    private static string DescribeAntivirus(SecurityProductInventory inventory, AntiVirusConcern concern) =>
+        concern switch
+        {
+            AntiVirusConcern.Protected =>
+                $"protected by {NamesOf(inventory.ActiveAntiVirusProducts)} — registered with Windows "
+                + "Security Center, actively scanning, definitions reported current.",
+            AntiVirusConcern.SignaturesOutOfDate =>
+                $"{NamesOf(inventory.ActiveAntiVirusProducts)} is scanning, but reports its definitions as "
+                + "OUT OF DATE. An antivirus that cannot recognise this week's malware is protecting you "
+                + "from last month's. Update it in the product itself.",
+            AntiVirusConcern.NoActiveAntiVirus =>
+                $"registered but NOT scanning: {NamesOf(inventory.AntiVirusProducts)}. Windows knows about "
+                + "these products and none of them reports itself as active, so nothing is scanning files "
+                + "on this machine. Open Windows Security to see why.",
+            AntiVirusConcern.NoAntiVirusRegistered =>
+                "no antivirus is registered with Windows Security Center. On Windows 10 and 11 this is "
+                + "unusual — Microsoft Defender registers itself unless it was disabled or removed — and it "
+                + "means no product is claiming responsibility for scanning this machine.",
+            _ =>
+                "unavailable — Windows Security Center could not be read on this machine, so which product "
+                + "is protecting it could not be established. This is the normal result on Windows Server "
+                + "editions, which do not ship Security Center; it is NOT evidence that no antivirus exists.",
+        };
+
+    private static string DescribeShield(
+        ControlledFolderAccessPosture shield,
+        SecurityProductInventory inventory) => shield.Concern switch
     {
         ControlledFolderAccessConcern.Off =>
             "disabled — Windows' built-in ransomware shield is off, so untrusted programs are not blocked "
@@ -852,11 +928,19 @@ public static class Adapters
         ControlledFolderAccessConcern.RuntimeRequirementsNotMet =>
             "enabled, but current Defender runtime evidence does not establish Normal mode with antivirus and "
             + "real-time protection enabled. The configured setting alone is not evidence of operational folder protection.",
+        // Named rather than left as a shrug: on a machine whose antivirus is not Microsoft's, "the
+        // ransomware shield is off" is true and misleading unless it also says what IS protecting you.
+        ControlledFolderAccessConcern.DefenderNotRunning when inventory.HasActiveNonMicrosoftAntiVirus =>
+            "not active — Microsoft Defender reports that it is not running because "
+            + $"{NamesOf(inventory.ActiveAntiVirusProducts)} is your antivirus. Controlled Folder Access is a "
+            + "Defender feature, so this specific folder shield is not protecting you; your antivirus may offer "
+            + "its own ransomware protection, which WinSight cannot read. This is a normal configuration, not a "
+            + "fault — but check that your product's own ransomware protection is switched on.",
         ControlledFolderAccessConcern.DefenderNotRunning =>
-            "not protecting — Microsoft Defender antivirus reports that it is not running, which is the usual "
-            + "result of another antivirus taking over. Controlled Folder Access is a Defender feature, so no "
-            + "configured value protects your folders until Defender runs again; check which antivirus is active "
-            + $"in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
+            "not protecting — Microsoft Defender antivirus reports that it is not running, and Windows Security "
+            + "Center does not show another antivirus actively scanning either. Controlled Folder Access is a "
+            + "Defender feature, so no configured value protects your folders until Defender runs again; check "
+            + $"which antivirus is active in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
         ControlledFolderAccessConcern.UnknownMode =>
             $"unsupported mode value {shield.RawStateValue} read; protection not established. Review the configured "
             + $"mode in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
