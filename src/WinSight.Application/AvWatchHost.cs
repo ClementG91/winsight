@@ -47,27 +47,37 @@ public sealed class AvWatchHost : IDisposable
             token = _cancellation.Token;
         }
 
-        // The poll loop blocks its thread until cancelled, so it cannot run on the caller's.
-        Task.Run(
-            () =>
+        // The poll loop blocks its thread until cancelled, so it cannot run on the caller's — and it
+        // must not run on the thread pool either. A work item that never returns holds a pool thread
+        // for the life of the dashboard, and the pool only grows slowly once saturated: on a busy
+        // machine this loop can wait seconds for a thread it then never gives back. That starvation
+        // is not theoretical — it made the end-to-end test intermittently fail and, on 2026-07-27,
+        // failed a release build outright. A loop that runs until shutdown owns a thread of its own.
+        var worker = new Thread(() =>
+        {
+            try
             {
-                try
-                {
-                    _monitor.Watch(usage => Detected?.Invoke(this, usage), token);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Normal shutdown.
-                }
-                catch (Exception ex) when (ex is UnauthorizedAccessException
-                                             or System.Security.SecurityException
-                                             or IOException)
-                {
-                    // Windows denied the capability records. Watching stops; everything else in the
-                    // dashboard, including the on-demand camera/mic scan, is unaffected.
-                }
-            },
-            CancellationToken.None);
+                _monitor.Watch(usage => Detected?.Invoke(this, usage), token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Normal shutdown.
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException
+                                         or System.Security.SecurityException
+                                         or IOException)
+            {
+                // Windows denied the capability records. Watching stops; everything else in the
+                // dashboard, including the on-demand camera/mic scan, is unaffected.
+            }
+        })
+        {
+            // Background, so a dashboard that is closing is never held open by a poll waiting out
+            // its interval.
+            IsBackground = true,
+            Name = "winsight-av-watch",
+        };
+        worker.Start();
     }
 
     public void Dispose()
