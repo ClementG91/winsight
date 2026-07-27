@@ -2,6 +2,34 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Blocking file I/O removed from the ETW trace callback, and the SYSTEM component given a floor
+- **The outbound observer read the policy file on the ETW trace thread.** `OnConnection` runs in the
+  kernel session's `TcpIpConnect` callback, and every five seconds it called
+  `LoadOrAuditAsync().GetAwaiter().GetResult()` — synchronous disk I/O, on that thread. A real-time
+  ETW session **drops events when its consumer is slow**, so the firewall observer risked losing the
+  very connections it exists to record. The surrounding comments already claimed I/O was kept off
+  that path; now it is. `Ruled()` never touches the disk: the snapshot is primed at service start,
+  refreshed on a pool thread when stale, and read with a `Volatile.Read`.
+- The refresh is **tracked, not fired and forgotten**. A background file read that outlives the
+  service races its own store during teardown — which surfaced immediately as a test failing to
+  delete its own directory. `StopAsync` now awaits the reload in flight.
+- **`EnforcementCoordinator` no longer implements `IDisposable`.** Its teardown is asynchronous, and
+  the synchronous bridge was `DisposeAsync().AsTask().GetAwaiter().GetResult()` — the sync-over-async
+  pattern this project's own standards forbid, on the shutdown path of a SYSTEM service. Removing it
+  made the compiler find the one caller that was taking it, in the privileged status path. A
+  synchronous entry point that can only be implemented by blocking is not a convenience.
+- **The service host was never disposed at all.** `RunAsync()` starts and stops a host; it does not
+  dispose it, so the WFP engine handle was left to process exit. Teardown is now explicit and
+  asynchronous — required, not preferred, since a provider refuses to dispose an `IAsyncDisposable`-only
+  singleton synchronously.
+- **The coverage floor protected the inverse of the risk.** Pure detection libraries — the ones that
+  cannot break anything — were held to 80%, while the only component that runs as SYSTEM and drives
+  WFP had no floor at all. It cannot meet 80% today (54.5%: much of it is P/Invoke and service
+  lifecycle only a privileged VM exercises), so it gets a **ratchet** pinned just under the measured
+  figure. Coverage can no longer regress there, and raising the number is the point.
+- Pinned by a test that fails on wall-clock: 200 stale-snapshot connections must complete in under two
+  seconds, which they cannot if the callback is waiting on the store again.
+
 ### Arm64 is tested before a tag, not after one
 - **CI tested only x64.** `package` built an Arm64 installer without ever running a test on that
   architecture, so the only Arm64 test run in the entire project happened inside `release.yml`, after

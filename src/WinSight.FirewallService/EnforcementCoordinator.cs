@@ -8,7 +8,16 @@ namespace WinSight.FirewallService;
 /// serialized, freshly validates storage, and creates the native backend lazily only
 /// after that validation. CLI processes never construct a second authority.
 /// </summary>
-public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDisposable, IAsyncDisposable
+/// <remarks>
+/// Teardown is asynchronous and this type therefore exposes <b>only</b> <see cref="IAsyncDisposable"/>.
+/// It used to also implement <see cref="IDisposable"/>, bridged with
+/// <c>DisposeAsync().AsTask().GetAwaiter().GetResult()</c> — the sync-over-async pattern this
+/// project's own standards forbid, on the shutdown path of a SYSTEM service. Nothing ever used it:
+/// the host, the validation probe and every test already dispose with <c>await using</c>. A
+/// synchronous entry point that can only be implemented by blocking is not a convenience, it is a
+/// deadlock waiting for the one caller who takes it.
+/// </remarks>
+public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncDisposable
 {
     private static readonly TimeSpan DefaultStatusVerificationTimeout = TimeSpan.FromSeconds(1);
 
@@ -560,8 +569,6 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IDispos
 
     private static bool PathEquals(string left, string right) =>
         string.Equals(left, right, StringComparison.OrdinalIgnoreCase);
-
-    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
     public async ValueTask DisposeAsync()
     {

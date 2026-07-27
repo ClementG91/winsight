@@ -176,7 +176,9 @@ static async Task<int> EnforceStatusAsync()
 
     try
     {
-        using var coordinator = CreateCoordinator();
+        // This was the one caller taking the synchronous bridge, and it was already inside an async
+        // method: the WFP engine handle now closes in order instead of behind a blocked thread.
+        await using var coordinator = CreateCoordinator();
         var mode = await coordinator.GetModeAsync().ConfigureAwait(false);
         Console.WriteLine($"Persisted desired enforcement mode: {mode}. Effective runtime state: unknown (query the authenticated running service).");
         return 0;
@@ -332,6 +334,31 @@ static async Task<int> RunHostAsync()
     builder.Services.AddHostedService<OutboundObserverService>();
     builder.Services.AddHostedService<FirewallServiceWorker>();
 
-    await builder.Build().RunAsync().ConfigureAwait(false);
+    // Disposed, and disposed asynchronously. RunAsync starts and stops the host but never disposes
+    // it, so the singletons it owns were being left to process exit: EnforcementCoordinator holds a
+    // WFP engine handle and implements IAsyncDisposable to close it in order, and relying on the
+    // process dying to do that is not a teardown, it is a hope.
+    //
+    // The switch is not ceremony. `IHost` declares only IDisposable, while the host the builder
+    // actually produces implements IAsyncDisposable — and the async path is required, not preferred:
+    // a service provider refuses to dispose a singleton that implements only IAsyncDisposable from a
+    // synchronous Dispose(), which is exactly what EnforcementCoordinator now is.
+    var host = builder.Build();
+    try
+    {
+        await host.RunAsync().ConfigureAwait(false);
+    }
+    finally
+    {
+        switch (host)
+        {
+            case IAsyncDisposable asyncHost:
+                await asyncHost.DisposeAsync().ConfigureAwait(false);
+                break;
+            default:
+                host.Dispose();
+                break;
+        }
+    }
     return 0;
 }

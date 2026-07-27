@@ -114,7 +114,15 @@ jobs:
       # would double the job that dominates this workflow's wall clock.
       - name: Test and verify coverage
         shell: pwsh
-        run: ./scripts/Measure-Coverage.ps1 -EngineMinimum 80 -TrxLogFilePrefix tests-${{ matrix.architecture }}
+        # Both floors are named here rather than left to the script's defaults, so the bar this
+        # workflow enforces is readable without opening another file. The privileged one is a ratchet
+        # on the SYSTEM component, which had no floor at all while the pure detection libraries were
+        # held to 80% — the inverse of the risk.
+        run: >-
+          ./scripts/Measure-Coverage.ps1
+          -EngineMinimum 80
+          -PrivilegedMinimum 54
+          -TrxLogFilePrefix tests-${{ matrix.architecture }}
 
       - name: Upload test results
         if: always()
