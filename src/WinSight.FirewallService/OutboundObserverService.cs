@@ -39,7 +39,15 @@ public sealed partial class OutboundObserverService : BackgroundService
     private readonly TimeProvider _time;
 
     private HashSet<string> _ruled = new(StringComparer.OrdinalIgnoreCase);
-    private DateTimeOffset _ruledLoadedUtc = DateTimeOffset.MinValue;
+    // Ticks rather than a DateTimeOffset, because two threads write it: the trace thread claims a
+    // window before queueing a reload, and the reload itself stamps the load it just completed. A
+    // 64-bit field is written atomically, so the worst a race costs is one extra refresh.
+    private long _ruledLoadedTicks = DateTimeOffset.MinValue.UtcTicks;
+    // 1 while a reload is in flight, so a burst of connections starts one refresh and not one each.
+    private int _refreshing;
+    // The reload in flight. Tracked rather than fired and forgotten: a background file read must not
+    // outlive the service that started it, or shutdown races its own store.
+    private Task _refresh = Task.CompletedTask;
     private int _unattributed;
 
     public OutboundObserverService(
@@ -59,14 +67,22 @@ public sealed partial class OutboundObserverService : BackgroundService
     /// <summary>Connections that carried no identity a policy could be keyed on.</summary>
     public int UnattributedConnections => Volatile.Read(ref _unattributed);
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken) =>
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Prime the snapshot before any connection can be judged against it. This is the one place a
+        // policy read is free: the host's start path, asynchronously, with no trace callback waiting.
+        // Without it the first connections would be measured against an empty set and an app the
+        // operator had already ruled on would be logged as pending once per service start.
+        await RefreshRuledAsync().ConfigureAwait(false);
+
         // The ETW pump blocks its thread until the session stops, so it cannot run on the host's
         // startup path without holding the whole service back.
-        Task.Factory.StartNew(
+        await Task.Factory.StartNew(
             () => Pump(stoppingToken),
             stoppingToken,
             TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
+            TaskScheduler.Default).ConfigureAwait(false);
+    }
 
     private void Pump(CancellationToken stoppingToken)
     {
@@ -141,30 +157,103 @@ public sealed partial class OutboundObserverService : BackgroundService
         LogUnattributed(processId, imageName ?? "unknown");
     }
 
+    /// <summary>
+    /// The applications the operator has already ruled on. Returns immediately, always.
+    /// </summary>
+    /// <remarks>
+    /// <b>This must never touch the disk.</b> It is called from the ETW trace callback for every
+    /// outbound connection, and a real-time ETW session drops events when its consumer is slow — so
+    /// blocking here to read the policy file risks losing the very connections this service exists
+    /// to observe. It previously did exactly that, once every refresh interval, via
+    /// <c>LoadOrAuditAsync().GetAwaiter().GetResult()</c>: synchronous file I/O on the trace thread,
+    /// which the project's own standards forbid and which the surrounding comments already claimed
+    /// was not happening.
+    ///
+    /// A stale window is the price, and it is the right one: this decides whether an app the operator
+    /// already ruled on is worth logging as pending. Being a few seconds late there is noise in a
+    /// notification list, never a missed block — enforcement is WFP's job and does not consult this.
+    /// </remarks>
     private HashSet<string> Ruled()
     {
         var now = _time.GetUtcNow();
-        if (now - _ruledLoadedUtc < PolicyRefreshInterval)
+        var loadedUtc = new DateTimeOffset(Volatile.Read(ref _ruledLoadedTicks), TimeSpan.Zero);
+        if (now - loadedUtc >= PolicyRefreshInterval
+            && Interlocked.CompareExchange(ref _refreshing, 1, 0) == 0)
         {
-            return _ruled;
+            // Claim the window here, on this thread, before the load is queued: a burst of
+            // connections must start one refresh, not one per event.
+            Volatile.Write(ref _ruledLoadedTicks, now.UtcTicks);
+            Volatile.Write(ref _refresh, RefreshInBackgroundAsync());
         }
 
+        return Volatile.Read(ref _ruled);
+    }
+
+    /// <summary>The reload in flight, so shutdown and tests can wait for it rather than race it.</summary>
+    internal Task PendingRefresh => Volatile.Read(ref _refresh);
+
+    /// <summary>
+    /// Waits for a policy reload still in flight before the service counts as stopped.
+    /// </summary>
+    /// <remarks>
+    /// Without this the refresh is fire-and-forget: a file read started by the last observed
+    /// connection can still be running while the host tears the service down, which is how a clean
+    /// shutdown turns into an I/O error on a thread nobody is watching.
+    /// </remarks>
+    public override async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await base.StopAsync(cancellationToken).ConfigureAwait(false);
+        await PendingRefresh.ConfigureAwait(false);
+    }
+
+    private async Task RefreshInBackgroundAsync()
+    {
         try
         {
-            var load = _store.LoadOrAuditAsync().GetAwaiter().GetResult();
+            // Task.Run, not a bare call: the point is that the load runs on a pool thread and the
+            // trace callback returns now. A short file read is exactly what the pool is for — unlike
+            // the pump above, which blocks until shutdown and therefore owns a thread of its own.
+            await Task.Run(RefreshRuledAsync).ConfigureAwait(false);
+        }
+        finally
+        {
+            Volatile.Write(ref _refreshing, 0);
+        }
+    }
+
+    /// <summary>
+    /// Reloads the ruled-application snapshot from the store.
+    /// </summary>
+    /// <remarks>
+    /// Internal and awaitable on purpose: the service awaits it once at startup, the background
+    /// refresh awaits it on a pool thread, and tests await it to stay deterministic. Nothing calls it
+    /// from the trace thread, which is the reason it exists separately from <see cref="Ruled"/>.
+    /// </remarks>
+    internal async Task RefreshRuledAsync()
+    {
+        try
+        {
+            var load = await _store.LoadOrAuditAsync().ConfigureAwait(false);
             var ruled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var policy in load.Configuration.Policies)
             {
                 ruled.Add(policy.ExecutablePath);
             }
-            _ruled = ruled;
+            Volatile.Write(ref _ruled, ruled);
+            // Stamp the load that just succeeded. Without this the startup prime left the snapshot
+            // looking never-loaded, so the very first connection after start would queue a second,
+            // redundant read of a file that had just been read — and in tests that stray background
+            // read outlived the test that caused it and held the store open.
+            Volatile.Write(ref _ruledLoadedTicks, _time.GetUtcNow().UtcTicks);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
         {
             // Keep the previous snapshot: reporting an already-ruled app is noise, not a hazard.
+            // The stamp is deliberately not advanced here. On the refresh path that costs nothing —
+            // Ruled() already claimed the window before queueing, so a failed load waits out the
+            // interval like any other and cannot become a retry storm on a corrupt store. On the
+            // startup prime, which has no claim, it is what makes the first connection try again.
         }
-        _ruledLoadedUtc = now;
-        return _ruled;
     }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "[FW_OBSERVER_WATCHING] Watching outbound connections for applications with no policy.")]

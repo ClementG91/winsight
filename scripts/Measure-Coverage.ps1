@@ -35,6 +35,10 @@ param(
     [ValidateRange(0, 100)]
     [double]$EngineMinimum = 80,
 
+    # The floor for the SYSTEM-privileged component. A ratchet rather than a target: see
+    # $privilegedAssemblies below. Pass 0 to report without gating.
+    [double]$PrivilegedMinimum = 54,
+
     # Emits a trx alongside the coverage report so CI can publish test results from this same run.
     [string]$TrxLogFilePrefix,
 
@@ -58,6 +62,15 @@ $engineAssemblies = @(
     "WinSight.Modules"
     "WinSight.Browser"
     "WinSight.Processes"
+)
+
+# The component that runs as SYSTEM and drives WFP. It had no floor at all while the pure detection
+# libraries above -- the ones that cannot break anything -- were held to 80%, which protects the
+# inverse of the risk. It cannot meet 80% today (measured 54.5%): much of it is P/Invoke and service
+# lifecycle that only a privileged VM exercises. So this is a **ratchet**, not an aspiration: it is
+# pinned just under the current figure so coverage can only go up, and raising it is the point.
+$privilegedAssemblies = @(
+    "winsight-firewall-service"
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -145,6 +158,7 @@ try
             Covered  = $total.Covered
             Percent  = if ($total.Lines) { [math]::Round(100 * $total.Covered / $total.Lines, 1) } else { 0 }
             Engine   = $engineAssemblies -contains $assembly
+            Privileged = $privilegedAssemblies -contains $assembly
         }
     }
 
@@ -155,7 +169,7 @@ try
     # PowerShell's format objects.
     ($production |
         Sort-Object Percent |
-        Format-Table Assembly, Lines, Covered, Percent, Engine -AutoSize |
+        Format-Table Assembly, Lines, Covered, Percent, Engine, Privileged -AutoSize |
         Out-String).TrimEnd() | Write-Output
 
     $totalLines = ($production | Measure-Object Lines -Sum).Sum
@@ -195,6 +209,31 @@ try
             throw "Below the $EngineMinimum% engine bar: $names"
         }
         "All engine libraries are at or above $EngineMinimum%." | Write-Output
+    }
+
+    if ($PrivilegedMinimum -gt 0)
+    {
+        # Same absence check as the engine tier, for the same reason: an assembly missing from the
+        # report was never measured, and a gate that vouches for nothing is worse than no gate.
+        $privileged = @($production | Where-Object Privileged)
+        $measuredPrivileged = @($privileged | ForEach-Object { $_.Assembly })
+        $unmeasuredPrivileged = @($privilegedAssemblies | Where-Object { $measuredPrivileged -notcontains $_ })
+        if ($unmeasuredPrivileged)
+        {
+            throw ("No coverage was recorded at all for the privileged component: {0}. Either the " +
+                   "assembly was renamed or no test project loaded it; both mean this gate cannot " +
+                   "vouch for the code that runs as SYSTEM." -f ($unmeasuredPrivileged -join ", "))
+        }
+
+        $belowPrivileged = @($privileged | Where-Object { $_.Percent -lt $PrivilegedMinimum })
+        if ($belowPrivileged)
+        {
+            $names = ($belowPrivileged | ForEach-Object { "$($_.Assembly) $($_.Percent)%" }) -join ", "
+            throw ("Below the $PrivilegedMinimum% privileged bar: $names. This is a ratchet - it is " +
+                   "set just under the measured figure so coverage cannot regress. If a change " +
+                   "genuinely removed covered code, lower it deliberately in this script.")
+        }
+        "Privileged component is at or above $PrivilegedMinimum%." | Write-Output
     }
 }
 finally
