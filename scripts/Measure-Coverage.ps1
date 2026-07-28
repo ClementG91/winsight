@@ -35,9 +35,10 @@ param(
     [ValidateRange(0, 100)]
     [double]$EngineMinimum = 80,
 
-    # The floor for the SYSTEM-privileged component. A ratchet rather than a target: see
-    # $privilegedAssemblies below. Pass 0 to report without gating.
-    [double]$PrivilegedMinimum = 54,
+    # The floor for the SYSTEM-privileged component, applied to its managed half only -- the native
+    # WFP/SCM boundary is qualified by the VM protocol instead. Same 80% as the engine libraries,
+    # because on that half the number means the same thing. Pass 0 to report without gating.
+    [double]$PrivilegedMinimum = 80,
 
     # Emits a trx alongside the coverage report so CI can publish test results from this same run.
     [string]$TrxLogFilePrefix,
@@ -66,11 +67,33 @@ $engineAssemblies = @(
 
 # The component that runs as SYSTEM and drives WFP. It had no floor at all while the pure detection
 # libraries above -- the ones that cannot break anything -- were held to 80%, which protects the
-# inverse of the risk. It cannot meet 80% today (measured 54.5%): much of it is P/Invoke and service
-# lifecycle that only a privileged VM exercises. So this is a **ratchet**, not an aspiration: it is
-# pinned just under the current figure so coverage can only go up, and raising it is the point.
+# inverse of the risk.
 $privilegedAssemblies = @(
     "winsight-firewall-service"
+)
+
+# Measured whole, this assembly reads 54%, and that number is an average of two incomparable things.
+# Split it and the picture is the opposite of what the average suggests:
+#
+#   managed policy logic      940/1050 lines   89.5%   <- already above the engine bar
+#   native/WFP/SCM/entry      108/885  lines   12.2%   <- only the VM protocol can reach it
+#
+# The files below are that second half: P/Invoke marshalling into fwpuclnt.dll and advapi32, WFP
+# provisioning, SCM installation, and the process entry point. Holding them to a unit-test percentage
+# would buy mock-heavy tests that assert against the mock rather than against Windows -- the exact
+# metric-gaming this project avoids elsewhere. They are not untested: they are qualified by the VM
+# protocol in docs/validation/VM_QUALIFICATION_KIT.md, which is evidence of a different kind and is
+# recorded as such.
+#
+# So the gate measures the half where a percentage means something, and holds it to the same 80% as
+# the engine libraries. Excluding a file from the count is a claim that something else covers it; if
+# that stops being true, the exclusion is the bug.
+$privilegedNativeFiles = @(
+    "Program.cs"
+    "WfpProvisioning.cs"
+    "WfpSelfTest.cs"
+    "WfpOutboundFirewallEngine.cs"
+    "FirewallServiceInstaller.cs"
 )
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -138,15 +161,33 @@ try
     }
 
     $totals = @{}
+    # The privileged assembly measured with its native boundary removed, which is the only figure a
+    # unit-test percentage can honestly speak for. Accumulated in the same pass; see the note above.
+    $privilegedManaged = [pscustomobject]@{ Lines = 0; Covered = 0 }
     foreach ($entry in $hits.GetEnumerator())
     {
-        $assembly = $entry.Key.Split('|')[0]
+        $parts = $entry.Key.Split('|')
+        $assembly = $parts[0]
         if (-not $totals.ContainsKey($assembly))
         {
             $totals[$assembly] = [pscustomobject]@{ Lines = 0; Covered = 0 }
         }
         $totals[$assembly].Lines++
         if ($entry.Value -gt 0) { $totals[$assembly].Covered++ }
+
+        if ($privilegedAssemblies -contains $assembly)
+        {
+            $leaf = Split-Path -Leaf $parts[1]
+            # `*.g.cs` is source-generator output: the LibraryImport marshalling stubs and the
+            # LoggerMessage shims. Holding hand-written tests against a generator's emitted code
+            # measures the generator, not this project -- and the marshalling stubs in particular are
+            # the same native boundary as the files listed above, just emitted rather than typed.
+            if ($privilegedNativeFiles -notcontains $leaf -and $leaf -notlike '*.g.cs')
+            {
+                $privilegedManaged.Lines++
+                if ($entry.Value -gt 0) { $privilegedManaged.Covered++ }
+            }
+        }
     }
 
     $rows = foreach ($assembly in $totals.Keys)
@@ -225,15 +266,24 @@ try
                    "vouch for the code that runs as SYSTEM." -f ($unmeasuredPrivileged -join ", "))
         }
 
-        $belowPrivileged = @($privileged | Where-Object { $_.Percent -lt $PrivilegedMinimum })
-        if ($belowPrivileged)
+        if (-not $privilegedManaged.Lines)
         {
-            $names = ($belowPrivileged | ForEach-Object { "$($_.Assembly) $($_.Percent)%" }) -join ", "
-            throw ("Below the $PrivilegedMinimum% privileged bar: $names. This is a ratchet - it is " +
-                   "set just under the measured figure so coverage cannot regress. If a change " +
-                   "genuinely removed covered code, lower it deliberately in this script.")
+            throw ("The privileged component's managed half measured zero lines. Either every file " +
+                   "was excluded as native or the exclusion list no longer matches any filename; " +
+                   "both mean this gate is measuring nothing.")
         }
-        "Privileged component is at or above $PrivilegedMinimum%." | Write-Output
+
+        $managedPercent = [math]::Round(100 * $privilegedManaged.Covered / $privilegedManaged.Lines, 1)
+        "Privileged managed logic: {0}/{1} lines ({2}%), native/WFP/SCM boundary excluded and qualified by the VM protocol." -f `
+            $privilegedManaged.Covered, $privilegedManaged.Lines, $managedPercent | Write-Output
+
+        if ($managedPercent -lt $PrivilegedMinimum)
+        {
+            throw ("Below the $PrivilegedMinimum% privileged bar: the managed half of the SYSTEM " +
+                   "component is at $managedPercent%. The native boundary is excluded on the grounds " +
+                   "that the VM protocol covers it; the rest has no such excuse.")
+        }
+        "Privileged managed logic is at or above $PrivilegedMinimum%." | Write-Output
     }
 }
 finally

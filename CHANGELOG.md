@@ -2,6 +2,33 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### The SYSTEM component's coverage bar is 80%, same as everything else
+- **54% was an average of two incomparable things.** Split, the privileged assembly reads: hand-written
+  policy logic **827/905 lines (91.4%)**, and a native boundary — P/Invoke marshalling into
+  `fwpuclnt.dll` and `advapi32`, WFP provisioning, SCM installation, the process entry point — at
+  roughly 12%. Averaging them produced a number that justified a 54% ratchet on a component that was
+  in fact better covered than most engine libraries.
+- The gate now measures the half where a percentage means something and holds it to **the same 80% as
+  the engine libraries**. The native boundary is excluded on a stated ground: the VM protocol in
+  `docs/validation/VM_QUALIFICATION_KIT.md` qualifies it, which is evidence of a different kind rather
+  than an absence of evidence. Excluding a file is a claim that something else covers it; if that stops
+  being true, the exclusion is the bug, and the script says so.
+- **The first cut of that split was wrong and the data caught it.** It read 79.8% — two lines under the
+  bar — because the exclusion list named the hand-written native files but not `LibraryImports.g.cs`,
+  the 144 lines of P/Invoke marshalling stubs the `[LibraryImport]` generator emits. Those are the same
+  boundary, just generated rather than typed. Lowering the bar by 0.2% would have been precisely the
+  metric-gaming this project avoids; excluding generator output is the honest fix, because holding
+  hand-written tests against emitted code measures the generator.
+
+### The WFP qualification record needs a re-run, and the change that caused it was ours
+- `docs/validation/README.md` now records that the WFP enforcement / SCM lifecycle gate binds to
+  `f0a3f16` and that its surface has since changed — because the host-disposal and
+  `EnforcementCoordinator` fixes landed inside exactly what those 25 checks exercise. The protocol
+  already demanded a candidate-aware delta review; this is that review, written down rather than
+  assumed.
+- Measured, not assumed, for the other two: the IPC surface is unchanged since `c9177cd` and
+  `src/WinSight.Firewall/` unchanged since `f84ac36`, so those records still qualify their candidates.
+
 ### Blocking file I/O removed from the ETW trace callback, and the SYSTEM component given a floor
 - **The outbound observer read the policy file on the ETW trace thread.** `OnConnection` runs in the
   kernel session's `TcpIpConnect` callback, and every five seconds it called

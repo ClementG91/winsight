@@ -22,6 +22,27 @@ review of the relevant service, trust-boundary or IPC surface and a new run if t
 or the impact is uncertain. These are qualification records for three exact x64 candidates, not
 automatic inheritance or a product-wide production-readiness verdict.
 
+## Requires a re-run against a new candidate
+
+> [!IMPORTANT]
+> **WFP enforcement / SCM lifecycle.** The record above binds to `f0a3f16`, and the delta review that
+> its own terms demand now says the surface changed. Between `f0a3f16` and `79c8056`,
+> `src/WinSight.FirewallService/` gained 153 lines across five files, and two of them are squarely
+> inside what that gate tests:
+>
+> - **`Program.cs`** — the host was never disposed at all. `RunAsync()` starts and stops a host; it
+>   does not dispose one, so the WFP engine handle was released by process exit. It is now torn down
+>   in order on shutdown. That is a change to what happens when the SCM stops the service.
+> - **`EnforcementCoordinator.cs`** — no longer implements `IDisposable`; disposal is asynchronous
+>   only, so the provider now takes `DisposeAsync` on the same shutdown path.
+>
+> Neither is a behavioural change the 25 checks would ignore — the gate covers SCM lifecycle and
+> rollback precisely. **Re-run gate 4.2 and 4.3 of the kit against the new candidate and bind a fresh
+> record.** Until then the WFP row above qualifies `f0a3f16` and nothing later.
+>
+> The other two rows are unaffected, and that is measured rather than assumed: `git diff` reports the
+> IPC surface unchanged since `c9177cd` and `src/WinSight.Firewall/` unchanged since `f84ac36`.
+
 ## Superseded
 
 [`2026-07-23-firewall-enforcement-x64.md`](2026-07-23-firewall-enforcement-x64.md) — an earlier
