@@ -231,12 +231,42 @@ $liveDirectoryCleaned = $false
 [System.IO.Directory]::CreateDirectory($liveDirectory) | Out-Null
 try {
     $helper = New-LiveCliHelper $liveDirectory
+
+    # Pay the cold start once, outside every timed case. The first launch of a freshly written
+    # .NET Framework executable costs JIT, image load and the antivirus's first scan of a brand-new
+    # binary, and on 2026-07-28 that pushed `live-literal-path-and-arguments` past its budget on the
+    # native Arm64 runner - the first live case failed while every later one passed, which is the
+    # signature of a cold start rather than of a broken contract. Warming removes the confound
+    # instead of hiding it behind a larger number.
+    $warmMode = $env:WINSIGHT_CFA_TEST_MODE
+    $warmLog = $env:WINSIGHT_CFA_TEST_LOG
+    $warmChild = $env:WINSIGHT_CFA_TEST_CHILD
+    try {
+        # All three are cleared, not just the mode: a stale WINSIGHT_CFA_TEST_CHILD would make the
+        # warm-up sleep for a minute, and a stale log path would let it write a transcript that a
+        # later case then asserts against.
+        $env:WINSIGHT_CFA_TEST_MODE = 'normal'
+        Remove-Item Env:WINSIGHT_CFA_TEST_LOG -ErrorAction SilentlyContinue
+        Remove-Item Env:WINSIGHT_CFA_TEST_CHILD -ErrorAction SilentlyContinue
+        & $helper integrity --json | Out-Null
+    }
+    finally {
+        $env:WINSIGHT_CFA_TEST_MODE = $warmMode
+        $env:WINSIGHT_CFA_TEST_LOG = $warmLog
+        $env:WINSIGHT_CFA_TEST_CHILD = $warmChild
+    }
+
+    # Two budgets, and the difference is deliberate. For the timeout-tree cases below the timeout *is*
+    # the behaviour under test, so it stays short. For these it is only a safety net - the assertion
+    # is about stream and exit-code handling, never about latency - so it is generous enough that a
+    # slow runner cannot turn a passing contract into a red build.
+    $streamTimeout = 20000
     $liveCases = @(
-        @{ Name = 'live-literal-path-and-arguments'; Mode = 'normal'; Timeout = 3000; MaximumCharacters = 65536; ExpectedExit = 0; ExpectedEvidence = $true },
-        @{ Name = 'live-json-on-stderr-only'; Mode = 'stderr-only'; Timeout = 3000; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
-        @{ Name = 'live-stdout-plus-stderr'; Mode = 'stdout-and-stderr'; Timeout = 3000; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
-        @{ Name = 'live-stdout-overflow'; Mode = 'overflow-stdout'; Timeout = 3000; MaximumCharacters = 1024; ExpectedExit = 1; ExpectedEvidence = $false },
-        @{ Name = 'live-stderr-overflow'; Mode = 'overflow-stderr'; Timeout = 3000; MaximumCharacters = 1024; ExpectedExit = 1; ExpectedEvidence = $false },
+        @{ Name = 'live-literal-path-and-arguments'; Mode = 'normal'; Timeout = $streamTimeout; MaximumCharacters = 65536; ExpectedExit = 0; ExpectedEvidence = $true },
+        @{ Name = 'live-json-on-stderr-only'; Mode = 'stderr-only'; Timeout = $streamTimeout; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
+        @{ Name = 'live-stdout-plus-stderr'; Mode = 'stdout-and-stderr'; Timeout = $streamTimeout; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
+        @{ Name = 'live-stdout-overflow'; Mode = 'overflow-stdout'; Timeout = $streamTimeout; MaximumCharacters = 1024; ExpectedExit = 1; ExpectedEvidence = $false },
+        @{ Name = 'live-stderr-overflow'; Mode = 'overflow-stderr'; Timeout = $streamTimeout; MaximumCharacters = 1024; ExpectedExit = 1; ExpectedEvidence = $false },
         @{ Name = 'live-timeout-tree-cleanup'; Mode = 'timeout-tree'; Timeout = 1000; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
         @{ Name = 'live-parent-exit-stream-timeout-tree-cleanup'; Mode = 'exit-handle-tree'; Timeout = 1000; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false }
     )
