@@ -115,13 +115,15 @@ jobs:
       - name: Test and verify coverage
         shell: pwsh
         # Both floors are named here rather than left to the script's defaults, so the bar this
-        # workflow enforces is readable without opening another file. The privileged one is a ratchet
-        # on the SYSTEM component, which had no floor at all while the pure detection libraries were
-        # held to 80% — the inverse of the risk.
+        # workflow enforces is readable without opening another file. They are the same 80%: the
+        # privileged one applies to the SYSTEM component's hand-written logic, with the WFP/SCM
+        # P/Invoke boundary excluded because the VM protocol qualifies it instead. Measured whole that
+        # assembly reads 54%, which averages policy logic with generated marshalling stubs and means
+        # nothing; measured honestly it is at 91%.
         run: >-
           ./scripts/Measure-Coverage.ps1
           -EngineMinimum 80
-          -PrivilegedMinimum 54
+          -PrivilegedMinimum 80
           -TrxLogFilePrefix tests-${{ matrix.architecture }}
 
       - name: Upload test results
