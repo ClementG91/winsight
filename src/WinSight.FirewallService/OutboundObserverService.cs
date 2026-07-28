@@ -39,9 +39,10 @@ public sealed partial class OutboundObserverService : BackgroundService
     private readonly TimeProvider _time;
 
     private HashSet<string> _ruled = new(StringComparer.OrdinalIgnoreCase);
-    // Read and written only on the thread that calls OnConnection, which claims a refresh window
-    // before handing the actual load to the pool.
-    private DateTimeOffset _ruledLoadedUtc = DateTimeOffset.MinValue;
+    // Ticks rather than a DateTimeOffset, because two threads write it: the trace thread claims a
+    // window before queueing a reload, and the reload itself stamps the load it just completed. A
+    // 64-bit field is written atomically, so the worst a race costs is one extra refresh.
+    private long _ruledLoadedTicks = DateTimeOffset.MinValue.UtcTicks;
     // 1 while a reload is in flight, so a burst of connections starts one refresh and not one each.
     private int _refreshing;
     // The reload in flight. Tracked rather than fired and forgotten: a background file read must not
@@ -175,12 +176,13 @@ public sealed partial class OutboundObserverService : BackgroundService
     private HashSet<string> Ruled()
     {
         var now = _time.GetUtcNow();
-        if (now - _ruledLoadedUtc >= PolicyRefreshInterval
+        var loadedUtc = new DateTimeOffset(Volatile.Read(ref _ruledLoadedTicks), TimeSpan.Zero);
+        if (now - loadedUtc >= PolicyRefreshInterval
             && Interlocked.CompareExchange(ref _refreshing, 1, 0) == 0)
         {
             // Claim the window here, on this thread, before the load is queued: a burst of
             // connections must start one refresh, not one per event.
-            _ruledLoadedUtc = now;
+            Volatile.Write(ref _ruledLoadedTicks, now.UtcTicks);
             Volatile.Write(ref _refresh, RefreshInBackgroundAsync());
         }
 
@@ -238,10 +240,19 @@ public sealed partial class OutboundObserverService : BackgroundService
                 ruled.Add(policy.ExecutablePath);
             }
             Volatile.Write(ref _ruled, ruled);
+            // Stamp the load that just succeeded. Without this the startup prime left the snapshot
+            // looking never-loaded, so the very first connection after start would queue a second,
+            // redundant read of a file that had just been read — and in tests that stray background
+            // read outlived the test that caused it and held the store open.
+            Volatile.Write(ref _ruledLoadedTicks, _time.GetUtcNow().UtcTicks);
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
         {
             // Keep the previous snapshot: reporting an already-ruled app is noise, not a hazard.
+            // The stamp is deliberately not advanced here. On the refresh path that costs nothing —
+            // Ruled() already claimed the window before queueing, so a failed load waits out the
+            // interval like any other and cannot become a retry storm on a corrupt store. On the
+            // startup prime, which has no claim, it is what makes the first connection try again.
         }
     }
 

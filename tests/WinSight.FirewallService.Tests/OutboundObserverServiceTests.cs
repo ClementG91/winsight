@@ -6,14 +6,20 @@ using Xunit;
 
 namespace WinSight.FirewallService.Tests;
 
-public sealed class OutboundObserverServiceTests : IDisposable
+public sealed class OutboundObserverServiceTests : IAsyncLifetime
 {
     private readonly string _directory = Path.Combine(
         Path.GetTempPath(), $"winsight-observer-{Guid.NewGuid():N}");
 
+    // Every observer this class builds, so teardown can wait for their background reloads the way
+    // the service's own StopAsync does.
+    private readonly List<OutboundObserverService> _observers = [];
+
     private string PolicyPath => Path.Combine(_directory, "policies.json");
 
     public OutboundObserverServiceTests() => Directory.CreateDirectory(_directory);
+
+    public Task InitializeAsync() => Task.CompletedTask;
 
     [Fact]
     public void OnConnection_RecordsAnAppWithNoPolicy()
@@ -163,9 +169,14 @@ public sealed class OutboundObserverServiceTests : IDisposable
         new(4242, path, address, port);
 
     private OutboundObserverService Observer(
-        PendingOutboundLog log, FirewallPolicyStore? store = null, TimeProvider? time = null) =>
-        new(new OutboundConnectionWatcher(), store ?? new FirewallPolicyStore(PolicyPath), log,
+        PendingOutboundLog log, FirewallPolicyStore? store = null, TimeProvider? time = null)
+    {
+        var observer = new OutboundObserverService(
+            new OutboundConnectionWatcher(), store ?? new FirewallPolicyStore(PolicyPath), log,
             NullLogger<OutboundObserverService>.Instance, time);
+        _observers.Add(observer);
+        return observer;
+    }
 
     // TimeProvider is in the BCL and abstract, so controlling the clock costs a few lines rather
     // than a test-only package.
@@ -176,8 +187,24 @@ public sealed class OutboundObserverServiceTests : IDisposable
         public void Advance(TimeSpan delta) => _now += delta;
     }
 
-    public void Dispose()
+    /// <summary>
+    /// Waits for every background policy reload before deleting the store, exactly as the service's
+    /// own <c>StopAsync</c> does.
+    /// </summary>
+    /// <remarks>
+    /// Not defensive tidying: a reload started by the last observed connection was still holding
+    /// <c>policies.json</c> open when this deleted the directory, and the resulting IOException
+    /// surfaced against whichever unrelated test happened to run last. It reproduced on
+    /// `windows-2022` and Arm64 while passing on the faster `windows-2025` image — the shape of a
+    /// race, not of a broken assertion.
+    /// </remarks>
+    public async Task DisposeAsync()
     {
+        foreach (var observer in _observers)
+        {
+            await observer.PendingRefresh;
+        }
+
         if (Directory.Exists(_directory))
         {
             Directory.Delete(_directory, recursive: true);
