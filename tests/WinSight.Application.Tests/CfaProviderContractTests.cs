@@ -58,7 +58,7 @@ public sealed class CfaProviderContractTests
 
         Assert.True(process.ExitCode == 0,
             $"CFA provider fixture contract failed with exit {process.ExitCode}.{Environment.NewLine}stdout:{Environment.NewLine}{stdout}{Environment.NewLine}stderr:{Environment.NewLine}{stderr}");
-        Assert.Contains("CFA provider contract fixtures: 28/28 passed; 7/7 live CliPath checks passed.", stdout, StringComparison.Ordinal);
+        Assert.Contains("CFA provider contract fixtures: 30/30 passed; 26/26 AC107 mutation checks passed; 7/7 live CliPath checks passed.", stdout, StringComparison.Ordinal);
     }
 
     private static async Task<string> ReadStreamWithinAsync(Task<string> readTask, StreamReader stream, string streamName)

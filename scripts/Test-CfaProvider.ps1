@@ -58,6 +58,29 @@ $script:AntiVirusConcerns = @(
     'Protected', 'SignaturesOutOfDate', 'NoActiveAntiVirus', 'NoAntiVirusRegistered',
     'Unavailable', 'SignatureStatusUnknown', 'ActivityStatusUnknown'
 )
+$script:AntivirusActivities = @('On', 'Off', 'Snoozed', 'Expired', 'Unknown')
+$script:AntivirusSignatures = @('UpToDate', 'OutOfDate', 'Unknown')
+$script:AntivirusFieldNames = @(
+    'protection',
+    'concern',
+    'reading',
+    'registeredAntivirus',
+    'activeAntivirus',
+    'activeAntivirusCount',
+    'onAntivirus',
+    'onAntivirusCount',
+    'registeredAntivirusCount',
+    'offAntivirusCount',
+    'snoozedAntivirusCount',
+    'expiredAntivirusCount',
+    'activityUnknownAntivirusCount',
+    'signatureUnknownAntivirusCount',
+    'hasActiveNonMicrosoftAntivirus'
+)
+$script:MaximumAntivirusProducts = 64
+$script:MaximumAntivirusNameLength = 256
+$script:MaximumJoinedAntivirusAliasLength =
+    ($script:MaximumAntivirusProducts * $script:MaximumAntivirusNameLength) + (($script:MaximumAntivirusProducts - 1) * 2)
 $script:States = @(
     'Unavailable', 'Unknown', 'Disabled', 'Enabled', 'Audit',
     'BlockDiskModificationOnly', 'AuditDiskModificationOnly'
@@ -86,11 +109,20 @@ function Fail-Contract([string]$Message) {
 function Assert-ExactProperties([object]$Object, [string[]]$Expected, [string]$Name) {
     if ($null -eq $Object) { Fail-Contract "$Name is missing" }
     $actual = @($Object.PSObject.Properties | ForEach-Object { $_.Name })
-    if ($actual.Count -ne $Expected.Count) {
-        Fail-Contract ("{0} has an unexpected property count (actual {1}: {2}; expected {3})" -f $Name, $actual.Count, ($actual -join ','), $Expected.Count)
-    }
+    # Missing-expected is checked before the count, and the order is the whole point. These names are
+    # this script's own constants, so naming the one that is absent is precise and echoes nothing that
+    # came from the CLI. The count check that follows cannot say which property is wrong without
+    # printing names taken from the report, so it deliberately says nothing more - a contract
+    # validator must not turn a crafted property name into a line in someone's build log.
+    #
+    # Ordering these the other way round is what made a real failure opaque: a report that had gained
+    # six fields could only report "unexpected property count", when it could have named the first
+    # expected field it no longer carried.
     foreach ($property in $Expected) {
         if ($actual -cnotcontains $property) { Fail-Contract "$Name is missing property '$property'" }
+    }
+    if ($actual.Count -ne $Expected.Count) {
+        Fail-Contract ("{0} has an unexpected property count (expected {1}, actual {2})" -f $Name, $Expected.Count, $actual.Count)
     }
 }
 
@@ -636,7 +668,152 @@ function Get-CanonicalRawState([object]$Value) {
     catch { Fail-Contract 'rawStateValue is outside the signed 32-bit range' }
 }
 
-function Assert-CfaItem([object]$Item) {
+function Get-CanonicalAntivirusInteger([object]$Value, [string]$Name) {
+    Assert-String $Value $Name
+    if ($Value -notmatch '^-?(0|[1-9][0-9]*)$') { Fail-Contract "$Name is not a canonical signed integer" }
+    try { return [int]::Parse($Value, [System.Globalization.CultureInfo]::InvariantCulture) }
+    catch { Fail-Contract "$Name is outside the signed 32-bit range" }
+}
+
+function Get-CanonicalAntivirusCount([object]$Value, [string]$Name) {
+    $count = Get-CanonicalAntivirusInteger $Value $Name
+    if ($count -lt 0 -or $count -gt $script:MaximumAntivirusProducts) { Fail-Contract "$Name is outside the supported product range" }
+    return $count
+}
+
+function Assert-NullableAntivirusNames([object]$Value, [string]$Name) {
+    if ($null -eq $Value) { return }
+    Assert-BoundedString $Value $Name $script:MaximumJoinedAntivirusAliasLength
+}
+
+function Join-AntivirusNames([object[]]$Products) {
+    if ($Products.Count -eq 0) { return $null }
+    return [string]::Join(', ', @($Products | ForEach-Object { $_.Name }))
+}
+
+function Test-MicrosoftDefenderName([string]$Name) {
+    return $Name.IndexOf('Windows Defender', [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+        $Name.IndexOf('Microsoft Defender', [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+
+function Assert-ExpectedField([object]$Actual, [object]$Expected, [string]$Name) {
+    if ($null -eq $Expected) {
+        if ($null -ne $Actual) { Fail-Contract "$Name must be null" }
+    }
+    elseif ($Actual -cne $Expected) { Fail-Contract "$Name contradicts the canonical antivirus item" }
+}
+
+function Assert-AntivirusItem([object]$Item) {
+    Assert-ExactProperties -Object $Item -Expected @('severity', 'title', 'detail', 'fields') -Name 'antivirus item'
+    Assert-ClosedValue -Value $Item.severity -Allowed @('info', 'notable') -Name 'antivirus severity'
+    Assert-String $Item.title 'antivirus title'
+    Assert-String $Item.detail 'antivirus detail'
+    if ($Item.title -cne 'Antivirus protection (Windows Security Center)') {
+        Fail-Contract 'antivirus title is not the stable report identity'
+    }
+
+    $fields = $Item.fields
+    Assert-String $fields.protection 'antivirus protection'
+    if ($fields.protection -cne 'Antivirus') { Fail-Contract 'antivirus protection identity is invalid' }
+    Assert-ClosedValue -Value $fields.reading -Allowed $script:SecurityCenterReadings -Name 'antivirus reading'
+    Assert-ClosedValue -Value $fields.concern -Allowed $script:AntiVirusConcerns -Name 'antivirus concern'
+    Assert-NullableAntivirusNames $fields.registeredAntivirus 'registeredAntivirus'
+    Assert-NullableAntivirusNames $fields.activeAntivirus 'activeAntivirus'
+    Assert-NullableAntivirusNames $fields.onAntivirus 'antivirus onAntivirus'
+    Assert-CanonicalBoolean $fields.hasActiveNonMicrosoftAntivirus 'hasActiveNonMicrosoftAntivirus'
+
+    $registeredCount = Get-CanonicalAntivirusCount $fields.registeredAntivirusCount 'registeredAntivirusCount'
+    $expectedFields = @($script:AntivirusFieldNames)
+    for ($index = 0; $index -lt $registeredCount; $index++) {
+        $prefix = "antivirusProduct.$index."
+        $expectedFields += @("${prefix}name", "${prefix}activity", "${prefix}signature", "${prefix}rawActivity", "${prefix}rawSignature", "${prefix}legacyRawProductState")
+    }
+    Assert-ExactProperties -Object $fields -Expected $expectedFields -Name 'antivirus fields'
+
+    $products = @()
+    for ($index = 0; $index -lt $registeredCount; $index++) {
+        $prefix = "antivirusProduct.$index."
+        Assert-BoundedString $fields."${prefix}name" "${prefix}name" $script:MaximumAntivirusNameLength
+        Assert-ClosedValue -Value $fields."${prefix}activity" -Allowed $script:AntivirusActivities -Name "${prefix}activity"
+        Assert-ClosedValue -Value $fields."${prefix}signature" -Allowed $script:AntivirusSignatures -Name "${prefix}signature"
+        $rawActivity = Get-CanonicalAntivirusInteger $fields."${prefix}rawActivity" "${prefix}rawActivity"
+        $rawSignature = Get-CanonicalAntivirusInteger $fields."${prefix}rawSignature" "${prefix}rawSignature"
+        if ($fields."${prefix}legacyRawProductState" -cne '0') {
+            Fail-Contract "${prefix}legacyRawProductState is not the documented COM legacy sentinel"
+        }
+        $activity = $fields."${prefix}activity"
+        $signature = $fields."${prefix}signature"
+        $expectedRawActivity = @{ 'On' = 0; 'Off' = 1; 'Snoozed' = 2; 'Expired' = 3 }
+        if ($activity -ceq 'Unknown') {
+            if ($rawActivity -in @(0, 1, 2, 3)) { Fail-Contract "${prefix}rawActivity contradicts Unknown activity" }
+        }
+        elseif ($rawActivity -ne $expectedRawActivity[$activity]) { Fail-Contract "${prefix}rawActivity contradicts activity" }
+        if ($signature -ceq 'Unknown') {
+            if ($rawSignature -in @(0, 1)) { Fail-Contract "${prefix}rawSignature contradicts Unknown signature" }
+        }
+        elseif ($rawSignature -ne (@{ 'UpToDate' = 1; 'OutOfDate' = 0 })[$signature]) {
+            Fail-Contract "${prefix}rawSignature contradicts signature"
+        }
+        $products += [pscustomobject]@{
+            Name = $fields."${prefix}name"
+            Activity = $activity
+            Signature = $signature
+            IsMicrosoftDefender = Test-MicrosoftDefenderName $fields."${prefix}name"
+        }
+    }
+
+    $onProducts = @($products | Where-Object { $_.Activity -ceq 'On' })
+    $unknownProducts = @($products | Where-Object { $_.Activity -ceq 'Unknown' })
+    $onThirdPartyProducts = @($onProducts | Where-Object { -not $_.IsMicrosoftDefender })
+    $protectedThirdPartyProducts = @($onThirdPartyProducts | Where-Object { $_.Signature -ceq 'UpToDate' })
+    if ($fields.reading -ceq 'Unavailable' -and $products.Count -ne 0) {
+        Fail-Contract 'unavailable Security Center item contains canonical product evidence'
+    }
+    $expectedConcern = if ($fields.reading -ceq 'Unavailable') { 'Unavailable' }
+        elseif ($products.Count -eq 0) { 'NoAntiVirusRegistered' }
+        elseif (@($onProducts | Where-Object { $_.Signature -ceq 'UpToDate' }).Count -gt 0) { 'Protected' }
+        elseif ($unknownProducts.Count -gt 0) { 'ActivityStatusUnknown' }
+        elseif (@($onProducts | Where-Object { $_.Signature -ceq 'Unknown' }).Count -gt 0) { 'SignatureStatusUnknown' }
+        elseif ($onProducts.Count -gt 0) { 'SignaturesOutOfDate' }
+        else { 'NoActiveAntiVirus' }
+    if ($fields.concern -cne $expectedConcern) { Fail-Contract 'antivirus concern contradicts canonical product evidence' }
+    if (($Item.severity -ceq 'info') -ne ($expectedConcern -ceq 'Protected')) {
+        Fail-Contract 'antivirus severity contradicts canonical concern'
+    }
+
+    $expectedCounts = @{
+        'activeAntivirusCount' = $onProducts.Count
+        'onAntivirusCount' = $onProducts.Count
+        'registeredAntivirusCount' = $products.Count
+        'offAntivirusCount' = @($products | Where-Object { $_.Activity -ceq 'Off' }).Count
+        'snoozedAntivirusCount' = @($products | Where-Object { $_.Activity -ceq 'Snoozed' }).Count
+        'expiredAntivirusCount' = @($products | Where-Object { $_.Activity -ceq 'Expired' }).Count
+        'activityUnknownAntivirusCount' = $unknownProducts.Count
+        'signatureUnknownAntivirusCount' = @($products | Where-Object { $_.Signature -ceq 'Unknown' }).Count
+    }
+    foreach ($name in $expectedCounts.Keys) {
+        if ((Get-CanonicalAntivirusCount $fields.$name $name) -ne $expectedCounts[$name]) {
+            Fail-Contract "$name contradicts the canonical indexed products"
+        }
+    }
+    Assert-ExpectedField $fields.registeredAntivirus (Join-AntivirusNames $products) 'registeredAntivirus'
+    Assert-ExpectedField $fields.activeAntivirus (Join-AntivirusNames $onProducts) 'activeAntivirus'
+    Assert-ExpectedField $fields.onAntivirus (Join-AntivirusNames $onProducts) 'antivirus onAntivirus'
+    if (($fields.hasActiveNonMicrosoftAntivirus -ceq 'True') -ne ($onThirdPartyProducts.Count -gt 0)) {
+        Fail-Contract 'hasActiveNonMicrosoftAntivirus contradicts canonical indexed products'
+    }
+
+    return [pscustomobject]@{
+        Reading = $fields.reading
+        Concern = $expectedConcern
+        OnAntivirus = Join-AntivirusNames $onProducts
+        ActivityUnknownAntivirus = Join-AntivirusNames $unknownProducts
+        OnThirdPartyAntivirus = Join-AntivirusNames $onThirdPartyProducts
+        ProtectedThirdPartyAntivirus = Join-AntivirusNames $protectedThirdPartyProducts
+    }
+}
+
+function Assert-CfaItem([object]$Item, [object]$Antivirus) {
     Assert-ExactProperties -Object $Item -Expected @('severity', 'title', 'detail', 'fields') -Name 'CFA item'
     Assert-ClosedValue -Value $Item.severity -Allowed @('info', 'notable') -Name 'CFA severity'
     Assert-String $Item.title 'CFA title'
@@ -654,6 +831,12 @@ function Assert-CfaItem([object]$Item) {
     Assert-ClosedValue -Value $fields.allowedApplicationsVisibility -Allowed $script:Visibilities -Name 'allowedApplicationsVisibility'
     Assert-ClosedValue -Value $fields.securityCenterReading -Allowed $script:SecurityCenterReadings -Name 'securityCenterReading'
     Assert-ClosedValue -Value $fields.antivirusConcern -Allowed $script:AntiVirusConcerns -Name 'antivirusConcern'
+    Assert-ExpectedField $fields.securityCenterReading $Antivirus.Reading 'securityCenterReading'
+    Assert-ExpectedField $fields.antivirusConcern $Antivirus.Concern 'antivirusConcern'
+    Assert-ExpectedField $fields.onAntivirus $Antivirus.OnAntivirus 'onAntivirus'
+    Assert-ExpectedField $fields.activityUnknownAntivirus $Antivirus.ActivityUnknownAntivirus 'activityUnknownAntivirus'
+    Assert-ExpectedField $fields.onThirdPartyAntivirus $Antivirus.OnThirdPartyAntivirus 'onThirdPartyAntivirus'
+    Assert-ExpectedField $fields.protectedThirdPartyAntivirus $Antivirus.ProtectedThirdPartyAntivirus 'protectedThirdPartyAntivirus'
 
     # An unreadable Security Center establishes nothing, so it must not name a product or claim a
     # posture. This is the shape of the defect the whole antivirus milestone was raised against:
@@ -896,7 +1079,14 @@ try {
             $fieldNames -ccontains 'protection' -and $_.fields.protection -ceq 'Controlled Folder Access'
         })
     if ($cfaItems.Count -ne 1) { Fail-Contract 'report must contain exactly one Controlled Folder Access item' }
-    $cfa = Assert-CfaItem $cfaItems[0]
+    $antivirusItems = @($items | Where-Object {
+            if ($null -eq $_.fields) { return $false }
+            $fieldNames = @($_.fields.PSObject.Properties | ForEach-Object { $_.Name })
+            $fieldNames -ccontains 'protection' -and $_.fields.protection -ceq 'Antivirus'
+        })
+    if ($antivirusItems.Count -ne 1) { Fail-Contract 'report must contain exactly one canonical antivirus item' }
+    $antivirus = Assert-AntivirusItem $antivirusItems[0]
+    $cfa = Assert-CfaItem $cfaItems[0] $antivirus
     $expectedExit = if ($reportedNotableCount -eq 0) { 0 } else { 1 }
     if ($probeResult.ExitCode -ne $expectedExit) { Fail-Contract 'CLI exit code contradicts whole-report notableCount' }
 

@@ -48,6 +48,71 @@ function Test-Evidence([object]$Evidence, [hashtable]$Expected) {
     return $true
 }
 
+function Invoke-FixtureProbe([string]$Name, [string]$FixturePath, [object]$GeneratedFixture) {
+    $outputDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('winsight-cfa-contract-{0}' -f [guid]::NewGuid().ToString('N'))
+    $output = Join-Path $outputDirectory 'evidence.json'
+    $generatedPath = Join-Path $outputDirectory ($Name + '.json')
+    try {
+        if ($null -ne $GeneratedFixture) {
+            [System.IO.Directory]::CreateDirectory($outputDirectory) | Out-Null
+            [System.IO.File]::WriteAllText(
+                $generatedPath,
+                ($GeneratedFixture | ConvertTo-Json -Depth 12),
+                [System.Text.UTF8Encoding]::new($false))
+            $FixturePath = $generatedPath
+        }
+        $oldErrorActionPreference = $ErrorActionPreference
+        try {
+            # A red fixture intentionally makes the child write stderr. Under this harness's global
+            # Stop preference, preserve the child diagnostic as data instead of turning it into a
+            # harness exception before its exit code can be asserted.
+            $ErrorActionPreference = 'Continue'
+            $messages = @(& $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe -CliPath 'fixture-only' -OutputPath $output -InputJsonPath $FixturePath 2>&1 | ForEach-Object { $_.ToString() })
+            $exitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $oldErrorActionPreference
+        }
+        return [pscustomobject]@{
+            ExitCode = $exitCode
+            HasEvidence = Test-Path -LiteralPath $output -PathType Leaf
+            EvidencePath = $output
+            Diagnostic = @($messages | Where-Object { $_ -like 'CFA provider contract failed: *' }) -join "`n"
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            ExitCode = -1
+            HasEvidence = $false
+            EvidencePath = $output
+            Diagnostic = $_.Exception.Message
+        }
+    }
+}
+
+function Remove-FixtureProbeArtifacts([object]$Probe) {
+    $directory = [System.IO.Path]::GetDirectoryName($Probe.EvidencePath)
+    if (Test-Path -LiteralPath $directory -PathType Container) { Remove-Item -LiteralPath $directory -Force -Recurse }
+}
+
+function Get-CanonicalMutationFixture {
+    return Get-Content -LiteralPath (Join-Path $fixtureRoot 'green-protecting.json') -Raw | ConvertFrom-Json
+}
+
+function Get-MutationReport([object]$Fixture) {
+    $reports = @($Fixture.stdout | ConvertFrom-Json)
+    if ($reports.Count -eq 1 -and $reports[0] -is [System.Array]) { $reports = @($reports[0]) }
+    return $reports[0]
+}
+
+function Set-MutationReport([object]$Fixture, [object]$Report) {
+    $Fixture.stdout = ConvertTo-Json -InputObject @($Report) -Compress -Depth 8
+}
+
+function Get-MutationItem([object]$Report, [string]$Protection) {
+    return @($Report.items | Where-Object { $_.fields.protection -ceq $Protection })[0]
+}
+
 function New-LiveCliHelper([string]$Directory) {
     $helper = Join-Path $Directory 'CFA helper & literal.exe'
     Add-Type -TypeDefinition @'
@@ -59,7 +124,7 @@ using System.Threading;
 
 public static class CfaProviderTestCli
 {
-    private const string Report = "[{\"tool\":\"integrity\",\"summary\":\"ok\",\"items\":[{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"protecting\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"Protecting\",\"runtimeSupportsProtection\":\"True\",\"amRunningMode\":\"Normal\",\"antivirusEnabled\":\"True\",\"realTimeProtectionEnabled\":\"True\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Unavailable\",\"antivirusConcern\":\"Unavailable\",\"protectedThirdPartyAntivirus\":null,\"onThirdPartyAntivirus\":null,\"onAntivirus\":null,\"activityUnknownAntivirus\":null}}],\"notableCount\":0}]";
+    private const string Report = "[{\"tool\":\"integrity\",\"summary\":\"ok\",\"items\":[{\"severity\":\"info\",\"title\":\"Antivirus protection (Windows Security Center)\",\"detail\":\"fixture antivirus evidence\",\"fields\":{\"protection\":\"Antivirus\",\"concern\":\"Protected\",\"reading\":\"Available\",\"registeredAntivirus\":\"Microsoft Defender\",\"activeAntivirus\":\"Microsoft Defender\",\"activeAntivirusCount\":\"1\",\"onAntivirus\":\"Microsoft Defender\",\"onAntivirusCount\":\"1\",\"registeredAntivirusCount\":\"1\",\"offAntivirusCount\":\"0\",\"snoozedAntivirusCount\":\"0\",\"expiredAntivirusCount\":\"0\",\"activityUnknownAntivirusCount\":\"0\",\"signatureUnknownAntivirusCount\":\"0\",\"hasActiveNonMicrosoftAntivirus\":\"False\",\"antivirusProduct.0.name\":\"Microsoft Defender\",\"antivirusProduct.0.activity\":\"On\",\"antivirusProduct.0.signature\":\"UpToDate\",\"antivirusProduct.0.rawActivity\":\"0\",\"antivirusProduct.0.rawSignature\":\"1\",\"antivirusProduct.0.legacyRawProductState\":\"0\"}},{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"protecting\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"Protecting\",\"runtimeSupportsProtection\":\"True\",\"amRunningMode\":\"Normal\",\"antivirusEnabled\":\"True\",\"realTimeProtectionEnabled\":\"True\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Available\",\"antivirusConcern\":\"Protected\",\"protectedThirdPartyAntivirus\":null,\"onThirdPartyAntivirus\":null,\"onAntivirus\":\"Microsoft Defender\",\"activityUnknownAntivirus\":null}}],\"notableCount\":0}]";
 
     public static int Main(string[] args)
     {
@@ -174,45 +239,56 @@ $cases = @(
     # vocabulary before the running-mode set covered every mode Defender documents, which turned the
     # commonest non-default configuration into an unreadable posture.
     @{ Name = 'green-defender-not-running.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Disabled'; Concern = 'DefenderNotRunning'; RawStateValue = 0; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 0 },
+    # Canonical indexed names retain a French Defender label, the Bitdefender false-positive trap and
+    # a comma in a vendor name. Every legacy alias is reconstructed as one ordered string, never split.
+    @{ Name = 'green-joined-comma-alias.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Disabled'; Concern = 'DefenderNotRunning'; RawStateValue = 0; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 0 },
     @{ Name = 'green-passive-spelling.json'; ExpectedExit = 0; ExpectedEvidence = $true; CliExitCode = 1; ReportNotableCount = 1; State = 'Enabled'; Concern = 'RuntimeRequirementsNotMet'; RawStateValue = 1; RuntimeSupportsProtection = $false; AllowedApplicationsVisibility = 'Visible'; ProtectedFolderCount = 1 },
-    @{ Name = 'red-missing-cfa.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-duplicate-cfa.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-unknown-vocabulary.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-protecting-runtime.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-unavailable-hidden.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-not-running-reported-as-off.json'; ExpectedExit = 1; ExpectedEvidence = $false },
+    @{ Name = 'red-missing-cfa.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: report must contain exactly one Controlled Folder Access item' },
+    @{ Name = 'red-duplicate-cfa.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: report must contain exactly one Controlled Folder Access item' },
+    @{ Name = 'red-unknown-vocabulary.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: concern has an unknown value' },
+    @{ Name = 'red-protecting-runtime.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: runtimeSupportsProtection contradicts the measured runtime fields' },
+    @{ Name = 'red-unavailable-hidden.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: Unavailable CFA is hidden or internally contradictory' },
+    @{ Name = 'red-not-running-reported-as-off.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: Defender reporting Not running is not reported as DefenderNotRunning' },
     # An unreadable Security Center that still names a product as protecting: absent evidence turned
     # into the most reassuring sentence the report can produce. The same shape as the defect the whole
     # antivirus milestone was raised against, so the contract has to reject it rather than count it.
-    @{ Name = 'red-antivirus-crossclaim.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-invalid-raw.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-notable-count-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-sensitive-field.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-bad-exit.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-exit-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-malformed-json.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-stderr-only.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-duplicate-report-member.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-duplicate-item-member.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-duplicate-cfa-field-member.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-escaped-duplicate-cfa-field-member.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-report-property-casing.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-item-property-casing.json'; ExpectedExit = 1; ExpectedEvidence = $false },
-    @{ Name = 'red-cfa-field-property-casing.json'; ExpectedExit = 1; ExpectedEvidence = $false }
+    @{ Name = 'red-antivirus-crossclaim.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: onAntivirus must be null' },
+    # Product A is the canonical protected third-party product, while Different Product B is merely
+    # On. The CFA alias deliberately drops Product A from its On-third-party value. The old validator
+    # accepted this because it tested only that both aliases were nonempty; do not split the aliases,
+    # because vendor product names may contain commas.
+    @{ Name = 'red-antivirus-product-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: onThirdPartyAntivirus contradicts the canonical antivirus item' },
+    @{ Name = 'red-invalid-raw.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: Unknown CFA state does not retain an unsupported raw value' },
+    @{ Name = 'red-notable-count-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: notableCount contradicts report item severities' },
+    @{ Name = 'red-sensitive-field.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: CFA fields has an unexpected property count (expected 17, actual 18)' },
+    @{ Name = 'red-bad-exit.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: CLI exit code is not a documented report exit' },
+    @{ Name = 'red-exit-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: CLI exit code contradicts whole-report notableCount' },
+    @{ Name = 'red-malformed-json.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: JSON string is malformed' },
+    @{ Name = 'red-stderr-only.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: CLI wrote an unexpected stderr diagnostic' },
+    @{ Name = 'red-duplicate-report-member.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: JSON object contains a duplicate decoded member name' },
+    @{ Name = 'red-duplicate-item-member.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: JSON object contains a duplicate decoded member name' },
+    @{ Name = 'red-duplicate-cfa-field-member.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: JSON object contains a duplicate decoded member name' },
+    @{ Name = 'red-escaped-duplicate-cfa-field-member.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: JSON object contains a duplicate decoded member name' },
+    @{ Name = 'red-report-property-casing.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = "CFA provider contract failed: integrity report is missing property 'tool'" },
+    @{ Name = 'red-item-property-casing.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = 'CFA provider contract failed: report item is missing severity' },
+    @{ Name = 'red-cfa-field-property-casing.json'; ExpectedExit = 1; ExpectedEvidence = $false; ExpectedDiagnostic = "CFA provider contract failed: CFA fields is missing property 'state'" }
 )
 
 $failures = 0
 foreach ($case in $cases) {
-    $outputDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('winsight-cfa-contract-{0}' -f [guid]::NewGuid().ToString('N'))
-    $output = Join-Path $outputDirectory 'evidence.json'
     $fixture = Join-Path $fixtureRoot $case.Name
-    & $powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File $probe -CliPath 'fixture-only' -OutputPath $output -InputJsonPath $fixture | Out-Null
-    $actualExit = $LASTEXITCODE
-    $hasEvidence = Test-Path -LiteralPath $output -PathType Leaf
-    $passed = $actualExit -eq $case.ExpectedExit -and $hasEvidence -eq $case.ExpectedEvidence
-    if ($passed -and $hasEvidence) {
+    $probeResult = Invoke-FixtureProbe $case.Name $fixture $null
+    $passed = $probeResult.ExitCode -eq $case.ExpectedExit -and $probeResult.HasEvidence -eq $case.ExpectedEvidence
+    $hasExpectedDiagnostic = $case.ContainsKey('ExpectedDiagnostic')
+    if ($passed -and $hasExpectedDiagnostic) {
+        $passed = $probeResult.Diagnostic -ceq $case.ExpectedDiagnostic
+    }
+    elseif ($passed) {
+        $passed = [string]::IsNullOrEmpty($probeResult.Diagnostic)
+    }
+    if ($passed -and $probeResult.HasEvidence) {
         try {
-            $evidence = Get-Content -LiteralPath $output -Raw | ConvertFrom-Json
+            $evidence = Get-Content -LiteralPath $probeResult.EvidencePath -Raw | ConvertFrom-Json
             $passed = Test-Evidence $evidence $case
             if ($passed) {
                 $evidence.ControlledFolderAccess | Add-Member -NotePropertyName AllowedApplications -NotePropertyValue 'sensitive' -Force
@@ -221,12 +297,111 @@ foreach ($case in $cases) {
         }
         catch { $passed = $false }
     }
-    if ($hasEvidence) { Remove-Item -LiteralPath $output -Force }
-    if (Test-Path -LiteralPath $outputDirectory -PathType Container) { Remove-Item -LiteralPath $outputDirectory -Force }
+    Remove-FixtureProbeArtifacts $probeResult
     if ($passed) { Write-Output ('[PASS] {0}' -f $case.Name) }
     else {
         $failures++
-        [Console]::Error.WriteLine(('[FAIL] {0}: exit {1}, evidence {2}' -f $case.Name, $actualExit, $hasEvidence))
+        [Console]::Error.WriteLine(('[FAIL] {0}: exit {1}, evidence {2}, diagnostic [{3}]' -f $case.Name, $probeResult.ExitCode, $probeResult.HasEvidence, $probeResult.Diagnostic))
+    }
+}
+
+# These single-fault reports begin as the same canonical fixture. They pin the exact rejection reason
+# for every AC107 antivirus and CFA cross-reference invariant, so a check cannot be deleted while a
+# different earlier rejection keeps the wrapper green. Aliases deliberately remain whole strings.
+$mutationCases = @(
+    @{ Name = 'mutation-av-missing-item'; ExpectedDiagnostic = 'CFA provider contract failed: report must contain exactly one canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture
+            $report.items = @($report.items | Where-Object { $_.fields.protection -cne 'Antivirus' })
+            Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-duplicate-item'; ExpectedDiagnostic = 'CFA provider contract failed: report must contain exactly one canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $report.items = @($report.items) + @($item | ConvertTo-Json -Compress -Depth 8 | ConvertFrom-Json)
+            Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-dynamic-schema'; ExpectedDiagnostic = "CFA provider contract failed: antivirus fields is missing property 'antivirusProduct.0.rawSignature'"; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.PSObject.Properties.Remove('antivirusProduct.0.rawSignature'); Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-legacy-sentinel'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusProduct.0.legacyRawProductState is not the documented COM legacy sentinel'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.'antivirusProduct.0.legacyRawProductState' = '1'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-activity-vocabulary'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusProduct.0.activity has an unknown value'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.'antivirusProduct.0.activity' = 'FutureActivity'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-signature-vocabulary'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusProduct.0.signature has an unknown value'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.'antivirusProduct.0.signature' = 'FutureSignature'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-raw-activity'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusProduct.0.rawActivity contradicts activity'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.'antivirusProduct.0.rawActivity' = '1'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-raw-signature'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusProduct.0.rawSignature contradicts signature'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.'antivirusProduct.0.rawSignature' = '0'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-raw-canonical-syntax'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusProduct.0.rawActivity is not a canonical signed integer'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.'antivirusProduct.0.rawActivity' = '00'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-count'; ExpectedDiagnostic = 'CFA provider contract failed: onAntivirusCount contradicts the canonical indexed products'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.onAntivirusCount = '0'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-count-bound'; ExpectedDiagnostic = 'CFA provider contract failed: registeredAntivirusCount is outside the supported product range'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.registeredAntivirusCount = '65'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-registered-alias'; ExpectedDiagnostic = 'CFA provider contract failed: registeredAntivirus contradicts the canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.registeredAntivirus = 'Different Product'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-active-alias'; ExpectedDiagnostic = 'CFA provider contract failed: activeAntivirus contradicts the canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.activeAntivirus = 'Different Product'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-on-alias'; ExpectedDiagnostic = 'CFA provider contract failed: antivirus onAntivirus contradicts the canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.onAntivirus = 'Different Product'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-unavailable-products'; ExpectedDiagnostic = 'CFA provider contract failed: unavailable Security Center item contains canonical product evidence'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.reading = 'Unavailable'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-reading-vocabulary'; ExpectedDiagnostic = 'CFA provider contract failed: antivirus reading has an unknown value'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.reading = 'FutureReading'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-concern-vocabulary'; ExpectedDiagnostic = 'CFA provider contract failed: antivirus concern has an unknown value'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.concern = 'FutureConcern'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-concern'; ExpectedDiagnostic = 'CFA provider contract failed: antivirus concern contradicts canonical product evidence'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.concern = 'NoActiveAntiVirus'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-severity'; ExpectedDiagnostic = 'CFA provider contract failed: antivirus severity contradicts canonical concern'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.severity = 'notable'; $report.notableCount = 1; $fixture.exitCode = 1; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-av-third-party-boolean'; ExpectedDiagnostic = 'CFA provider contract failed: hasActiveNonMicrosoftAntivirus contradicts canonical indexed products'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Antivirus'
+            $item.fields.hasActiveNonMicrosoftAntivirus = 'True'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-cfa-reading'; ExpectedDiagnostic = 'CFA provider contract failed: securityCenterReading contradicts the canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Controlled Folder Access'
+            $item.fields.securityCenterReading = 'Unavailable'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-cfa-concern'; ExpectedDiagnostic = 'CFA provider contract failed: antivirusConcern contradicts the canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Controlled Folder Access'
+            $item.fields.antivirusConcern = 'NoActiveAntiVirus'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-cfa-on'; ExpectedDiagnostic = 'CFA provider contract failed: onAntivirus contradicts the canonical antivirus item'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Controlled Folder Access'
+            $item.fields.onAntivirus = 'Different Product'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-cfa-activity-unknown'; ExpectedDiagnostic = 'CFA provider contract failed: activityUnknownAntivirus must be null'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Controlled Folder Access'
+            $item.fields.activityUnknownAntivirus = 'Different Product'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-cfa-on-third-party'; ExpectedDiagnostic = 'CFA provider contract failed: onThirdPartyAntivirus must be null'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Controlled Folder Access'
+            $item.fields.onThirdPartyAntivirus = 'Different Product'; Set-MutationReport $fixture $report } },
+    @{ Name = 'mutation-cfa-protected-third-party'; ExpectedDiagnostic = 'CFA provider contract failed: protectedThirdPartyAntivirus must be null'; Mutate = {
+            param($fixture) $report = Get-MutationReport $fixture; $item = Get-MutationItem $report 'Controlled Folder Access'
+            $item.fields.protectedThirdPartyAntivirus = 'Different Product'; Set-MutationReport $fixture $report } }
+)
+
+foreach ($case in $mutationCases) {
+    $fixture = Get-CanonicalMutationFixture
+    & $case.Mutate $fixture
+    $probeResult = Invoke-FixtureProbe $case.Name $null $fixture
+    $passed = $probeResult.ExitCode -eq 1 -and -not $probeResult.HasEvidence -and
+        $probeResult.Diagnostic -ceq $case.ExpectedDiagnostic
+    Remove-FixtureProbeArtifacts $probeResult
+    if ($passed) { Write-Output ('[PASS] {0}' -f $case.Name) }
+    else {
+        $failures++
+        [Console]::Error.WriteLine(('[FAIL] {0}: exit {1}, evidence {2}, diagnostic [{3}]' -f $case.Name, $probeResult.ExitCode, $probeResult.HasEvidence, $probeResult.Diagnostic))
     }
 }
 
@@ -292,4 +467,4 @@ finally {
 
 if (-not $liveDirectoryCleaned) { throw 'Live helper temporary directory was not cleaned' }
 if ($failures -ne 0) { throw "$failures CFA provider contract fixture test(s) failed" }
-Write-Output ('CFA provider contract fixtures: {0}/{0} passed; {1}/{1} live CliPath checks passed.' -f $cases.Count, $liveCases.Count)
+Write-Output ('CFA provider contract fixtures: {0}/{0} passed; {1}/{1} AC107 mutation checks passed; {2}/{2} live CliPath checks passed.' -f $cases.Count, $mutationCases.Count, $liveCases.Count)
