@@ -28,6 +28,7 @@ public static class DashboardFindingPresenter
             "firewall" => Firewall(item, text),
             "outbound-firewall" => OutboundFirewall(item, text),
             "connections" => Connection(item, text),
+            "integrity" => Integrity(item, text),
             _ => new FindingPresentation(item.Title, item.Detail),
         };
 
@@ -218,6 +219,149 @@ public static class DashboardFindingPresenter
         }
         return new FindingPresentation(item.Title, detail);
     }
+
+    private static FindingPresentation Integrity(ReportItem item, LocalizationManager text) =>
+        Field(item, "protection") switch
+        {
+            "Antivirus" => Antivirus(item, text),
+            "Controlled Folder Access" => ControlledFolderAccess(item, text),
+            _ => new FindingPresentation(item.Title, item.Detail),
+        };
+
+    private static FindingPresentation Antivirus(ReportItem item, LocalizationManager text)
+    {
+        var products = AntivirusProducts(item);
+        var concern = Field(item, "concern");
+        var detail = concern switch
+        {
+            "Protected" => text.Format(
+                "AntivirusProtected",
+                ProductNames(products.Where(product =>
+                    product.Activity == "On" && product.Signature == "UpToDate"), text)),
+            "SignaturesOutOfDate" => text.Format(
+                "AntivirusSignaturesOutOfDate",
+                ProductNames(products.Where(product => product.Activity == "On"), text)),
+            "SignatureStatusUnknown" => text.Format(
+                "AntivirusSignatureStatusUnknown",
+                ProductNames(products.Where(product => product.Activity == "On"), text)),
+            "ActivityStatusUnknown" => text.Format(
+                "AntivirusActivityStatusUnknown",
+                ProductNames(products.Where(product => product.Activity == "Unknown"), text)),
+            "NoActiveAntiVirus" => text.Format(
+                "AntivirusNoActive",
+                InactiveProducts(products, text)),
+            "NoAntiVirusRegistered" => text["AntivirusNoneRegistered"],
+            "Unavailable" => text["AntivirusUnavailable"],
+            _ => text["IntegrityEvidenceUnavailable"],
+        };
+        return new FindingPresentation(text["AntivirusProtectionTitle"], detail);
+    }
+
+    private static FindingPresentation ControlledFolderAccess(ReportItem item, LocalizationManager text)
+    {
+        var concern = Field(item, "concern");
+        var detail = concern switch
+        {
+            "Off" => text["CfaOff"],
+            "AuditOnly" => text["CfaAuditOnly"],
+            "BlockDiskModificationOnly" => text["CfaBlockDiskModificationOnly"],
+            "AuditDiskModificationOnly" => text["CfaAuditDiskModificationOnly"],
+            "Protecting" => text["CfaProtecting"],
+            "RuntimeRequirementsNotMet" => text["CfaRuntimeRequirementsNotMet"],
+            "UnknownMode" => text.Format("CfaUnknownMode", Field(item, "rawStateValue") ?? text["UnknownValue"]),
+            "Unavailable" => text["CfaUnavailable"],
+            "DefenderNotRunning" => DefenderNotRunning(item, text),
+            _ => text["IntegrityEvidenceUnavailable"],
+        };
+        return new FindingPresentation(text["CfaTitle"], detail);
+    }
+
+    private static string DefenderNotRunning(ReportItem item, LocalizationManager text)
+    {
+        var antivirusConcern = Field(item, "antivirusConcern");
+        var protectedThirdParty = Field(item, "protectedThirdPartyAntivirus");
+        if (antivirusConcern == "Protected" && protectedThirdParty is not null)
+        {
+            return text.Format("CfaDefenderNotRunningProtectedThirdParty", protectedThirdParty);
+        }
+
+        return antivirusConcern switch
+        {
+            "Unavailable" => text["CfaDefenderNotRunningAvUnavailable"],
+            "ActivityStatusUnknown" => text.Format(
+                "CfaDefenderNotRunningActivityUnknown",
+                Field(item, "activityUnknownAntivirus") ?? text["UnknownValue"]),
+            "SignatureStatusUnknown" => text.Format(
+                "CfaDefenderNotRunningSignatureUnknown",
+                Field(item, "onAntivirus") ?? text["UnknownValue"]),
+            "SignaturesOutOfDate" => text.Format(
+                "CfaDefenderNotRunningSignaturesOutOfDate",
+                Field(item, "onAntivirus") ?? text["UnknownValue"]),
+            "Protected" => text["CfaDefenderNotRunningInconsistent"],
+            _ => text["CfaDefenderNotRunningNoOnAntivirus"],
+        };
+    }
+
+    private static List<AntivirusProductEvidence> AntivirusProducts(ReportItem item)
+    {
+        if (!int.TryParse(
+                Field(item, "registeredAntivirusCount"),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var count))
+        {
+            return [];
+        }
+
+        var products = new List<AntivirusProductEvidence>(Math.Clamp(count, 0, 64));
+        for (var index = 0; index < Math.Clamp(count, 0, 64); index++)
+        {
+            var prefix = $"antivirusProduct.{index}.";
+            if (Field(item, $"{prefix}name") is not { } name)
+            {
+                continue;
+            }
+            products.Add(new AntivirusProductEvidence(
+                name,
+                Field(item, $"{prefix}activity") ?? "Unknown",
+                Field(item, $"{prefix}signature") ?? "Unknown"));
+        }
+        return products;
+    }
+
+    private static string ProductNames(
+        IEnumerable<AntivirusProductEvidence> products,
+        LocalizationManager text)
+    {
+        var names = products.Select(product => product.Name).ToArray();
+        return names.Length == 0 ? text["UnknownValue"] : string.Join(", ", names);
+    }
+
+    private static string InactiveProducts(
+        List<AntivirusProductEvidence> products,
+        LocalizationManager text)
+    {
+        var groups = new[]
+        {
+            (State: "Off", Resource: "AntivirusStateOff"),
+            (State: "Snoozed", Resource: "AntivirusStateSnoozed"),
+            (State: "Expired", Resource: "AntivirusStateExpired"),
+        };
+        var descriptions = groups.Select(group =>
+        {
+            var names = products
+                .Where(product => product.Activity == group.State)
+                .Select(product => product.Name)
+                .ToArray();
+            return names.Length == 0
+                ? null
+                : text.Format("AntivirusStateGroup", text[group.Resource], string.Join(", ", names));
+        }).Where(description => description is not null);
+        var result = string.Join("; ", descriptions!);
+        return result.Length == 0 ? text["UnknownValue"] : result;
+    }
+
+    private sealed record AntivirusProductEvidence(string Name, string Activity, string Signature);
 
     private static string LocalizedEnum(LocalizationManager text, string prefix, string? value)
     {

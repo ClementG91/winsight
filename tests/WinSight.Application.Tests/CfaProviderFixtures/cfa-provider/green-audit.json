@@ -1,6 +1,6 @@
 {
   "exitCode": 1,
-  "stdout": "[{\"tool\":\"integrity\",\"summary\":\"one protection checked\",\"items\":[{\"severity\":\"notable\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"audit only\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Audit\",\"rawStateValue\":\"2\",\"concern\":\"AuditOnly\",\"runtimeSupportsProtection\":\"False\",\"amRunningMode\":\"Passive Mode\",\"antivirusEnabled\":\"False\",\"realTimeProtectionEnabled\":\"False\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\"}}],\"notableCount\":1}]",
+  "stdout": "[{\"tool\":\"integrity\",\"summary\":\"one protection checked\",\"items\":[{\"severity\":\"notable\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"audit only\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Audit\",\"rawStateValue\":\"2\",\"concern\":\"AuditOnly\",\"runtimeSupportsProtection\":\"False\",\"amRunningMode\":\"Passive Mode\",\"antivirusEnabled\":\"False\",\"realTimeProtectionEnabled\":\"False\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Unavailable\",\"antivirusConcern\":\"Unavailable\",\"protectedThirdPartyAntivirus\":null,\"onThirdPartyAntivirus\":null,\"onAntivirus\":null,\"activityUnknownAntivirus\":null}}],\"notableCount\":1}]",
   "stderr": "",
   "operatingSystem": {
     "product": "Fixture Windows 11",

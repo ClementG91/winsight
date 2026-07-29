@@ -59,7 +59,7 @@ using System.Threading;
 
 public static class CfaProviderTestCli
 {
-    private const string Report = "[{\"tool\":\"integrity\",\"summary\":\"ok\",\"items\":[{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"protecting\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"Protecting\",\"runtimeSupportsProtection\":\"True\",\"amRunningMode\":\"Normal\",\"antivirusEnabled\":\"True\",\"realTimeProtectionEnabled\":\"True\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\"}}],\"notableCount\":0}]";
+    private const string Report = "[{\"tool\":\"integrity\",\"summary\":\"ok\",\"items\":[{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"protecting\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"Protecting\",\"runtimeSupportsProtection\":\"True\",\"amRunningMode\":\"Normal\",\"antivirusEnabled\":\"True\",\"realTimeProtectionEnabled\":\"True\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Unavailable\",\"antivirusConcern\":\"Unavailable\",\"protectedThirdPartyAntivirus\":null,\"onThirdPartyAntivirus\":null,\"onAntivirus\":null,\"activityUnknownAntivirus\":null}}],\"notableCount\":0}]";
 
     public static int Main(string[] args)
     {
@@ -181,6 +181,10 @@ $cases = @(
     @{ Name = 'red-protecting-runtime.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-unavailable-hidden.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-not-running-reported-as-off.json'; ExpectedExit = 1; ExpectedEvidence = $false },
+    # An unreadable Security Center that still names a product as protecting: absent evidence turned
+    # into the most reassuring sentence the report can produce. The same shape as the defect the whole
+    # antivirus milestone was raised against, so the contract has to reject it rather than count it.
+    @{ Name = 'red-antivirus-crossclaim.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-invalid-raw.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-notable-count-mismatch.json'; ExpectedExit = 1; ExpectedEvidence = $false },
     @{ Name = 'red-sensitive-field.json'; ExpectedExit = 1; ExpectedEvidence = $false },

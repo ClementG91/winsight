@@ -2,6 +2,27 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### Antivirus posture no longer invents certainty from an undocumented state word
+- Production inventory now uses Microsoft's documented `IWSCProductList`/`IWscProduct` COM
+  interfaces with the antivirus provider only. The former `root\SecurityCenter2` `productState`
+  decoder remains a compatibility helper but is no longer an acquisition truth source.
+- `On`, `Off`, `Snoozed` and `Expired` are distinct. Future activity/signature values remain
+  `Unknown`, preserve their raw integers in explicitly named COM properties, and produce explicit
+  notable indeterminate concerns. The legacy public WMI `RawProductState` word retains its original
+  meaning and sentinel rather than being silently repurposed.
+  An unknown activity no longer means “nothing is scanning”, and an unknown signature no longer
+  means “definitions are out of date”.
+- Vendor-controlled display names are collapsed to one line, bounded to 256 UTF-16 code units and
+  replaced with an explicit unnamed-product placeholder when blank. Inspection itself is bounded;
+  invalid UTF-16 and Unicode format/bidirectional controls are removed. Indexed name/state fields
+  replace delimiter-based associations, so a vendor name cannot forge another state entry.
+- The real COM call sequence now crosses injectable elemental list/product wrappers, and caller
+  cancellation reaches both Security Center and Controlled Folder Access. Dashboard AV/CFA details
+  are reconstructed from structured fields through equivalent EN/FR/ES resources.
+- This correction does not promote v0.10.5: that historical release remains unsigned and not
+  production-ready. SignPath/AuthentiCode, exact-candidate CI/CodeQL/package, current-candidate x64
+  WFP/SCM, privileged Arm64 and remaining session gates stay open.
+
 ### The SYSTEM component's coverage bar is 80%, same as everything else
 - **54% was an average of two incomparable things.** Split, the privileged assembly reads: hand-written
   policy logic **827/905 lines (91.4%)**, and a native boundary — P/Invoke marshalling into

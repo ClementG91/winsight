@@ -53,18 +53,19 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-The unsigned public v0.10.3 release pipeline successfully published x64 and Arm64 assets with GitHub
-build-provenance and SBOM attestations; its x64 artifact was independently observed as `NotSigned`.
-The signed Authenticode production chain has never been exercised end to end, so signing is not a
-closed release gate. The repository variable `REQUIRE_SIGNED_RELEASE=true` was set and re-read at
-2026-07-26T14:55:05Z, so the release workflow now fails closed when signing is unavailable. Neither
-`WINSIGHT_SIGNING_CERT_BASE64` nor `WINSIGHT_SIGNING_CERT_PASSWORD` is configured. A signed release
-remains blocked until a real certificate is configured and verified.
+The latest public release, v0.10.5, is historical, unsigned and not production-ready. Earlier v0.10.3
+x64 evidence independently observed `NotSigned`; the two later waivers intentionally preserved that
+unsigned posture rather than closing it. The signed Authenticode production chain has never been
+exercised end to end. `REQUIRE_SIGNED_RELEASE=true` was restored after v0.10.5, so the workflow now
+fails closed when signing is unavailable. Neither `WINSIGHT_SIGNING_CERT_BASE64` nor
+`WINSIGHT_SIGNING_CERT_PASSWORD` is configured, and the SignPath Foundation application is pending.
+A signed release remains blocked until a real certificate-backed exact candidate is configured,
+signed and verified.
 
 The user explicitly authorized a public unsigned v0.10.4 release under a one-release waiver dated
-2026-07-26. `REQUIRE_SIGNED_RELEASE` will be intentionally disabled for that waived release so the
-known absence of a certificate does not stop it. The resulting artifacts are expected to be unsigned
-and to trigger the normal Windows unknown-publisher warning. This exception does not exercise or
+2026-07-26. `REQUIRE_SIGNED_RELEASE` was intentionally disabled for that waived release so the
+known absence of a certificate did not stop it. The resulting artifacts were unsigned and trigger
+the normal Windows unknown-publisher warning. This exception does not exercise or
 establish the signed Authenticode production chain, and it does not establish product readiness.
 
 #### Second unsigned waiver — v0.10.5, dated 2026-07-27
@@ -185,6 +186,11 @@ being published.
 What this does **not** defend against: a compromise of the GitHub account or of the signing
 certificate itself. Provenance proves *which workflow built it*, not that the workflow was
 trustworthy at the time.
+
+None of the historical release evidence qualifies the current source candidate. Before another
+release, exact-candidate CI, CodeQL, package/installer lifecycle, current x64 WFP/SCM qualification,
+privileged Arm64 and remaining session checks must be evaluated alongside the signed Authenticode
+gate. Historical validation records remain bound to their original commits.
 
 ## Release checklist
 

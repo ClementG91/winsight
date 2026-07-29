@@ -5,12 +5,12 @@ is closed only when someone can re-run it and get the same answer.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Not production-ready** — three privileged boundaries are qualified, but product-level gates remain open |
+| **x64** | **Not production-ready** — the current candidate needs WFP/SCM requalification and release-level gates remain open |
 | **Arm64 (native)** | **Not production-ready** — build, unit tests and packaging verified in CI on every pull request, privileged runtime behaviour unverified |
 
 ## x64
 
-### Closed, with a reproducible record
+### Historical candidate-bound evidence
 
 | Gate | Result | Candidate | CI run |
 |---|---|---|---|
@@ -27,6 +27,11 @@ revision, perform a candidate-aware delta review of the relevant service, trust-
 surface. If that surface changed or the impact is uncertain, rerun its gate and bind the new record
 to the new candidate. These records are not an automatic inheritance rule or a product-wide
 production-readiness verdict.
+
+The current candidate changed the WFP/SCM runtime surface after `f0a3f16`. Its 25-check record is
+therefore invalidated for current-candidate readiness and must be rerun in an isolated x64 VM. The
+trust and IPC rows remain historical evidence bound to their named commits, not a blanket current
+candidate approval.
 
 ### Automated CI evidence
 
@@ -46,7 +51,7 @@ and CodeQL default setup. CodeQL run `30204877420` independently completed succe
 Actions at `4359e87`, with zero open CodeQL or Dependabot alerts. That evidence is candidate-bound:
 a new candidate still needs its own green scan.
 
-The unsigned public v0.10.3 release pipeline was exercised successfully: it published x64 and Arm64
+The unsigned public v0.10.5 release pipeline was exercised successfully: it published x64 and Arm64
 assets with GitHub build-provenance and SBOM attestations. CI packaging and installer lifecycle also
 prove that generated packages can install, run their automated smoke contracts and uninstall on the
 runners. This does not prove the signed Authenticode production chain, safe external deployment or
@@ -54,11 +59,12 @@ human operator acceptance.
 
 ### Product-level gates that remain open
 
-1. **Authenticode is not closed.** The released v0.10.3 x64 artifact was independently observed as
-   `NotSigned`. The repository variable `REQUIRE_SIGNED_RELEASE=true` was set and re-read on
-   2026-07-26, so the release workflow now fails closed when signing is unavailable. Neither
+1. **Authenticode is not closed.** The released v0.10.5 artifacts are unsigned under the second and
+   final waiver and are not production-ready. The repository variable `REQUIRE_SIGNED_RELEASE=true`
+   was restored after publication, so the release workflow fails closed when signing is unavailable. Neither
    `WINSIGHT_SIGNING_CERT_BASE64` nor `WINSIGHT_SIGNING_CERT_PASSWORD` is configured, so a signed
-   release remains blocked until a real certificate is configured and verified. See
+   release remains blocked while the project awaits the SignPath Foundation response and until a
+   real certificate-backed candidate is configured and verified. See
    [`RELEASE.md`](RELEASE.md).
 2. **Three commits in history are unsigned** (`214a25f`, `d5ee120`, `e964779`), from a pull request
    merged with `--rebase`. They are deliberately not re-signed: doing so changes their hashes and
@@ -72,9 +78,12 @@ human operator acceptance.
 4. **Presentation attestation and release gates.** A user-supplied attestation dated 2026-07-26 says
    that EN/FR/ES human presentation was completed. This is not independent validation evidence.
    The signed Authenticode production chain has never been exercised end to end and remains blocking;
-   the successful unsigned v0.10.3 public release does not close that gate.
-Until these gates close, the honest x64 verdict is not production-ready despite the three qualified
-privileged boundaries.
+   the successful unsigned v0.10.5 public release does not close that gate. The exact corrected
+   antivirus candidate still needs its own CI, CodeQL and package lifecycle evidence.
+5. **Current-candidate privileged evidence is incomplete.** WFP/SCM must be rerun on x64 because its
+   runtime surface changed. Native Arm64 WFP, SCM, trust, IPC/session and emulated-x64 identity gates
+   remain unexecuted.
+Until these gates close, the honest x64 verdict is not production-ready.
 
 ## Arm64
 

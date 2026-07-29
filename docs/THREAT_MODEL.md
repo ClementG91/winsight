@@ -120,6 +120,20 @@ The runtime state is re-verified against the live WFP engine on every status rea
 exact verification downgrades to `Degraded` in a `finally`, so `Active` can never be reported without
 live proof.
 
+### 6. Misleading antivirus registration data
+
+*Goal: make a security report overstate or understate antivirus protection.*
+
+WinSight reads only the documented Windows Security Center antivirus COM provider. Raw activity and
+signature integers are preserved in explicitly named fields and mapped only when they match documented
+values; future values remain explicit `Unknown`. The legacy public WMI raw word is not repurposed.
+Third-party display names are untrusted presentation input: only a bounded prefix is inspected,
+whitespace is collapsed, controls, invalid UTF-16 and Unicode format/bidirectional controls are
+removed, output is length-bounded, and blank names remain visible through a stable placeholder.
+Product name and state use separate indexed report fields, so delimiters in a name cannot forge an
+association. Provider failure is `Unavailable`, while only a successful zero-product enumeration
+means no antivirus was registered. WinSight does not register, configure or remediate a product.
+
 ## Explicitly out of scope
 
 | Not defended | Why |
@@ -144,10 +158,13 @@ transmitted anywhere.
 
 ## Residual risk
 
-- **Native Arm64 privileged behaviour is unqualified.** The x64 gates are closed with reproducible
-  records; Arm64 has native CI coverage for build, PE architecture, installer lifecycle and smoke
-  tests, but WFP/SCM/TOCTOU/IPC on Arm64 need an elevated native VM. See
+- **Current-candidate privileged qualification is incomplete.** Historical x64 records remain bound
+  to their named commits, but later WFP/SCM changes require that gate to be rerun for the current
+  candidate. Arm64 has native CI coverage for build, PE architecture, installer lifecycle and smoke
+  tests, but WFP/SCM/TOCTOU/IPC/session behavior on Arm64 still needs an elevated native VM. See
   [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
-- **Released binaries are unsigned** until a code-signing certificate exists.
+- **v0.10.5 is historical, unsigned and not production-ready.** The SignPath response, a signed
+  exact-candidate release, exact-candidate CI/CodeQL/package evidence, and remaining session gates
+  are open.
 - The service must be deployed to a protected location by an administrator. WinSight verifies this and
   refuses otherwise, but it cannot create the trust root for you.

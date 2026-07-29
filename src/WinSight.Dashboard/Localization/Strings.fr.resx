@@ -271,4 +271,33 @@
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Activité possible de rançongiciel</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>Un fichier-appât protégé vient d'être modifié. Rien de légitime n'y touche : c'est le comportement d'un rançongiciel. Déconnectez ce PC du réseau et vérifiez ce qui s'exécute.</value></data>
   <data name="RansomwareBurstDetected" xml:space="preserve"><value>Une rafale inhabituelle de renommages ou de suppressions de fichiers a été détectée. Si vous n'avez pas lancé d'opération en masse, considérez-la comme suspecte.</value></data>
+  <data name="IntegrityEvidenceUnavailable" xml:space="preserve"><value>Les preuves structurées sur la protection sont indisponibles ou non reconnues.</value></data>
+  <data name="AntivirusProtectionTitle" xml:space="preserve"><value>Protection antivirus (Centre de sécurité Windows)</value></data>
+  <data name="AntivirusProtected" xml:space="preserve"><value>Protection établie : le Centre de sécurité Windows indique {0} actif avec des signatures à jour.</value></data>
+  <data name="AntivirusSignaturesOutOfDate" xml:space="preserve"><value>{0} est indiqué actif, mais tous les produits actifs signalent des signatures obsolètes. Mettez-les à jour dans la console du produit.</value></data>
+  <data name="AntivirusSignatureStatusUnknown" xml:space="preserve"><value>{0} est indiqué actif, mais l'actualité des signatures n'a pas pu être établie. Cela ne prouve pas qu'elles sont à jour ni obsolètes.</value></data>
+  <data name="AntivirusActivityStatusUnknown" xml:space="preserve"><value>L'état d'activité de {0} n'est pas reconnu. Cela ne prouve pas que le produit est actif ou inactif.</value></data>
+  <data name="AntivirusNoActive" xml:space="preserve"><value>Aucun antivirus enregistré n'est indiqué actif ({0}). Ces états explicites n'établissent pas une analyse active.</value></data>
+  <data name="AntivirusNoneRegistered" xml:space="preserve"><value>Le Centre de sécurité Windows a répondu correctement et n'a renvoyé aucun antivirus enregistré.</value></data>
+  <data name="AntivirusUnavailable" xml:space="preserve"><value>Le Centre de sécurité Windows n'a pas pu être interrogé. Cela ne prouve pas l'absence d'antivirus et ce résultat est attendu sur Windows Server.</value></data>
+  <data name="AntivirusStateOff" xml:space="preserve"><value>Inactif</value></data>
+  <data name="AntivirusStateSnoozed" xml:space="preserve"><value>Suspendu</value></data>
+  <data name="AntivirusStateExpired" xml:space="preserve"><value>Expiré</value></data>
+  <data name="AntivirusStateGroup" xml:space="preserve"><value>{0} : {1}</value></data>
+  <data name="CfaTitle" xml:space="preserve"><value>Accès contrôlé aux dossiers (bouclier anti-rançongiciel)</value></data>
+  <data name="CfaOff" xml:space="preserve"><value>Désactivé. L'Accès contrôlé aux dossiers ne bloque pas la modification des dossiers protégés par les programmes non approuvés.</value></data>
+  <data name="CfaAuditOnly" xml:space="preserve"><value>Audit seul. Windows consigne ce qu'il bloquerait, mais ne le bloque pas.</value></data>
+  <data name="CfaBlockDiskModificationOnly" xml:space="preserve"><value>Blocage des modifications disque uniquement. Ce mode n'établit pas la protection de dossiers tels que Documents, Images et Bureau.</value></data>
+  <data name="CfaAuditDiskModificationOnly" xml:space="preserve"><value>Audit des modifications disque uniquement. Ce mode consigne les changements sans établir l'application de la protection des dossiers.</value></data>
+  <data name="CfaProtecting" xml:space="preserve"><value>Activé avec les preuves d'exécution Defender requises observées. Il s'agit d'une preuve de posture, pas d'une garantie que chaque écriture sera bloquée.</value></data>
+  <data name="CfaRuntimeRequirementsNotMet" xml:space="preserve"><value>Activé, mais les preuves d'exécution Defender n'établissent pas le mode Normal avec l'antivirus et la protection en temps réel actifs.</value></data>
+  <data name="CfaUnknownMode" xml:space="preserve"><value>La valeur de mode {0} n'est pas reconnue ; la protection des dossiers n'est pas établie.</value></data>
+  <data name="CfaUnavailable" xml:space="preserve"><value>La posture de l'Accès contrôlé aux dossiers n'a pas pu être lue ; la protection des dossiers n'est pas établie.</value></data>
+  <data name="CfaDefenderNotRunningProtectedThirdParty" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas, tandis que le Centre de sécurité Windows indique {0} actif avec des signatures à jour. L'Accès contrôlé aux dossiers est une fonction Defender et n'est pas actif ; cette configuration peut être normale avec un antivirus tiers, mais vérifiez la protection anti-rançongiciel de ce produit dans sa propre console.</value></data>
+  <data name="CfaDefenderNotRunningAvUnavailable" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas et le Centre de sécurité Windows n'a pas pu être interrogé. L'activité d'un autre antivirus ne peut pas être établie ; la protection de ces dossiers par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
+  <data name="CfaDefenderNotRunningActivityUnknown" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas et {0} a renvoyé un état d'activité non reconnu. L'activité de ce produit ne peut pas être établie ; la protection de ces dossiers par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
+  <data name="CfaDefenderNotRunningSignatureUnknown" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas. {0} est indiqué actif, mais l'actualité de ses signatures est inconnue. La protection antivirus actuelle et celle de l'Accès contrôlé aux dossiers ne sont pas établies.</value></data>
+  <data name="CfaDefenderNotRunningSignaturesOutOfDate" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas. {0} est indiqué actif avec des signatures obsolètes. Mettez ce produit à jour ; la protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
+  <data name="CfaDefenderNotRunningInconsistent" xml:space="preserve"><value>Les preuves d'exécution de Microsoft Defender et du Centre de sécurité Windows sont incohérentes. Aucune cause n'est déduite ; la protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
+  <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas et le Centre de sécurité Windows n'indique aucun antivirus actif. La protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
 </root>

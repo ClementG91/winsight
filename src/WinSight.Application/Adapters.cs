@@ -45,9 +45,31 @@ public static class Adapters
         string command,
         bool flaggedOnly = false,
         bool allowNetworkLookups = true,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        RunCore(
+            command,
+            flaggedOnly,
+            allowNetworkLookups,
+            new ControlledFolderAccessReader(),
+            new SecurityCenterReader(),
+            cancellationToken);
+
+    /// <summary>
+    /// Shared command router with explicit integrity providers. This is an instance-free,
+    /// concurrency-safe seam: tests can cancel during either provider read without replacing
+    /// process-global state or bypassing the same switch used by public callers.
+    /// </summary>
+    internal static ToolReport RunCore(
+        string command,
+        bool flaggedOnly,
+        bool allowNetworkLookups,
+        ControlledFolderAccessReader controlledFolderAccessReader,
+        SecurityCenterReader securityCenterReader,
+        CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
+        ArgumentNullException.ThrowIfNull(controlledFolderAccessReader);
+        ArgumentNullException.ThrowIfNull(securityCenterReader);
         cancellationToken.ThrowIfCancellationRequested();
         return command.ToLowerInvariant() switch
         {
@@ -62,7 +84,11 @@ public static class Adapters
             "certificates" or "certs" => Certificates(flaggedOnly),
             "hosts" => Hosts(flaggedOnly),
             "input" or "inputhooks" => InputHooks(flaggedOnly, cancellationToken),
-            "integrity" or "ci" => CodeIntegrity(flaggedOnly),
+            "integrity" or "ci" => CodeIntegrity(
+                flaggedOnly,
+                controlledFolderAccessReader,
+                securityCenterReader,
+                cancellationToken),
             "drivers" or "drv" => Drivers(flaggedOnly, cancellationToken),
             "hijack" or "hijacks" => Hijack(flaggedOnly, cancellationToken),
             "presence" => Presence(flaggedOnly),
@@ -749,7 +775,15 @@ public static class Adapters
     /// changes it — the operator flips it in Windows Security via the deep link on the finding.
     /// </remarks>
     public static ToolReport CodeIntegrity(bool flaggedOnly) =>
-        CodeIntegrity(flaggedOnly, new ControlledFolderAccessReader(), new SecurityCenterReader());
+        CodeIntegrity(flaggedOnly, CancellationToken.None);
+
+    /// <summary>Runs the integrity report while propagating cancellation into every provider read.</summary>
+    public static ToolReport CodeIntegrity(bool flaggedOnly, CancellationToken cancellationToken) =>
+        CodeIntegrity(
+            flaggedOnly,
+            new ControlledFolderAccessReader(),
+            new SecurityCenterReader(),
+            cancellationToken);
 
     /// <summary>
     /// Composes the code-integrity report with already-created readers. Internal so tests can exercise
@@ -765,11 +799,14 @@ public static class Adapters
     internal static ToolReport CodeIntegrity(
         bool flaggedOnly,
         ControlledFolderAccessReader controlledFolderAccessReader,
-        SecurityCenterReader securityCenterReader)
+        SecurityCenterReader securityCenterReader,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(controlledFolderAccessReader);
         ArgumentNullException.ThrowIfNull(securityCenterReader);
+        cancellationToken.ThrowIfCancellationRequested();
         var findings = CodeIntegrityTriage.Evaluate(new CodeIntegrityReader().Read());
+        cancellationToken.ThrowIfCancellationRequested();
         var b = new ToolReport.Builder("integrity");
         var checkedCount = 0;
         var notable = 0;
@@ -801,7 +838,8 @@ public static class Adapters
         // posture because the CFA verdict is only honest in its light: "the ransomware shield is not
         // protecting you" is an accurate sentence that leaves a false impression on a machine whose
         // antivirus is Norton and is working fine.
-        var inventory = securityCenterReader.Read();
+        var inventory = securityCenterReader.Read(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         var antivirusConcern = SecurityProductTriage.Concern(inventory);
         var antivirusNotable = SecurityProductTriage.IsNotable(antivirusConcern);
         if (inventory.Reading == SecurityCenterReading.Unavailable)
@@ -822,22 +860,12 @@ public static class Adapters
                 antivirusNotable ? Severity.Notable : Severity.Info,
                 "Antivirus protection (Windows Security Center)",
                 DescribeAntivirus(inventory, antivirusConcern),
-                new Dictionary<string, string?>
-                {
-                    ["protection"] = "Antivirus",
-                    ["concern"] = antivirusConcern.ToString(),
-                    ["reading"] = inventory.Reading.ToString(),
-                    ["registeredAntivirus"] = NamesOf(inventory.AntiVirusProducts),
-                    ["activeAntivirus"] = NamesOf(inventory.ActiveAntiVirusProducts),
-                    ["registeredAntivirusCount"] = inventory.AntiVirusProducts.Count.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture),
-                    ["activeAntivirusCount"] = inventory.ActiveAntiVirusProducts.Count.ToString(
-                        System.Globalization.CultureInfo.InvariantCulture),
-                    ["hasActiveNonMicrosoftAntivirus"] = inventory.HasActiveNonMicrosoftAntiVirus.ToString(),
-                });
+                AntivirusFields(inventory, antivirusConcern));
         }
 
-        var shield = controlledFolderAccessReader.Read();
+        cancellationToken.ThrowIfCancellationRequested();
+        var shield = controlledFolderAccessReader.Read(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (shield.State == ControlledFolderAccessState.Unavailable)
         {
             unavailable++;
@@ -856,20 +884,7 @@ public static class Adapters
                 shield.IsNotable ? Severity.Notable : Severity.Info,
                 "Controlled Folder Access (ransomware shield)",
                 DescribeShield(shield, inventory),
-                new Dictionary<string, string?>
-                {
-                    ["protection"] = "Controlled Folder Access",
-                    ["state"] = shield.State.ToString(),
-                    ["rawStateValue"] = shield.RawStateValue?.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                    ["concern"] = shield.Concern.ToString(),
-                    ["runtimeSupportsProtection"] = shield.RuntimeSupportsProtection.ToString(),
-                    ["amRunningMode"] = shield.RuntimeEvidence.AMRunningMode,
-                    ["antivirusEnabled"] = shield.RuntimeEvidence.AntivirusEnabled?.ToString(),
-                    ["realTimeProtectionEnabled"] = shield.RuntimeEvidence.RealTimeProtectionEnabled?.ToString(),
-                    ["protectedFolders"] = shield.ProtectedFolders.Count.ToString(),
-                    ["allowedApplicationsVisibility"] = shield.AllowedApplications.Visibility.ToString(),
-                    ["settingsDeepLink"] = ControlledFolderAccessReader.SettingsDeepLink,
-                });
+                ControlledFolderAccessFields(shield, inventory, antivirusConcern));
         }
 
         return b.Build(
@@ -884,6 +899,130 @@ public static class Adapters
     private static string? NamesOf(IReadOnlyList<SecurityProduct> products) =>
         products.Count == 0 ? null : string.Join(", ", products.Select(product => product.DisplayName));
 
+    private static string CountAntivirusState(
+        SecurityProductInventory inventory,
+        SecurityProductState state) =>
+        inventory.AntiVirusProducts.Count(product => product.State == state)
+            .ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static Dictionary<string, string?> AntivirusFields(
+        SecurityProductInventory inventory,
+        AntiVirusConcern concern)
+    {
+        var products = inventory.AntiVirusProducts;
+        var fields = new Dictionary<string, string?>
+        {
+            ["protection"] = "Antivirus",
+            ["concern"] = concern.ToString(),
+            ["reading"] = inventory.Reading.ToString(),
+            ["registeredAntivirus"] = NamesOf(products),
+            // Legacy aliases retained for existing JSON consumers. Canonical structured state uses
+            // antivirusProduct.<index>.* and the Windows vocabulary On/Off/Snoozed/Expired/Unknown.
+            ["activeAntivirus"] = NamesOf(inventory.ActiveAntiVirusProducts),
+            ["activeAntivirusCount"] = Invariant(inventory.ActiveAntiVirusProducts.Count),
+            ["onAntivirus"] = NamesOf(inventory.ActiveAntiVirusProducts),
+            ["onAntivirusCount"] = Invariant(inventory.ActiveAntiVirusProducts.Count),
+            ["registeredAntivirusCount"] = Invariant(products.Count),
+            ["offAntivirusCount"] = CountAntivirusState(inventory, SecurityProductState.Disabled),
+            ["snoozedAntivirusCount"] = CountAntivirusState(inventory, SecurityProductState.Snoozed),
+            ["expiredAntivirusCount"] = CountAntivirusState(inventory, SecurityProductState.Expired),
+            ["activityUnknownAntivirusCount"] = CountAntivirusState(inventory, SecurityProductState.Unknown),
+            ["signatureUnknownAntivirusCount"] = Invariant(products.Count(product =>
+                product.Signatures == SecurityProductSignatures.Unknown)),
+            ["hasActiveNonMicrosoftAntivirus"] = inventory.HasActiveNonMicrosoftAntiVirus.ToString(),
+        };
+
+        for (var index = 0; index < products.Count; index++)
+        {
+            var product = products[index];
+            var prefix = $"antivirusProduct.{index}.";
+            fields[$"{prefix}name"] = product.DisplayName;
+            fields[$"{prefix}activity"] = ProductActivity(product.State);
+            fields[$"{prefix}signature"] = ProductSignature(product.Signatures);
+            fields[$"{prefix}rawActivity"] = product.RawActivityState?.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            fields[$"{prefix}rawSignature"] = product.RawSignatureStatus?.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+            fields[$"{prefix}legacyRawProductState"] = product.RawProductState.ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        return fields;
+    }
+
+    private static Dictionary<string, string?> ControlledFolderAccessFields(
+        ControlledFolderAccessPosture shield,
+        SecurityProductInventory inventory,
+        AntiVirusConcern antivirusConcern) => new()
+        {
+            ["protection"] = "Controlled Folder Access",
+            ["state"] = shield.State.ToString(),
+            ["rawStateValue"] = shield.RawStateValue?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["concern"] = shield.Concern.ToString(),
+            ["runtimeSupportsProtection"] = shield.RuntimeSupportsProtection.ToString(),
+            ["amRunningMode"] = shield.RuntimeEvidence.AMRunningMode,
+            ["antivirusEnabled"] = shield.RuntimeEvidence.AntivirusEnabled?.ToString(),
+            ["realTimeProtectionEnabled"] = shield.RuntimeEvidence.RealTimeProtectionEnabled?.ToString(),
+            ["protectedFolders"] = Invariant(shield.ProtectedFolders.Count),
+            ["allowedApplicationsVisibility"] = shield.AllowedApplications.Visibility.ToString(),
+            ["settingsDeepLink"] = ControlledFolderAccessReader.SettingsDeepLink,
+            ["securityCenterReading"] = inventory.Reading.ToString(),
+            ["antivirusConcern"] = antivirusConcern.ToString(),
+            ["protectedThirdPartyAntivirus"] = NamesOf(ProtectedThirdPartyProducts(inventory)),
+            ["onThirdPartyAntivirus"] = NamesOf(OnThirdPartyProducts(inventory)),
+            ["onAntivirus"] = NamesOf(inventory.ActiveAntiVirusProducts),
+            ["activityUnknownAntivirus"] = NamesOf(
+            [.. inventory.AntiVirusProducts.Where(product =>
+                product.State == SecurityProductState.Unknown)]),
+        };
+
+    private static IReadOnlyList<SecurityProduct> ProtectedThirdPartyProducts(
+        SecurityProductInventory inventory) =>
+        [.. inventory.ActiveAntiVirusProducts.Where(product =>
+            !product.IsMicrosoftDefender
+            && product.Signatures == SecurityProductSignatures.UpToDate)];
+
+    private static IReadOnlyList<SecurityProduct> OnThirdPartyProducts(
+        SecurityProductInventory inventory) =>
+        [.. inventory.ActiveAntiVirusProducts.Where(product => !product.IsMicrosoftDefender)];
+
+    private static string Invariant(int value) =>
+        value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+    private static string ProductActivity(SecurityProductState state) => state switch
+    {
+        SecurityProductState.Enabled => "On",
+        SecurityProductState.Disabled => "Off",
+        SecurityProductState.Snoozed => "Snoozed",
+        SecurityProductState.Expired => "Expired",
+        _ => "Unknown",
+    };
+
+    private static string ProductSignature(SecurityProductSignatures signatures) => signatures switch
+    {
+        SecurityProductSignatures.UpToDate => "UpToDate",
+        SecurityProductSignatures.OutOfDate => "OutOfDate",
+        _ => "Unknown",
+    };
+
+    private static string ExplicitlyInactiveStates(SecurityProductInventory inventory) =>
+        string.Join(
+            "; ",
+            new[]
+            {
+                (Label: "Off", State: SecurityProductState.Disabled),
+                (Label: "Snoozed", State: SecurityProductState.Snoozed),
+                (Label: "Expired", State: SecurityProductState.Expired),
+            }
+            .Select(group =>
+            {
+                var products = inventory.AntiVirusProducts
+                    .Where(product => product.State == group.State)
+                    .ToArray();
+                return products.Length == 0 ? null : $"{group.Label}: {NamesOf(products)}";
+            })
+            .Where(description => description is not null)!);
+
     /// <summary>
     /// Plain-language line for what Windows Security Center reports is protecting this machine.
     /// </summary>
@@ -891,16 +1030,28 @@ public static class Adapters
         concern switch
         {
             AntiVirusConcern.Protected =>
-                $"protected by {NamesOf(inventory.ActiveAntiVirusProducts)} — registered with Windows "
-                + "Security Center, actively scanning, definitions reported current.",
+                $"protection established by {NamesOf(
+                    [.. inventory.ActiveAntiVirusProducts.Where(product =>
+                        product.Signatures == SecurityProductSignatures.UpToDate)])} — Windows Security "
+                + "Center reports On with signatures current.",
             AntiVirusConcern.SignaturesOutOfDate =>
-                $"{NamesOf(inventory.ActiveAntiVirusProducts)} is scanning, but reports its definitions as "
-                + "OUT OF DATE. An antivirus that cannot recognise this week's malware is protecting you "
-                + "from last month's. Update it in the product itself.",
+                $"{NamesOf(inventory.ActiveAntiVirusProducts)} reports On, but every On product reports "
+                + "signatures OUT OF DATE. Update it in the product itself.",
+            AntiVirusConcern.SignatureStatusUnknown =>
+                $"Windows Security Center reports On for {NamesOf(inventory.ActiveAntiVirusProducts)}, but "
+                + "at least one On product returned an unrecognized signature status and none reported "
+                + "current signatures. Signature currency could not be established; this is not evidence "
+                + "that definitions are current or out of date.",
+            AntiVirusConcern.ActivityStatusUnknown =>
+                $"registered antivirus activity could not be established for "
+                + $"{NamesOf(
+                    [.. inventory.AntiVirusProducts.Where(product =>
+                        product.State == SecurityProductState.Unknown)])}. Windows Security Center returned "
+                + "an unrecognized activity state; this is not evidence that the product is On or Off.",
             AntiVirusConcern.NoActiveAntiVirus =>
-                $"registered but NOT scanning: {NamesOf(inventory.AntiVirusProducts)}. Windows knows about "
-                + "these products and none of them reports itself as active, so nothing is scanning files "
-                + "on this machine. Open Windows Security to see why.",
+                $"no registered antivirus reports On ({ExplicitlyInactiveStates(inventory)}). These explicit "
+                + "Off, Snoozed or Expired states do not establish active scanning. Open Windows Security "
+                + "to review the products.",
             AntiVirusConcern.NoAntiVirusRegistered =>
                 "no antivirus is registered with Windows Security Center. On Windows 10 and 11 this is "
                 + "unusual — Microsoft Defender registers itself unless it was disabled or removed — and it "
@@ -936,18 +1087,45 @@ public static class Adapters
             ControlledFolderAccessConcern.RuntimeRequirementsNotMet =>
                 "enabled, but current Defender runtime evidence does not establish Normal mode with antivirus and "
                 + "real-time protection enabled. The configured setting alone is not evidence of operational folder protection.",
-            // Named rather than left as a shrug: on a machine whose antivirus is not Microsoft's, "the
-            // ransomware shield is off" is true and misleading unless it also says what IS protecting you.
-            ControlledFolderAccessConcern.DefenderNotRunning when inventory.HasActiveNonMicrosoftAntiVirus =>
-                "not active — Microsoft Defender reports that it is not running because "
-                + $"{NamesOf(inventory.ActiveAntiVirusProducts)} is your antivirus. Controlled Folder Access is a "
-                + "Defender feature, so this specific folder shield is not protecting you; your antivirus may offer "
-                + "its own ransomware protection, which WinSight cannot read. This is a normal configuration, not a "
-                + "fault — but check that your product's own ransomware protection is switched on.",
+            ControlledFolderAccessConcern.DefenderNotRunning
+                when SecurityProductTriage.Concern(inventory) == AntiVirusConcern.Protected
+                     && ProtectedThirdPartyProducts(inventory).Count > 0 =>
+                "not active — Microsoft Defender reports that it is not running, while Windows Security Center "
+                + $"reports {NamesOf(ProtectedThirdPartyProducts(inventory))} On with current signatures. Controlled "
+                + "Folder Access is a Defender feature, so this specific folder shield is not protecting you; the "
+                + "third-party antivirus may offer its own ransomware protection, which WinSight cannot read. This "
+                + "can be a normal third-party antivirus configuration, but confirm that product's ransomware "
+                + "protection in its own console.",
+            ControlledFolderAccessConcern.DefenderNotRunning
+                when inventory.Reading == SecurityCenterReading.Unavailable =>
+                "not active — Microsoft Defender reports that it is not running, while Windows Security Center "
+                + "could not be read. WinSight therefore cannot establish whether another antivirus is active. "
+                + "Controlled Folder Access is a Defender feature and is not established as protecting these folders.",
+            ControlledFolderAccessConcern.DefenderNotRunning
+                when SecurityProductTriage.Concern(inventory) == AntiVirusConcern.ActivityStatusUnknown =>
+                "not active — Microsoft Defender reports that it is not running, and a registered antivirus returned "
+                + "an unrecognized activity state. WinSight cannot establish whether that product is active. Controlled "
+                + "Folder Access is a Defender feature and is not established as protecting these folders.",
+            ControlledFolderAccessConcern.DefenderNotRunning
+                when SecurityProductTriage.Concern(inventory) == AntiVirusConcern.SignatureStatusUnknown =>
+                "not active — Microsoft Defender reports that it is not running. Windows Security Center reports "
+                + $"{NamesOf(inventory.ActiveAntiVirusProducts)} On, but signature currency is unknown. This does not "
+                + "establish current antivirus protection, and Controlled Folder Access is not established as "
+                + "protecting these folders.",
+            ControlledFolderAccessConcern.DefenderNotRunning
+                when SecurityProductTriage.Concern(inventory) == AntiVirusConcern.SignaturesOutOfDate =>
+                "not active — Microsoft Defender reports that it is not running. Windows Security Center reports "
+                + $"{NamesOf(inventory.ActiveAntiVirusProducts)} On with out-of-date signatures. Update that product; "
+                + "Controlled Folder Access is not established as protecting these folders.",
+            ControlledFolderAccessConcern.DefenderNotRunning
+                when SecurityProductTriage.Concern(inventory) == AntiVirusConcern.Protected =>
+                "not active — Microsoft Defender runtime and Windows Security Center returned inconsistent Defender "
+                + "evidence. WinSight does not infer a cause. Controlled Folder Access is not established as protecting "
+                + "these folders; review Windows Security.",
             ControlledFolderAccessConcern.DefenderNotRunning =>
-                "not protecting — Microsoft Defender antivirus reports that it is not running, and Windows Security "
-                + "Center does not show another antivirus actively scanning either. Controlled Folder Access is a "
-                + "Defender feature, so no configured value protects your folders until Defender runs again; check "
+                "not protecting — Microsoft Defender reports that it is not running, and Windows Security Center "
+                + "reports no antivirus On. Controlled Folder Access is a Defender feature and is not established as "
+                + "protecting these folders; check "
                 + $"which antivirus is active in Windows Security ({ControlledFolderAccessReader.SettingsDeepLink}).",
             ControlledFolderAccessConcern.UnknownMode =>
                 $"unsupported mode value {shield.RawStateValue} read; protection not established. Review the configured "

@@ -8,13 +8,23 @@ public enum SecurityProductKind
     Firewall,
 }
 
-/// <summary>Whether a registered product reports itself as actively scanning.</summary>
+/// <summary>The activity state reported by Windows Security Center.</summary>
 public enum SecurityProductState
 {
-    /// <summary>The product state could not be decoded. Never treated as either on or off.</summary>
+    /// <summary>The product state is not understood. Never treated as either on or off.</summary>
     Unknown,
+
+    /// <summary>Windows Security Center reports <c>WSC_SECURITY_PRODUCT_STATE_ON</c>.</summary>
     Enabled,
+
+    /// <summary>Windows Security Center reports <c>WSC_SECURITY_PRODUCT_STATE_OFF</c>.</summary>
     Disabled,
+
+    /// <summary>Windows Security Center reports <c>WSC_SECURITY_PRODUCT_STATE_SNOOZED</c>.</summary>
+    Snoozed,
+
+    /// <summary>Windows Security Center reports <c>WSC_SECURITY_PRODUCT_STATE_EXPIRED</c>.</summary>
+    Expired,
 }
 
 /// <summary>Whether a registered product reports its definitions as current.</summary>
@@ -31,8 +41,8 @@ public enum SecurityProductSignatures
 /// <param name="State">Whether it reports itself as actively scanning.</param>
 /// <param name="Signatures">Whether it reports its definitions as current.</param>
 /// <param name="RawProductState">
-/// The undecoded <c>productState</c> word, kept so a reader is never lied to about what Windows
-/// actually said — particularly when this reader could not decode it.
+/// The legacy undecoded WMI <c>productState</c> word. Production COM inventory leaves this at the
+/// historical sentinel; consumers must use <see cref="RawActivityState"/> for the documented COM enum.
 /// </param>
 public sealed record SecurityProduct(
     SecurityProductKind Kind,
@@ -42,12 +52,35 @@ public sealed record SecurityProduct(
     int RawProductState)
 {
     /// <summary>
+    /// The raw documented <c>WSC_SECURITY_PRODUCT_STATE</c> value. Production COM inventory sets
+    /// this property and leaves <see cref="RawProductState"/> at its legacy WMI sentinel.
+    /// </summary>
+    public int? RawActivityState { get; init; }
+
+    /// <summary>
+    /// The raw documented <c>WSC_SECURITY_SIGNATURE_STATUS</c> value. This is nullable only for
+    /// compatibility with inventories constructed before signature evidence was carried separately.
+    /// </summary>
+    public int? RawSignatureStatus { get; init; }
+
+    /// <summary>
     /// Whether this is Microsoft's own antivirus, matched on the registered display name.
     /// </summary>
     /// <remarks>
     /// Name matching is a heuristic and is treated as one: it is used only to relate this inventory to
     /// the Controlled Folder Access finding, never to decide whether the machine is protected. A
     /// mismatch costs a cross-reference, not a wrong verdict.
+    ///
+    /// <b>The string it reads is localized.</b> The WMI inventory this replaced returned the invariant
+    /// English name; <c>IWscProduct::get_ProductName</c> returns the machine's display language — a
+    /// French host reports "Antivirus Microsoft Defender". Microsoft keeps the brand tokens Latin and
+    /// adjacent across the shipping locales, which is why matching on the adjacent pair still works.
+    ///
+    /// <b>The adjacency is load-bearing, not incidental.</b> Matching "Defender" and "Microsoft" or
+    /// "Windows" as independent tokens looks like a locale-robustness improvement and is a regression:
+    /// it makes "Bitdefender Antivirus for Windows" read as Microsoft's own product, on the one path
+    /// that decides whether the operator is told a third-party antivirus is protecting them. The test
+    /// matrix carries that exact name so the idea fails a test rather than a user.
     /// </remarks>
     public bool IsMicrosoftDefender =>
         DisplayName.Contains("Windows Defender", StringComparison.OrdinalIgnoreCase)
@@ -57,12 +90,12 @@ public sealed record SecurityProduct(
 /// <summary>Whether Windows Security Center could be enumerated at all.</summary>
 public enum SecurityCenterReading
 {
-    /// <summary>The namespace answered. Zero products is a valid answer and means none are registered.</summary>
+    /// <summary>The provider answered. Zero products is a valid answer and means none are registered.</summary>
     Available,
 
     /// <summary>
-    /// The namespace could not be read — absent (Windows Server does not ship it), the service is
-    /// stopped, or the query failed. Explicitly not the same as "no antivirus is installed".
+    /// The provider could not be read — unsupported (including Windows Server), unavailable, or the
+    /// COM call failed. Explicitly not the same as "no antivirus is installed".
     /// </summary>
     Unavailable,
 }
@@ -78,15 +111,15 @@ public sealed record SecurityProductInventory(
         [.. Products.Where(product => product.Kind == SecurityProductKind.AntiVirus)];
 
     /// <summary>
-    /// The registered antivirus products that report themselves as actively scanning. An undecodable
-    /// state is deliberately excluded: "we could not tell" must not be counted as protection.
+    /// The registered antivirus products for which Windows Security Center reports <c>On</c>. An
+    /// unknown state is deliberately excluded: "we could not tell" must not be counted as protection.
     /// </summary>
     public IReadOnlyList<SecurityProduct> ActiveAntiVirusProducts =>
         [.. AntiVirusProducts.Where(product => product.State == SecurityProductState.Enabled)];
 
     /// <summary>
-    /// Whether an antivirus other than Microsoft's is actively scanning — the ordinary reason Defender
-    /// steps aside, and therefore the reason Controlled Folder Access is not protecting.
+    /// Whether Windows Security Center reports <c>On</c> for an antivirus other than Microsoft's —
+    /// the ordinary reason Defender steps aside and Controlled Folder Access is not protecting.
     /// </summary>
     public bool HasActiveNonMicrosoftAntiVirus =>
         ActiveAntiVirusProducts.Any(product => !product.IsMicrosoftDefender);
@@ -96,30 +129,55 @@ public sealed record SecurityProductInventory(
 public enum AntiVirusConcern
 {
     /// <summary>At least one antivirus is actively scanning and reports current definitions.</summary>
-    Protected,
+    Protected = 0,
 
     /// <summary>An antivirus is actively scanning but reports its definitions as out of date.</summary>
-    SignaturesOutOfDate,
+    SignaturesOutOfDate = 1,
 
     /// <summary>Products are registered, but none of them reports itself as actively scanning.</summary>
-    NoActiveAntiVirus,
+    NoActiveAntiVirus = 2,
 
     /// <summary>Security Center answered and no antivirus is registered at all.</summary>
-    NoAntiVirusRegistered,
+    NoAntiVirusRegistered = 3,
 
     /// <summary>Security Center could not be read, so nothing is established either way.</summary>
-    Unavailable,
+    Unavailable = 4,
+
+    /// <summary>An antivirus reports On, but signature currency could not be established.</summary>
+    SignatureStatusUnknown = 5,
+
+    /// <summary>Products are registered, but at least one activity state is not understood.</summary>
+    ActivityStatusUnknown = 6,
 }
 
 /// <summary>
-/// Pure interpretation of what Windows Security Center reports. Split from the WMI reader so the
-/// decoding is tested exhaustively without depending on whatever happens to be installed on the
+/// Pure interpretation of what Windows Security Center reports. Split from the COM reader so the
+/// mapping is tested exhaustively without depending on whatever happens to be installed on the
 /// machine running the tests.
 /// </summary>
 public static class SecurityProductTriage
 {
+    /// <summary>Maps the documented Windows Security Center product state without guessing.</summary>
+    public static SecurityProductState MapProductState(int rawState) => rawState switch
+    {
+        0 => SecurityProductState.Enabled,
+        1 => SecurityProductState.Disabled,
+        2 => SecurityProductState.Snoozed,
+        3 => SecurityProductState.Expired,
+        _ => SecurityProductState.Unknown,
+    };
+
+    /// <summary>Maps the documented Windows Security Center signature status without guessing.</summary>
+    public static SecurityProductSignatures MapSignatureStatus(int rawStatus) => rawStatus switch
+    {
+        0 => SecurityProductSignatures.OutOfDate,
+        1 => SecurityProductSignatures.UpToDate,
+        _ => SecurityProductSignatures.Unknown,
+    };
+
     /// <summary>
-    /// Decodes the <c>productState</c> word into a scanning state and a definition state.
+    /// Decodes the legacy WMI <c>productState</c> word. Production acquisition does not use this
+    /// undocumented encoding; the method remains only for source compatibility.
     /// </summary>
     /// <remarks>
     /// <b>This encoding is not documented by Microsoft.</b> It is the widely-used community decoding,
@@ -166,16 +224,27 @@ public static class SecurityProductTriage
         }
 
         var active = inventory.ActiveAntiVirusProducts;
-        if (active.Count == 0)
+        if (active.Any(product => product.Signatures == SecurityProductSignatures.UpToDate))
         {
-            return AntiVirusConcern.NoActiveAntiVirus;
+            return AntiVirusConcern.Protected;
         }
-
-        // Out-of-date definitions on every active product is a real gap; one current product is enough
-        // to establish protection, so this only fires when none of them reports current definitions.
-        return active.Any(product => product.Signatures == SecurityProductSignatures.UpToDate)
-            ? AntiVirusConcern.Protected
-            : AntiVirusConcern.SignaturesOutOfDate;
+        if (inventory.AntiVirusProducts.Any(product =>
+                product.State is not SecurityProductState.Enabled
+                    and not SecurityProductState.Disabled
+                    and not SecurityProductState.Snoozed
+                    and not SecurityProductState.Expired))
+        {
+            return AntiVirusConcern.ActivityStatusUnknown;
+        }
+        if (active.Any(product =>
+                product.Signatures is not SecurityProductSignatures.UpToDate
+                    and not SecurityProductSignatures.OutOfDate))
+        {
+            return AntiVirusConcern.SignatureStatusUnknown;
+        }
+        return active.Count > 0
+            ? AntiVirusConcern.SignaturesOutOfDate
+            : AntiVirusConcern.NoActiveAntiVirus;
     }
 
     /// <summary>Whether a concern must stay visible in a flagged-only report.</summary>

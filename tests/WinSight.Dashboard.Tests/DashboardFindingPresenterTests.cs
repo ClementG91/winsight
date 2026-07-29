@@ -1,3 +1,6 @@
+using System.Collections;
+using System.Globalization;
+using System.Resources;
 using WinSight.Reporting;
 using Xunit;
 
@@ -296,6 +299,199 @@ public sealed class DashboardFindingPresenterTests
     [InlineData("en")]
     [InlineData("fr")]
     [InlineData("es")]
+    public void AntivirusPresentation_LocalizesEveryConcernFromIndexedEvidence(string culture)
+    {
+        WithCulture(culture, text =>
+        {
+            const string product = "Produit Ω;Vendor";
+            var cases = new[]
+            {
+                (
+                    Concern: "Protected",
+                    Item: AntivirusItem("Protected", (product, "On", "UpToDate")),
+                    Expected: text.Format("AntivirusProtected", product)),
+                (
+                    Concern: "SignaturesOutOfDate",
+                    Item: AntivirusItem("SignaturesOutOfDate", (product, "On", "OutOfDate")),
+                    Expected: text.Format("AntivirusSignaturesOutOfDate", product)),
+                (
+                    Concern: "SignatureStatusUnknown",
+                    Item: AntivirusItem("SignatureStatusUnknown", (product, "On", "Unknown")),
+                    Expected: text.Format("AntivirusSignatureStatusUnknown", product)),
+                (
+                    Concern: "ActivityStatusUnknown",
+                    Item: AntivirusItem("ActivityStatusUnknown", (product, "Unknown", "OutOfDate")),
+                    Expected: text.Format("AntivirusActivityStatusUnknown", product)),
+                (
+                    Concern: "NoActiveAntiVirus",
+                    Item: AntivirusItem("NoActiveAntiVirus", (product, "Snoozed", "UpToDate")),
+                    Expected: text.Format(
+                        "AntivirusNoActive",
+                        text.Format("AntivirusStateGroup", text["AntivirusStateSnoozed"], product))),
+                (
+                    Concern: "NoAntiVirusRegistered",
+                    Item: AntivirusItem("NoAntiVirusRegistered"),
+                    Expected: text["AntivirusNoneRegistered"]),
+                (
+                    Concern: "Unavailable",
+                    Item: AntivirusItem("Unavailable"),
+                    Expected: text["AntivirusUnavailable"]),
+            };
+
+            foreach (var sample in cases)
+            {
+                var result = DashboardFindingPresenter.Present("integrity", sample.Item, text);
+
+                Assert.Equal(text["AntivirusProtectionTitle"], result.Title);
+                Assert.Equal(sample.Expected, result.Detail);
+                Assert.DoesNotContain("APPLICATION ENGLISH PROSE", result.Detail, StringComparison.Ordinal);
+                if (sample.Item.Fields["registeredAntivirusCount"] != "0")
+                {
+                    Assert.Contains(product, result.Detail, StringComparison.Ordinal);
+                }
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("fr")]
+    [InlineData("es")]
+    public void ControlledFolderAccessPresentation_LocalizesEveryNonDefenderConcern(string culture)
+    {
+        WithCulture(culture, text =>
+        {
+            var cases = new[]
+            {
+                (Concern: "Off", Expected: text["CfaOff"]),
+                (Concern: "AuditOnly", Expected: text["CfaAuditOnly"]),
+                (Concern: "BlockDiskModificationOnly", Expected: text["CfaBlockDiskModificationOnly"]),
+                (Concern: "AuditDiskModificationOnly", Expected: text["CfaAuditDiskModificationOnly"]),
+                (Concern: "Protecting", Expected: text["CfaProtecting"]),
+                (Concern: "RuntimeRequirementsNotMet", Expected: text["CfaRuntimeRequirementsNotMet"]),
+                (Concern: "Unavailable", Expected: text["CfaUnavailable"]),
+            };
+
+            foreach (var sample in cases)
+            {
+                var result = DashboardFindingPresenter.Present(
+                    "integrity",
+                    CfaItem(sample.Concern),
+                    text);
+
+                Assert.Equal(text["CfaTitle"], result.Title);
+                Assert.Equal(sample.Expected, result.Detail);
+                Assert.DoesNotContain("APPLICATION ENGLISH PROSE", result.Detail, StringComparison.Ordinal);
+            }
+
+            var unknown = DashboardFindingPresenter.Present(
+                "integrity",
+                CfaItem("UnknownMode", ("rawStateValue", "57")),
+                text);
+            Assert.Equal(text.Format("CfaUnknownMode", "57"), unknown.Detail);
+            Assert.DoesNotContain("APPLICATION ENGLISH PROSE", unknown.Detail, StringComparison.Ordinal);
+        });
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("fr")]
+    [InlineData("es")]
+    public void DefenderNotRunningPresentation_LocalizesEveryAntivirusEvidenceBranch(string culture)
+    {
+        WithCulture(culture, text =>
+        {
+            const string product = "Produit Ω;Vendor";
+            var cases = new[]
+            {
+                (
+                    Item: CfaItem(
+                        "DefenderNotRunning",
+                        ("antivirusConcern", "Protected"),
+                        ("protectedThirdPartyAntivirus", product)),
+                    Expected: text.Format("CfaDefenderNotRunningProtectedThirdParty", product)),
+                (
+                    Item: CfaItem("DefenderNotRunning", ("antivirusConcern", "Unavailable")),
+                    Expected: text["CfaDefenderNotRunningAvUnavailable"]),
+                (
+                    Item: CfaItem(
+                        "DefenderNotRunning",
+                        ("antivirusConcern", "ActivityStatusUnknown"),
+                        ("activityUnknownAntivirus", product)),
+                    Expected: text.Format("CfaDefenderNotRunningActivityUnknown", product)),
+                (
+                    Item: CfaItem(
+                        "DefenderNotRunning",
+                        ("antivirusConcern", "SignatureStatusUnknown"),
+                        ("onAntivirus", product)),
+                    Expected: text.Format("CfaDefenderNotRunningSignatureUnknown", product)),
+                (
+                    Item: CfaItem(
+                        "DefenderNotRunning",
+                        ("antivirusConcern", "SignaturesOutOfDate"),
+                        ("onAntivirus", product)),
+                    Expected: text.Format("CfaDefenderNotRunningSignaturesOutOfDate", product)),
+                (
+                    Item: CfaItem("DefenderNotRunning", ("antivirusConcern", "Protected")),
+                    Expected: text["CfaDefenderNotRunningInconsistent"]),
+                (
+                    Item: CfaItem("DefenderNotRunning", ("antivirusConcern", "NoActiveAntiVirus")),
+                    Expected: text["CfaDefenderNotRunningNoOnAntivirus"]),
+            };
+
+            foreach (var sample in cases)
+            {
+                var result = DashboardFindingPresenter.Present("integrity", sample.Item, text);
+
+                Assert.Equal(text["CfaTitle"], result.Title);
+                Assert.Equal(sample.Expected, result.Detail);
+                Assert.DoesNotContain("APPLICATION ENGLISH PROSE", result.Detail, StringComparison.Ordinal);
+                if (sample.Expected.Contains(product, StringComparison.Ordinal))
+                {
+                    Assert.Contains(product, result.Detail, StringComparison.Ordinal);
+                }
+            }
+        });
+    }
+
+    [Fact]
+    public void AntivirusAndCfaResourceKeys_HaveExactEnglishFrenchSpanishParity()
+    {
+        var resources = new ResourceManager(
+            "WinSight.Dashboard.Localization.Strings",
+            typeof(LocalizationManager).Assembly);
+        var sets = new[]
+        {
+            resources.GetResourceSet(CultureInfo.InvariantCulture, true, false),
+            resources.GetResourceSet(CultureInfo.GetCultureInfo("fr"), true, false),
+            resources.GetResourceSet(CultureInfo.GetCultureInfo("es"), true, false),
+        };
+        Assert.All(sets, Assert.NotNull);
+
+        var relevantKeys = sets
+            .Select(set => set!.Cast<DictionaryEntry>()
+                .Select(entry => Assert.IsType<string>(entry.Key))
+                .Where(key =>
+                    key.StartsWith("Antivirus", StringComparison.Ordinal)
+                    || key.StartsWith("Cfa", StringComparison.Ordinal))
+                .ToHashSet(StringComparer.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(relevantKeys[0]);
+        Assert.True(relevantKeys[0].SetEquals(relevantKeys[1]));
+        Assert.True(relevantKeys[0].SetEquals(relevantKeys[2]));
+        foreach (var key in relevantKeys[0].Where(key => key != "AntivirusStateGroup"))
+        {
+            var english = sets[0]!.GetString(key);
+            Assert.NotEqual(english, sets[1]!.GetString(key));
+            Assert.NotEqual(english, sets[2]!.GetString(key));
+        }
+    }
+
+    [Theory]
+    [InlineData("en")]
+    [InlineData("fr")]
+    [InlineData("es")]
     public void EveryStructuredTool_HasAResourceBackedPresentation(string culture)
     {
         WithCulture(culture, text =>
@@ -322,6 +518,50 @@ public sealed class DashboardFindingPresenterTests
 
     private static ReportItem Item(Severity severity, Dictionary<string, string?> fields) =>
         new(severity, "raw-title", "raw-detail", fields);
+
+    private static ReportItem AntivirusItem(
+        string concern,
+        params (string Name, string Activity, string Signature)[] products)
+    {
+        var fields = new Dictionary<string, string?>
+        {
+            ["protection"] = "Antivirus",
+            ["concern"] = concern,
+            ["registeredAntivirusCount"] = products.Length.ToString(CultureInfo.InvariantCulture),
+        };
+        for (var index = 0; index < products.Length; index++)
+        {
+            var prefix = $"antivirusProduct.{index}.";
+            fields[$"{prefix}name"] = products[index].Name;
+            fields[$"{prefix}activity"] = products[index].Activity;
+            fields[$"{prefix}signature"] = products[index].Signature;
+        }
+        return new ReportItem(
+            Severity.Notable,
+            "APPLICATION ENGLISH PROSE TITLE",
+            "APPLICATION ENGLISH PROSE DETAIL",
+            fields);
+    }
+
+    private static ReportItem CfaItem(
+        string concern,
+        params (string Key, string? Value)[] additionalFields)
+    {
+        var fields = new Dictionary<string, string?>
+        {
+            ["protection"] = "Controlled Folder Access",
+            ["concern"] = concern,
+        };
+        foreach (var (key, value) in additionalFields)
+        {
+            fields[key] = value;
+        }
+        return new ReportItem(
+            Severity.Notable,
+            "APPLICATION ENGLISH PROSE TITLE",
+            "APPLICATION ENGLISH PROSE DETAIL",
+            fields);
+    }
 
     private static void WithCulture(string culture, Action<LocalizationManager> assertion)
     {

@@ -151,12 +151,11 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Privileged WFP/trust/IPC gates qualified; **product readiness not established** |
+| **x64** | Historical trust/IPC evidence remains candidate-bound; WFP/SCM must be rerun for the current candidate; **product readiness not established** |
 | **Arm64 (native)** | Build, packaging and installer verified in CI; **privileged runtime unqualified and product readiness not established** |
 
-The privileged behaviour CI cannot reach — real WFP enforcement and rollback, SCM lifecycle,
-adversarial path-trust/TOCTOU, and the multi-user IPC boundary — has real qualification evidence from
-clean x64 VMs, each run bound to a commit and to the CI run that built it:
+The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
+each run bound to the commit and CI run that built it:
 
 | Gate | Result | Record |
 |---|---|---|
@@ -164,12 +163,12 @@ clean x64 VMs, each run bound to a commit and to the CI run that built it:
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
 
-Each record qualifies its exact candidate. A later revision needs a candidate-aware delta review of
-the affected service, trust-boundary or IPC surface; an affected or uncertain gate must be rerun.
-There is no automatic inheritance, and these three records do not establish product-wide readiness.
-Released artifacts still lack a real Authenticode certificate/signature, privileged Arm64 and named
-hostile-user sub-cases remain open. The user attested that EN/FR/ES human presentation was completed
-on 2026-07-26; this is not independent evidence. External release/deployment has not closed.
+Each record qualifies its exact candidate. The current candidate changed the WFP/SCM runtime surface,
+so that gate is invalidated for current readiness and must be rerun; the table is historical evidence,
+not a current PASS. Released v0.10.5 artifacts are unsigned and not production-ready. The project is
+waiting for SignPath, while exact-candidate CI/CodeQL/package, current x64 WFP/SCM, privileged Arm64,
+named hostile-user session cases and a signed release remain open. The user attested that EN/FR/ES
+human presentation was completed on 2026-07-26; this is not independent evidence.
 
 The authoritative statement, with every limitation named:
 [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
@@ -202,7 +201,7 @@ dotnet run --project src/WinSight.Dashboard
 To reproduce the full release payload, including SBOM, installer and signing stage:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.10.3
+./scripts/Build-Release.ps1 -Version 0.10.5
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned Inno Setup compiler
