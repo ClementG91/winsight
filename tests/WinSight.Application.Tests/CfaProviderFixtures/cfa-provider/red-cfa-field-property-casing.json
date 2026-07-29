@@ -1,1 +1,11 @@
-{"exitCode":0,"stdout":"[{\"tool\":\"integrity\",\"summary\":\"x\",\"items\":[{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"x\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"RawStateValue\":\"1\"}}],\"notableCount\":0}]","stderr":"","operatingSystem":{"product":"Fixture Windows 11","version":"10.0.99999.0","build":"99999","architecture":"x64"}}
+{
+  "exitCode": 1,
+  "stdout": "[{\"tool\":\"integrity\",\"summary\":\"x\",\"items\":[{\"severity\":\"notable\",\"title\":\"Antivirus protection (Windows Security Center)\",\"detail\":\"canonical unavailable antivirus evidence\",\"fields\":{\"protection\":\"Antivirus\",\"concern\":\"Unavailable\",\"reading\":\"Unavailable\",\"registeredAntivirus\":null,\"activeAntivirus\":null,\"activeAntivirusCount\":\"0\",\"onAntivirus\":null,\"onAntivirusCount\":\"0\",\"registeredAntivirusCount\":\"0\",\"offAntivirusCount\":\"0\",\"snoozedAntivirusCount\":\"0\",\"expiredAntivirusCount\":\"0\",\"activityUnknownAntivirusCount\":\"0\",\"signatureUnknownAntivirusCount\":\"0\",\"hasActiveNonMicrosoftAntivirus\":\"False\"}},{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"x\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"RawStateValue\":\"1\"}}],\"notableCount\":1}]",
+  "stderr": "",
+  "operatingSystem": {
+    "product": "Fixture Windows 11",
+    "version": "10.0.99999.0",
+    "build": "99999",
+    "architecture": "x64"
+  }
+}

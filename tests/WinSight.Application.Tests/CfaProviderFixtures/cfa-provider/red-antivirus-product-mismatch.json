@@ -1,0 +1,11 @@
+{
+  "exitCode": 1,
+  "stdout": "[{\"tool\":\"integrity\",\"summary\":\"one protection checked\",\"items\":[{\"severity\":\"info\",\"title\":\"Antivirus protection (Windows Security Center)\",\"detail\":\"fixture antivirus evidence\",\"fields\":{\"protection\":\"Antivirus\",\"concern\":\"Protected\",\"reading\":\"Available\",\"registeredAntivirus\":\"Product A, Different Product B\",\"activeAntivirus\":\"Product A, Different Product B\",\"activeAntivirusCount\":\"2\",\"onAntivirus\":\"Product A, Different Product B\",\"onAntivirusCount\":\"2\",\"registeredAntivirusCount\":\"2\",\"offAntivirusCount\":\"0\",\"snoozedAntivirusCount\":\"0\",\"expiredAntivirusCount\":\"0\",\"activityUnknownAntivirusCount\":\"0\",\"signatureUnknownAntivirusCount\":\"0\",\"hasActiveNonMicrosoftAntivirus\":\"True\",\"antivirusProduct.0.name\":\"Product A\",\"antivirusProduct.0.activity\":\"On\",\"antivirusProduct.0.signature\":\"UpToDate\",\"antivirusProduct.0.rawActivity\":\"0\",\"antivirusProduct.0.rawSignature\":\"1\",\"antivirusProduct.0.legacyRawProductState\":\"0\",\"antivirusProduct.1.name\":\"Different Product B\",\"antivirusProduct.1.activity\":\"On\",\"antivirusProduct.1.signature\":\"OutOfDate\",\"antivirusProduct.1.rawActivity\":\"0\",\"antivirusProduct.1.rawSignature\":\"0\",\"antivirusProduct.1.legacyRawProductState\":\"0\"}},{\"severity\":\"notable\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"defender not running\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Disabled\",\"rawStateValue\":\"0\",\"concern\":\"DefenderNotRunning\",\"runtimeSupportsProtection\":\"False\",\"amRunningMode\":\"Not running\",\"antivirusEnabled\":\"False\",\"realTimeProtectionEnabled\":\"False\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Available\",\"antivirusConcern\":\"Protected\",\"protectedThirdPartyAntivirus\":\"Product A\",\"onThirdPartyAntivirus\":\"Different Product B\",\"onAntivirus\":\"Product A, Different Product B\",\"activityUnknownAntivirus\":null}}],\"notableCount\":1}]",
+  "stderr": "",
+  "operatingSystem": {
+    "product": "Fixture Windows 11",
+    "version": "10.0.99999.0",
+    "build": "99999",
+    "architecture": "x64"
+  }
+}
