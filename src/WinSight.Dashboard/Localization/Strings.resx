@@ -271,4 +271,33 @@
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Possible ransomware activity</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>A protected decoy file was just modified. Nothing legitimate changes it, so this is how ransomware behaves. Disconnect this PC from the network and check what is running.</value></data>
   <data name="RansomwareBurstDetected" xml:space="preserve"><value>An unusual burst of file renames or deletions was detected. If you did not start a bulk operation, treat this as suspicious.</value></data>
+  <data name="IntegrityEvidenceUnavailable" xml:space="preserve"><value>The structured protection evidence is unavailable or not recognized.</value></data>
+  <data name="AntivirusProtectionTitle" xml:space="preserve"><value>Antivirus protection (Windows Security Center)</value></data>
+  <data name="AntivirusProtected" xml:space="preserve"><value>Protection established: Windows Security Center reports {0} On with signatures up to date.</value></data>
+  <data name="AntivirusSignaturesOutOfDate" xml:space="preserve"><value>{0} reports On, but every On product reports signatures out of date. Update it in the product console.</value></data>
+  <data name="AntivirusSignatureStatusUnknown" xml:space="preserve"><value>{0} reports On, but signature currency could not be established. This is not evidence that signatures are current or out of date.</value></data>
+  <data name="AntivirusActivityStatusUnknown" xml:space="preserve"><value>The activity state of {0} is not recognized. This is not evidence that the product is On or Off.</value></data>
+  <data name="AntivirusNoActive" xml:space="preserve"><value>No registered antivirus reports On ({0}). These explicit states do not establish active scanning.</value></data>
+  <data name="AntivirusNoneRegistered" xml:space="preserve"><value>Windows Security Center answered successfully and returned no registered antivirus.</value></data>
+  <data name="AntivirusUnavailable" xml:space="preserve"><value>Windows Security Center could not be read. This is not evidence that no antivirus exists and is expected on Windows Server.</value></data>
+  <data name="AntivirusStateOff" xml:space="preserve"><value>Off</value></data>
+  <data name="AntivirusStateSnoozed" xml:space="preserve"><value>Snoozed</value></data>
+  <data name="AntivirusStateExpired" xml:space="preserve"><value>Expired</value></data>
+  <data name="AntivirusStateGroup" xml:space="preserve"><value>{0}: {1}</value></data>
+  <data name="CfaTitle" xml:space="preserve"><value>Controlled Folder Access (ransomware shield)</value></data>
+  <data name="CfaOff" xml:space="preserve"><value>Disabled. Controlled Folder Access is not blocking untrusted programs from modifying protected folders.</value></data>
+  <data name="CfaAuditOnly" xml:space="preserve"><value>Audit only. Windows records what it would block but does not block it.</value></data>
+  <data name="CfaBlockDiskModificationOnly" xml:space="preserve"><value>Block disk modification only. This mode does not establish protection for folders such as Documents, Pictures and Desktop.</value></data>
+  <data name="CfaAuditDiskModificationOnly" xml:space="preserve"><value>Audit disk modification only. This mode records disk changes but does not establish protected-folder enforcement.</value></data>
+  <data name="CfaProtecting" xml:space="preserve"><value>Enabled with the required Defender runtime evidence observed. This is posture evidence, not a guarantee that every write will be blocked.</value></data>
+  <data name="CfaRuntimeRequirementsNotMet" xml:space="preserve"><value>Enabled, but Defender runtime evidence does not establish Normal mode with antivirus and real-time protection enabled.</value></data>
+  <data name="CfaUnknownMode" xml:space="preserve"><value>Mode value {0} is not recognized; folder protection is not established.</value></data>
+  <data name="CfaUnavailable" xml:space="preserve"><value>Controlled Folder Access posture could not be read; folder protection is not established.</value></data>
+  <data name="CfaDefenderNotRunningProtectedThirdParty" xml:space="preserve"><value>Microsoft Defender reports that it is not running, while Windows Security Center reports {0} On with current signatures. Controlled Folder Access is a Defender feature and is not active; this may be a normal third-party antivirus configuration, but verify that product's ransomware protection in its own console.</value></data>
+  <data name="CfaDefenderNotRunningAvUnavailable" xml:space="preserve"><value>Microsoft Defender reports that it is not running, and Windows Security Center could not be read. Whether another antivirus is active cannot be established; Controlled Folder Access is not established as protecting these folders.</value></data>
+  <data name="CfaDefenderNotRunningActivityUnknown" xml:space="preserve"><value>Microsoft Defender reports that it is not running, and {0} returned an unrecognized activity state. Whether that product is active cannot be established; Controlled Folder Access is not established as protecting these folders.</value></data>
+  <data name="CfaDefenderNotRunningSignatureUnknown" xml:space="preserve"><value>Microsoft Defender reports that it is not running. {0} reports On, but signature currency is unknown. Current antivirus protection and Controlled Folder Access protection are not established.</value></data>
+  <data name="CfaDefenderNotRunningSignaturesOutOfDate" xml:space="preserve"><value>Microsoft Defender reports that it is not running. {0} reports On with out-of-date signatures. Update that product; Controlled Folder Access protection is not established.</value></data>
+  <data name="CfaDefenderNotRunningInconsistent" xml:space="preserve"><value>Microsoft Defender runtime and Windows Security Center returned inconsistent Defender evidence. No cause is inferred; Controlled Folder Access protection is not established.</value></data>
+  <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender reports that it is not running, and Windows Security Center reports no antivirus On. Controlled Folder Access protection is not established.</value></data>
 </root>

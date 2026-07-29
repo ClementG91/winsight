@@ -36,11 +36,13 @@ Deliberate constraints, chosen to avoid building an EDR nobody asked for:
 Persistence scanner, camera and mic monitor, connection and DNS monitors, unified dashboard, shared
 signature and reputation helper.
 
-### Phase 2 — outbound firewall *(shipped, qualified on x64)*
+### Phase 2 — outbound firewall *(shipped; current-candidate x64 requalification open)*
 
 Per-application outbound control on WFP: an unprivileged dashboard driving a privileged LocalSystem
 service over authenticated local IPC. Opt-in enforcement that persists and survives reboot.
-Qualified end to end on a clean VM — see [`validation/`](validation/README.md).
+Historically qualified end to end on a clean x64 VM. Later WFP/SCM runtime changes invalidate that
+part of the evidence for the current candidate, so it must be rerun; see
+[`validation/`](validation/README.md).
 
 ### Phase 3 — real-time persistence *(shipped, detect-and-alert)*
 
@@ -71,7 +73,9 @@ package. The exact procedure is in [`PRODUCTION_READINESS.md`](PRODUCTION_READIN
 
 ### Authenticode signing
 
-Implemented and verified; waiting on a code-signing certificate. See [`RELEASE.md`](RELEASE.md).
+The fail-closed workflow is implemented; the production signing chain is not verified and is waiting
+on the SignPath Foundation response. A signed candidate and release verification remain open. See
+[`RELEASE.md`](RELEASE.md).
 
 ### Broader write attribution
 

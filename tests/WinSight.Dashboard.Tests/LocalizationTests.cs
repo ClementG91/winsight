@@ -94,6 +94,7 @@ public sealed class LocalizationTests
     private static readonly HashSet<string> DeliberatelyUntranslated = new(StringComparer.Ordinal)
     {
         // Pure format strings: placeholders and punctuation only, no words to translate.
+        "AntivirusStateGroup",
         "ConnectionProcessState",
         "FindingSelectionFormat",
         "FirewallRuleTitle",

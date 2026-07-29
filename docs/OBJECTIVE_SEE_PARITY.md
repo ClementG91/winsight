@@ -18,7 +18,7 @@ Two structural differences shape everything below:
 |---|---|---|---|
 | **BlockBlock** | Real-time persistence alerts | **Guardian** — ~17 live registry/file surfaces, tray alert, journalled | **Parity.** Cannot block the write (driver). |
 | **KnockKnock** | One-shot persistence enumeration | **Persistence scan** — 22 autostart surfaces with signature verdicts | **Parity, arguably ahead** (more surfaces, Authenticode + catalog). |
-| **LuLu** | Per-app outbound firewall | **Outbound firewall** — WFP per-app, enforcement opt-in, survives reboot | **Feature parity in code; privileged x64 gates qualified, native Arm64 pending.** The corrected candidate-bound x64 records cover WFP/SCM/rollback/per-app scoping, adversarial trust and IPC. They do not establish product-wide production readiness. |
+| **LuLu** | Per-app outbound firewall | **Outbound firewall** — WFP per-app, enforcement opt-in, survives reboot | **Feature parity in code; current-candidate qualification incomplete.** Historical candidate-bound x64 records cover WFP/SCM/rollback/per-app scoping, adversarial trust and IPC, but later WFP/SCM changes require that gate to be rerun. Native Arm64 remains pending. |
 | **RansomWhere?** | Ransomware behaviour detection | **Ransomware protection** — canaries, rename/delete burst, entropy-on-write, opt-in | **Parity.** Cannot halt the process mid-encryption (driver). |
 | **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** — live, tray alert, journalled | **Parity** (the host landed 2026-07-21; the detector predated it). |
 | **Netiquette** | Network connection list | **Connections scan** — with process attribution | **Parity.** |
@@ -29,11 +29,12 @@ Two structural differences shape everything below:
 | **KextViewr** | Kernel extension viewer | **Drivers scan** — every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
 | **DoNotDisturb** | Physical-access ("evil maid") detection | **Presence scan** — resume timeline with Windows' wake source, flagging only wakes attributable to a human hand | **Parity, with a narrower honest claim.** A lid open is unambiguous; a Windows wake source is `Unknown` half the time, and the scan says so rather than guessing. |
 
-The corrected candidate-bound x64 gates are real: WFP enforcement, SCM lifecycle, rollback,
+The historical candidate-bound x64 gates are real: WFP enforcement, SCM lifecycle, rollback,
 connectivity and per-app scoping passed 25/25 on `f0a3f16`; adversarial path trust passed 11/11 on
 `f84ac36`; and the multi-user IPC capability boundary passed 7/7 on `c9177cd`. Each record qualifies
 its exact candidate. Applying it to a later revision requires a candidate-aware delta review of the
-relevant surface and a rerun when that surface changed or the impact is uncertain. The former 14/14
+relevant surface and a rerun when that surface changed or the impact is uncertain. The current
+candidate changed the WFP/SCM surface, so that gate is open again. The former 14/14
 and historical 18/18 remain invalid as qualification; the intermediate 15/15 was transient and is
 not evidence.
 
@@ -280,8 +281,9 @@ Beating Objective-See on Windows is not a checklist race. WinSight has feature c
 ahead on the eight tools that matter most — persistence × 2, firewall, ransomware, camera/mic,
 keyboard interception, kernel drivers and hijack analysis — while being one app instead of eight,
 with an MCP server, an alert journal and four scanners Objective-See has no equivalent for. That is
-a product-capability comparison, not a product-readiness verdict: the corrected x64 privileged gates
-are qualified, while native Arm64 and the remaining product-level gates are still open.
+a product-capability comparison, not a product-readiness verdict: historical x64 evidence remains
+candidate-bound, current WFP/SCM requalification is open, and native Arm64, exact-candidate
+automation, remaining sessions and signing are still open.
 
 **Every tool on the list above now has parity-or-better feature coverage**, in one app instead of
 eight, with an MCP server, an alert journal, four scanners Objective-See has no equivalent for, and
