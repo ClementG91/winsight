@@ -42,7 +42,21 @@ $script:CfaFieldNames = @(
     'realTimeProtectionEnabled',
     'protectedFolders',
     'allowedApplicationsVisibility',
-    'settingsDeepLink'
+    'settingsDeepLink',
+    # The Controlled Folder Access verdict is only honest beside what Windows Security Center says is
+    # actually protecting the machine, so the item carries that cross-reference. These are validated
+    # below, not merely counted: a field admitted to the contract without a rule widens it.
+    'securityCenterReading',
+    'antivirusConcern',
+    'protectedThirdPartyAntivirus',
+    'onThirdPartyAntivirus',
+    'onAntivirus',
+    'activityUnknownAntivirus'
+)
+$script:SecurityCenterReadings = @('Available', 'Unavailable')
+$script:AntiVirusConcerns = @(
+    'Protected', 'SignaturesOutOfDate', 'NoActiveAntiVirus', 'NoAntiVirusRegistered',
+    'Unavailable', 'SignatureStatusUnknown', 'ActivityStatusUnknown'
 )
 $script:States = @(
     'Unavailable', 'Unknown', 'Disabled', 'Enabled', 'Audit',
@@ -638,6 +652,36 @@ function Assert-CfaItem([object]$Item) {
     Assert-ClosedValue -Value $fields.concern -Allowed $script:Concerns -Name 'concern'
     Assert-CanonicalBoolean $fields.runtimeSupportsProtection 'runtimeSupportsProtection'
     Assert-ClosedValue -Value $fields.allowedApplicationsVisibility -Allowed $script:Visibilities -Name 'allowedApplicationsVisibility'
+    Assert-ClosedValue -Value $fields.securityCenterReading -Allowed $script:SecurityCenterReadings -Name 'securityCenterReading'
+    Assert-ClosedValue -Value $fields.antivirusConcern -Allowed $script:AntiVirusConcerns -Name 'antivirusConcern'
+
+    # An unreadable Security Center establishes nothing, so it must not name a product or claim a
+    # posture. This is the shape of the defect the whole antivirus milestone was raised against:
+    # turning absent evidence into a verdict.
+    if ($fields.securityCenterReading -ceq 'Unavailable') {
+        if ($fields.antivirusConcern -cne 'Unavailable') {
+            Fail-Contract 'unreadable Security Center reports an antivirus concern other than Unavailable'
+        }
+        foreach ($name in @('protectedThirdPartyAntivirus', 'onThirdPartyAntivirus', 'onAntivirus', 'activityUnknownAntivirus')) {
+            if (-not [string]::IsNullOrEmpty($fields.$name)) {
+                Fail-Contract "unreadable Security Center still names products in $name"
+            }
+        }
+    }
+
+    # Naming a third-party product as protecting is the single most reassuring thing this item can
+    # say. It is allowed only when the concern actually established protection.
+    if (-not [string]::IsNullOrEmpty($fields.protectedThirdPartyAntivirus) -and
+        $fields.antivirusConcern -cne 'Protected') {
+        Fail-Contract 'a protected third-party antivirus is named without a Protected antivirus concern'
+    }
+
+    # Every protected third-party product must also be one Security Center reports On: the protected
+    # set is a subset of the On set, and a name appearing only in the former is unsourced.
+    if (-not [string]::IsNullOrEmpty($fields.protectedThirdPartyAntivirus) -and
+        [string]::IsNullOrEmpty($fields.onThirdPartyAntivirus)) {
+        Fail-Contract 'a protected third-party antivirus is named while none is reported On'
+    }
     Assert-String $fields.protectedFolders 'protectedFolders'
     if ($fields.protectedFolders -notmatch '^(0|[1-9][0-9]*)$') { Fail-Contract 'protectedFolders is not a bounded count' }
     if ($fields.settingsDeepLink -cne 'windowsdefender://RansomwareProtection') {
