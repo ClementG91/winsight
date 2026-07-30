@@ -39,10 +39,35 @@ name its author.
 | `UnknownProcess` | Seen, but the writer was not in the process index. |
 | `UnannouncedKey` | Seen, but the kernel never announced that key handle. |
 | `UntranslatablePath` | The key resolved, but its namespace does not map to a readable path. |
+| `Failure` | Stable redacted ETW failure: access, resource exhaustion, collision, platform or unexpected. |
 
 The two unresolved counters are kept apart because they look identical from outside and have
 different fixes: one is a gap in the kernel's bookkeeping replay, the other in WinSight's namespace
 mapping.
+
+`Failure` is an additive init property. The original six-field `AttributionHealth` constructor and
+six-value deconstruction remain unchanged for existing API consumers.
+
+## Session ownership and abrupt termination
+
+ETW sessions are machine-wide and Windows does not necessarily remove one when its owner is killed.
+Attribution therefore shares one lifecycle implementation with the outbound and DNS observers.
+New sessions are named
+`WinSight-Attribution-v2-<pid>-<process-start-identity>` and are created with
+`Create | NoRestartOnCreate`: a concurrent live instance is never silently replaced.
+
+Before creation, WinSight considers only exact names from its three closed profiles. A legacy
+PID-only session is reclaimed only when the PID is definitely absent both before and after exact
+attachment. A v2 session additionally permits recovery after PID reuse, but only when the recorded
+process-start identity is definitively different on both checks. Current, live, malformed and
+indeterminate owners are preserved. An attached session is stopped explicitly and its disappearance
+is checked; disposing an attached TraceEvent object is not treated as cleanup proof.
+
+Cleanup is conservative and best effort. If enumeration, process inspection, attachment, stop or the
+post-stop check is ambiguous, WinSight does not widen the target or stop a different session. Failure
+to create the new observer becomes a bounded health failure. It cannot escape the attribution
+background thread and terminate the dashboard. In particular, `0x800705AA` is reported as ETW
+resource exhaustion rather than as a privilege refusal.
 
 ## What the kernel actually reports
 

@@ -1,3 +1,4 @@
+using WinSight.NetMonitor;
 using Xunit;
 
 namespace WinSight.Attribution.Tests;
@@ -143,11 +144,117 @@ public sealed class AttributionHostTests
         Assert.Equal(0, watcher.Starts);
     }
 
+    [Fact]
+    public void AttributionHealthRetainsItsSixValuePublicRecordContract()
+    {
+        var constructor = typeof(AttributionHealth).GetConstructor(
+            [typeof(bool), typeof(long), typeof(long), typeof(long), typeof(long), typeof(bool)]);
+        Assert.NotNull(constructor);
+        Assert.Contains(
+            typeof(AttributionHealth).GetMethods(),
+            method => method.Name == "Deconstruct" && method.GetParameters().Length == 6);
+
+        var health = new AttributionHealth(
+            Running: false,
+            Attributed: 1,
+            UnknownProcess: 2,
+            UnannouncedKey: 3,
+            UntranslatablePath: 4,
+            Refused: false);
+        var (running, attributed, unknownProcess, unannouncedKey, untranslatablePath, refused) = health;
+
+        Assert.False(running);
+        Assert.Equal((1L, 2L, 3L, 4L, false),
+            (attributed, unknownProcess, unannouncedKey, untranslatablePath, refused));
+    }
+
+    [Theory]
+    [InlineData(unchecked((int)0x800705AA), (int)EtwFailureCode.ResourceExhausted)] // ERROR_NO_SYSTEM_RESOURCES
+    [InlineData(unchecked((int)0x800700B7), (int)EtwFailureCode.SessionCollision)] // ERROR_ALREADY_EXISTS
+    public void AnOperationalEtwComFailureStopsOnlyAttribution(int hresult, int expectedFailure)
+    {
+        // This must run entirely through the watcher seam: opening a real ETW session here would
+        // make the portable unit suite consume a machine-global, privileged resource. Both quota
+        // exhaustion and a session-name collision must degrade attribution rather than terminate
+        // the dashboard process that owns this background thread.
+        var watcher = new ScriptedWatcher(
+            failure: EtwFailure(hresult));
+        using var host = new AttributionHost(watcher);
+
+        host.Start();
+
+        Assert.True(watcher.Completed.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => !host.Health.Running, TimeSpan.FromSeconds(5)));
+        Assert.False(host.Health.Running);
+        Assert.False(host.Health.Refused);
+        Assert.Equal((EtwFailureCode)expectedFailure, host.Health.Failure);
+    }
+
+    [Fact]
+    public void AWin32AccessDeniedFailureIsClassifiedWithoutClaimingTheWatcherIsStillRunning()
+    {
+        var watcher = new ScriptedWatcher(failure: new System.ComponentModel.Win32Exception(5));
+        using var host = new AttributionHost(watcher);
+
+        host.Start();
+
+        Assert.True(watcher.Completed.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => !host.Health.Running, TimeSpan.FromSeconds(5)));
+        Assert.False(host.Health.Refused);
+        Assert.Equal(EtwFailureCode.AccessDenied, host.Health.Failure);
+    }
+
+    [Fact]
+    public void AnUnexpectedNonfatalWatcherFailureDoesNotEscapeTheWorkerThread()
+    {
+        // A future TraceEvent failure type must not turn into a process-wide unhandled exception.
+        // This assertion deliberately uses an exception outside the known ETW HRESULT list.
+        var watcher = new ScriptedWatcher(failure: new InvalidOperationException("test-only"));
+        using var host = new AttributionHost(watcher);
+
+        host.Start();
+
+        Assert.True(watcher.Completed.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => !host.Health.Running, TimeSpan.FromSeconds(5)));
+        Assert.False(host.Health.Refused);
+        Assert.Equal(EtwFailureCode.Unexpected, host.Health.Failure);
+    }
+
+    [Fact]
+    public void CancellationRequestedByDisposeIsNotReportedAsAnElevationRefusal()
+    {
+        var watcher = new ScriptedWatcher(blockUntilCancelled: true);
+        var host = new AttributionHost(watcher);
+        host.Start();
+
+        host.Dispose();
+
+        Assert.True(watcher.Completed.Wait(TimeSpan.FromSeconds(5)));
+        Assert.False(host.Health.Running);
+        Assert.False(host.Health.Refused);
+        Assert.Equal(EtwFailureCode.None, host.Health.Failure);
+    }
+
+    [Fact]
+    public void AnUnrequestedCancellationIsAnUnexpectedFailureNotANormalShutdown()
+    {
+        var watcher = new ScriptedWatcher(failure: new OperationCanceledException("not requested"));
+        using var host = new AttributionHost(watcher);
+
+        host.Start();
+
+        Assert.True(watcher.Completed.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => !host.Health.Running, TimeSpan.FromSeconds(5)));
+        Assert.Equal(EtwFailureCode.Unexpected, host.Health.Failure);
+        Assert.False(host.Health.Refused);
+    }
+
     private sealed class ScriptedWatcher(
         IReadOnlyList<WriteObservation>? writes = null,
         IReadOnlyList<UnattributedWrite>? misses = null,
         bool refuse = false,
-        bool blockUntilCancelled = false) : IWriteWatcher
+        bool blockUntilCancelled = false,
+        Exception? failure = null) : IWriteWatcher
     {
         private int _starts;
 
@@ -155,32 +262,65 @@ public sealed class AttributionHostTests
 
         public ManualResetEventSlim Delivered { get; } = new();
 
+        public ManualResetEventSlim Completed { get; } = new();
+
         public void Watch(
             Action<WriteObservation> onWrite,
             Action<UnattributedWrite>? onUnattributed,
             CancellationToken token)
         {
             Interlocked.Increment(ref _starts);
-            if (refuse)
+            try
             {
+                if (refuse)
+                {
+                    Delivered.Set();
+                    throw new UnauthorizedAccessException("elevation required");
+                }
+
+                foreach (var write in writes ?? [])
+                {
+                    onWrite(write);
+                }
+                foreach (var miss in misses ?? [])
+                {
+                    onUnattributed?.Invoke(miss);
+                }
                 Delivered.Set();
-                throw new UnauthorizedAccessException("elevation required");
-            }
 
-            foreach (var write in writes ?? [])
-            {
-                onWrite(write);
-            }
-            foreach (var miss in misses ?? [])
-            {
-                onUnattributed?.Invoke(miss);
-            }
-            Delivered.Set();
+                if (blockUntilCancelled)
+                {
+                    token.WaitHandle.WaitOne();
+                    token.ThrowIfCancellationRequested();
+                }
 
-            if (blockUntilCancelled)
+                if (failure is not null)
+                {
+                    throw failure;
+                }
+            }
+            finally
             {
-                token.WaitHandle.WaitOne();
+                Completed.Set();
             }
         }
+    }
+
+    private static Exception EtwFailure(int hresult)
+    {
+        try
+        {
+            System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(hresult);
+        }
+        catch (UnauthorizedAccessException failure)
+        {
+            return failure;
+        }
+        catch (System.Runtime.InteropServices.COMException failure)
+        {
+            return failure;
+        }
+
+        throw new InvalidOperationException($"HRESULT 0x{hresult:X8} did not produce a COM exception.");
     }
 }

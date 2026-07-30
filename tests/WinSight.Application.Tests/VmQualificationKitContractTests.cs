@@ -1,0 +1,103 @@
+using Xunit;
+
+namespace WinSight.Application.Tests;
+
+/// <summary>
+/// The clean-VM runbook is a release-security control. These source contracts keep the observed
+/// VM corrections from drifting back into assumptions hidden in prose.
+/// </summary>
+public sealed class VmQualificationKitContractTests
+{
+    private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
+    [Fact]
+    public void KitBindsNativeArchitectureArtifactPeHashesProtectedStagingAndExternalEvidence()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.Contains("Win32_Processor", kit, StringComparison.Ordinal);
+        Assert.Contains("winsight-win-$NativeArchitecture", kit, StringComparison.Ordinal);
+        Assert.Contains("$ExpectedInstallerSha256", kit, StringComparison.Ordinal);
+        Assert.Contains("$ProtectedArtifactRoot", kit, StringComparison.Ordinal);
+        Assert.Contains("$ProtectedPayloadRoot", kit, StringComparison.Ordinal);
+        Assert.Contains("Test-PeArchitecture.ps1", kit, StringComparison.Ordinal);
+        Assert.Contains("$CandidateExecutables = @($Cli, $Dashboard, $Service)", kit, StringComparison.Ordinal);
+        Assert.Contains("Assert-CandidateFiles", kit, StringComparison.Ordinal);
+        Assert.Contains("EvidenceStorageOutsideSnapshot", kit, StringComparison.Ordinal);
+        Assert.Contains("protected-candidate.sha256", kit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void KitUsesTheExactEtwModuleAndProvidesFinalAuditOnlyIpcLifecycle()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.Contains("WinSightEtwValidation.psm1", kit, StringComparison.Ordinal);
+        Assert.Contains("Get-WinSightEtwSessionNames", kit, StringComparison.Ordinal);
+        Assert.Contains("Assert-WinSightEtwSessionsAbsent", kit, StringComparison.Ordinal);
+        Assert.DoesNotContain("Get-WinSightEtwInventory", kit, StringComparison.Ordinal);
+        Assert.Contains("& $Service install", kit, StringComparison.Ordinal);
+        Assert.Contains("$NativeSystemDirectory = [Environment]::SystemDirectory", kit, StringComparison.Ordinal);
+        Assert.Contains("$ScExe = Join-Path $NativeSystemDirectory 'sc.exe'", kit, StringComparison.Ordinal);
+        Assert.Contains("& $ScExe start WinSightFirewall", kit, StringComparison.Ordinal);
+        Assert.Contains("$GitExe = Join-Path $ProgramFilesRoot 'Git\\cmd\\git.exe'", kit, StringComparison.Ordinal);
+        Assert.Contains("$GhExe = Join-Path $ProgramFilesRoot 'GitHub CLI\\gh.exe'", kit, StringComparison.Ordinal);
+        Assert.Contains("$NativePowerShellExe", kit, StringComparison.Ordinal);
+        Assert.DoesNotContain("$env:SystemRoot", kit, StringComparison.Ordinal);
+        Assert.Contains("Test-IpcBoundary.ps1", kit, StringComparison.Ordinal);
+        Assert.Contains("& $Service uninstall", kit, StringComparison.Ordinal);
+        Assert.Contains("SCM 1060", kit, StringComparison.Ordinal);
+        Assert.Contains("$installerArguments = @(", kit, StringComparison.Ordinal);
+        Assert.Contains("$installerArguments += '-RequireSigned'", kit, StringComparison.Ordinal);
+        Assert.DoesNotContain("$installerParams = @{", kit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EtwRunbookBindsCapturedProcessesToExactSessionsAndExitEvidence()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.Contains("Get-WinSightEtwSessionForProcess", kit, StringComparison.Ordinal);
+        Assert.Contains(".Refresh()", kit, StringComparison.Ordinal);
+        Assert.Contains(".HasExited", kit, StringComparison.Ordinal);
+        Assert.Contains(".WaitForExit", kit, StringComparison.Ordinal);
+        Assert.Contains(".ExitCode", kit, StringComparison.Ordinal);
+        Assert.Contains("Assert-WinSightEtwSessionsAbsent", kit, StringComparison.Ordinal);
+        Assert.Contains("Get-WinSightRuntimeCrashEvents", kit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void S1ResumeBootstrapRevalidatesExistingProtectedStateWithoutRedeployingIt()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+        var start = kit.IndexOf("### Bootstrap de reprise S1", StringComparison.Ordinal);
+        var end = kit.IndexOf("## 6.", StringComparison.Ordinal);
+
+        Assert.True(start >= 0 && end > start, "Missing bounded S1 resume bootstrap.");
+        var bootstrap = kit[start..end];
+
+        Assert.Contains("function Initialize-WinSightS1QualificationContext", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("$ProtectedRoot", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("protected-candidate.sha256", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("Count -ne 10", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("Resolve-Path", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("Get-FileHash", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("rev-parse HEAD", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("status --porcelain", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("$CandidateHash = @{}", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("function Assert-CandidateFiles", bootstrap, StringComparison.Ordinal);
+
+        var assertCandidate = bootstrap.IndexOf("Assert-CandidateFiles", StringComparison.Ordinal);
+        var importModule = bootstrap.IndexOf("Import-Module", StringComparison.Ordinal);
+        Assert.True(assertCandidate >= 0 && importModule > assertCandidate,
+            "The S1 bootstrap must rehash before importing a protected module.");
+        Assert.DoesNotContain("git clone", bootstrap, StringComparison.Ordinal);
+        Assert.DoesNotContain("Expand-Archive", bootstrap, StringComparison.Ordinal);
+        Assert.DoesNotContain("racine protégée doit être absente", bootstrap, StringComparison.Ordinal);
+    }
+}

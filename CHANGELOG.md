@@ -2,6 +2,19 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### ETW observers survive quota and orphan-session failures
+
+- Attribution, outbound observation and DNS now share a conservative ETW session lifecycle.
+  Versioned PID/process-start names prevent PID reuse from becoming ownership evidence,
+  `NoRestartOnCreate` preserves concurrent live observers, and only exact proven WinSight orphans
+  are explicitly stopped.
+- Non-catastrophic ETW failures are contained at the dashboard, firewall-service and CLI boundaries.
+  Resource exhaustion such as `0x800705AA` degrades observation with a stable redacted reason
+  instead of terminating the elevated dashboard or the LocalSystem service.
+- VM qualification is candidate-bound and fail-closed for flat artifacts, native architecture,
+  integrity exit 1, AuditOnly IPC and abrupt-termination ETW recovery. Window Close is tested as
+  tray hide; tray Exit is the normal cleanup path.
+
 ### Antivirus posture no longer invents certainty from an undocumented state word
 - Production inventory now uses Microsoft's documented `IWSCProductList`/`IWscProduct` COM
   interfaces with the antivirus provider only. The former `root\SecurityCenter2` `productState`

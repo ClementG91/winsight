@@ -252,42 +252,39 @@ public static class Adapters
         var attributed = 0;
         var unknownProcess = 0;
         var unresolvedTarget = 0;
-        try
-        {
-            new WriteAttributionWatcher(scope.ShouldRecord).Watch(
-                observation =>
-                {
-                    attributed++;
-                    Console.WriteLine(
-                        $"  {Path.GetFileName(observation.ExecutablePath)} (pid {observation.ProcessId})  →  {observation.Target}");
-                },
-                // Printed as well as counted: a watcher that only shows what it managed to attribute
-                // cannot be told apart from one that is missing everything.
-                miss =>
-                {
-                    if (miss.Reason == UnattributedReason.UnknownProcess)
+        return RunEtwWatch(
+            () =>
+            {
+                new WriteAttributionWatcher(scope.ShouldRecord).Watch(
+                    observation =>
                     {
-                        unknownProcess++;
-                        Console.WriteLine($"  [unknown process {miss.ProcessId}]  →  {miss.Target}");
-                    }
-                    else
+                        attributed++;
+                        Console.WriteLine(
+                            $"  {Path.GetFileName(observation.ExecutablePath)} (pid {observation.ProcessId})  →  {observation.Target}");
+                    },
+                    // Printed as well as counted: a watcher that only shows what it managed to
+                    // attribute cannot be told apart from one that is missing everything.
+                    miss =>
                     {
-                        unresolvedTarget++;
-                        Console.WriteLine(miss.Target is null
-                            ? $"  [unannounced key handle, pid {miss.ProcessId}]"
-                            : $"  [untranslatable key, pid {miss.ProcessId}]  →  {miss.Target}");
-                    }
-                },
-                cts.Token);
-            Console.WriteLine(
-                $"attributed {attributed}, unknown process {unknownProcess}, unresolved target {unresolvedTarget}");
-            return 0;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine("Live attribution (ETW) requires Administrator privileges.");
-            return 1;
-        }
+                        if (miss.Reason == UnattributedReason.UnknownProcess)
+                        {
+                            unknownProcess++;
+                            Console.WriteLine($"  [unknown process {miss.ProcessId}]  →  {miss.Target}");
+                        }
+                        else
+                        {
+                            unresolvedTarget++;
+                            Console.WriteLine(miss.Target is null
+                                ? $"  [unannounced key handle, pid {miss.ProcessId}]"
+                                : $"  [untranslatable key, pid {miss.ProcessId}]  →  {miss.Target}");
+                        }
+                    },
+                    cts.Token);
+                Console.WriteLine(
+                    $"attributed {attributed}, unknown process {unknownProcess}, unresolved target {unresolvedTarget}");
+            },
+            Console.Error,
+            cts.Token);
     }
 
     /// <summary>Runs the live DNS (ETW) watcher, printing queries until Ctrl+C.</summary>
@@ -300,15 +297,47 @@ public static class Adapters
             cts.Cancel();
         };
         Console.WriteLine("Watching DNS queries (ETW), Ctrl+C to stop.");
+        return RunEtwWatch(
+            () => new DnsEtwWatcher().Watch(
+                e => Console.WriteLine($"  {e.Type,-5} {e.Name}  (pid {e.ProcessId})"), cts.Token),
+            Console.Error,
+            cts.Token);
+    }
+
+    /// <summary>
+    /// Closes the CLI ETW exception boundary without exposing localized native messages, paths or
+    /// stacks. Internal so deterministic tests can inject failures without opening a real session.
+    /// </summary>
+    internal static int RunEtwWatch(
+        Action watch,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(watch);
+        ArgumentNullException.ThrowIfNull(error);
+
         try
         {
-            new DnsEtwWatcher().Watch(
-                e => Console.WriteLine($"  {e.Type,-5} {e.Name}  (pid {e.ProcessId})"), cts.Token);
+            watch();
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return 0;
+            }
+
+            // A live ETW pump is expected to block until the caller cancels it. A spontaneous
+            // return means observation ended unexpectedly and must not be reported as success.
+            error.WriteLine(
+                $"[{EtwFailure.Token(EtwFailureCode.Unexpected)}] Live ETW observation is unavailable.");
+            return 1;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
             return 0;
         }
-        catch (UnauthorizedAccessException)
+        catch (Exception ex) when (!EtwFailure.IsCatastrophic(ex))
         {
-            Console.Error.WriteLine("Live DNS (ETW) requires Administrator privileges.");
+            var failure = EtwFailure.Classify(ex);
+            error.WriteLine($"[{EtwFailure.Token(failure)}] Live ETW observation is unavailable.");
             return 1;
         }
     }

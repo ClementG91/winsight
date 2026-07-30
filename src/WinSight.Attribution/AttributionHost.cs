@@ -1,5 +1,7 @@
 using System.Security.Principal;
 
+using WinSight.NetMonitor;
+
 namespace WinSight.Attribution;
 
 /// <summary>What the watcher has managed to see, so its blind spots are readable.</summary>
@@ -34,6 +36,13 @@ public sealed record AttributionHealth(
     long UntranslatablePath,
     bool Refused)
 {
+    /// <summary>
+    /// Stable redacted reason the watcher stopped, or <see cref="EtwFailureCode.None"/> for normal
+    /// operation and requested shutdown. Kept outside the primary record contract so the original
+    /// six-argument constructor and six-value <c>Deconstruct</c> remain binary/source compatible.
+    /// </summary>
+    public EtwFailureCode Failure { get; init; } = EtwFailureCode.None;
+
     /// <summary>Every write seen but not attributed, for a one-line "how blind am I?" answer.</summary>
     public long Unattributed => UnknownProcess + UnannouncedKey + UntranslatablePath;
 }
@@ -63,12 +72,14 @@ public sealed class AttributionHost : IDisposable
     private CancellationTokenSource? _cancellation;
     private Thread? _worker;
     private bool _disposed;
+    private bool _started;
     private long _attributed;
     private long _unknownProcess;
     private long _unannouncedKey;
     private long _untranslatablePath;
     private bool _refused;
     private bool _running;
+    private EtwFailureCode _failure;
 
     public AttributionHost(IWriteWatcher? watcher = null, WriteAttributionIndex? index = null)
     {
@@ -102,7 +113,10 @@ public sealed class AttributionHost : IDisposable
                     Interlocked.Read(ref _unknownProcess),
                     Interlocked.Read(ref _unannouncedKey),
                     Interlocked.Read(ref _untranslatablePath),
-                    _refused);
+                    _refused)
+                {
+                    Failure = _failure,
+                };
             }
         }
     }
@@ -110,19 +124,22 @@ public sealed class AttributionHost : IDisposable
     /// <summary>Begins watching. Safe to call twice; the second call does nothing.</summary>
     public void Start()
     {
-        CancellationToken token;
+        CancellationTokenSource cancellation;
         lock (_gate)
         {
-            if (_disposed || _cancellation is not null)
+            if (_disposed || _started)
             {
                 return;
             }
-            _cancellation = new CancellationTokenSource();
+            _started = true;
+            cancellation = new CancellationTokenSource();
+            _cancellation = cancellation;
             _running = true;
             _refused = false;
-            token = _cancellation.Token;
+            _failure = EtwFailureCode.None;
         }
 
+        var token = cancellation.Token;
         // The session blocks its thread until stopped, so it cannot run on the caller's — and for the
         // same reason as AvWatchHost it must not run on the thread pool: a work item that never
         // returns holds a pool thread for the life of the dashboard, and a saturated pool hands one
@@ -130,11 +147,16 @@ public sealed class AttributionHost : IDisposable
         var worker = new Thread(() =>
         {
             var refused = false;
+            var failure = EtwFailureCode.None;
             try
             {
                 _watcher.Watch(OnWrite, OnUnattributed, token);
+                if (!token.IsCancellationRequested)
+                {
+                    failure = EtwFailureCode.Unexpected;
+                }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
                 // Normal shutdown.
             }
@@ -143,6 +165,13 @@ public sealed class AttributionHost : IDisposable
                 // Not elevated. Recorded as a refusal rather than silence, so a caller can say
                 // "attribution is unavailable" instead of "nothing was written".
                 refused = true;
+                failure = EtwFailureCode.AccessDenied;
+            }
+            catch (Exception ex) when (!EtwFailure.IsCatastrophic(ex))
+            {
+                // ETW is observational enrichment. A native/resource/collision failure, or a bad
+                // callback, must never escape this dedicated thread and terminate the dashboard.
+                failure = EtwFailure.Classify(ex);
             }
             finally
             {
@@ -151,19 +180,37 @@ public sealed class AttributionHost : IDisposable
                 lock (_gate)
                 {
                     _refused = refused;
+                    _failure = failure;
                     _running = false;
+                    if (ReferenceEquals(_cancellation, cancellation))
+                    {
+                        _cancellation = null;
+                    }
                 }
+
+                // The worker owns this source. Dispose never tears its token state out from under a
+                // watcher that failed to stop within the bounded join.
+                cancellation.Dispose();
             }
         })
         {
             IsBackground = true,
             Name = "winsight-attribution-watch",
         };
-        worker.Start();
-
         lock (_gate)
         {
+            if (_disposed)
+            {
+                _running = false;
+                if (ReferenceEquals(_cancellation, cancellation))
+                {
+                    _cancellation = null;
+                }
+                cancellation.Dispose();
+                return;
+            }
             _worker = worker;
+            worker.Start();
         }
     }
 
@@ -192,7 +239,6 @@ public sealed class AttributionHost : IDisposable
             _disposed = true;
             cancellation = _cancellation;
             worker = _worker;
-            _cancellation = null;
             _worker = null;
         }
 
@@ -201,12 +247,18 @@ public sealed class AttributionHost : IDisposable
             return;
         }
 
-        cancellation.Cancel();
+        try
+        {
+            cancellation.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The worker completed between the state snapshot and cancellation.
+        }
         // Waiting before disposing the source matters: the watch is blocked on this token's wait
         // handle, and disposing it out from under that thread is how a clean shutdown turns into an
         // ObjectDisposedException on a background thread nobody is watching.
-        worker?.Join(StopTimeout);
-        cancellation.Dispose();
+        _ = worker?.Join(StopTimeout);
     }
 
     private void OnWrite(WriteObservation observation)

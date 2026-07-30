@@ -26,7 +26,7 @@ public sealed class DnsEtwWatcher
     /// </summary>
     public void Watch(Action<DnsQueryEvent> onEvent, CancellationToken token)
     {
-        using var session = new TraceEventSession($"WinSight-DNS-{Environment.ProcessId}");
+        using var session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Dns);
         using var stop = token.Register(() =>
         {
             try

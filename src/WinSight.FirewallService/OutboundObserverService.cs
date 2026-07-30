@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using WinSight.Firewall;
@@ -32,7 +30,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     /// <summary>How long a policy snapshot is reused before the store is read again.</summary>
     private static readonly TimeSpan PolicyRefreshInterval = TimeSpan.FromSeconds(5);
 
-    private readonly OutboundConnectionWatcher _watcher;
+    private readonly IOutboundConnectionWatcher _watcher;
     private readonly FirewallPolicyStore _store;
     private readonly PendingOutboundLog _log;
     private readonly ILogger<OutboundObserverService> _logger;
@@ -51,7 +49,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     private int _unattributed;
 
     public OutboundObserverService(
-        OutboundConnectionWatcher watcher,
+        IOutboundConnectionWatcher watcher,
         FirewallPolicyStore store,
         PendingOutboundLog log,
         ILogger<OutboundObserverService> logger,
@@ -90,14 +88,21 @@ public sealed partial class OutboundObserverService : BackgroundService
         {
             LogWatching();
             _watcher.Watch(OnConnection, OnUnattributedConnection, stoppingToken);
+            if (!stoppingToken.IsCancellationRequested)
+            {
+                // A blocking ETW pump should return only after requested shutdown. Returning early
+                // is observational failure just like a contained exception.
+                LogUnavailable();
+            }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             // Normal shutdown.
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or Win32Exception or InvalidOperationException)
+        catch (Exception ex) when (!EtwFailure.IsCatastrophic(ex))
         {
-            // The pipe endpoint is worth more than this feature: report and stand down.
+            // ETW observation is optional. Emit one fixed token without attaching the native
+            // exception, then let this hosted observer complete while IPC and enforcement remain.
             LogUnavailable();
         }
     }

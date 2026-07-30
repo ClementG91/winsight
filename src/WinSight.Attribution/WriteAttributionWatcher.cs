@@ -58,8 +58,9 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
         var processes = new ProcessPathIndex();
         var normalizer = new KernelPathNormalizer(VolumeMap.Current(), CurrentUserSid());
 
-        // A private name, so WinSight never takes the shared NT Kernel Logger from another tool.
-        using var session = new TraceEventSession($"WinSight-Attribution-{Environment.ProcessId}");
+        // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
+        // silently replaces another live WinSight owner.
+        using var session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Attribution);
         using var stop = token.Register(() =>
         {
             try
