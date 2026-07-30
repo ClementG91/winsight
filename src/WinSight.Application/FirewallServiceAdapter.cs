@@ -17,6 +17,11 @@ public static class FirewallServiceAdapter
     /// <summary>A gateway over the real, authenticated firewall service pipe.</summary>
     public static FirewallServiceGateway CreateGateway() => new(new FirewallServiceClient());
 
+    /// <summary>
+    /// A posture-only view of the same pipe, for callers that must never be able to change policy.
+    /// </summary>
+    public static IFirewallPostureReader CreatePostureReader() => new FirewallPostureReader(CreateGateway());
+
     /// <summary>Maps a service view into a report: one status line plus one line per policy.</summary>
     public static ToolReport BuildReport(FirewallServiceView view)
     {

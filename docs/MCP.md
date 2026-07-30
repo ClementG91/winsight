@@ -16,6 +16,16 @@ registry editing, firewall mutation or WFP policy changes. VirusTotal and every
 other network lookup are disabled inside MCP scans even when `WINSIGHT_VT_KEY` is
 present in the parent environment.
 
+The process opens one channel, and only one. `winsight_outbound_firewall` connects
+to the local WinSight firewall service over its authenticated named pipe to read
+posture, sending status and list commands only. The privileged service authorises by
+the caller's Windows identity and refuses every mutation to an unelevated caller, so
+the MCP process has exactly the reach an unelevated dashboard has and no path to arm
+or disarm the machine. Inside WinSight the tool is handed a posture-only interface
+rather than the full service gateway, so the restriction does not rest on nobody
+adding the wrong call later. The capability document declares this channel as
+`firewallServiceIpc`.
+
 Remember that the configured AI client may send tool results to its model provider.
 That transfer is controlled by the AI client, not by WinSight. Review the client's
 privacy policy and tool-confirmation UI before enabling evidence access.
@@ -47,6 +57,13 @@ PowerShell, `cmd.exe`, an HTTP relay or a network tunnel.
 | `winsight_overview` | Runs the balanced seven-scanner overview. | Summaries/counts; noteworthy-only. |
 | `winsight_scan` | Runs one named scanner, including large opt-in inventories. | Summaries/counts; noteworthy-only. |
 | `winsight_alerts` | Reads WinSight's own real-time detection journal (persistence and ransomware activity its background protection flagged, including while unattended). History, not a live scan. | Summaries/counts; noteworthy-only. |
+| `winsight_outbound_firewall` | Reads the posture of WinSight's own opt-in outbound firewall service: reachability, requested mode, effective runtime state, applications awaiting a decision and stored per-application policies. Distinct from the `firewall` scanner, which inventories Microsoft Defender Firewall rules. | Posture summary and counts. |
+
+Two fields of the posture report are deliberately separate and must not be merged
+into one sentence. `mode` is what an operator requested; `effectiveState` is what is
+running. Traffic is filtered only when `effectiveState` is `Active`; `Degraded` means
+enforcement was requested and is not filtering. When `available` is `False`, WinSight
+could not verify the service, which is not a finding that outbound filtering is off.
 
 The server also publishes `winsight://capabilities` and
 `winsight://security-model` as MCP resources.
@@ -67,20 +84,26 @@ trusted to receive local paths and command lines.
 
 ## Protocol and compatibility
 
-As verified on **2026-07-14**, WinSight pins the
-[latest published stable MCP revision](https://modelcontextprotocol.io/specification/2025-11-25),
-`2025-11-25`, through version **1.4.1** of the
+As verified on **2026-07-30**, WinSight speaks the current MCP revision,
+[`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28), through
+version **2.0.0** of the
 [official C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk).
-Packaging and installer tests perform a real initialization,
-list every tool, verify the read-only annotations and invoke the capability tool on
-native x64 and Arm64 runners.
 
-The date in a protocol revision is not the age of this documentation. A breaking
-[`2026-07-28` release candidate](https://blog.modelcontextprotocol.io/posts/2026-07-28-release-candidate/)
-exists, but its final specification is scheduled for 2026-07-28. WinSight does not
-ship preview protocol behavior in a production release. Migration will be evaluated
-after the final revision and stable SDK support are published, with the existing
-subprocess interoperability tests retained as the compatibility gate.
+The server deliberately does not pin a single revision. `2026-07-28` removed the
+`initialize` handshake in favour of a stateless model where a client declares its
+version per request, so offering that revision alone would answer every client still
+on `2025-11-25` or earlier with `Protocol version '2026-07-28' is not available
+through the initialize handshake` - unreachable rather than modern. The specification
+expects both sides to support several revisions at once, so the SDK negotiates:
+`server/discover` advertises `2026-07-28` and carries the protocol version, client
+capabilities and client identity in `_meta`, while the handshake continues to serve
+older clients.
+
+Packaging and installer tests exercise both paths on native x64 and Arm64 runners:
+a stateless `server/discover` and `tools/list`, then a real `2025-11-25`
+initialization, listing every tool, verifying the read-only annotations and invoking
+the capability, scan, alert and posture tools. Covering only one path would hide
+exactly the failure described above.
 
 The MCP surface follows the same report semantics as the CLI and dashboard. A
 `notable` item is evidence worth investigating, not proof of compromise and not a

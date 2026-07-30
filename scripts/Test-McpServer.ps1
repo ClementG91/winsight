@@ -95,7 +95,7 @@ try
         params = @{ _meta = $statelessMeta }
     }
     $statelessTools = @((Receive-McpMessage).result.tools | ForEach-Object { $_.name })
-    foreach ($expected in @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts"))
+    foreach ($expected in @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts", "winsight_outbound_firewall"))
     {
         if ($statelessTools -notcontains $expected)
         {
@@ -125,7 +125,7 @@ try
     Send-McpMessage @{ jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{} }
     $toolList = Receive-McpMessage
     $tools = @($toolList.result.tools)
-    $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts")
+    $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts", "winsight_outbound_firewall")
     if ($tools.Count -ne $expectedTools.Count)
     {
         throw "Expected $($expectedTools.Count) MCP tools, got $($tools.Count)."
@@ -153,6 +153,12 @@ try
         @($capabilities.result.structuredContent.scanners).Count -ne 15)
     {
         throw "MCP capability result violates the local read-only contract."
+    }
+    # The firewall pipe is the one channel this process opens, and the capability document is where
+    # an operator reads that. Undeclaring it would make the document understate the process.
+    if (-not $capabilities.result.structuredContent.firewallServiceIpc)
+    {
+        throw "MCP capability result does not declare the firewall service channel."
     }
 
     Send-McpMessage @{
@@ -182,6 +188,25 @@ try
         $alertReports.Count -ne 1 -or $alertReports[0].tool -ne "alerts")
     {
         throw "MCP alerts tool did not preserve the summary-only disclosure contract."
+    }
+
+    # Posture must answer on a machine where the privileged firewall service is not installed, which
+    # is the packaging runner and most first launches. The summary vocabulary is pinned because the
+    # difference between "Unavailable" and "AuditOnly" is the difference between "WinSight could not
+    # see the service" and "the service is up and blocking nothing", and a client will repeat it.
+    Send-McpMessage @{
+        jsonrpc = "2.0"
+        id = 6
+        method = "tools/call"
+        params = @{ name = "winsight_outbound_firewall"; arguments = @{} }
+    }
+    $posture = Receive-McpMessage
+    $postureReports = @($posture.result.structuredContent.reports)
+    if ($posture.result.structuredContent.evidenceIncluded -or
+        $postureReports.Count -ne 1 -or $postureReports[0].tool -ne "outbound-firewall" -or
+        @("Unavailable", "AuditOnly", "Active", "Degraded") -notcontains $postureReports[0].summary)
+    {
+        throw "MCP outbound firewall tool did not report a bounded read-only posture."
     }
 }
 finally

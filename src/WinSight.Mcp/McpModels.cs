@@ -16,6 +16,9 @@ public sealed record McpCapabilitiesResult(
     bool ReadOnly,
     bool NetworkListener,
     bool NetworkReputationLookups,
+    // Declared for the same reason as the two flags above: an operator auditing this server should
+    // be able to read every channel it opens out of the capability document. This one is true.
+    bool FirewallServiceIpc,
     bool SensitiveEvidenceEnabled,
     List<McpScannerCapability> Scanners);
 
