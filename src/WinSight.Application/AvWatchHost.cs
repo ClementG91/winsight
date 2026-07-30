@@ -63,12 +63,18 @@ public sealed class AvWatchHost : IDisposable
             {
                 // Normal shutdown.
             }
-            catch (Exception ex) when (ex is UnauthorizedAccessException
-                                         or System.Security.SecurityException
-                                         or IOException)
+            catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
             {
-                // Windows denied the capability records. Watching stops; everything else in the
+                // Windows denied the capability records, a subscriber threw, or the reader failed in
+                // a way this host cannot enumerate in advance. Watching stops; everything else in the
                 // dashboard, including the on-demand camera/mic scan, is unaffected.
+                //
+                // The breadth is the point, and it is a consequence of moving this loop off the
+                // thread pool. A pool work item that throws produces an unobserved task exception the
+                // runtime ignores; a dedicated thread that throws terminates the process. Listing
+                // three exception types was adequate under the old model and became a way for a
+                // camera-watcher fault to take the whole dashboard down with it, losing every other
+                // monitor at once. Only genuinely unrecoverable failures are left to propagate.
             }
         })
         {
