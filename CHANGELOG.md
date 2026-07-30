@@ -2,6 +2,18 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### A scanner test measured machine churn instead of the filter it named
+- `TheFlaggedViewNeverExceedsTheFullOne` ran each scanner twice and compared the counts. A machine
+  moves between two scans, so a runner reported `modules: flagged returned 133 of 113` because
+  processes started while the two ran. Nothing was wrong with the product.
+- It was **vacuous exactly where it failed**: `modules` ignores `--flagged` outright, since an
+  unsigned module loaded into a running process is never routine, so the two runs differed only by
+  elapsed time. A red result there could never have meant what the failure message claimed.
+- It now takes one observation and asserts what `--flagged` actually promises: every item in a
+  flagged report is notable, and the header agrees with the body. That holds on any machine and
+  catches the leak the count comparison never could, an `Info` item surviving the filter. Verified
+  against all fifteen scanners on a live machine before the assertion was written.
+
 ### The outbound firewall's posture is visible to MCP clients
 - An AI client asking "what is the security posture of this machine" could reach all fifteen scanners
   and the detection journal, and could not see **WinSight's own outbound firewall** at all: not whether
