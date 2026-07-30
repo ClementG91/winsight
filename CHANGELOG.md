@@ -2,6 +2,31 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### v0.10.6 — the first release under the explicit unsigned policy
+- **SignPath Foundation declined the application on 2026-07-29.** The reason was visibility, not
+  quality: the programme requires established public trust signals — stars, forks, contributors,
+  external references — and this project does not have them yet. That is a fair reading of a young
+  repository, and it is recorded here rather than paraphrased away.
+- The per-release waiver model is **retired**, not renewed. Two waivers had already been granted and
+  the second was written as the last; a third would have made "one release only" meaningless. What
+  replaces it is an explicit, dated repository policy: releases are unsigned, `REQUIRE_SIGNED_RELEASE`
+  is `false`, and the workflow refuses any value other than an explicit `true` or `false` so the
+  posture can never be ambiguous. `-DisableSignature` makes an accidental signature impossible even if
+  stale secrets survive somewhere, and it is mutually exclusive with `-RequireSignature`.
+- **Windows will show an unknown publisher, and every surface says so.** This is a real limitation of
+  the product, not a footnote: the checksums and GitHub attestations prove where the bytes came from,
+  they do not give the operating system a publisher to trust.
+- **What v0.10.5 users gain.** That release reports an unknown antivirus state as fact — "nothing is
+  scanning" from data that established nothing. This release replaces that with Microsoft's documented
+  Security Center interfaces and keeps indeterminate states indeterminate. For a tool whose only job
+  is to tell the truth about a machine, that is the reason to ship rather than wait.
+- Also carried: the ETW session lifecycle hardening, the Controlled Folder Access contract measured
+  against the canonical antivirus item, native Arm64 test coverage on every pull request, and the
+  removal of blocking disk I/O from the ETW trace callback.
+- **Still not production-ready, and the verdict has not moved.** The WFP/SCM qualification must be
+  re-run against this candidate, the privileged Arm64 gates remain `NOT_RUN` for want of hardware, and
+  an unsigned release closes no signing gate.
+
 ### ETW observers survive quota and orphan-session failures
 
 - Attribution, outbound observation and DNS now share a conservative ETW session lifecycle.
