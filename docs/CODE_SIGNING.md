@@ -26,9 +26,9 @@ What every release *does* carry today:
 
 - **SHA-256 checksums** for every artifact, generated in the build job and **re-verified in a separate
   job** before publication.
-- **GitHub build provenance attestation** — a cryptographic statement, signed by GitHub's OIDC
+- **GitHub build provenance attestation** - a cryptographic statement, signed by GitHub's OIDC
   identity, binding the artifact to the workflow, repository and commit that produced it.
-- **SBOM attestation** — the dependency inventory, attested the same way.
+- **SBOM attestation** - the dependency inventory, attested the same way.
 
 Provenance is not a substitute for Authenticode. It proves *where the bytes came from*; Authenticode
 would provide a publisher identity to Windows. Users must verify the SHA-256 and GitHub attestations
@@ -87,8 +87,8 @@ leave every published hash describing bytes that no longer exist.
 
 ## Binary metadata
 
-Every future signed binary would carry the stable product identity — product name, company, copyright
-and version — set centrally in `Directory.Build.props` rather than derived from an assembly name. The
+Every future signed binary would carry the stable product identity - product name, company, copyright
+and version - set centrally in `Directory.Build.props` rather than derived from an assembly name. The
 current unsigned binaries expose that metadata but have no verified Windows publisher identity.
 
 ## Reporting a problem with a signature

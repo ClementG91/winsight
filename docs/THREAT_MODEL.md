@@ -1,6 +1,6 @@
 # Threat model
 
-What WinSight protects, from whom, and — just as importantly — what it does not. Every claim here
+What WinSight protects, from whom, and - just as importantly - what it does not. Every claim here
 points at code or at a validation record; nothing is aspirational.
 
 ## What WinSight is
@@ -62,7 +62,7 @@ Enforced at two independent layers: the pipe ACL (SYSTEM and Administrators full
 read/write, **Network denied**) and a per-request capability check that refuses a mutation before it
 is dispatched.
 
-Verified end to end on real hardware — an unprivileged token reads status and is refused the mutation:
+Verified end to end on real hardware - an unprivileged token reads status and is refused the mutation:
 [`docs/validation/2026-07-23-ipc-boundary-c9177cd.md`](validation/2026-07-23-ipc-boundary-c9177cd.md).
 
 ## Adversaries considered
@@ -114,7 +114,7 @@ identity is absent and users must verify hashes and attestations before executio
 
 The store lives under an ACL-protected machine-data root whose trust is checked before every read and
 write. A corrupt, oversized, truncated, unknown-schema or future-schema file **recovers to audit-only
-with a diagnostic** rather than being partially honoured — deliberately failing towards "not
+with a diagnostic** rather than being partially honoured - deliberately failing towards "not
 filtering" rather than cutting a machine off the network on a parse error.
 
 The runtime state is re-verified against the live WFP engine on every status read; anything short of
@@ -142,7 +142,7 @@ means no antivirus was registered. WinSight does not register, configure or reme
 | An adversary already running as SYSTEM | They outrank every control WinSight has |
 | Kernel-mode malware, rootkits, hypervisor attacks | No driver; user-mode only |
 | Physical access, DMA, offline disk tampering | Outside a user-mode tool's reach |
-| Detection evasion by malware | WinSight is triage, not EDR — a missed technique is a coverage gap |
+| Detection evasion by malware | WinSight is triage, not EDR - a missed technique is a coverage gap |
 | Malicious Windows updates or a compromised OS | WinSight trusts the platform it runs on |
 | A compromised GitHub account or signing key | Provenance proves which workflow built it, not that the workflow was trustworthy |
 
@@ -153,7 +153,7 @@ needs signing and a separate safety programme.
 ## Privacy
 
 No telemetry, no analytics, no automatic network calls. The single outbound connection is a
-VirusTotal hash lookup, which is explicit, user-initiated, rate-limited, and sends a hash — never file
+VirusTotal hash lookup, which is explicit, user-initiated, rate-limited, and sends a hash - never file
 contents. Executable paths are preserved verbatim in reports as forensic evidence and are not
 transmitted anywhere.
 

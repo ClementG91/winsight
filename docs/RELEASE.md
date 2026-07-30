@@ -1,6 +1,6 @@
 # Release process
 
-How a WinSight release is cut, signed, attested and verified — and how someone who did not build it
+How a WinSight release is cut, signed, attested and verified - and how someone who did not build it
 can check that what they downloaded is what this repository produced.
 
 ## What a release contains
@@ -28,12 +28,12 @@ Plus GitHub **build provenance** and **SBOM attestations**, signed by GitHub's O
 git tag v0.11.0 && git push origin v0.11.0
 ```
 
-`release.yml` then builds both architectures — x64 on the pinned `windows-2025` image, Arm64 on the
-**native** `windows-11-arm` runner — runs the full installer lifecycle on each, signs, checksums,
+`release.yml` then builds both architectures - x64 on the pinned `windows-2025` image, Arm64 on the
+**native** `windows-11-arm` runner - runs the full installer lifecycle on each, signs, checksums,
 attests and publishes.
 
 Runner images are pinned rather than following `windows-latest`. The label resolves to `windows-2025`
-today, so the pin changes nothing now — that is the point. It moves on GitHub's schedule, and this
+today, so the pin changes nothing now - that is the point. It moves on GitHub's schedule, and this
 workflow produces the binaries someone downloads and runs; a release built on an image no CI leg ever
 exercised is an unreviewed change to the artifact arriving without a commit. `ci.yml` pins the same
 image and covers `windows-2022` and native `windows-11-arm` beside it. Moving to a newer image is a
@@ -41,7 +41,7 @@ deliberate one-line commit.
 
 **Pinning the label is not the same as pinning the image**, and this document should not pretend
 otherwise. GitHub migrated both `windows-latest` and `windows-2025` to a Visual Studio 2026 image in
-June 2026, and hosted images are re-cut weekly regardless — so `runs-on: windows-2025` names a moving
+June 2026, and hosted images are re-cut weekly regardless - so `runs-on: windows-2025` names a moving
 target, just a slowly moving one that only moves when GitHub says so rather than continuously. There
 is no immutable hosted-image label to reach for, so the mitigation is evidence rather than a stronger
 pin: each build job records `ImageOS` and `ImageVersion` in the workflow run summary, which turns
@@ -71,7 +71,7 @@ known absence of a certificate did not stop it. The resulting artifacts were uns
 the normal Windows unknown-publisher warning. This exception does not exercise or
 establish the signed Authenticode production chain, and it does not establish product readiness.
 
-#### Second unsigned waiver — v0.10.5, dated 2026-07-27
+#### Second unsigned waiver - v0.10.5, dated 2026-07-27
 
 A second unsigned public release was explicitly authorized on 2026-07-27, on the same terms and with
 the same limits. Recording it honestly matters more than the tidiness of having said "one release
@@ -80,7 +80,7 @@ rather than let a reader infer a discipline that is not being kept.
 
 Why it was granted, so the trade is auditable rather than assumed:
 
-- v0.10.5 carries three user-affecting corrections — a detection notification that could not be
+- v0.10.5 carries three user-affecting corrections - a detection notification that could not be
   clicked open, a Controlled Folder Access posture that read "unavailable" on machines running a
   non-Microsoft antivirus, and the Security Center inventory that stops the ransomware-shield verdict
   from leaving a false impression on exactly those machines.
@@ -107,7 +107,7 @@ A code-signing certificate cannot live in a public repository. Provide it as rep
 
 An OV or EV certificate from a CA in the Windows trusted root program is required for Windows to
 accept the signature. A self-signed certificate will sign successfully and then **fail verification**
-— see below.
+- see below.
 
 ### Behaviour when no certificate is configured
 
@@ -136,8 +136,8 @@ certificate is not a trusted root produces:
 signtool signed ...\probe.exe but verification failed (exit 1).
 ```
 
-The signature is genuinely applied and genuinely timestamped — `Get-AuthenticodeSignature` reports
-the signer and a timestamp — and it is still worthless, because the chain does not validate. Trusting
+The signature is genuinely applied and genuinely timestamped - `Get-AuthenticodeSignature` reports
+the signer and a timestamp - and it is still worthless, because the chain does not validate. Trusting
 the `sign` exit code alone would have shipped that.
 
 ## Verifying a release you downloaded
@@ -149,7 +149,7 @@ Get-FileHash winsight-v0.11.0-win-x64.zip -Algorithm SHA256
 Get-Content winsight-v0.11.0-win-x64.zip.sha256
 ```
 
-**2. Provenance** — proves GitHub Actions built this exact file from this repository:
+**2. Provenance** - proves GitHub Actions built this exact file from this repository:
 
 ```bash
 gh attestation verify winsight-v0.11.0-win-x64.zip --repo ClementG91/winsight
@@ -163,7 +163,7 @@ Get-AuthenticodeSignature .\winsight-dashboard.exe | Format-List Status, SignerC
 
 `Status` must be `Valid`. Anything else means do not run it with Administrator rights.
 
-**4. Architecture** — the PE header, not the file name:
+**4. Architecture** - the PE header, not the file name:
 
 ```powershell
 ./scripts/Test-PeArchitecture.ps1 -Path .\winsight.exe -Architecture x64

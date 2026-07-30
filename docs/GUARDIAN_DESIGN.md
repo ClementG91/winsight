@@ -28,7 +28,7 @@ now?"*. Guardian answers *"what just started persisting, and is it worth my atte
 A watcher (registry-change notification, filesystem watcher) is cheap and dumb: it says
 *"something under this key/folder changed"*, not *what* changed. On a trigger, Guardian
 re-runs the affected enumerator(s), diffs the fresh result against a baseline, and
-surfaces the genuinely new entries — resolved and signature-checked by the exact same
+surfaces the genuinely new entries - resolved and signature-checked by the exact same
 code path as the manual scan. We never grow a second, parallel notion of what a
 persistence entry is, and we never re-implement `.sdb`/signature logic in a watcher.
 
@@ -73,26 +73,26 @@ flowchart LR
 
 ### Pure core (in `WinSight.Persistence`, fully unit-tested)
 
-These have no I/O and carry all the logic. This is where correctness is *proven in CI* —
+These have no I/O and carry all the logic. This is where correctness is *proven in CI* -
 the standing lesson from the firewall is that anything the unit tests can reach is a bug
 caught before the VM, so we push every decision into this layer.
 
-- **`PersistenceIdentity`** — the canonical dedup key for an entry: `(Vector, Name,
+- **`PersistenceIdentity`** - the canonical dedup key for an entry: `(Vector, Name,
   normalized target)`. Normalization reuses the same path-canonicalization idea as
   `OutboundPolicyEvaluator.CanonicalPath` so `C:\X\a.exe` and `c:\x\a.exe` are one identity.
   Two entries with the same identity are "the same persistence", regardless of transient
   command-line noise.
-- **`PersistenceDiffEngine`** — pure function: `(baseline: ISet<PersistenceIdentity>,
+- **`PersistenceDiffEngine`** - pure function: `(baseline: ISet<PersistenceIdentity>,
   fresh: IReadOnlyList<AutostartEntry>) -> (Added, Reappeared, Removed)`. No clock, no I/O,
   fully table-testable.
-- **`PersistenceChangeLog`** — the direct analog of `PendingOutboundLog`:
+- **`PersistenceChangeLog`** - the direct analog of `PendingOutboundLog`:
   - bounded at `MaxChanges` (a normal machine adds persistence rarely; a hundred pending
     means something pathological),
   - deduplicates by `PersistenceIdentity`,
   - `Observe(...)` returns `true` only the first time, so callers notify once per entry,
-  - refused entries increment `DroppedChanges` — **never a silent truncation**,
+  - refused entries increment `DroppedChanges` - **never a silent truncation**,
   - `Snapshot()` returns most-recent-first.
-- **`PersistenceEvent`** — the surfaced record: the `AutostartEntry`, its identity,
+- **`PersistenceEvent`** - the surfaced record: the `AutostartEntry`, its identity,
   `FirstSeenUtc`/`LastSeenUtc`, and a `kind` (`Added` / `Reappeared`). Severity is *derived*
   from the existing `AutostartEntry.IsSuspicious` / `Status`, not invented here.
 
@@ -127,12 +127,12 @@ Kept as small as `OutboundConnectionWatcher`. Each implements
 **`IPersistenceChangeSource`** which raises `SurfaceChanged` events; the interface is what
 the monitor depends on, so tests drive the monitor with a fake source.
 
-- **`RegistryChangeWatcher`** — `RegNotifyChangeKeyValue` (via CsWin32, consistent with the
+- **`RegistryChangeWatcher`** - `RegNotifyChangeKeyValue` (via CsWin32, consistent with the
   rest of the Win32 surface) with a wait handle per watched key,
   `REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_CHANGE_NAME`, `watchSubtree` where the surface
   needs it (Services). Re-arms after each signal. One background wait loop; cancellation via
   `CancellationToken`.
-- **`FileSystemPersistenceWatcher`** — `FileSystemWatcher` over the per-user and common
+- **`FileSystemPersistenceWatcher`** - `FileSystemWatcher` over the per-user and common
   Startup folders and `C:\Windows\System32\Tasks` (scheduled tasks are files).
 - *(Later increment)* **`EtwPersistenceWatcher`** / a WMI `__InstanceCreationEvent`
   subscription for surfaces with neither a registry nor a file backing.
@@ -142,25 +142,25 @@ the monitor depends on, so tests drive the monitor with a fake source.
 Wires the sources to the core. Responsibilities, all individually testable with a fake
 source and a fake/real scanner:
 
-1. **Silent baseline on start** — one full scan seeds the baseline identity set. Pre-existing
+1. **Silent baseline on start** - one full scan seeds the baseline identity set. Pre-existing
    persistence raises *no* alert (the analog of the firewall's "already-ruled" filtering).
    Without this, every machine screams on first launch.
-2. **Debounce** — coalesce a burst of triggers (a single installer touches many keys) within
+2. **Debounce** - coalesce a burst of triggers (a single installer touches many keys) within
    a short window (~750 ms) before re-scanning, so one install is one pass.
-3. **Scoped re-scan** — re-run only the enumerators mapped to the fired watch target.
-4. **Diff + record** — `PersistenceDiffEngine` against the baseline; new identities go to
+3. **Scoped re-scan** - re-run only the enumerators mapped to the fired watch target.
+4. **Diff + record** - `PersistenceDiffEngine` against the baseline; new identities go to
    `PersistenceChangeLog` and update the baseline; raise `PersistenceDetected`.
-5. **Graceful degradation** — a surface that can't be watched under the current token
+5. **Graceful degradation** - a surface that can't be watched under the current token
    (e.g. an HKLM key a standard user can't open for notify) is reported as
    *not-watchable*, not silently skipped. Honesty about blind spots is a product rule here.
 
 ### Application + Dashboard
 
-- **`PersistenceMonitorPresenter`** (`WinSight.Application`) — mirrors
+- **`PersistenceMonitorPresenter`** (`WinSight.Application`) - mirrors
   `FirewallControlPresenter`: exposes the live change list + counts (`DroppedChanges`,
   not-watchable surfaces) to the UI, marshals nothing itself (UI thread marshalling stays
   in the view).
-- **Dashboard** — a "Surveillance persistance" live view, and a **tray balloon** when a
+- **Dashboard** - a "Surveillance persistance" live view, and a **tray balloon** when a
   *Notable* (unsigned / untrusted / file-missing) entry appears; signed-trusted arrivals go
   to the list quietly. All strings localized in `Strings.resx` / `.fr.resx` / `.es.resx`.
 
@@ -172,7 +172,7 @@ source and a fake/real scanner:
   `WinSight.Persistence.Tests`. Target ≥ 80%, with the diff/baseline/debounce/bounded-log
   invariants pinned by table tests. Behavioural bugs must be catchable here, not only on a VM.
 - **Thin watchers** (`RegistryChangeWatcher`, `FileSystemPersistenceWatcher`): source-contract
-  tests (assert they arm the right keys/flags) plus **real-machine validation** — the same
+  tests (assert they arm the right keys/flags) plus **real-machine validation** - the same
   discipline as `docs/ARM64_VALIDATION.md`. A short protocol ("add an HKCU Run value →
   balloon within a second; add a signed one → quiet list entry; flood N values → capped list
   with 'and more not recorded'") ships alongside the code.
@@ -187,7 +187,7 @@ source and a fake/real scanner:
    Run keys, Services, Winlogon and later broadened to the high-value surfaces most abused for
    persistence: IFEO (Image File Execution Options), AppInit_DLLs, Active Setup, SilentProcessExit,
    LSA packages, BootExecute, AppCertDlls, time providers, print monitors/providers, netsh helpers,
-   credential providers, browser helper objects, Windows Load/Run — ~17 live surfaces in total. Each
+   credential providers, browser helper objects, Windows Load/Run - ~17 live surfaces in total. Each
    enumerator just declares its `WatchTargets`; arming the whole default set stays within the WaitAny
    handle cap (asserted by a test). COM/CLSID hijack (a subtree too noisy to watch) and WMI
    subscriptions (no registry/file backing) stay covered by the on-start diff instead. Includes a
@@ -205,11 +205,11 @@ source and a fake/real scanner:
    .`ReconcileFromPersistedBaseline` diffs the current scan against it on Start, so what appeared
    while WinSight was off surfaces once, then the baseline resets to the current state. Wired by
    default through `GuardianHost`.
-6. **Scoped re-scan.** ✅ Done. A change re-scans only the surface that fired — the change source
+6. **Scoped re-scan.** ✅ Done. A change re-scans only the surface that fired - the change source
    carries the fired `PersistenceWatchTarget`, and the monitor maps it to the owning enumerator(s)
    via `WatchTargets` and scans just those (full scan when the origin is unknown). Real-machine
    latency for a new HKCU Run value dropped from ~20s to ~0.5s.
-7. **Deferred — needs elevation.** Live WMI/ETW surfaces and writing-process attribution both
+7. **Deferred - needs elevation.** Live WMI/ETW surfaces and writing-process attribution both
    require admin (reading `root\subscription`, the kernel-registry ETW provider, or the security
    audit log), which would break the unprivileged in-dashboard model. A future opt-in elevated
    "deep monitoring" mode could add them; the WMI subscription surface stays covered by the on-start
@@ -231,11 +231,11 @@ boundary with the same honesty:
   not running is caught on the next start by the reconciliation diff (implemented, increment 5),
   not in real time.
 - **It is bounded and says so.** A flood of new entries is capped at `MaxChanges` with a
-  visible "and N more not recorded" — never a silent truncation. A security tool that hides
+  visible "and N more not recorded" - never a silent truncation. A security tool that hides
   its own blind spot is worse than one without the feature.
 - **The balloon is not the only record.** Windows can suppress tray balloons outright (Focus
   Assist / "Ne pas déranger", including its automatic full-screen rule) and throttles an app that
-  posts several toasts quickly — both indistinguishable from "nothing was detected". Every
+  posts several toasts quickly - both indistinguishable from "nothing was detected". Every
   detection is therefore also appended to a local, bounded alert journal
   (`%LocalAppData%\WinSight\alerts.log`, see `AlertJournal`) *before* the balloon is raised, so a
   missed or suppressed alert still leaves a trace to come back to.

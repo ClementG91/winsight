@@ -5,9 +5,9 @@ for one commit or package does not automatically qualify a later one.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Not production-ready** — candidate `3ad4b92` passed the executed ETW, WFP/SCM, trust, IPC-workaround and installer gates, but host snapshot continuity and the exact Network Logon gate were not run |
-| **Arm64 (native)** | **Not production-ready** — native CI build/package/installer passed for `3ad4b92`; privileged WFP/SCM/trust/IPC/session behavior remains unverified |
-| **x64 on Arm64** | **Not production-ready** — emulated application identity and privileged runtime behavior remain unverified |
+| **x64** | **Not production-ready** - candidate `3ad4b92` passed the executed ETW, WFP/SCM, trust, IPC-workaround and installer gates, but host snapshot continuity and the exact Network Logon gate were not run |
+| **Arm64 (native)** | **Not production-ready** - native CI build/package/installer passed for `3ad4b92`; privileged WFP/SCM/trust/IPC/session behavior remains unverified |
+| **x64 on Arm64** | **Not production-ready** - emulated application identity and privileged runtime behavior remain unverified |
 
 ## Current x64 evidence
 

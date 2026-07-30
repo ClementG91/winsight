@@ -1,4 +1,4 @@
-# Multi-user IPC boundary — candidate `c9177cd`
+# Multi-user IPC boundary - candidate `c9177cd`
 
 **Result: 7 checks, 0 failures, exit 0.**
 

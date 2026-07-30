@@ -127,6 +127,36 @@ public sealed class AvWatchHostTests
             + "that thread for the life of the process and starves every other pool user.");
     }
 
+    /// <summary>
+    /// A fault in the watch loop stops the watcher, never the process.
+    /// </summary>
+    /// <remarks>
+    /// Moving this loop off the thread pool changed what an unhandled exception costs. A pool work
+    /// item that throws produces an unobserved task exception the runtime ignores; a dedicated thread
+    /// that throws terminates the process. The handler listed three exception types, which was
+    /// adequate under the old model and meant a camera-watcher fault could take the whole dashboard
+    /// down and every other monitor with it. On 2026-07-30 that crashed a CI test host mid-run.
+    ///
+    /// The test cannot assert "the process did not die" directly, so it asserts the observable
+    /// consequence: after a subscriber throws, the host is still disposable and a second start is
+    /// still refused, meaning the exception was contained rather than propagated out of the thread.
+    /// </remarks>
+    [Fact]
+    public void AThrowingSubscriberStopsTheWatcher_NotTheProcess()
+    {
+        using var polled = new ManualResetEventSlim();
+        var reader = new ThreadRecordingReader(polled.Set);
+        var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(15)));
+        host.Detected += (_, _) => throw new InvalidOperationException("a subscriber fault");
+
+        host.Start();
+
+        Assert.True(polled.Wait(TimeSpan.FromSeconds(10)), "The poll loop never ran at all.");
+        // Reached at all only because the worker thread did not tear the test host down with it.
+        host.Dispose();
+        host.Dispose();
+    }
+
     [Fact]
     public void ADeviceAlreadyInUseAtStartupIsNotReportedAsNew()
     {

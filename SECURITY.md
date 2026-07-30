@@ -47,12 +47,12 @@ The opt-in outbound firewall adds a LocalSystem service, and it is the most
 privileged surface in the project. Of particular interest there:
 
 - Privilege escalation through the service, its SCM registration, or its named pipe.
-- Bypassing the IPC capability boundary — anything that lets a caller without
+- Bypassing the IPC capability boundary - anything that lets a caller without
   `MutateMachinePolicy` change policy, or that widens the pipe ACL beyond SYSTEM,
   Administrators and Interactive.
 - Defeating service-path trust: persuading the service to accept a binary from a
   location an unprivileged principal can write, or winning the inspect-to-use race.
-- **Making WinSight misreport its own enforcement state** — claiming a machine is
+- **Making WinSight misreport its own enforcement state** - claiming a machine is
   filtered when it is not, or unfiltered when it is. For a security tool that is a
   vulnerability, not a display bug, because an operator acts on it.
 - Policy-store tampering that survives the storage trust checks.

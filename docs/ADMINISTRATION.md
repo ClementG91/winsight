@@ -12,7 +12,7 @@ broken, go straight to [`RECOVERY.md`](RECOVERY.md).
 | Portable ZIP | anywhere you extract it | none to scan | available only from a protected path |
 
 The read-only scanners work in every model. The **outbound firewall service is deliberately not
-installed by setup** — it registers a LocalSystem service and mutates the Windows Filtering Platform,
+installed by setup** - it registers a LocalSystem service and mutates the Windows Filtering Platform,
 which is not something an installer should do without an explicit decision.
 
 ### Machine-wide install
@@ -32,7 +32,7 @@ committing to it, without changing anything:
 ```
 
 `[FW_INSTALL_PATH_TRUSTED]` and exit 0 means the path is acceptable. Any other result names the
-specific reason — see the table in [`RECOVERY.md`](RECOVERY.md).
+specific reason - see the table in [`RECOVERY.md`](RECOVERY.md).
 
 ## The firewall service
 
@@ -55,7 +55,7 @@ It starts in **audit-only**. Nothing is filtered until someone arms it deliberat
 & "C:\Program Files\WinSight\winsight-firewall-service.exe" wfp-block-status "C:\path\to\app.exe"
 ```
 
-`enforce-status` reports the **persisted desired mode**, and says so — it deliberately does not claim
+`enforce-status` reports the **persisted desired mode**, and says so - it deliberately does not claim
 to know the live runtime state, because only the running service can prove that. `wfp-status` reports
 the actual WFP objects. Trust `wfp-status` over any UI when the two disagree, and treat a disagreement
 as a defect worth reporting.
@@ -96,7 +96,7 @@ sc query WinSightFirewall
 ```
 
 `sc query` must end with error **1060** (service does not exist). Uninstalling the *application*
-does not remove the service — the service is a separate, deliberate registration.
+does not remove the service - the service is a separate, deliberate registration.
 
 ## Where state lives
 

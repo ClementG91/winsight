@@ -24,7 +24,7 @@ sc query WinSightFirewall
 | `wfp-status` → `provider: present, sublayer: present` | WinSight is armed. |
 | `enforce-status` → `AuditOnly` | The persisted intent is not to filter. |
 
-**If `wfp-status` reports everything absent, WinSight is not blocking anything.** Look elsewhere —
+**If `wfp-status` reports everything absent, WinSight is not blocking anything.** Look elsewhere -
 Windows Defender Firewall, a VPN client, or a proxy.
 
 ## An application cannot reach the network
@@ -39,7 +39,7 @@ Windows Defender Firewall, a VPN client, or a proxy.
 
 2. If it is WinSight and you need it back now: **dashboard → Emergency disable**. That lifts every
    WinSight filter and returns to audit-only.
-3. If you only want that one application unblocked, change its policy in the dashboard instead —
+3. If you only want that one application unblocked, change its policy in the dashboard instead -
    emergency disable is a blunt instrument and turns off all protection.
 
 Then verify, rather than trusting the dialog:
@@ -51,7 +51,7 @@ Then verify, rather than trusting the dialog:
 ## The whole machine lost network access
 
 WinSight blocks **per application**. It does not have a machine-wide cut, and the per-app scoping is
-verified on real hardware — a blocked application returns http 000 while an independent control still
+verified on real hardware - a blocked application returns http 000 while an independent control still
 returns 200 ([record](validation/2026-07-23-wfp-qualification-f0a3f16.md)).
 
 So a total outage is probably not WinSight. Confirm in seconds:
@@ -61,7 +61,7 @@ So a total outage is probably not WinSight. Confirm in seconds:
 ```
 
 All `absent` means WinSight owns no filters at all. If you want certainty regardless, stop the
-service — this is safe and reversible:
+service - this is safe and reversible:
 
 ```powershell
 sc stop WinSightFirewall
@@ -74,9 +74,9 @@ Stopping the service removes WinSight from the picture entirely.
 The dashboard is an unprivileged client. "Unavailable" means it could not complete an authenticated
 exchange, which has three ordinary causes:
 
-1. **The service is not running** — `sc query WinSightFirewall`, then `sc start WinSightFirewall`.
-2. **The service is not installed** — error 1060. See [`ADMINISTRATION.md`](ADMINISTRATION.md).
-3. **You are running as a network logon** — the pipe denies the Network SID by design and always will.
+1. **The service is not running** - `sc query WinSightFirewall`, then `sc start WinSightFirewall`.
+2. **The service is not installed** - error 1060. See [`ADMINISTRATION.md`](ADMINISTRATION.md).
+3. **You are running as a network logon** - the pipe denies the Network SID by design and always will.
 
 Reading status does not require elevation. **Changing policy does**, and an unelevated administrator
 is refused exactly like a standard user, because Windows hands out a filtered token. That is
@@ -108,7 +108,7 @@ Diagnose any path without changing anything:
 ## The status says Degraded
 
 `Degraded` means: enforcement is the persisted intent, but the live WFP state could not be verified
-exactly. **It is an honest answer, not a malfunction** — the alternative would be claiming `Active`
+exactly. **It is an honest answer, not a malfunction** - the alternative would be claiming `Active`
 without proof.
 
 ```powershell
@@ -134,7 +134,7 @@ Rename-Item "$env:ProgramData\WinSight\firewall-policy.json" "firewall-policy.js
 sc start WinSightFirewall
 ```
 
-Keep the `.bad` file — it is evidence if the corruption was not accidental.
+Keep the `.bad` file - it is evidence if the corruption was not accidental.
 
 ## Full removal
 
@@ -147,7 +147,7 @@ sc query WinSightFirewall          # must be error 1060
 
 Then uninstall the application from Settings, or run `unins000.exe` in the install directory.
 
-If `wfp-status` still shows objects after uninstalling the service, that is a defect — capture the
+If `wfp-status` still shows objects after uninstalling the service, that is a defect - capture the
 output and report it under [`SECURITY.md`](../SECURITY.md).
 
 ## Nothing here helped
@@ -159,6 +159,6 @@ Collect, and open an issue:
 - `enforce-status` and `wfp-status` output
 - Whether the machine was armed, and what changed just before
 
-If the problem is that WinSight **misreported its own state** — said filtered when it was not, or the
-reverse — report it privately as a security issue rather than a bug. For a security tool that is a
+If the problem is that WinSight **misreported its own state** - said filtered when it was not, or the
+reverse - report it privately as a security issue rather than a bug. For a security tool that is a
 vulnerability.

@@ -10,7 +10,19 @@ public sealed class CfaProviderContractTests
     private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
-    [Fact(Timeout = 90000)]
+    /// <summary>
+    /// The budget is a safety net against a hung harness, not an assertion about how fast a runner is.
+    /// </summary>
+    /// <remarks>
+    /// It was 90 seconds outer and 75 inner, sized when the live cases gave up after one second each.
+    /// Raising the process-tree cases to eight seconds - so a cold Arm64 runner has time to start the
+    /// child whose termination the case exists to prove - added fourteen seconds to a harness that
+    /// also compiles a helper executable and launches Windows PowerShell once per fixture, mutation
+    /// and live case. On the slowest image in the fleet that crossed 75 seconds, and one timeout was
+    /// traded for another. These are sized with margin instead: a genuinely hung harness still fails,
+    /// while a slow machine no longer does.
+    /// </remarks>
+    [Fact(Timeout = 300000)]
     public async Task FixtureContractPassesUnderProtectedWindowsPowerShell51()
     {
         var shell = Path.Combine(
@@ -45,12 +57,12 @@ public sealed class CfaProviderContractTests
         var stderrTask = process.StandardError.ReadToEndAsync();
         try
         {
-            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(75));
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(240));
         }
         catch (TimeoutException)
         {
             await TerminateProcessTreeAndDrainStreamsAsync(process, stdoutTask, stderrTask);
-            throw new TimeoutException("CFA provider fixture contract exceeded its 75-second harness timeout; the harness process tree was terminated.");
+            throw new TimeoutException("CFA provider fixture contract exceeded its 240-second harness timeout; the harness process tree was terminated.");
         }
 
         var stdout = await ReadStreamWithinAsync(stdoutTask, process.StandardOutput, "stdout");

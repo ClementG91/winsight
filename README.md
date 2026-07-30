@@ -17,16 +17,16 @@
   <img src="https://img.shields.io/badge/production%20readiness-not%20established-critical" alt="Production readiness not established" />
 </p>
 
-WinSight is a suite of small, single-purpose, auditable security tools under one roof — in the spirit
+WinSight is a suite of small, single-purpose, auditable security tools under one roof - in the spirit
 of [Objective-See](https://objective-see.org/tools.html) for macOS, for Windows.
 
 It shows you what **persists** across reboots, what **watches** your camera and microphone, what
-**phones home**, and what could be **hijacked** — and it lets you block any application's outbound
+**phones home**, and what could be **hijacked** - and it lets you block any application's outbound
 traffic at the kernel filtering layer.
 
 > **Everything observes and reports.** Nothing acts on its own. The two exceptions are explicit and
 > opt-in: the firewall blocks only what you tell it to, and ransomware protection is the one feature
-> that writes anything (its decoy files), which is why it stays off until you turn it on — and removes
+> that writes anything (its decoy files), which is why it stays off until you turn it on - and removes
 > them when you turn it off.
 
 ---
@@ -42,14 +42,14 @@ traffic at the kernel filtering layer.
 | **Camera & mic monitor** | OverSight | Which process turned the webcam or microphone on |
 | **Connections & DNS** | Netiquette, DNSMonitor | Live outbound connections and DNS queries, attributed to processes |
 | **Signature verification** | What's Your Sign? | Authenticode verdicts with catalog fallback, used by every tool |
-| **Hijack scan** | DHS | Unquoted service paths, writable service directories and PATH entries, and phantom DLL imports — each graded by whether it is exploitable on *this* machine |
+| **Hijack scan** | DHS | Unquoted service paths, writable service directories and PATH entries, and phantom DLL imports - each graded by whether it is exploitable on *this* machine |
 
 Beyond the macOS originals: **write attribution** names the program behind a persistence or
 ransomware alert when running elevated (`written by setup.exe (pid 4242)`) and says why it cannot when
 it is not, rather than staying silent. **Per-process drill-down** (`winsight process <pid>`) and
 **physical-access detection** (`winsight presence`) have no Objective-See counterpart. And because
 WinSight's decoys *detect* ransomware but cannot *block* it without a driver, the overview also
-**reports its configured and observed operational posture** — read-only, including explicit
+**reports its configured and observed operational posture** - read-only, including explicit
 unavailability when Defender cannot be queried. It points to the Windows control; WinSight never
 changes that setting itself and does not guarantee enforcement of an individual write.
 
@@ -58,9 +58,9 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
 
 ## Three ways to use it
 
-- **Dashboard** — a WPF desktop and tray application, in **English, French and Spanish**. Every check
+- **Dashboard** - a WPF desktop and tray application, in **English, French and Spanish**. Every check
   explains what it observes and what an alert means.
-- **Command line** — 17 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
+- **Command line** - 17 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
   notable, so it drops straight into a scheduled task:
 
   ```
@@ -71,7 +71,7 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   winsight presence                       when this machine woke, and whether anyone was there
   winsight av --watch | dns --watch | attribution --watch
   ```
-- **MCP server** — `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. No
+- **MCP server** - `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. No
   network listener. See [`docs/MCP.md`](docs/MCP.md).
 
 All three share one orchestration layer; detection logic is never duplicated in UI or protocol code.
@@ -89,14 +89,14 @@ Download the installer for your machine from the
 The default install is **per-user** and needs no administrator rights and no .NET runtime. Portable
 ZIPs are published for both architectures.
 
-**Verify what you downloaded before running it** — checksums, SBOM and GitHub build provenance:
+**Verify what you downloaded before running it** - checksums, SBOM and GitHub build provenance:
 
 ```powershell
 Get-FileHash winsight-vX.Y.Z-win-x64.zip -Algorithm SHA256
 gh attestation verify winsight-vX.Y.Z-win-x64.zip --repo ClementG91/winsight
 ```
 
-> Released binaries are **not Authenticode-signed** — the project holds no code-signing certificate
+> Released binaries are **not Authenticode-signed** - the project holds no code-signing certificate
 > and currently uses an explicit unsigned-release policy, so Windows will warn on first run. Verify
 > SHA-256 and GitHub attestations before execution. See [`docs/RELEASE.md`](docs/RELEASE.md).
 
@@ -107,17 +107,17 @@ service and mutates WFP, which should be an explicit decision. See
 ## Security posture
 
 - **No telemetry, no analytics, no account.** The only outbound connection is an explicit,
-  user-initiated VirusTotal hash lookup — a hash, never file contents.
+  user-initiated VirusTotal hash lookup - a hash, never file contents.
 - **The privileged boundary is an authenticated named-pipe channel**, not the UI. The dashboard is an
   unprivileged IPC client and cannot change policy on its own; an unelevated administrator is refused
   exactly like a standard user.
 - **Enforcement is opt-in and starts audit-only.** Nothing is filtered until an elevated operator
-  arms it, and there is no command-line path to arming — that is the security property, not a missing
+  arms it, and there is no command-line path to arming - that is the security property, not a missing
   feature.
 - **Desired intent and effective state are reported separately, and never conflated.** WinSight
   distinguishes the *desired* mode you persisted from the *effective* runtime state it can actually
   prove against the live filtering engine. If it cannot verify enforcement exactly, it reports
-  `Degraded` rather than claiming `Active` — a security tool that overstates its own protection is
+  `Degraded` rather than claiming `Active` - a security tool that overstates its own protection is
   worse than one that admits a gap.
 - **Enforcement survives reboots** through service boot persistence, and the state is re-verified on
   every status read rather than assumed from what was persisted.
@@ -133,7 +133,7 @@ Threat model, trust boundaries and what is explicitly out of scope:
 
 ### Code signing
 
-Releases are **not Authenticode-signed**, so Windows shows an unknown-publisher warning on first run —
+Releases are **not Authenticode-signed**, so Windows shows an unknown-publisher warning on first run -
 that warning is accurate. SignPath Foundation declined the free-program application on 2026-07-29
 because the project does not yet have enough public adoption signals. The current release policy is
 therefore explicitly unsigned, not silently downgraded.
@@ -182,6 +182,7 @@ The authoritative statement, with every limitation named:
 | Security | [SECURITY.md](SECURITY.md), [THREAT_MODEL.md](docs/THREAT_MODEL.md) |
 | Privacy and code signing | [PRIVACY.md](PRIVACY.md), [CODE_SIGNING.md](docs/CODE_SIGNING.md) |
 | How it is built | [ARCHITECTURE.md](docs/ARCHITECTURE.md), [WFP_DESIGN.md](docs/WFP_DESIGN.md) |
+| Contributing code | [CODING_STANDARDS.md](docs/CODING_STANDARDS.md) |
 | Releasing and verifying | [RELEASE.md](docs/RELEASE.md) |
 | Evidence | [validation/](docs/validation/README.md) |
 | Where it is going | [ROADMAP.md](docs/ROADMAP.md) |
@@ -208,9 +209,12 @@ after verifying **both** its official SHA-256 and its Authenticode signature.
 
 ## Contributing
 
-Issues and pull requests are welcome. CI enforces formatting, a dependency vulnerability audit, the
-full test suite on two Windows images, an 80% line-coverage floor on every detection-engine library,
-and a packaged install/uninstall lifecycle on native x64 **and** native Arm64.
+Issues and pull requests are welcome. The rules this codebase actually enforces are in
+[CODING_STANDARDS.md](docs/CODING_STANDARDS.md), and most of them are checked by CI rather than by
+review: formatting, a dependency vulnerability audit, the full test suite on **three** Windows images
+including native Arm64, an 80% line-coverage floor on every detection-engine library and on the
+hand-written half of the privileged service, and a packaged install/uninstall lifecycle on native x64
+**and** native Arm64.
 
 Security issues go through [private reporting](SECURITY.md), not public issues.
 

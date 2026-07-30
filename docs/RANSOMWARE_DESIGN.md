@@ -17,7 +17,7 @@ up, and removed when the toggle is cleared or WinSight closes.
 Objective-See's RansomWhere? watches for the *behavior* of ransomware rather than a
 signature: a process rapidly encrypting, renaming, or deleting many files. WinSight's Phase 4
 does the same, user-mode, reusing the exact discipline that made the firewall and Guardian
-solid — **all the decisions live in a pure, unit-tested core; the OS-facing watcher is a thin,
+solid - **all the decisions live in a pure, unit-tested core; the OS-facing watcher is a thin,
 separately-validated shell.**
 
 ## The two signals
@@ -26,18 +26,18 @@ separately-validated shell.**
    (Documents, Desktop, Pictures, …). A decoy has *no legitimate reason to change*, so a single
    touch is a high-confidence signal that fires immediately.
 2. **Behavioral burst.** Ransomware's tell is volume and speed. Count recent suspicious file
-   events — a freshly written file whose content **looks encrypted** (high Shannon entropy), a
-   rename, a delete — in a short sliding window, and fire once when they cross a threshold.
+   events - a freshly written file whose content **looks encrypted** (high Shannon entropy), a
+   rename, a delete - in a short sliding window, and fire once when they cross a threshold.
 
 Neither is a verdict on its own; together, and tuned conservatively, they catch the behavior
 while a security tool that cries wolf on ordinary activity would be worse than nothing.
 
 ## The pure core
 
-- **`ShannonEntropy`** — entropy of a byte buffer in bits/byte (0..8). Encrypted/compressed data
+- **`ShannonEntropy`** - entropy of a byte buffer in bits/byte (0..8). Encrypted/compressed data
   sits near 8; text and structured formats well below. `LooksEncrypted` requires both a minimum
   sample size (so a tiny high-entropy fragment cannot trigger) and a conservative threshold.
-- **`RansomwareBurstDetector`** — a bounded, clock-injected sliding-window counter. `Observe`
+- **`RansomwareBurstDetector`** - a bounded, clock-injected sliding-window counter. `Observe`
   returns true **exactly once per burst** (or immediately on a touched canary), so the caller
   alerts once, not once per file. It is bounded (it stops accumulating once fired, until `Reset`)
   and pure (the caller supplies each event's timestamp), so it is fully unit-tested.
@@ -45,7 +45,7 @@ while a security tool that cries wolf on ordinary activity would be worse than n
 ### Firing once per burst means someone must re-arm it
 
 The detector deliberately latches: once fired it ignores further signals until `Reset()`. That is
-what turns one encryption wave into one alert instead of one alert per file — but it also means the
+what turns one encryption wave into one alert instead of one alert per file - but it also means the
 **owner of the detector is responsible for re-arming it**, and forgetting to is not a small bug.
 
 `RansomwareMonitor` therefore calls `Detector.Reset()` immediately after forwarding each `Detected`
@@ -57,7 +57,7 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
 
 ## Increments
 
-1. **Heuristics core.** ✅ Done. `ShannonEntropy` and `RansomwareBurstDetector`, described above —
+1. **Heuristics core.** ✅ Done. `ShannonEntropy` and `RansomwareBurstDetector`, described above -
    pure, clock-injected, fully unit-tested, no I/O.
 2. **Canary manager + file watcher.** ✅ Done. `CanaryManager` plants hidden decoys in the
    protected directories and answers `IsCanary`; `RansomwareSignalClassifier` (pure) maps a change to
@@ -65,18 +65,18 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
    and feeds the burst detector; `RansomwareMonitor` wires them and removes the decoys on dispose. A
    touched canary fires immediately; a rename/delete burst fires once. User-mode, real-machine
    validated by functional tests. Entropy-on-write is intentionally NOT wired here (legitimately
-   compressed files — .docx/.jpg/.zip — are high-entropy and would false-positive).
+   compressed files - .docx/.jpg/.zip - are high-entropy and would false-positive).
 3. **Entropy sampling on write.** ✅ Done. `RansomwareEntropySampler` reads a bounded 4 KB prefix
    (sharing flags that never fight the writer; any I/O trouble yields false, never an exception) and
    scores it with `ShannonEntropy`. It is gated twice: formats **compressed by design** are skipped
-   outright — .zip/.jpg/.mp4 and, critically, .docx/.xlsx/.pptx, which are ZIP containers and would
-   otherwise flag someone saving a Word file — and the score still needs a minimum sample and a
+   outright - .zip/.jpg/.mp4 and, critically, .docx/.xlsx/.pptx, which are ZIP containers and would
+   otherwise flag someone saving a Word file - and the score still needs a minimum sample and a
    conservative threshold. Ransomware's own extensions (.locked, .encrypted, …) are exactly what
    still gets scored; in-place encryption that keeps the original extension is covered by the canary.
 4. **Dashboard alert.** ✅ Done. An opt-in "Ransomware protection" toggle in the dashboard starts and
    stops the monitor (planting runs off the UI thread; clearing the toggle removes the decoys).
    `RansomwarePresenter` maps a detection to a localization key and a detail line that shows only the
-   file NAME — never the directory tree, so an alert cannot leak a folder layout into a screenshot.
+   file NAME - never the directory tree, so an alert cannot leak a folder layout into a screenshot.
    A touched canary is presented as critical, a burst as a warning, on the proven `ShowBalloonTip`
    path, localized en/fr/es.
 
@@ -85,8 +85,8 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
 - **It detects and alerts; it does not stop the encryption.** Halting a process mid-write needs a
   kernel **minifilter** (`FltRegisterFilter`) with the authority to block file I/O, which needs an
   EV certificate + Microsoft attestation signing. Explicitly deferred, exactly as for Guardian's
-  blocking. **Windows already ships that blocker** — Microsoft Defender's Controlled Folder Access
-  refuses untrusted writes to protected folders at the kernel — so rather than half-build a competing
+  blocking. **Windows already ships that blocker** - Microsoft Defender's Controlled Folder Access
+  refuses untrusted writes to protected folders at the kernel - so rather than half-build a competing
   driver, WinSight reports its *configured and observed operational posture*. The `integrity` scan
   reads Defender WMI unelevated and only reports Protecting when CFA is Enabled and Defender reports
   `AMRunningMode=Normal`, antivirus enabled and real-time protection enabled. Disabled, audit and
@@ -103,11 +103,11 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
 - **It is bounded and conservative.** Thresholds are tuned so ordinary bulk operations (a backup,
   an archive extract) do not trip it lightly. The detector latches on firing so one wave is one
   alert rather than one per file, and `RansomwareMonitor` re-arms it immediately afterwards so the
-  next wave still alerts — bounded state, but never a permanently silent detector.
+  next wave still alerts - bounded state, but never a permanently silent detector.
 - **Alerts are subject to the OS, not just to us.** Windows suppresses tray balloons under Focus
   Assist / "Ne pas déranger" (including its automatic full-screen rule), and throttles an app that
   posts many toasts in quick succession. Both are Windows behaviours WinSight cannot override, and
-  both look exactly like "the alert is broken" when testing by hand — check the notification centre
+  both look exactly like "the alert is broken" when testing by hand - check the notification centre
   and the Focus Assist state before concluding a detection failed. Because of this, every detection
   is also written to a local **alert journal** (`%LocalAppData%\WinSight\alerts.log`, see
   `AlertJournal`) *before* the balloon is raised, so a suppressed or missed alert still leaves a

@@ -1,4 +1,4 @@
-# x64 VM qualification — 2026-07-30
+# x64 VM qualification - 2026-07-30
 
 ## Evidence identity
 

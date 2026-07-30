@@ -26,7 +26,7 @@ yours to keep or delete.
 
 ## The one thing that leaves your machine
 
-**VirusTotal hash lookups — off by default, and only ever with your own API key.**
+**VirusTotal hash lookups - off by default, and only ever with your own API key.**
 
 If you choose to enable it, WinSight sends a **SHA-256 hash** of a file to VirusTotal to ask whether
 that hash is already known:
@@ -41,7 +41,7 @@ Being precise about this, because "we send a hash" is easy to say loosely:
 - **It is opt-in.** No lookup happens until you enter a VirusTotal API key yourself.
 - **It uses your key, not the maintainer's.** You create your own VirusTotal Community account. The
   project ships no key and pays for no quota on your behalf.
-- **A hash is not nothing.** A file that is unique to you — a document, an internal build — has a hash
+- **A hash is not nothing.** A file that is unique to you - a document, an internal build - has a hash
   unique to you, and asking about it tells VirusTotal that someone holds that file. This is why the
   feature is off until you switch it on.
 - **Your API key is stored encrypted** with Windows DPAPI, scoped to your Windows user account, so
@@ -65,7 +65,7 @@ WinSight is a system administration tool, not directed at children, and collects
 ## Your rights
 
 Because WinSight holds no personal data about you, there is nothing to request access to, correct, or
-erase — the local files listed above are on your own disk and under your own control. If you believe
+erase - the local files listed above are on your own disk and under your own control. If you believe
 otherwise, or you have a privacy question about the project, write to the address below.
 
 ## Who is responsible

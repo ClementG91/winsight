@@ -10,8 +10,8 @@ security tools aimed at a normal user rather than an enterprise SOC. What exists
 enterprise EDR (expensive, opaque, agent-heavy), a single-purpose utility with no common language for
 its findings, or freeware with an unclear business model.
 
-WinSight's bet is that the valuable part is not any one detection — most are documented Windows
-mechanisms — but **one auditable roof** over them, with a shared report shape, a shared signature
+WinSight's bet is that the valuable part is not any one detection - most are documented Windows
+mechanisms - but **one auditable roof** over them, with a shared report shape, a shared signature
 verifier, and an explicit refusal to phone home.
 
 ## Scope decisions
@@ -31,12 +31,12 @@ Deliberate constraints, chosen to avoid building an EDR nobody asked for:
 
 ## Phases
 
-### Phase 1 — user-mode scanners *(shipped)*
+### Phase 1 - user-mode scanners *(shipped)*
 
 Persistence scanner, camera and mic monitor, connection and DNS monitors, unified dashboard, shared
 signature and reputation helper.
 
-### Phase 2 — outbound firewall *(shipped; current-candidate x64 requalification open)*
+### Phase 2 - outbound firewall *(shipped; current-candidate x64 requalification open)*
 
 Per-application outbound control on WFP: an unprivileged dashboard driving a privileged LocalSystem
 service over authenticated local IPC. Opt-in enforcement that persists and survives reboot.
@@ -44,7 +44,7 @@ Historically qualified end to end on a clean x64 VM. Later WFP/SCM runtime chang
 part of the evidence for the current candidate, so it must be rerun; see
 [`validation/`](validation/README.md).
 
-### Phase 3 — real-time persistence *(shipped, detect-and-alert)*
+### Phase 3 - real-time persistence *(shipped, detect-and-alert)*
 
 Guardian promotes the scanner to a live watcher: registry change notification plus Startup and Tasks
 folder watching, verdict through the existing Authenticode path, tray alert, and reconciliation of
@@ -52,7 +52,7 @@ what changed while WinSight was not running.
 
 *Blocking* the write still needs a minifilter. See [`GUARDIAN_DESIGN.md`](GUARDIAN_DESIGN.md).
 
-### Phase 4 — ransomware canary *(shipped, opt-in)*
+### Phase 4 - ransomware canary *(shipped, opt-in)*
 
 Hidden decoy files, rename/delete-burst detection, and entropy-on-write scoring gated so that saving
 a `.docx` or a `.jpg` never trips it. Loud alert on detection.
@@ -65,7 +65,7 @@ a `.docx` or a `.jpg` never trips it. Loud alert on detection.
 
 The only work blocked on hardware. Build, PE architecture, packaging and the full installer lifecycle
 are already verified on a **native** Arm64 runner on every CI run. What remains is the privileged
-runtime — WFP, SCM, path trust, IPC — plus emulated-x64 application identity, the one behaviour with
+runtime - WFP, SCM, path trust, IPC - plus emulated-x64 application identity, the one behaviour with
 no x64 analogue.
 
 Nothing new needs writing: the protocol, scripts and binding method exist and ship inside the Arm64

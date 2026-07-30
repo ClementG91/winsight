@@ -1,4 +1,4 @@
-# WFP qualification — corrected strict protocol, candidate `f0a3f16`
+# WFP qualification - corrected strict protocol, candidate `f0a3f16`
 
 **Result: 25 checks, 0 failures, exit 0.**
 
@@ -29,7 +29,7 @@ bound to the canonical candidate plus the `run` verb, start, Running, stop, Stop
 `1060` again. No step was inferred; each has its own check.
 
 **Path trust, with the exact reason.** The protected candidate refused a user-writable sentinel with
-`[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]` — the specific typed code, not a generic failure. The
+`[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]` - the specific typed code, not a generic failure. The
 sentinel was staged as data only and never executed or loaded.
 
 **WFP read-only inspection.** The engine opened with 573 existing filters visible and changed
@@ -51,7 +51,7 @@ absent/absent/absent. The refusal did not quietly half-apply anything.
 | Windows PowerShell HTTP (independent control) | 200, exit 0 | **200, exit 0** | 200, exit 0 |
 
 Both legs matter. Had the control also failed, the "block" would have been a machine-wide cut wearing
-a per-app label — a defect, not a success.
+a per-app label - a defect, not a success.
 
 **Rollback is complete.** Back to `AuditOnly`, all WFP state removed (absent/absent/absent), and both
 the target and the control restored to 200.

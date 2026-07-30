@@ -2,7 +2,7 @@
 
 What has actually been run against a real machine, and what has not. Every record here binds to a
 **commit** and to the **CI run that built it**, so a third party can check that the binary tested was
-the binary that commit produces. A green count with no binding qualifies nothing — that lesson cost
+the binary that commit produces. A green count with no binding qualifies nothing - that lesson cost
 this project a whole qualification cycle.
 
 Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any of these.
@@ -35,7 +35,7 @@ automatic inheritance or a product-wide production-readiness verdict.
 
 ## Superseded
 
-[`2026-07-23-firewall-enforcement-x64.md`](2026-07-23-firewall-enforcement-x64.md) — an earlier
+[`2026-07-23-firewall-enforcement-x64.md`](2026-07-23-firewall-enforcement-x64.md) - an earlier
 `18/18` transcript. Retained deliberately and marked invalid: the script revision behind it could
 accept mixed WFP state, skip a failed probe, and observe a service bound to a different binary. It is
 kept as a record of what that script printed, not as evidence.
@@ -64,7 +64,7 @@ the **test harness**, not the product:
   so every helper call inside the adapter threw when the script was launched with `&` instead of
   `-File`;
 - the trust gate mis-read correct refusals, because Windows PowerShell 5.1 decorates native stderr and
-  the script compared the whole decorated capture instead of the typed `[FW_...]` token — and its race
+  the script compared the whole decorated capture instead of the typed `[FW_...]` token - and its race
   copied user-writable *content* into a *protected* directory, then treated the correct trusted verdict
   as a bug;
 - the IPC gate's restricted leg read its output file a beat too early, because `cmd`'s `>` creates the
