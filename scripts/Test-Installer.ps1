@@ -101,10 +101,6 @@ try
     foreach ($candidateExecutable in @($cli, $dashboard, $service))
     {
         & (Join-Path $PSScriptRoot "Test-PeArchitecture.ps1") -Path $candidateExecutable -Architecture $Architecture
-        if ($LASTEXITCODE -ne 0)
-        {
-            throw "Installed candidate PE architecture check failed: $candidateExecutable"
-        }
     }
     if ($RequireSigned)
     {
@@ -120,10 +116,6 @@ try
     }
 
     & (Join-Path $PSScriptRoot "Test-McpServer.ps1") -ServerPath $cli -Version $Version
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw "Installed MCP server smoke test failed."
-    }
 
     foreach ($language in @("en", "fr", "es"))
     {

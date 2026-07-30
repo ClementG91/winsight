@@ -47,4 +47,35 @@ public sealed class TestInstallerScriptContractTests
         var executeUninstaller = script.IndexOf("Start-Process -FilePath $uninstaller", StringComparison.Ordinal);
         Assert.True(verifyUninstaller >= 0 && verifyUninstaller < executeUninstaller);
     }
+
+    [Fact]
+    public void PowerShellValidationScriptsDoNotDependOnNativeLastExitCode()
+    {
+        var script = File.ReadAllText(Path.Combine(RepositoryRoot, "scripts", "Test-Installer.ps1"));
+
+        AssertSegmentDoesNotContainLastExitCode(
+            script,
+            "Test-PeArchitecture.ps1",
+            "if ($RequireSigned)");
+        AssertSegmentDoesNotContainLastExitCode(
+            script,
+            "Test-McpServer.ps1",
+            "foreach ($language");
+    }
+
+    private static void AssertSegmentDoesNotContainLastExitCode(
+        string script,
+        string segmentStart,
+        string segmentEnd)
+    {
+        var start = script.IndexOf(segmentStart, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"Missing script segment start: {segmentStart}");
+
+        var end = script.IndexOf(segmentEnd, start, StringComparison.Ordinal);
+        Assert.True(end > start, $"Missing script segment end after {segmentStart}: {segmentEnd}");
+        Assert.DoesNotContain(
+            "$LASTEXITCODE",
+            script[start..end],
+            StringComparison.OrdinalIgnoreCase);
+    }
 }
