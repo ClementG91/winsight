@@ -7,6 +7,17 @@ this project a whole qualification cycle.
 
 Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any of these.
 
+## Latest x64 campaign
+
+| Scope | Result | Candidate | CI run | Record |
+|---|---|---|---|---|
+| ETW lifecycle, WFP/SCM, trust, IPC with path workaround, installer and final cleanup | Executed gates passed; Network Logon and host snapshot continuity `NOT_RUN` | `3ad4b92` | `30536205557` | [record](2026-07-30-x64-qualification-3ad4b92.md) |
+
+This campaign confirmed the ETW exhaustion/crash correction and reran the current WFP/SCM surface.
+It also exposed an obsolete IPC default path, the absence of a reproducible Network Logon method and
+guest/host confusion for snapshots. The corrected kit needs a new exact-candidate package and VM
+rerun; the partial record is not a production-readiness verdict.
+
 ## Closed on x64
 
 | Gate | Result | Candidate | CI run | Record |
@@ -22,27 +33,6 @@ review of the relevant service, trust-boundary or IPC surface and a new run if t
 or the impact is uncertain. These are qualification records for three exact x64 candidates, not
 automatic inheritance or a product-wide production-readiness verdict.
 
-## Requires a re-run against a new candidate
-
-> [!IMPORTANT]
-> **WFP enforcement / SCM lifecycle.** The record above binds to `f0a3f16`, and the delta review that
-> its own terms demand now says the surface changed. Between `f0a3f16` and `79c8056`,
-> `src/WinSight.FirewallService/` gained 153 lines across five files, and two of them are squarely
-> inside what that gate tests:
->
-> - **`Program.cs`** — the host was never disposed at all. `RunAsync()` starts and stops a host; it
->   does not dispose one, so the WFP engine handle was released by process exit. It is now torn down
->   in order on shutdown. That is a change to what happens when the SCM stops the service.
-> - **`EnforcementCoordinator.cs`** — no longer implements `IDisposable`; disposal is asynchronous
->   only, so the provider now takes `DisposeAsync` on the same shutdown path.
->
-> Neither is a behavioural change the 25 checks would ignore — the gate covers SCM lifecycle and
-> rollback precisely. **Re-run gate 4.2 and 4.3 of the kit against the new candidate and bind a fresh
-> record.** Until then the WFP row above qualifies `f0a3f16` and nothing later.
->
-> The other two rows are unaffected, and that is measured rather than assumed: `git diff` reports the
-> IPC surface unchanged since `c9177cd` and `src/WinSight.Firewall/` unchanged since `f84ac36`.
-
 ## Superseded
 
 [`2026-07-23-firewall-enforcement-x64.md`](2026-07-23-firewall-enforcement-x64.md) — an earlier
@@ -54,15 +44,16 @@ kept as a record of what that script printed, not as evidence.
 
 | Gate | Why |
 |---|---|
-| Native Arm64 | Needs Arm64 hardware. The x64 records prove x64 package behaviour only. See [`../ARM64_VALIDATION.md`](../ARM64_VALIDATION.md). |
-| Foreign-owner-SID path trust | Needs a second standard account (`-HostileAccount`). The owner-trust path itself is proven by the TrustedInstaller leaf refusal. |
-| Dedicated unelevated-admin and network-logon IPC | Covered by proxy (a SAFER basic-user token is the same non-admin capability class) and by the pipe DACL unit test, not by a live logon of each kind. |
-| Production Authenticode signing, external release and deployment | CI exercises x64/Arm64 packaging plus installer install/smoke/uninstall, but the project has no production signing certificate, released artifacts remain unsigned, and the external release/deployment path has not been exercised end to end. |
+| Native Arm64 privileged runtime | Native Arm64 CI build/package/installer passes, but WFP/SCM/trust/IPC/session needs an isolated Arm64 VM. See [`../ARM64_VALIDATION.md`](../ARM64_VALIDATION.md). |
+| x64 emulated on Arm64 | Application-identity behavior has no x64-native equivalent and needs Arm64 hardware. |
+| Exact Network Logon IPC | Impersonation denial was observed, but the literal process-level gate requires the new second-machine WinRM procedure. |
+| Host-bound S0/S1/S2 continuity | The latest campaign attempted snapshot control from the guest; host take/restore records remain absent. |
+| Signed Authenticode path | The current release policy is explicitly unsigned after SignPath Foundation declined the free application. A future certificate path remains unexercised. |
 | EN/FR/ES presentation | User attestation completed on 2026-07-26; this is not independent evidence. |
 
 **Production readiness is not established.** These records close the largest gates on x64; they do not
-close the list above. In particular, a green CI installer lifecycle is automation evidence, not proof
-of real Authenticode signing, an externally published release or production deployment.
+close the list above. In particular, a green CI installer lifecycle is automation evidence, and
+unsigned distribution has no Windows publisher identity even when hashes and attestations verify.
 
 ## Why three of these records exist at all
 

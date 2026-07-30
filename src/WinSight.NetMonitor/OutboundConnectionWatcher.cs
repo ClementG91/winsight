@@ -43,7 +43,15 @@ public sealed record OutboundConnectionEvent(
 /// this watcher collected process and connection events normally while the NT Kernel Logger was
 /// already held by something else. WinSight therefore never competes for it.
 /// </remarks>
-public sealed class OutboundConnectionWatcher
+public interface IOutboundConnectionWatcher
+{
+    void Watch(
+        Action<OutboundConnectionEvent> onEvent,
+        Action<int, string?>? onUnattributed,
+        CancellationToken token);
+}
+
+public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher
 {
     /// <summary>
     /// Opens the trace session and invokes <paramref name="onEvent"/> for each attributed outbound
@@ -70,8 +78,10 @@ public sealed class OutboundConnectionWatcher
         ArgumentNullException.ThrowIfNull(onEvent);
 
         var index = new ProcessPathIndex();
-        // A private name, so WinSight never takes the shared NT Kernel Logger from another tool.
-        using var session = new TraceEventSession($"WinSight-Outbound-{Environment.ProcessId}");
+        // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
+        // silently replaces a concurrent WinSight observer. Proven dead WinSight sessions are
+        // conservatively reclaimed before creation.
+        using var session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Outbound);
         using var stop = token.Register(() =>
         {
             try

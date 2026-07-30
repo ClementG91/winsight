@@ -96,9 +96,9 @@ Get-FileHash winsight-vX.Y.Z-win-x64.zip -Algorithm SHA256
 gh attestation verify winsight-vX.Y.Z-win-x64.zip --repo ClementG91/winsight
 ```
 
-> Released binaries are **not yet Authenticode-signed** — the project holds no code-signing
-> certificate, so Windows will warn on first run. The signing chain is implemented and activates the
-> moment a certificate is supplied. See [`docs/RELEASE.md`](docs/RELEASE.md).
+> Released binaries are **not Authenticode-signed** — the project holds no code-signing certificate
+> and currently uses an explicit unsigned-release policy, so Windows will warn on first run. Verify
+> SHA-256 and GitHub attestations before execution. See [`docs/RELEASE.md`](docs/RELEASE.md).
 
 The **outbound firewall service is deliberately not installed by setup**: it registers a LocalSystem
 service and mutates WFP, which should be an explicit decision. See
@@ -133,16 +133,14 @@ Threat model, trust boundaries and what is explicitly out of scope:
 
 ### Code signing
 
-Releases are **not yet Authenticode-signed**, so Windows shows an unknown-publisher warning on first
-run — that warning is accurate and this project will not pretend otherwise. Every release does carry
-SHA-256 checksums plus GitHub **build provenance** and **SBOM** attestations, which prove the bytes
-came from this repository's release workflow at a named commit; verify them before running anything.
+Releases are **not Authenticode-signed**, so Windows shows an unknown-publisher warning on first run —
+that warning is accurate. SignPath Foundation declined the free-program application on 2026-07-29
+because the project does not yet have enough public adoption signals. The current release policy is
+therefore explicitly unsigned, not silently downgraded.
 
-WinSight has **applied to the [SignPath Foundation](https://signpath.org/)** free code signing
-programme for open-source projects. If the application is granted, release binaries will be signed
-through SignPath.io with a certificate issued in SignPath Foundation's name, and this section will say
-so instead of what it says now. Until then, treat the checksums and attestations as the only integrity
-evidence — because they are.
+Every release carries SHA-256 checksums plus GitHub **build provenance** and **SBOM** attestations,
+which bind the bytes to this repository's release workflow at a named commit. They do not provide a
+Windows publisher identity; verify them before running anything.
 
 Who may authorise a signature, what one would and would not prove, and how to check a release
 yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
@@ -151,7 +149,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Historical trust/IPC evidence remains candidate-bound; WFP/SCM must be rerun for the current candidate; **product readiness not established** |
+| **x64** | ETW, WFP/SCM, trust, installer and final cleanup passed on candidate `3ad4b92`; exact Network Logon and snapshot continuity were not run; **product readiness not established** |
 | **Arm64 (native)** | Build, packaging and installer verified in CI; **privileged runtime unqualified and product readiness not established** |
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
@@ -162,13 +160,14 @@ each run bound to the commit and CI run that built it:
 | WFP enforcement, SCM, rollback, per-app scoping | 25 checks, 0 failures | [record](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md) |
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
+| Current x64 ETW, WFP/SCM, trust, IPC workaround and installer | supplied VM campaign; limits recorded | [record](docs/validation/2026-07-30-x64-qualification-3ad4b92.md) |
 
-Each record qualifies its exact candidate. The current candidate changed the WFP/SCM runtime surface,
-so that gate is invalidated for current readiness and must be rerun; the table is historical evidence,
-not a current PASS. Released v0.10.5 artifacts are unsigned and not production-ready. The project is
-waiting for SignPath, while exact-candidate CI/CodeQL/package, current x64 WFP/SCM, privileged Arm64,
-named hostile-user session cases and a signed release remain open. The user attested that EN/FR/ES
-human presentation was completed on 2026-07-26; this is not independent evidence.
+Each record qualifies its exact candidate. Candidate `3ad4b92` fixed the ETW exhaustion/crash and
+passed the privileged x64 gates that were executed, but the original kit had an IPC path defect, no
+reproducible Network Logon method and no host-side snapshot proof. The corrected kit must be rerun on
+its own exact CI artifact. Native Arm64 privileged gates, x64-on-Arm64 identity and independent
+EN/FR/ES review also remain open. Unsigned distribution is an accepted visible limitation, not a
+claim that signing has passed.
 
 The authoritative statement, with every limitation named:
 [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
@@ -201,7 +200,7 @@ dotnet run --project src/WinSight.Dashboard
 To reproduce the full release payload, including SBOM, installer and signing stage:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.10.5
+./scripts/Build-Release.ps1 -Version 0.10.5 -DisableSignature
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned Inno Setup compiler

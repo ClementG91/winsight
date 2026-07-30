@@ -8,24 +8,19 @@ For how a release is cut, hashed and attested, see [RELEASE.md](RELEASE.md).
 
 ## Current signing status
 
-**WinSight releases are not yet Authenticode-signed.** This is stated plainly rather than buried:
-Windows shows an unknown-publisher warning on first run, and that warning is accurate.
+**WinSight releases are intentionally distributed without Authenticode for now.** Windows shows an
+unknown-publisher warning on first run, and that warning is accurate.
 
-WinSight has **applied to the [SignPath Foundation](https://signpath.org/)**, which provides free code
-signing to open-source projects through the SignPath.io platform. If the application is granted:
+SignPath Foundation declined the project's free-program application on 2026-07-29 because the project
+does not yet have enough public adoption and independent visibility. SignPath explicitly described
+this as a visibility decision, not a judgment of software quality. A paid subscription was not chosen.
+The project may reapply after it has stronger external adoption signals.
 
-- Release binaries will be signed by **SignPath.io**, with a certificate issued in **SignPath
-  Foundation's name** — not in the maintainer's. A SignPath-issued signature attests that the binary
-  came from this project's reviewed release pipeline under the Foundation's terms; it is not a
-  statement by the Foundation about the software's quality or fitness.
-- The certificate may be **revoked by the Foundation** if this project violates those terms.
-- No signing key will exist in this repository or on any developer machine. Signing is requested by the
-  release workflow and performed on SignPath's infrastructure.
-- This document and the README will be updated to describe the arrangement in the present tense, and
-  the roles below become the roles SignPath holds this project to.
-
-Until then, the checksums and attestations described below are the only integrity evidence, and this
-document says so rather than implying a signature that does not exist.
+The repository variable is therefore deliberately set to
+`REQUIRE_SIGNED_RELEASE=false`. The release workflow rejects an absent or malformed value and writes
+the unsigned policy into the run summary. It also forces `Build-Release.ps1 -DisableSignature`, so a
+residual credential cannot silently sign an unsigned-policy release. The signed build path remains
+implemented and testable for a future certificate, but it is not presented as an active control.
 
 What every release *does* carry today:
 
@@ -36,11 +31,8 @@ What every release *does* carry today:
 - **SBOM attestation** — the dependency inventory, attested the same way.
 
 Provenance is not a substitute for Authenticode. It proves *where the bytes came from*; Authenticode
-proves *who stands behind them* to the operating system. Both are wanted; only one is in place.
-
-The repository variable `REQUIRE_SIGNED_RELEASE=true` makes a missing certificate a **hard failure**,
-so a release cannot quietly lose a signature it once had. See
-[RELEASE.md](RELEASE.md#authenticode-signing).
+would provide a publisher identity to Windows. Users must verify the SHA-256 and GitHub attestations
+before running a release and must expect the unknown-publisher warning.
 
 ## Who may authorise a signature
 
@@ -60,8 +52,9 @@ controls are technical, not organisational:
 - **Signed commits are required on `main`**, and the requirement binds the maintainer's own account:
   `enforce_admins` is enabled, so the only account able to bypass the rule cannot. A control that
   exempts the one actor capable of breaking it is theatre.
-- **Signing happens only in CI**, from a tagged commit on `main`, in a workflow whose definition is in
-  this repository and covered by the same review and signing requirements as any other file.
+- **Any future production signing happens only in CI**, from a tagged commit on `main`, in a workflow
+  whose definition is in this repository and covered by the same review requirements as any other
+  file.
 - **No signing key ever exists on a developer machine.** There is no local signing path, so a
   compromised workstation cannot produce a signed WinSight binary.
 - **The tag must match the project version.** `release.yml` refuses to build when
@@ -71,7 +64,7 @@ controls are technical, not organisational:
 If this project ever gains a second maintainer, Reviewer and Approver will be separated from Author
 and this table will say so.
 
-## What is signed
+## What would be signed
 
 - **Only WinSight's own binaries**, built in CI from this repository's source at a tagged commit.
 - **Never third-party or upstream binaries.** WinSight ships self-contained .NET applications; the
@@ -94,10 +87,9 @@ leave every published hash describing bytes that no longer exist.
 
 ## Binary metadata
 
-Every signed binary carries a stable product identity — product name, company, copyright and version —
-set centrally in `Directory.Build.props` rather than derived from an assembly name. A signing policy
-that pins expected metadata is only meaningful if that metadata is deliberate, and it is what Windows
-shows the user in the UAC and SmartScreen prompts.
+Every future signed binary would carry the stable product identity — product name, company, copyright
+and version — set centrally in `Directory.Build.props` rather than derived from an assembly name. The
+current unsigned binaries expose that metadata but have no verified Windows publisher identity.
 
 ## Reporting a problem with a signature
 

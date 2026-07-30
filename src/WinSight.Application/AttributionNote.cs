@@ -1,4 +1,5 @@
 using WinSight.Attribution;
+using WinSight.NetMonitor;
 
 namespace WinSight.Application;
 
@@ -45,6 +46,11 @@ public static class AttributionNote
         null => "attribution not running",
         // A session was attempted and the kernel refused it.
         { Refused: true } => "attribution needs Administrator",
+        { Failure: EtwFailureCode.AccessDenied } => "attribution unavailable (ETW access denied)",
+        { Failure: EtwFailureCode.ResourceExhausted } => "attribution unavailable (ETW resource exhausted)",
+        { Failure: EtwFailureCode.SessionCollision } => "attribution unavailable (ETW session conflict)",
+        { Failure: EtwFailureCode.PlatformUnavailable } => "attribution unavailable on this platform",
+        { Failure: EtwFailureCode.Unexpected } => "attribution unavailable (ETW failure)",
         // Started, then stopped or faulted. Distinct from never having started: something went wrong.
         { Running: false } => "attribution stopped",
         // The honest "unknown": watching, and nothing observed accounts for this target. The writer

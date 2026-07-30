@@ -1,5 +1,6 @@
 using WinSight.Application;
 using WinSight.Attribution;
+using WinSight.NetMonitor;
 
 using Xunit;
 
@@ -48,6 +49,24 @@ public sealed class AttributionNoteTests
             "attribution stopped",
             AttributionNote.WhyNoAuthor(Health(running: false, refused: false)));
 
+    [Theory]
+    [InlineData((int)EtwFailureCode.AccessDenied, "attribution unavailable (ETW access denied)")]
+    [InlineData((int)EtwFailureCode.ResourceExhausted, "attribution unavailable (ETW resource exhausted)")]
+    [InlineData((int)EtwFailureCode.SessionCollision, "attribution unavailable (ETW session conflict)")]
+    [InlineData((int)EtwFailureCode.PlatformUnavailable, "attribution unavailable on this platform")]
+    [InlineData((int)EtwFailureCode.Unexpected, "attribution unavailable (ETW failure)")]
+    public void EveryEtwFailureHasItsOwnTruthfulReason(int failureValue, string expected)
+    {
+        var health = Health(running: false, refused: false) with
+        {
+            Failure = (EtwFailureCode)failureValue,
+        };
+
+        Assert.Equal(expected, AttributionNote.WhyNoAuthor(health));
+        Assert.NotEqual(AttributionNote.WhyNoAuthor(Health(running: false, refused: false)),
+            AttributionNote.WhyNoAuthor(health));
+    }
+
     /// <summary>
     /// The four answers must all differ, or the type is decorative.
     /// </summary>
@@ -65,6 +84,26 @@ public sealed class AttributionNoteTests
             AttributionNote.WhyNoAuthor(Health(running: false, refused: true)),
             AttributionNote.WhyNoAuthor(Health(running: true, refused: false)),
             AttributionNote.WhyNoAuthor(Health(running: false, refused: false)),
+            AttributionNote.WhyNoAuthor(Health(running: false, refused: false) with
+            {
+                Failure = EtwFailureCode.AccessDenied,
+            }),
+            AttributionNote.WhyNoAuthor(Health(running: false, refused: false) with
+            {
+                Failure = EtwFailureCode.ResourceExhausted,
+            }),
+            AttributionNote.WhyNoAuthor(Health(running: false, refused: false) with
+            {
+                Failure = EtwFailureCode.SessionCollision,
+            }),
+            AttributionNote.WhyNoAuthor(Health(running: false, refused: false) with
+            {
+                Failure = EtwFailureCode.PlatformUnavailable,
+            }),
+            AttributionNote.WhyNoAuthor(Health(running: false, refused: false) with
+            {
+                Failure = EtwFailureCode.Unexpected,
+            }),
         ];
 
         Assert.Equal(answers.Length, answers.Distinct(StringComparer.Ordinal).Count());

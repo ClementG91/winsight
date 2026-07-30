@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using WinSight.Firewall;
 using WinSight.FirewallService;
@@ -165,17 +168,142 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
         Assert.Equal(5, app.Observations);
     }
 
+    [Fact]
+    public async Task AComWatcherFailureLogsOnlyTheFixedUnavailableTokenAndDoesNotFaultTheObserver()
+    {
+        var watcher = new ThrowingWatcher(EtwComFailure(unchecked((int)0x800705AA)));
+        var logger = new CapturingLogger<OutboundObserverService>();
+        var observer = Observer(new PendingOutboundLog(), watcher: watcher, logger: logger);
+
+        await observer.StartAsync(CancellationToken.None);
+        Assert.True(watcher.Called.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => !logger.Entries.IsEmpty, TimeSpan.FromSeconds(5)));
+        await observer.StopAsync(CancellationToken.None);
+
+        var unavailable = Assert.Single(logger.Entries, entry =>
+            entry.Message.Contains("[FW_OBSERVER_UNAVAILABLE]", StringComparison.Ordinal));
+        Assert.Null(unavailable.Exception);
+        Assert.DoesNotContain("native ETW detail", unavailable.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnUnexpectedWatcherReturnLogsTheSameSingleUnavailableToken()
+    {
+        var watcher = new ReturningWatcher(waitForCancellation: false);
+        var logger = new CapturingLogger<OutboundObserverService>();
+        var observer = Observer(new PendingOutboundLog(), watcher: watcher, logger: logger);
+
+        await observer.StartAsync(CancellationToken.None);
+        Assert.True(watcher.Returned.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => logger.Entries.Any(entry =>
+            entry.Message.Contains("[FW_OBSERVER_UNAVAILABLE]", StringComparison.Ordinal)), TimeSpan.FromSeconds(5)));
+        await observer.StopAsync(CancellationToken.None);
+
+        var unavailable = Assert.Single(logger.Entries, entry =>
+            entry.Message.Contains("[FW_OBSERVER_UNAVAILABLE]", StringComparison.Ordinal));
+        Assert.Null(unavailable.Exception);
+    }
+
+    [Fact]
+    public async Task AWatcherReturnAfterRequestedCancellationIsSilent()
+    {
+        var watcher = new ReturningWatcher(waitForCancellation: true);
+        var logger = new CapturingLogger<OutboundObserverService>();
+        var observer = Observer(new PendingOutboundLog(), watcher: watcher, logger: logger);
+
+        await observer.StartAsync(CancellationToken.None);
+        Assert.True(watcher.Started.Wait(TimeSpan.FromSeconds(5)));
+        await observer.StopAsync(CancellationToken.None);
+        Assert.True(watcher.Returned.Wait(TimeSpan.FromSeconds(5)));
+
+        Assert.DoesNotContain(logger.Entries, entry =>
+            entry.Message.Contains("[FW_OBSERVER_UNAVAILABLE]", StringComparison.Ordinal));
+    }
+
     private static OutboundConnectionEvent Connection(string path, string address, int port) =>
         new(4242, path, address, port);
 
     private OutboundObserverService Observer(
-        PendingOutboundLog log, FirewallPolicyStore? store = null, TimeProvider? time = null)
+        PendingOutboundLog log,
+        FirewallPolicyStore? store = null,
+        TimeProvider? time = null,
+        IOutboundConnectionWatcher? watcher = null,
+        ILogger<OutboundObserverService>? logger = null)
     {
         var observer = new OutboundObserverService(
-            new OutboundConnectionWatcher(), store ?? new FirewallPolicyStore(PolicyPath), log,
-            NullLogger<OutboundObserverService>.Instance, time);
+            watcher ?? new OutboundConnectionWatcher(), store ?? new FirewallPolicyStore(PolicyPath), log,
+            logger ?? NullLogger<OutboundObserverService>.Instance, time);
         _observers.Add(observer);
         return observer;
+    }
+
+    private sealed class ThrowingWatcher(Exception failure) : IOutboundConnectionWatcher
+    {
+        public ManualResetEventSlim Called { get; } = new();
+
+        public void Watch(
+            Action<OutboundConnectionEvent> onEvent,
+            Action<int, string?>? onUnattributed,
+            CancellationToken token)
+        {
+            Called.Set();
+            throw failure;
+        }
+    }
+
+    private sealed class ReturningWatcher(bool waitForCancellation) : IOutboundConnectionWatcher
+    {
+        public ManualResetEventSlim Started { get; } = new();
+
+        public ManualResetEventSlim Returned { get; } = new();
+
+        public void Watch(
+            Action<OutboundConnectionEvent> onEvent,
+            Action<int, string?>? onUnattributed,
+            CancellationToken token)
+        {
+            Started.Set();
+            if (waitForCancellation)
+            {
+                token.WaitHandle.WaitOne();
+            }
+
+            Returned.Set();
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public ConcurrentQueue<(LogLevel Level, string Message, Exception? Exception)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Entries.Enqueue((logLevel, formatter(state, exception), exception));
+        }
+    }
+
+    private static System.Runtime.InteropServices.COMException EtwComFailure(int hresult)
+    {
+        try
+        {
+            System.Runtime.InteropServices.Marshal.ThrowExceptionForHR(hresult);
+        }
+        catch (System.Runtime.InteropServices.COMException failure)
+        {
+            return failure;
+        }
+
+        throw new InvalidOperationException($"HRESULT 0x{hresult:X8} did not produce a COM exception.");
     }
 
     // TimeProvider is in the BCL and abstract, so controlling the clock costs a few lines rather

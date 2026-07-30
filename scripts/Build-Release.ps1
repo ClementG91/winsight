@@ -12,13 +12,19 @@ param(
     [switch]$SkipInstaller,
     [switch]$SkipSbom,
 
-    # Fail the build if no signing certificate is configured. Off by default so development and
-    # community builds work unsigned; the release workflow turns it on for a tagged version.
-    [switch]$RequireSignature
+    # Fail the build if no signing certificate is configured.
+    [switch]$RequireSignature,
+
+    # Force unsigned output even if signing credentials exist in the caller's environment.
+    [switch]$DisableSignature
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
+if ($RequireSignature -and $DisableSignature)
+{
+    throw "RequireSignature and DisableSignature are mutually exclusive."
+}
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $outputRoot = [System.IO.Path]::GetFullPath((Join-Path $repoRoot $OutputPath))
@@ -175,7 +181,16 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destina
     {
         throw "No executables found to sign under $packageRoot."
     }
-    & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") -Path $signTargets -RequireSignature:$RequireSignature
+    if ($DisableSignature)
+    {
+        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
+            -Path $signTargets -CertificateBase64 "" -CertificatePassword ""
+    }
+    else
+    {
+        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
+            -Path $signTargets -RequireSignature:$RequireSignature
+    }
     if ($LASTEXITCODE -ne 0)
     {
         throw "Signing stage failed for $rid."
@@ -242,7 +257,16 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destina
 
         # The installer is produced after the archive, so it needs its own signing pass - again
         # before its checksum, for the same reason.
-        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") -Path @($installerPath) -RequireSignature:$RequireSignature
+        if ($DisableSignature)
+        {
+            & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
+                -Path @($installerPath) -CertificateBase64 "" -CertificatePassword ""
+        }
+        else
+        {
+            & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
+                -Path @($installerPath) -RequireSignature:$RequireSignature
+        }
         if ($LASTEXITCODE -ne 0)
         {
             throw "Signing stage failed for the $rid installer."

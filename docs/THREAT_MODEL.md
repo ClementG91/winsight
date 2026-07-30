@@ -105,7 +105,8 @@ group membership cannot route around it. WinSight opens no listening socket.
 
 SHA-256 per asset, an SPDX SBOM, and GitHub build-provenance attestations bound to the workflow,
 repository and commit. Checksums are generated in the build job and **re-verified in a separate job**
-after artifacts move. Authenticode is implemented and awaiting a certificate.
+after artifacts move. Releases currently use an explicit unsigned policy, so Windows publisher
+identity is absent and users must verify hashes and attestations before execution.
 
 ### 5. Corrupted or tampered policy store
 
@@ -163,8 +164,8 @@ transmitted anywhere.
   candidate. Arm64 has native CI coverage for build, PE architecture, installer lifecycle and smoke
   tests, but WFP/SCM/TOCTOU/IPC/session behavior on Arm64 still needs an elevated native VM. See
   [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
-- **v0.10.5 is historical, unsigned and not production-ready.** The SignPath response, a signed
-  exact-candidate release, exact-candidate CI/CodeQL/package evidence, and remaining session gates
-  are open.
+- **v0.10.5 is historical, unsigned and not production-ready.** SignPath Foundation declined the
+  free-program application on visibility grounds. Exact-candidate CI/CodeQL/package evidence and the
+  remaining native/session gates are open; unsigned distribution remains a visible accepted risk.
 - The service must be deployed to a protected location by an administrator. WinSight verifies this and
   refuses otherwise, but it cannot create the trust root for you.

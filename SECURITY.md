@@ -63,13 +63,12 @@ adversaries considered, and what is explicitly out of scope.
 
 Third-party dependency vulnerabilities should normally be reported upstream, but a
 WinSight-specific exploitable integration remains in scope. Public release binaries
-currently lack Authenticode signing because the project does not own a public
-code-signing certificate; checksum or SmartScreen warnings caused solely by that
-documented limitation are not vulnerabilities. Integrity is currently supplied by
-SHA-256 files, GitHub build-provenance/SBOM attestations, and signed Git commits and
-tags.
+use an explicit unsigned policy because the project has no public code-signing
+certificate; checksum or SmartScreen warnings caused solely by that documented
+limitation are not vulnerabilities. Integrity evidence is supplied by SHA-256 files,
+GitHub build-provenance/SBOM attestations, and signed Git commits and tags.
 
-The signing chain itself is implemented and waiting on that certificate: supplying
-`WINSIGHT_SIGNING_CERT_BASE64` activates it, and the build announces `UNSIGNED`
-explicitly when it is absent rather than leaving the state to be discovered. See
+The optional signing chain remains implemented for a future certificate. The current
+workflow requires an explicit `REQUIRE_SIGNED_RELEASE=false` policy and announces
+`UNSIGNED` rather than leaving the state to be discovered. See
 [`docs/RELEASE.md`](docs/RELEASE.md).
