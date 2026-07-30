@@ -76,10 +76,8 @@ jobs:
           ./scripts/Test-VulnerablePackages.ps1
 
       # Signing happens inside Build-Release.ps1, before archives are compressed and before any
-      # checksum is taken, so every published hash covers the signed bytes. With no certificate
-      # configured the build still succeeds but announces UNSIGNED in the log; set the repository
-      # variable REQUIRE_SIGNED_RELEASE=true to turn a missing certificate into a hard failure so a
-      # release can never silently lose its signature. See docs/RELEASE.md.
+      # checksum is taken, so every published hash covers the final bytes. The repository policy must
+      # be the explicit string "true" or "false": an absent or malformed value fails closed.
       - name: Build release artifacts
         shell: pwsh
         env:
@@ -87,11 +85,25 @@ jobs:
           WINSIGHT_SIGNING_CERT_PASSWORD: ${{ secrets.WINSIGHT_SIGNING_CERT_PASSWORD }}
         run: |
           $version = "${{ github.ref_name }}".TrimStart("v")
-          $requireSignature = "${{ vars.REQUIRE_SIGNED_RELEASE }}" -eq "true"
+          $signingPolicy = "${{ vars.REQUIRE_SIGNED_RELEASE }}".Trim().ToLowerInvariant()
+          if ($signingPolicy -notin @("true", "false")) {
+            throw "REQUIRE_SIGNED_RELEASE must be explicitly set to true or false."
+          }
+          $requireSignature = $signingPolicy -eq "true"
+          if (-not $requireSignature) {
+            Write-Warning "UNSIGNED RELEASE POLICY: artifacts will have no Windows publisher identity."
+            @"
+          ### Authenticode policy
+
+          `REQUIRE_SIGNED_RELEASE=false`: this release is intentionally unsigned. Verify its SHA-256
+          checksums and GitHub attestations; Windows will display an unknown publisher.
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          }
           ./scripts/Build-Release.ps1 `
             -Version $version `
             -Architectures ${{ matrix.architecture }} `
-            -RequireSignature:$requireSignature
+            -RequireSignature:$requireSignature `
+            -DisableSignature:(-not $requireSignature)
 
       - name: Test native installer lifecycle
         shell: pwsh

@@ -53,14 +53,17 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-The latest public release, v0.10.5, is historical, unsigned and not production-ready. Earlier v0.10.3
-x64 evidence independently observed `NotSigned`; the two later waivers intentionally preserved that
-unsigned posture rather than closing it. The signed Authenticode production chain has never been
-exercised end to end. `REQUIRE_SIGNED_RELEASE=true` was restored after v0.10.5, so the workflow now
-fails closed when signing is unavailable. Neither `WINSIGHT_SIGNING_CERT_BASE64` nor
-`WINSIGHT_SIGNING_CERT_PASSWORD` is configured, and the SignPath Foundation application is pending.
-A signed release remains blocked until a real certificate-backed exact candidate is configured,
-signed and verified.
+The latest public release, v0.10.5, is historical, unsigned and not production-ready. The signed
+Authenticode production chain has never been exercised end to end. SignPath Foundation declined the
+free-program application on 2026-07-29 because the project does not yet have sufficient public
+adoption and independent visibility.
+
+On 2026-07-30 the project replaced the per-release waiver model with an explicit unsigned
+distribution policy. The repository variable is `REQUIRE_SIGNED_RELEASE=false`; neither signing
+secret is configured. The workflow accepts only the literal policy values `true` or `false`, fails if
+the variable is absent or malformed, passes `-DisableSignature` so residual credentials cannot sign
+opportunistically, and writes the unsigned posture to the run summary. This permits release
+publication but does not establish a Windows publisher identity or product readiness.
 
 The user explicitly authorized a public unsigned v0.10.4 release under a one-release waiver dated
 2026-07-26. `REQUIRE_SIGNED_RELEASE` was intentionally disabled for that waived release so the
@@ -83,15 +86,11 @@ Why it was granted, so the trade is auditable rather than assumed:
   from leaving a false impression on exactly those machines.
 - **v0.10.4 already shipped unsigned.** An unsigned v0.10.5 is therefore not a regression in posture;
   it is the same posture carrying fixes. Withholding the fixes would have been the larger harm.
-- An application to the SignPath Foundation free code-signing programme for open-source projects is
-  pending. It had not been answered when this release was cut, and its outcome is not certain.
+- The SignPath Foundation application had not been answered when this release was cut. It was later
+  declined on visibility/adoption grounds.
 
-`REQUIRE_SIGNED_RELEASE` is set back to `true` immediately after publication. It is a gate that fails
-closed by default, opened deliberately and briefly, and closed again — not a setting left off.
-
-**This waiver expires with v0.10.5.** A third unsigned release should not be waved through on the
-strength of the first two; if signing is still unavailable by then, the honest response is to fix the
-signing path rather than to keep writing paragraphs like this one.
+This historical waiver expired with v0.10.5. It is superseded by the explicit unsigned policy dated
+2026-07-30 above; future releases must not describe the old waiver as the current control.
 
 ### Values required to enable the signing path
 
@@ -119,10 +118,10 @@ The build still succeeds, and says so loudly:
 [SIGNING] 12 file(s) will ship UNSIGNED. Windows will warn users on first run.
 ```
 
-It is never silent. The normal repository setting `REQUIRE_SIGNED_RELEASE=true` makes a missing
-certificate a hard failure, so the release workflow cannot quietly lose its signature. It has been
-intentionally disabled only for the two explicitly waived unsigned releases described above — v0.10.4
-and v0.10.5 — and set back to `true` immediately after each was published.
+It is never silent. `REQUIRE_SIGNED_RELEASE=false` is the current explicit policy, and the workflow
+adds that fact to its summary. An absent or malformed policy value is a hard failure. Setting the
+variable to `true` reactivates the certificate requirement and makes a missing or invalid signature a
+hard failure.
 
 ### Why signing is verified, not assumed
 
@@ -189,8 +188,9 @@ trustworthy at the time.
 
 None of the historical release evidence qualifies the current source candidate. Before another
 release, exact-candidate CI, CodeQL, package/installer lifecycle, current x64 WFP/SCM qualification,
-privileged Arm64 and remaining session checks must be evaluated alongside the signed Authenticode
-gate. Historical validation records remain bound to their original commits.
+privileged Arm64 and remaining session checks must be evaluated. The Authenticode result must match
+the explicit repository policy; under the current unsigned policy it must be `NotSigned` and visibly
+reported. Historical validation records remain bound to their original commits.
 
 ## Release checklist
 
@@ -200,5 +200,5 @@ gate. Historical validation records remain bound to their original commits.
 - [ ] Validation records in `docs/validation/` still bind to reachable commits
 - [ ] `production_ready` statement in `docs/PRODUCTION_READINESS.md` reflects reality
 - [ ] Tag pushed; `release.yml` green on both architectures
-- [ ] Signing verified with a real certificate, or an explicit unsigned-release waiver recorded
+- [ ] `REQUIRE_SIGNED_RELEASE` explicitly matches the documented signed or unsigned policy
 - [ ] Downloaded assets verified with the four checks above

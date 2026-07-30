@@ -73,9 +73,10 @@ package. The exact procedure is in [`PRODUCTION_READINESS.md`](PRODUCTION_READIN
 
 ### Authenticode signing
 
-The fail-closed workflow is implemented; the production signing chain is not verified and is waiting
-on the SignPath Foundation response. A signed candidate and release verification remain open. See
-[`RELEASE.md`](RELEASE.md).
+The optional fail-closed signing path is implemented, but no certificate is configured. SignPath
+Foundation declined the free-program application on 2026-07-29 because public adoption signals are
+still insufficient. Releases use an explicit visible unsigned policy for now; reapplying or obtaining
+a regular certificate remains future work. See [`RELEASE.md`](RELEASE.md).
 
 ### Broader write attribution
 

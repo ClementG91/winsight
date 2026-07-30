@@ -13,13 +13,12 @@ target/
 .env
 # Scan reports exported by the CLI/dashboard (winsight-<yyyyMMdd-HHmmss>.json)
 winsight-*.json
-# LLM-as-a-judge eval runs (prompts, model transcripts and scores are local only)
+# Local evaluation runs
 evals/out/
 evals/results/
 
-# Local Codex autonomous engineering harness
+# Local engineering state
 /.agent/
-/.codex/
 /AGENTS.md
 
 # Local-only VM qualification / diagnostic probe kits. These are privileged, exploratory

@@ -27,7 +27,8 @@ $ProductVersion = '<version produit>'
 $ExpectedZipSha256 = '<SHA-256 du ZIP portable>'
 $ExpectedInstallerSha256 = '<SHA-256 du setup>'
 $RequireSigned = $false
-$ExpectedPublisher = '<Subject exact commun attendu de SignPath>'
+$AcceptUnsignedDistribution = $true
+$ExpectedPublisher = $null
 
 # Volume monté hors du snapshot de la VM ou partage réseau durable.
 $EvidenceRoot = 'E:\WinSight-Evidence'
@@ -59,8 +60,11 @@ if ([string]::Equals(
         [StringComparison]::OrdinalIgnoreCase)) {
     throw 'EvidenceRoot doit être hors du volume restauré avec la VM.'
 }
-if ($RequireSigned -and $ExpectedPublisher -match '^<|>$') {
+if ($RequireSigned -and [string]::IsNullOrWhiteSpace($ExpectedPublisher)) {
     throw 'ExpectedPublisher exact requis pour le candidat signé.'
+}
+if (-not $RequireSigned -and -not $AcceptUnsignedDistribution) {
+    throw 'La politique Authenticode doit être choisie explicitement.'
 }
 
 New-Item -ItemType Directory -Force $EvidenceRoot | Out-Null
@@ -75,9 +79,69 @@ manifest SHA-256 sur ce stockage externe et vérifier depuis l’hyperviseur qu�
 
 ## 2. Snapshot S0 et prérequis
 
-Créer `S0-clean-before-winsight` avant toute installation. Le shell de qualification doit être le
-Windows PowerShell natif lancé avec `-NoProfile`. Depuis le premier shell non élevé, installer les
-prérequis puis relancer immédiatement le shell exact :
+Les snapshots ne sont jamais créés ni restaurés depuis l’invité. `VBoxManage` est un outil de
+l’hôte VirtualBox ; son absence dans la VM est normale.
+
+### HOTE UNIQUEMENT — créer et prouver S0
+
+Éteindre proprement la VM vierge, puis exécuter sur l’hôte. Pour Hyper-V, VMware ou un autre
+hyperviseur, utiliser l’opération équivalente et conserver une preuve hote donnant le nom de la VM,
+le nom/identifiant du snapshot, l’état éteint, la commande, le code de sortie et l’heure UTC.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+$VmName = '<nom exact de la VM>'
+$SnapshotName = 'S0-clean-before-winsight'
+$HostEvidenceRoot = '<répertoire hôte hors du disque de la VM>'
+$VBoxManage = Join-Path (
+    [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) `
+    'Oracle\VirtualBox\VBoxManage.exe'
+
+if (-not (Test-Path -LiteralPath $VBoxManage -PathType Leaf)) {
+    throw "VBoxManage.exe absent sur l'hôte."
+}
+if ((Get-AuthenticodeSignature -LiteralPath $VBoxManage).Status -ne 'Valid') {
+    throw 'Signature de VBoxManage.exe invalide.'
+}
+New-Item -ItemType Directory -Force $HostEvidenceRoot | Out-Null
+$before = @(& $VBoxManage showvminfo $VmName --machinereadable 2>&1)
+if ($LASTEXITCODE -ne 0 -or ($before -join "`n") -notmatch 'VMState="poweroff"') {
+    throw 'La VM doit être éteinte avant le snapshot.'
+}
+@(& $VBoxManage snapshot $VmName take $SnapshotName 2>&1) | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Création S0 échouée.' }
+$snapshotInfo = @(
+    & $VBoxManage snapshot $VmName showvminfo $SnapshotName --machinereadable 2>&1)
+if ($LASTEXITCODE -ne 0) { throw 'Lecture de la preuve S0 échouée.' }
+$record = Join-Path $HostEvidenceRoot "$SnapshotName.txt"
+@(
+    "utc=$([DateTime]::UtcNow.ToString('O'))"
+    "vm=$VmName"
+    "snapshot=$SnapshotName"
+    'operation=take'
+    $snapshotInfo
+) | Set-Content -LiteralPath $record
+Get-FileHash -LiteralPath $record -Algorithm SHA256
+```
+
+Copier ou exposer ce fichier et son hash sous
+`$EvidenceRoot\host-snapshots\S0-clean-before-winsight.txt`. Sans cette preuve hote, classer S0
+`NOT_RUN` et arrêter la qualification ; ne jamais tenter `VBoxManage` dans l’invité.
+
+### INVITE — vérifier S0 puis installer les prérequis
+
+```powershell
+$S0HostRecord = Join-Path $EvidenceRoot 'host-snapshots\S0-clean-before-winsight.txt'
+if (-not (Test-Path -LiteralPath $S0HostRecord -PathType Leaf)) {
+    throw 'STOP: preuve hote S0 absente; snapshot NOT_RUN.'
+}
+Get-FileHash -LiteralPath $S0HostRecord -Algorithm SHA256
+```
+
+Le shell de qualification doit être le Windows PowerShell natif lancé avec `-NoProfile`. Depuis le
+premier shell non élevé, installer les prérequis puis relancer immédiatement le shell exact :
 
 ```powershell
 winget install --id Git.Git --source winget --accept-package-agreements --accept-source-agreements
@@ -189,7 +253,8 @@ $ProductVersion = '<même version produit>'
 $ExpectedZipSha256 = '<même SHA-256 du ZIP portable>'
 $ExpectedInstallerSha256 = '<même SHA-256 du setup>'
 $RequireSigned = $false
-$ExpectedPublisher = '<même Subject exact commun attendu de SignPath>'
+$AcceptUnsignedDistribution = $true
+$ExpectedPublisher = $null
 $EvidenceRoot = 'E:\WinSight-Evidence'
 $EvidenceStorageOutsideSnapshot = $true
 
@@ -204,8 +269,11 @@ if ($ExpectedInstallerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
     throw 'Hash setup non lié.'
 }
 if (-not $EvidenceStorageOutsideSnapshot) { throw 'Les preuves ne survivront pas au restore.' }
-if ($RequireSigned -and $ExpectedPublisher -match '^<|>$') {
+if ($RequireSigned -and [string]::IsNullOrWhiteSpace($ExpectedPublisher)) {
     throw 'ExpectedPublisher exact requis pour le candidat signé.'
+}
+if (-not $RequireSigned -and -not $AcceptUnsignedDistribution) {
+    throw 'La politique Authenticode doit être choisie explicitement.'
 }
 
 $NativeSystemDirectory = [Environment]::SystemDirectory
@@ -373,9 +441,16 @@ commande WinSight, installation SCM, WFP ou installateur.
 
 ## 4. Authenticode et installateur
 
-Avant SignPath, enregistrer `NotSigned` et conserver le blocage release. Avec `$RequireSigned=$true`,
-le setup et les trois EXE portables doivent tous être `Valid`, timestampés et avoir exactement le
-même Subject `$ExpectedPublisher` :
+Le 29 juillet 2026, SignPath Foundation a refusé la demande gratuite faute de signaux publics
+d’adoption suffisants. La politique courante est donc explicitement
+`$RequireSigned=$false` / `$AcceptUnsignedDistribution=$true`. Ce choix autorise une distribution
+non signée clairement annoncée ; il ne transforme ni les hashes ni les attestations en identité
+d’éditeur Windows. Les quatre cibles doivent être exactement `NotSigned`, sans signataire ni
+timestamp. Toute autre erreur de signature est rouge.
+
+Le chemin signé reste disponible pour un futur certificat. Avec `$RequireSigned=$true`, le setup et
+les trois EXE portables doivent tous être `Valid`, timestampés et avoir exactement le même Subject
+`$ExpectedPublisher` :
 
 ```powershell
 function Assert-ExpectedSignature([string]$Path) {
@@ -396,6 +471,11 @@ if ($RequireSigned) {
 else {
     $SignatureTargets | ForEach-Object {
         $sig = Get-AuthenticodeSignature $_
+        if ($sig.Status -ne 'NotSigned' -or
+            $null -ne $sig.SignerCertificate -or
+            $null -ne $sig.TimeStamperCertificate) {
+            throw "État non signé inattendu : $($_) status=$($sig.Status)"
+        }
         $signer = if ($null -eq $sig.SignerCertificate) { '<none>' }
             else { $sig.SignerCertificate.Subject }
         $timestamp = if ($null -eq $sig.TimeStamperCertificate) { '<none>' }
@@ -432,31 +512,62 @@ $installerArguments = @(
     '-File', (Join-Path $ProtectedSourceRoot 'scripts\Test-Installer.ps1'),
     '-InstallerPath', $ProtectedInstaller,
     '-Version', $ProductVersion,
-    '-Architecture', $NativeArchitecture,
-    '-ExpectedPublisher', $ExpectedPublisher
+    '-Architecture', $NativeArchitecture
 )
-if ($RequireSigned) { $installerArguments += '-RequireSigned' }
+if ($RequireSigned) {
+    $installerArguments += @('-ExpectedPublisher', $ExpectedPublisher)
+    $installerArguments += '-RequireSigned'
+}
 & $NativePowerShellExe @installerArguments
 if ($LASTEXITCODE -ne 0) { throw 'Cycle installateur invalide.' }
 ```
 
 ## 5. Continuité après restauration
 
-Sceller les preuves des sections 1 à 4 sur `$EvidenceRoot`, puis restaurer
-`S0-clean-before-winsight`. La restauration efface les prérequis, variables, téléchargements et la
-racine protégée : ne pas continuer avec des chemins imaginés.
+Sceller les preuves des sections 1 à 4 sur `$EvidenceRoot`. Fermer la VM, puis restaurer
+`S0-clean-before-winsight` **depuis l’hôte uniquement**. Exemple VirtualBox, dans le même shell hôte
+protégé que la section 2 :
+
+```powershell
+$SnapshotName = 'S0-clean-before-winsight'
+@(& $VBoxManage snapshot $VmName restore $SnapshotName 2>&1) | Out-Host
+if ($LASTEXITCODE -ne 0) { throw 'Restore S0 échoué.' }
+$restoredInfo = @(& $VBoxManage showvminfo $VmName --machinereadable 2>&1)
+if ($LASTEXITCODE -ne 0 -or
+    ($restoredInfo -join "`n") -notmatch 'CurrentSnapshotName="S0-clean-before-winsight"') {
+    throw 'Restore S0 non prouvé.'
+}
+$restoreRecord = Join-Path $HostEvidenceRoot 'restore-S0-clean-before-winsight.txt'
+@(
+    "utc=$([DateTime]::UtcNow.ToString('O'))"
+    "vm=$VmName"
+    "snapshot=$SnapshotName"
+    'operation=restore'
+    $restoredInfo
+) | Set-Content -LiteralPath $restoreRecord
+Get-FileHash -LiteralPath $restoreRecord -Algorithm SHA256
+```
+
+Exporter cette preuve hote vers `$EvidenceRoot\host-restores\` avant de redémarrer la VM. Si
+l’hyperviseur ou son enregistrement n’est pas disponible depuis l’hôte, la restauration est
+`NOT_RUN` ; l’agent dans l’invité ne doit ni inventer la preuve ni poursuivre comme si le disque
+avait été restauré. La restauration efface les prérequis, variables, téléchargements et la racine
+protégée : ne pas continuer avec des chemins imaginés.
 
 Après restore :
 
-1. remonter `$EvidenceRoot` et vérifier son manifest depuis l’extérieur ;
+1. remonter `$EvidenceRoot`, vérifier son manifest depuis l’extérieur et vérifier la preuve hote
+   `restore-S0-clean-before-winsight.txt` ;
 2. réinitialiser explicitement toutes les variables de la section 1 ;
 3. réinstaller Git/gh, se réauthentifier et recalculer `$NativeArchitecture` ;
 4. répéter intégralement les sections 3 et 4 depuis le même run/hashes, y compris le bootstrap
    exécutable de toute nouvelle console élevée ;
 5. comparer le nouveau `protected-candidate.sha256` au manifest exporté ;
-6. créer seulement alors `S1-candidate-protected`.
+6. éteindre la VM et créer seulement alors `S1-candidate-protected` depuis l’hôte, avec la même
+   procédure `take` + `showvminfo` + hash que S0.
 
-Chaque section privilégiée suivante restaure `S1`, ouvre le Windows PowerShell natif avec
+Chaque section privilégiée suivante fait restaurer `S1` par l’hôte, exige la preuve hote
+`operation=restore`, puis ouvre dans l’invité le Windows PowerShell natif avec
 `-NoProfile`, ressaisit les valeurs exactes de la section 1 puis exécute uniquement le bootstrap de
 reprise ci-dessous. Le bootstrap de création de la section 3 ne doit jamais être rejoué sur `S1` :
 il exige à juste titre une racine absente et sert seulement à construire le snapshot.
@@ -949,9 +1060,12 @@ Assert-CandidateFiles
 if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 16/16 échoué.' }
 ```
 
-Créer `S2-before-WFP`, puis full WFP : attendu 25/25, curl cible 200→000, contrôle 200, rollback
-AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Ensuite trust : attendu 12/12 sans skip, avec
-un vrai compte standard pour `-HostileAccount`.
+Éteindre la VM et faire créer `S2-before-WFP` par l’hôte avec sa preuve `take` scellée. Redémarrer
+seulement après export de cette preuve hote, puis exécuter le full WFP : attendu 25/25, curl cible
+200→000, contrôle 200, rollback AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Toute
+restauration S2 après échec est également une opération hôte qui exige sa propre preuve
+`operation=restore`. Ensuite trust : attendu 12/12 sans skip, avec un vrai compte standard pour
+`-HostileAccount`.
 
 ```powershell
 Assert-CandidateFiles
@@ -991,10 +1105,94 @@ if ($LASTEXITCODE -ne 0 -or
     ($wfp -join "`n") -notmatch 'provider: absent, sublayer: absent, permit-filter: absent') {
     throw 'IPC WFP non vide.'
 }
-& (Join-Path $PackageRoot 'Test-IpcBoundary.ps1')
+& (Join-Path $PackageRoot 'Test-IpcBoundary.ps1') -CliPath $Cli -ServicePath $Service
 if ($LASTEXITCODE -ne 0) { throw 'IPC 7/7 échoué.' }
 # Elevated doit être CanMutate; restricted CanReadOnly/Unauthorized.
 # ReadableMutateSkipped n’est pas un PASS AuditOnly.
+```
+
+### Network Logon — seconde machine de controle obligatoire
+
+Un processus local fabriqué avec `LOGON32_LOGON_NETWORK` n’est pas un substitut fiable : il peut
+mourir avant PowerShell faute de bureau interactif. La preuve littérale doit venir d’une vraie
+seconde machine de controle, sur le même réseau privé isolé, par WinRM. Une boucle WinRM vers la
+même VM n’est pas acceptée. En l’absence de seconde machine, classer ce gate `NOT_RUN`.
+
+Dans l’invité cible, toujours sur S1 jetable, créer un compte local standard dédié et activer WinRM.
+Ne lui donner ni le groupe Administrateurs ni un droit de connexion interactive :
+
+```powershell
+$NetworkProbeUser = 'WinSightNetworkProbe'
+$NetworkProbePassword = Read-Host 'Mot de passe temporaire du compte Network' -AsSecureString
+New-LocalUser -Name $NetworkProbeUser -Password $NetworkProbePassword `
+    -Description 'Compte jetable pour qualification Network Logon' | Out-Null
+Add-LocalGroupMember -Group 'Remote Management Users' -Member $NetworkProbeUser
+Enable-PSRemoting -SkipNetworkProfileCheck -Force
+```
+
+Sur la seconde machine, ouvrir Windows PowerShell élevé avec `-NoProfile`. Le compte fourni à
+`Get-Credential` doit être le compte local de l’invité (`NOMINVITE\WinSightNetworkProbe`). Si les
+machines sont hors domaine, `TrustedHosts` est limité à l’adresse exacte de la VM et restauré dans
+le `finally` :
+
+```powershell
+$GuestAddress = '<IPv4 exacte de la VM>'
+$GuestComputerName = '<nom NetBIOS exact de la VM>'
+$GuestPackageRoot = 'C:\Program Files\WinSight-Qualification\payload'
+$ControlEvidenceRoot = '<stockage de preuves hors snapshot, côté contrôle>'
+$credential = Get-Credential "$GuestComputerName\WinSightNetworkProbe"
+$trustedHostsPath = 'WSMan:\localhost\Client\TrustedHosts'
+$previousTrustedHosts = (Get-Item -LiteralPath $trustedHostsPath).Value
+
+try {
+    Set-Item -LiteralPath $trustedHostsPath -Value $GuestAddress -Force
+    $networkResult = Invoke-Command -ComputerName $GuestAddress -Credential $credential `
+        -Authentication Negotiate -ScriptBlock {
+            param($RemotePackageRoot)
+            $scriptPath = Join-Path $RemotePackageRoot 'Test-IpcBoundary.ps1'
+            $cliPath = Join-Path $RemotePackageRoot 'winsight.exe'
+            $servicePath = Join-Path $RemotePackageRoot 'winsight-firewall-service.exe'
+            $output = @(
+                & $scriptPath -CliPath $cliPath -ServicePath $servicePath -NetworkLogon *>&1 |
+                    ForEach-Object { $_.ToString() })
+            [pscustomobject]@{
+                ExitCode = $LASTEXITCODE
+                Output = $output
+            }
+        } -ArgumentList $GuestPackageRoot
+}
+finally {
+    Set-Item -LiteralPath $trustedHostsPath -Value $previousTrustedHosts -Force
+}
+
+$networkText = @($networkResult.Output) -join [Environment]::NewLine
+$networkText
+if ($networkResult.ExitCode -ne 0 -or
+    $networkText -notmatch [regex]::Escape('Result: 10 checks, 0 failure(s).')) {
+    throw 'Network Logon 10/10 échoué.'
+}
+foreach ($required in @(
+        'S-1-5-2=true',
+        'S-1-5-4=false',
+        'serviceAvailable=false',
+        'outcome=ServiceUnavailable',
+        'mutation=none')) {
+    if ($networkText -notmatch [regex]::Escape($required)) {
+        throw "Preuve Network Logon absente : $required"
+    }
+}
+New-Item -ItemType Directory -Force $ControlEvidenceRoot | Out-Null
+$networkText | Set-Content (Join-Path $ControlEvidenceRoot 'ipc-network-logon.txt')
+```
+
+Le script refuse de passer sauf si le jeton contient le SID Network `S-1-5-2`, ne contient pas le
+SID Interactive `S-1-5-4`, reçoit exactement exit 3 / `ServiceUnavailable` / `mutation=none`, et
+retrouve le même PID et la même commande SCM avant/après. Copier et hasher la preuve dans
+`$EvidenceRoot` avant le nettoyage invité.
+
+Revenir ensuite dans la console élevée de l’invité :
+
+```powershell
 & $ScExe stop WinSightFirewall | Out-Host
 $deadline = (Get-Date).AddSeconds(30)
 do {
@@ -1011,8 +1209,8 @@ if ($LASTEXITCODE -ne 1060) { throw 'IPC cleanup SCM 1060 non prouvé.' }
 Assert-WinSightEtwSessionsAbsent
 ```
 
-Exécuter séparément standard user, administrateur filtré, administrateur élevé et Network logon. Un
-token ne prouve pas les autres.
+Les résultats elevated/restricted du script, l’administrateur filtré UAC et le Network Logon distant
+sont quatre preuves séparées. Un token ne prouve pas les autres.
 
 ## 8. Sceller, exporter, restaurer
 
@@ -1034,5 +1232,7 @@ Exporter/sceller hors VM **avant** de restaurer `S0`. Vérifier le manifest sur 
 restaurer. Un nettoyage manuel après état incertain ne transforme jamais un run rouge en PASS.
 
 x64, Arm64 natif et x64 émulé sur Arm64 sont trois preuves distinctes. Tant que CI/CodeQL/package
-exacts, variantes natives/session, revue humaine EN/FR/ES et vraie chaîne SignPath Authenticode
-timestampée ne sont pas enregistrés, `production_ready` reste faux.
+exacts, variantes natives/session et revue humaine EN/FR/ES ne sont pas enregistrés,
+`production_ready` reste faux. L’absence d’Authenticode est une limitation de distribution acceptée
+et visible (`Unknown publisher`), pas une preuve de sécurité ; la réactiver ultérieurement exige de
+repasser intégralement le chemin signé.

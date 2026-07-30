@@ -40,7 +40,8 @@ not evidence.
 
 Product-wide production readiness is nevertheless not established. Native Arm64 privileged
 behaviour, the foreign-owner-SID trust case, dedicated unelevated-administrator and network-logon IPC
-sessions, real Authenticode signing and external release/deployment remain open.
+sessions and external release/deployment remain open. Authenticode is an explicitly accepted unsigned
+distribution limitation until a certificate becomes available.
 
 The current local protocol's 24/24 contract self-test and deliberate exit-1 negative control preserve
 portable regression evidence but cannot promote candidate CI, CodeQL, package, signing,

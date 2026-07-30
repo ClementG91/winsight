@@ -56,6 +56,54 @@ public sealed class VmQualificationKitContractTests
     }
 
     [Fact]
+    public void IpcProbeUsesPortableProtectedPathsAndHasAFailClosedNetworkLogonMode()
+    {
+        var script = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "scripts", "Test-IpcBoundary.ps1"));
+
+        Assert.Contains(
+            "[string]$CliPath = (Join-Path $PSScriptRoot 'winsight.exe')",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "[string]$ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe')",
+            script,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(@"C:\Program Files\WinSight-VM", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("$env:SystemRoot", script, StringComparison.Ordinal);
+        Assert.Contains("[switch]$NetworkLogon", script, StringComparison.Ordinal);
+        Assert.Contains("'S-1-5-2'", script, StringComparison.Ordinal);
+        Assert.Contains("'S-1-5-4'", script, StringComparison.Ordinal);
+        Assert.Contains("$networkRun.ExitCode -eq 3", script, StringComparison.Ordinal);
+        Assert.Contains("$networkRun.Available -eq 'false'", script, StringComparison.Ordinal);
+        Assert.Contains("$networkRun.Outcome -eq 'ServiceUnavailable'", script, StringComparison.Ordinal);
+        Assert.Contains("$networkRun.Mutation -eq 'none'", script, StringComparison.Ordinal);
+        Assert.Contains("[uint32]$after.ProcessId -eq [uint32]$before.ProcessId", script, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void KitSeparatesHostSnapshotsAndRunsNetworkLogonFromASecondMachine()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.Contains("HOTE UNIQUEMENT", kit, StringComparison.Ordinal);
+        Assert.Contains("VBoxManage.exe", kit, StringComparison.Ordinal);
+        Assert.Contains("showvminfo", kit, StringComparison.Ordinal);
+        Assert.Contains("preuve hote", kit, StringComparison.Ordinal);
+        Assert.Contains("seconde machine de controle", kit, StringComparison.Ordinal);
+        Assert.Contains("Invoke-Command", kit, StringComparison.Ordinal);
+        Assert.Contains("-NetworkLogon", kit, StringComparison.Ordinal);
+        Assert.Contains("S-1-5-2", kit, StringComparison.Ordinal);
+        Assert.Contains("S-1-5-4", kit, StringComparison.Ordinal);
+        Assert.Contains("Result: 10 checks, 0 failure(s).", kit, StringComparison.Ordinal);
+        Assert.Contains(
+            "-CliPath $Cli -ServicePath $Service",
+            kit,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void EtwRunbookBindsCapturedProcessesToExactSessionsAndExitEvidence()
     {
         var kit = File.ReadAllText(Path.Combine(
