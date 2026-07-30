@@ -8,7 +8,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version>0.10.6</Version>
+    <Version>0.10.7</Version>
     <Deterministic>true</Deterministic>
     <!-- Product identity, set centrally rather than derived from each assembly's name.
          Without this every binary reported ProductName/CompanyName as "winsight-dashboard" with no
