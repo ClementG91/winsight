@@ -77,26 +77,36 @@ public sealed class EveryScannerRunsTests
     }
 
     /// <summary>
-    /// The flagged view is a subset of the full one, for every scanner.
+    /// The flagged view shows only what needs attention, for every scanner.
     /// </summary>
     /// <remarks>
     /// <c>--flagged</c> is what an operator uses when they want the short list, and what automation
-    /// keys its exit code on. A scanner that returned <i>more</i> under it, or that dropped a notable
-    /// item, would be lying in the direction that matters.
+    /// keys its exit code on. A scanner that let an <c>Info</c> item through it would pad that list
+    /// with routine facts and make a scripted check exit non-zero over nothing.
+    ///
+    /// <b>Why this is one scan and not two.</b> It used to run the scanner twice and assert the
+    /// flagged count did not exceed the full count. That compared two observations of a machine that
+    /// moves between them, so it measured churn rather than the filter: on 2026-07-30 a runner
+    /// reported <c>modules: flagged returned 133 of 113</c> purely because processes started while
+    /// the two scans ran. Worse, it was vacuous exactly where it failed - <c>modules</c> ignores
+    /// <c>flaggedOnly</c> outright, since an unsigned module loaded into a running process is never
+    /// routine, so the two runs differed only by elapsed time.
+    ///
+    /// The property below needs a single observation and holds on any machine: every scanner derives
+    /// the flagged item from the same predicate it derives <c>Notable</c> from, so a flagged report
+    /// contains notable items or nothing. That also catches the leak the count comparison could not
+    /// see, an <c>Info</c> item surviving the filter.
     /// </remarks>
     [Theory]
     [MemberData(nameof(EveryScanner))]
-    public void TheFlaggedViewNeverExceedsTheFullOne(string command)
+    public void TheFlaggedViewShowsOnlyWhatNeedsAttention(string command)
     {
-        var full = Adapters.Run(command, flaggedOnly: false, allowNetworkLookups: false);
         var flagged = Adapters.Run(command, flaggedOnly: true, allowNetworkLookups: false);
 
-        Assert.True(
-            flagged.Items.Count <= full.Items.Count,
-            $"{command}: flagged returned {flagged.Items.Count} of {full.Items.Count}");
-        Assert.True(
-            flagged.NotableCount <= full.NotableCount,
-            $"{command}: flagged reported more notable items than the full scan");
+        Assert.All(flagged.Items, item => Assert.Equal(Severity.Notable, item.Severity));
+        // An empty flagged report is a normal answer on a clean machine, so the count is not asserted
+        // to be positive; what must hold is that the header agrees with the body an operator reads.
+        Assert.Equal(flagged.Items.Count, flagged.NotableCount);
     }
 
     /// <summary>

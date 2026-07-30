@@ -6,6 +6,9 @@ namespace WinSight.Mcp.Tests;
 
 public sealed class McpProtocolIntegrationTests
 {
+    /// <summary>Every posture a live read may legitimately report, and nothing else.</summary>
+    private static readonly string[] PostureSummaries = ["Unavailable", "AuditOnly", "Active", "Degraded"];
+
     [Fact(Timeout = 30000)]
     public async Task StdioServer_NegotiatesListsAndCallsReadOnlyTools()
     {
@@ -40,7 +43,7 @@ public sealed class McpProtocolIntegrationTests
             await SendAsync(process, """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}""");
             using var tools = await ReadAsync(process);
             var listedTools = tools.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToList();
-            Assert.Equal(4, listedTools.Count);
+            Assert.Equal(5, listedTools.Count);
             Assert.All(listedTools, tool =>
             {
                 var annotations = tool.GetProperty("annotations");
@@ -79,6 +82,19 @@ public sealed class McpProtocolIntegrationTests
             var alertsResult = alerts.RootElement.GetProperty("result").GetProperty("structuredContent");
             Assert.False(alertsResult.GetProperty("evidenceIncluded").GetBoolean());
             Assert.Equal("alerts", alertsResult.GetProperty("reports")[0].GetProperty("tool").GetString());
+
+            // Posture must answer over the protocol on a machine with no firewall service installed,
+            // which is every CI runner. The contract is that it answers honestly rather than failing:
+            // "Unavailable" is a verdict about WinSight's ability to see, not about the machine.
+            await SendAsync(process, """
+                {"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"winsight_outbound_firewall","arguments":{}}}
+                """);
+            using var posture = await ReadAsync(process);
+            var postureResult = posture.RootElement.GetProperty("result").GetProperty("structuredContent");
+            Assert.False(postureResult.GetProperty("evidenceIncluded").GetBoolean());
+            var postureReport = postureResult.GetProperty("reports")[0];
+            Assert.Equal("outbound-firewall", postureReport.GetProperty("tool").GetString());
+            Assert.Contains(postureReport.GetProperty("summary").GetString(), PostureSummaries);
 
             await SendAsync(process, """{"jsonrpc":"2.0","id":5,"method":"resources/list","params":{}}""");
             using var resources = await ReadAsync(process);

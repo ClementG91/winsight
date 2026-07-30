@@ -2,6 +2,50 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### A scanner test measured machine churn instead of the filter it named
+- `TheFlaggedViewNeverExceedsTheFullOne` ran each scanner twice and compared the counts. A machine
+  moves between two scans, so a runner reported `modules: flagged returned 133 of 113` because
+  processes started while the two ran. Nothing was wrong with the product.
+- It was **vacuous exactly where it failed**: `modules` ignores `--flagged` outright, since an
+  unsigned module loaded into a running process is never routine, so the two runs differed only by
+  elapsed time. A red result there could never have meant what the failure message claimed.
+- It now takes one observation and asserts what `--flagged` actually promises: every item in a
+  flagged report is notable, and the header agrees with the body. That holds on any machine and
+  catches the leak the count comparison never could, an `Info` item surviving the filter. Verified
+  against all fifteen scanners on a live machine before the assertion was written.
+
+### The outbound firewall's posture is visible to MCP clients
+- An AI client asking "what is the security posture of this machine" could reach all fifteen scanners
+  and the detection journal, and could not see **WinSight's own outbound firewall** at all: not whether
+  it is armed, not which applications are blocked, not which ones reached the network before anyone
+  ruled on them. `winsight_outbound_firewall` closes that gap.
+- **It reports two states, and refuses to merge them.** `mode` is what an operator requested;
+  `effectiveState` is what is running. A client that reads only the first would tell a user their
+  traffic is blocked while `Degraded` means enforcement was requested and nothing is being filtered.
+  The tool description, the server instructions and a test each pin that separation.
+- **Unreachable is not "off".** When the service cannot be contacted the answer is that WinSight could
+  not verify it, never that outbound filtering is disabled, because a client will repeat whichever one
+  it is given as fact. A read that times out raises an error rather than returning a posture.
+- **The one channel this process opens is now declared rather than implied.** The MCP process talks to
+  the firewall service over its authenticated named pipe, sending status and list commands only. The
+  service authorises by Windows identity and refuses every mutation to an unelevated caller, so the
+  MCP process has exactly the reach an unelevated dashboard has. Inside WinSight the tool holds a
+  posture-only interface instead of the service gateway, so read-only does not depend on nobody adding
+  the wrong call later. The capability document gained `firewallServiceIpc` and moved to schema 1.1.
+- Posture evidence goes through the same projector as every scanner, so profile paths are redacted
+  unless the server was launched with `WINSIGHT_MCP_ALLOW_SENSITIVE=1`. Posture reads take their own
+  queue rather than sharing the scan gate, so the cheapest question on the server is not stuck behind
+  a ninety-second scan.
+- **Verified honestly.** The unreachable path is exercised end-to-end over the real protocol, in the
+  packaged-installer contract on x64 and Arm64. The armed, degraded and audit-only paths are covered
+  through an injected reader; confirming them against a live privileged service belongs to the VM
+  qualification, which has not been re-run against this candidate.
+
+### The MCP surface speaks the 2026-07-28 revision without losing older clients
+- The published documentation still described a pinned `2025-11-25` on SDK 1.4.1 and called
+  `2026-07-28` an unshipped release candidate. Both statements were stale on `main`; `docs/MCP.md` now
+  matches what the server actually does.
+
 ### v0.10.6 - the first release under the explicit unsigned policy
 - **SignPath Foundation declined the application on 2026-07-29.** The reason was visibility, not
   quality: the programme requires established public trust signals - stars, forks, contributors,

@@ -20,6 +20,10 @@ public static class WinSightMcpHost
         var security = McpSecurityOptions.FromEnvironment();
         builder.Services.AddSingleton(security);
         builder.Services.AddSingleton<McpScanService>();
+        // Registered as the posture-only interface, so nothing resolved from this container can
+        // reach the gateway's policy mutations even by accident.
+        builder.Services.AddSingleton(_ => WinSight.Application.FirewallServiceAdapter.CreatePostureReader());
+        builder.Services.AddSingleton<McpFirewallPostureService>();
         builder.Services
             .AddMcpServer(options =>
             {

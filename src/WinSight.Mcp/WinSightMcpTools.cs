@@ -6,7 +6,10 @@ using WinSight.Application;
 namespace WinSight.Mcp;
 
 [McpServerToolType]
-public sealed class WinSightMcpTools(McpScanService scans, McpSecurityOptions security)
+public sealed class WinSightMcpTools(
+    McpScanService scans,
+    McpSecurityOptions security,
+    McpFirewallPostureService firewallPosture)
 {
     [McpServerTool(
         Name = "winsight_get_capabilities",
@@ -18,11 +21,12 @@ public sealed class WinSightMcpTools(McpScanService scans, McpSecurityOptions se
         UseStructuredContent = true)]
     [Description("Describe the local WinSight scanners and MCP privacy controls without scanning the machine.")]
     public McpCapabilitiesResult GetCapabilities() => new(
-        "1.0",
+        "1.1",
         McpCatalog.ProtocolVersion,
         ReadOnly: true,
         NetworkListener: false,
         NetworkReputationLookups: false,
+        FirewallServiceIpc: true,
         security.AllowSensitiveEvidence,
         McpCatalog.Scanners.ToList());
 
@@ -126,13 +130,46 @@ public sealed class WinSightMcpTools(McpScanService scans, McpSecurityOptions se
             maxItems,
             cancellationToken);
 
-    private async Task<McpScanResult> RunAndProjectAsync(
-        string? scanner,
-        bool flaggedOnly,
-        bool includeEvidence,
-        bool includeSensitive,
-        int maxItems,
-        CancellationToken cancellationToken)
+    [McpServerTool(
+        Name = "winsight_outbound_firewall",
+        Title = "Read WinSight's own outbound firewall posture",
+        ReadOnly = true,
+        Idempotent = true,
+        Destructive = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description(
+        "Read the posture of WinSight's own opt-in outbound firewall service: whether it is reachable, the mode " +
+        "that was requested, the state actually running, applications seen reaching the network that nobody has " +
+        "ruled on yet, and the stored per-application policies. This is a different subject from the 'firewall' " +
+        "scanner, which inventories Microsoft Defender Firewall rules. Read-only: it cannot allow, block, arm or " +
+        "disarm anything, and changing policy requires an elevated user in the WinSight dashboard. Requested mode " +
+        "is intent, not proof of filtering, so describe traffic as blocked only when effectiveState is Active. " +
+        "When available is False, WinSight could not verify the service; that is not a finding that outbound " +
+        "filtering is off.")]
+    public async Task<McpScanResult> OutboundFirewallAsync(
+        [Description("Include each policy and pending application. False returns counts and the posture summary only.")]
+        bool includeEvidence = false,
+        [Description("Include unredacted executable paths. Requires WINSIGHT_MCP_ALLOW_SENSITIVE=1 on the server.")]
+        bool includeSensitive = false,
+        [Description("Maximum policies and pending applications returned, from 1 to 200.")]
+        int maxItems = 50,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateDisclosure(includeEvidence, includeSensitive, maxItems);
+        var report = await firewallPosture.ReadAsync(cancellationToken).ConfigureAwait(false);
+        // Same projector as every other tool, so posture evidence inherits the identical privacy
+        // model: executable paths under the user's profile are redacted unless the server was
+        // launched with sensitive evidence enabled.
+        return McpResultProjector.Project(
+            [report],
+            includeEvidence,
+            includeSensitive,
+            security.AllowSensitiveEvidence,
+            maxItems);
+    }
+
+    private void ValidateDisclosure(bool includeEvidence, bool includeSensitive, int maxItems)
     {
         if (maxItems is < 1 or > 200)
         {
@@ -147,6 +184,17 @@ public sealed class WinSightMcpTools(McpScanService scans, McpSecurityOptions se
             throw new McpException(
                 "Sensitive evidence is locked. The user must launch the server with WINSIGHT_MCP_ALLOW_SENSITIVE=1.");
         }
+    }
+
+    private async Task<McpScanResult> RunAndProjectAsync(
+        string? scanner,
+        bool flaggedOnly,
+        bool includeEvidence,
+        bool includeSensitive,
+        int maxItems,
+        CancellationToken cancellationToken)
+    {
+        ValidateDisclosure(includeEvidence, includeSensitive, maxItems);
 
         try
         {

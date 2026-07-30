@@ -39,7 +39,14 @@ public static class McpCatalog
         "WinSight exposes read-only observations from the local Windows machine. " +
         "Start with winsight_get_capabilities, then use summary-only scans. winsight_overview runs the balanced " +
         "set; winsight_scan runs one scanner; winsight_alerts reads WinSight's own record of what its real-time " +
-        "protection already flagged (history, not a fresh scan). Request evidence only when the user " +
+        "protection already flagged (history, not a fresh scan). winsight_outbound_firewall reports the posture of " +
+        "WinSight's own opt-in outbound firewall, which is a different subject from the 'firewall' scanner: that " +
+        "one inventories Microsoft Defender Firewall rules. Two of its fields must never be merged into one " +
+        "sentence: 'mode' is what an operator asked for and 'effectiveState' is what is running, so call traffic " +
+        "filtered only when effectiveState is Active, and treat Degraded as enforcement requested and not " +
+        "filtering. When 'available' is False, say WinSight could not verify the service, never that outbound " +
+        "filtering is off. An application listed as pending reached the network before anyone ruled on it; that " +
+        "is a decision waiting for the user, not a detection. Request evidence only when the user " +
         "needs item-level investigation. A notable finding is triage evidence, not proof of malware. " +
         "Never claim that WinSight remediated, blocked, deleted or quarantined anything. " +
         "An alert may name the process that wrote it ('written by <path> (pid N)'); when it instead " +
@@ -69,13 +76,16 @@ public static class McpCatalog
 
     public static string CapabilitiesJson(bool sensitiveEnabled) => JsonSerializer.Serialize(new
     {
-        schemaVersion = "1.0",
+        // 1.1 added firewallServiceIpc. The document exists to state this process's boundaries, so
+        // it gained a field when a boundary changed rather than leaving the new channel undeclared.
+        schemaVersion = "1.1",
         protocolVersion = ProtocolVersion,
         transport = "stdio",
         networkListener = false,
         readOnly = true,
         mutationTools = false,
         networkReputationLookups = false,
+        firewallServiceIpc = true,
         sensitiveEvidenceEnabled = sensitiveEnabled,
         scanners = Scanners,
     }, McpJson.Options);
@@ -84,6 +94,11 @@ public static class McpCatalog
         # WinSight MCP security model
 
         - Local `stdio` child process only; no HTTP endpoint or listening socket.
+        - One outbound channel exists, and only one: `winsight_outbound_firewall` connects to the
+          local WinSight firewall service over its authenticated named pipe. It sends status and
+          list commands only. The service authorises by the caller's Windows identity and refuses
+          every mutation to an unelevated caller, so this process has exactly the reach an
+          unelevated dashboard has, and no path to arm or disarm the machine.
         - Every exposed tool is read-only, idempotent and closed-world.
         - VirusTotal and all other network enrichment are disabled in the MCP process.
         - Summary-only results are the default. Item evidence must be requested explicitly.
