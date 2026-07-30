@@ -82,7 +82,7 @@ manifest SHA-256 sur ce stockage externe et vérifier depuis l’hyperviseur qu�
 Les snapshots ne sont jamais créés ni restaurés depuis l’invité. `VBoxManage` est un outil de
 l’hôte VirtualBox ; son absence dans la VM est normale.
 
-### HOTE UNIQUEMENT — créer et prouver S0
+### HOTE UNIQUEMENT - créer et prouver S0
 
 Éteindre proprement la VM vierge, puis exécuter sur l’hôte. Pour Hyper-V, VMware ou un autre
 hyperviseur, utiliser l’opération équivalente et conserver une preuve hote donnant le nom de la VM,
@@ -130,7 +130,7 @@ Copier ou exposer ce fichier et son hash sous
 `$EvidenceRoot\host-snapshots\S0-clean-before-winsight.txt`. Sans cette preuve hote, classer S0
 `NOT_RUN` et arrêter la qualification ; ne jamais tenter `VBoxManage` dans l’invité.
 
-### INVITE — vérifier S0 puis installer les prérequis
+### INVITE - vérifier S0 puis installer les prérequis
 
 ```powershell
 $S0HostRecord = Join-Path $EvidenceRoot 'host-snapshots\S0-clean-before-winsight.txt'
@@ -1111,7 +1111,7 @@ if ($LASTEXITCODE -ne 0) { throw 'IPC 7/7 échoué.' }
 # ReadableMutateSkipped n’est pas un PASS AuditOnly.
 ```
 
-### Network Logon — seconde machine de controle obligatoire
+### Network Logon - seconde machine de controle obligatoire
 
 Un processus local fabriqué avec `LOGON32_LOGON_NETWORK` n’est pas un substitut fiable : il peut
 mourir avant PowerShell faute de bureau interactif. La preuve littérale doit venir d’une vraie

@@ -92,12 +92,12 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
 - Real-time persistence blocking and ransomware interception require a separately
   signed and safety-reviewed driver and are not shipped. WinSight's own ransomware
   feature therefore detects and alerts but does not block. It does, however, **report**
-  whether Windows' own kernel-level blocker — Microsoft Defender **Controlled Folder
-  Access** — configured and operational posture can be read: the `integrity` check uses
+  whether Windows' own kernel-level blocker - Microsoft Defender **Controlled Folder
+  Access** - configured and operational posture can be read: the `integrity` check uses
   Defender WMI (unelevated) and distinguishes Disabled, Audit, block/audit disk-modification-only,
   and a fully observed Enabled posture. The latter requires Defender `AMRunningMode=Normal`,
-  antivirus enabled and real-time protection enabled. Every operating mode Defender documents —
-  `Normal`, `Passive`, `Passive Mode`, `SxS Passive Mode`, `EDR Block Mode` and `Not running` — counts
+  antivirus enabled and real-time protection enabled. Every operating mode Defender documents -
+  `Normal`, `Passive`, `Passive Mode`, `SxS Passive Mode`, `EDR Block Mode` and `Not running` - counts
   as a successful read; `Not running` reports as **Defender not running** rather than as a configured
   mode, because Controlled Folder Access is a Defender feature and no configured value protects
   anything while the antivirus is stopped. Only genuinely missing or undocumented provider/runtime
@@ -108,14 +108,14 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
   inactive. Reporting only "the ransomware shield is not protecting you" would be accurate and would
   leave a false impression, so the `integrity` scan also reads Windows Security Center and, when another
   antivirus reports both `On` **and** `UpToDate`, the CFA line names it and says this can be a normal
-  third-party configuration rather than a fault — while pointing out that WinSight cannot read that
+  third-party configuration rather than a fault - while pointing out that WinSight cannot read that
   product's own ransomware protection and the operator should confirm it is on. An `On` product whose
   signatures are `Unknown` or `OutOfDate` is notable and never receives that reassurance. The antivirus
   inventory uses Microsoft's documented
   Windows Security Center COM product interface, queries only the antivirus provider, preserves raw
   activity/signature values, bounds and neutralizes vendor-controlled names, and treats unknown
   evidence as indeterminate. WinSight only reads and reports this setting; it never enables,
-  disables or otherwise configures Controlled Folder Access — the operator changes it in Windows.
+  disables or otherwise configures Controlled Folder Access - the operator changes it in Windows.
 - VirusTotal is opt-in and user-keyed. WinSight enforces Community ceilings across
   its processes (4/rolling minute, 500/UTC day, 15,500/UTC month), never retries a
   quota response, and documents that Community access is non-commercial. Sending a

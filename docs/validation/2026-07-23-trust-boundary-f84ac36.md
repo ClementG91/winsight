@@ -1,4 +1,4 @@
-# Service-path trust boundary — adversarial gate, candidate `f84ac36`
+# Service-path trust boundary - adversarial gate, candidate `f84ac36`
 
 **Result: 11 checks, 0 failures, exit 0.**
 

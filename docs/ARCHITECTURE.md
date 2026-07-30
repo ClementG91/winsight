@@ -58,7 +58,7 @@ Paths, process names, domains and other forensic values are never rewritten.
   on the Run/Services/Winlogon keys and a `FileSystemWatcher` on the Startup folders and
   `\System32\Tasks` trigger a re-scan of the affected surface; a genuinely new autostart
   item is verdict-checked via the existing Authenticode path and raised as a tray balloon.
-  The 22 enumerators stay the source of truth — watchers only trigger the diff. See
+  The 22 enumerators stay the source of truth - watchers only trigger the diff. See
   `docs/GUARDIAN_DESIGN.md`. Phase 4 ransomware behavior is **also implemented** (user-mode,
   opt-in): hidden decoy files plus rename/delete-burst and entropy-on-write heuristics over a
   `FileSystemWatcher`, with the same pure-core/thin-watcher split. See `docs/RANSOMWARE_DESIGN.md`.

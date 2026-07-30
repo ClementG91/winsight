@@ -1,4 +1,4 @@
-# WFP enforcement — runtime validation, x64
+# WFP enforcement - runtime validation, x64
 
 > [!NOTE]
 > **Superseded.** The corrected strict protocol has since completed on a candidate-bound binary:
@@ -7,7 +7,7 @@
 > the older script printed.
 
 > [!WARNING]
-> **Historical observation only — not a production qualification gate.** This run used
+> **Historical observation only - not a production qualification gate.** This run used
 > `Test-WfpValidation.ps1` revision `76b5481`. Its reported **18/18** is invalid as strict evidence:
 > that revision could accept mixed WFP state, skip a path-trust probe whose staging failed, ignore
 > native failures or hide visible native output, and observe a pre-existing service registered to a different
@@ -39,10 +39,10 @@ than retroactively presenting it as evidence produced by the stricter current pr
 The old script printed **18/18**. That count is retained as historical output, not treated as a
 strict verdict. The useful observations it records are:
 
-- **`the target reads as blocked`** and **`blocked app cannot reach the network`** — a per-app WFP
+- **`the target reads as blocked`** and **`blocked app cannot reach the network`** - a per-app WFP
   block filter was created and it actually stops that program's traffic (http 000 where the baseline
   was 200).
-- **`an unblocked copy still reaches the network`** — the single most important line. A second,
+- **`an unblocked copy still reaches the network`** - the single most important line. A second,
   unblocked copy of curl still reached the network, so the block is **scoped to the one application**,
   not a machine-wide cut. If this had failed while the blocked leg passed, that would have been a
   defect, not a success.
@@ -65,7 +65,7 @@ candidate.
 ## What this does NOT cover
 
 - **Arm64.** These binaries are x64. Emulated-x64 app-id behaviour and Arm64 struct marshalling remain
-  open — see [`ARM64_VALIDATION.md`](../ARM64_VALIDATION.md).
+  open - see [`ARM64_VALIDATION.md`](../ARM64_VALIDATION.md).
 - **The adversarial TOCTOU race** on service-path trust (WFP_DESIGN.md) is a separate, narrower
   validation and is not exercised here.
 - User attestation for EN/FR/ES human presentation was completed on 2026-07-26; this is not

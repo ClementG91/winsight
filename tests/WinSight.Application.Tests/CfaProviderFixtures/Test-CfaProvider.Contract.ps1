@@ -435,19 +435,27 @@ try {
         $env:WINSIGHT_CFA_TEST_CHILD = $warmChild
     }
 
-    # Two budgets, and the difference is deliberate. For the timeout-tree cases below the timeout *is*
-    # the behaviour under test, so it stays short. For these it is only a safety net - the assertion
-    # is about stream and exit-code handling, never about latency - so it is generous enough that a
-    # slow runner cannot turn a passing contract into a red build.
+    # Two budgets, and the difference is deliberate. For the stream cases the timeout is only a safety
+    # net - the assertion is stream and exit-code handling, never latency - so it is generous enough
+    # that a slow runner cannot turn a passing contract into a red build.
     $streamTimeout = 20000
+
+    # The tree cases assert that giving up kills the whole process tree, and giving up is what the
+    # timeout triggers. It still has to be long enough for the child to exist: the parent spawns it and
+    # then sleeps for 60 seconds, so anything well under that fires the same timeout path, while 1000ms
+    # was short enough that on a cold Arm64 runner the child had not yet started a second .NET Framework
+    # process and written its pid. The harness then found no child to prove had been killed and failed a
+    # release build - the same shape of defect as the cold start fixed earlier, a budget measuring
+    # process startup instead of the behaviour under test.
+    $treeTimeout = 8000
     $liveCases = @(
         @{ Name = 'live-literal-path-and-arguments'; Mode = 'normal'; Timeout = $streamTimeout; MaximumCharacters = 65536; ExpectedExit = 0; ExpectedEvidence = $true },
         @{ Name = 'live-json-on-stderr-only'; Mode = 'stderr-only'; Timeout = $streamTimeout; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
         @{ Name = 'live-stdout-plus-stderr'; Mode = 'stdout-and-stderr'; Timeout = $streamTimeout; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
         @{ Name = 'live-stdout-overflow'; Mode = 'overflow-stdout'; Timeout = $streamTimeout; MaximumCharacters = 1024; ExpectedExit = 1; ExpectedEvidence = $false },
         @{ Name = 'live-stderr-overflow'; Mode = 'overflow-stderr'; Timeout = $streamTimeout; MaximumCharacters = 1024; ExpectedExit = 1; ExpectedEvidence = $false },
-        @{ Name = 'live-timeout-tree-cleanup'; Mode = 'timeout-tree'; Timeout = 1000; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
-        @{ Name = 'live-parent-exit-stream-timeout-tree-cleanup'; Mode = 'exit-handle-tree'; Timeout = 1000; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false }
+        @{ Name = 'live-timeout-tree-cleanup'; Mode = 'timeout-tree'; Timeout = $treeTimeout; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false },
+        @{ Name = 'live-parent-exit-stream-timeout-tree-cleanup'; Mode = 'exit-handle-tree'; Timeout = $treeTimeout; MaximumCharacters = 65536; ExpectedExit = 1; ExpectedEvidence = $false }
     )
     foreach ($case in $liveCases) {
         if (Invoke-LiveCliCase $helper $liveDirectory $case) { Write-Output ('[PASS] {0}' -f $case.Name) }
