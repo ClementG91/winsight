@@ -23,7 +23,16 @@ public static class WinSightMcpHost
         builder.Services
             .AddMcpServer(options =>
             {
-                options.ProtocolVersion = McpCatalog.ProtocolVersion;
+                // Deliberately not pinned. The SDK negotiates every revision it implements, which is
+                // what the specification asks of a server: a client declares its version per request
+                // and the server accepts or rejects it, and clients MAY be on different revisions.
+                //
+                // Pinning it to 2026-07-28 makes the server unreachable rather than modern. That
+                // revision removed the initialize handshake, so forcing it as the only offer answers
+                // every handshake-based client with "Protocol version '2026-07-28' is not available
+                // through the initialize handshake" - which is every client still on 2025-11-25 or
+                // earlier. Leaving it unset keeps `server/discover` and per-request `_meta` for new
+                // clients and the handshake for older ones.
                 options.InitializationTimeout = TimeSpan.FromSeconds(15);
                 options.ServerInfo = new Implementation
                 {

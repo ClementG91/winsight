@@ -6,7 +6,34 @@ public sealed record McpScannerCapability(string Name, string Purpose, bool InOv
 
 public static class McpCatalog
 {
-    public const string ProtocolVersion = "2025-11-25";
+    /// <summary>
+    /// The newest specification revision this server speaks. It is reported, not enforced.
+    /// </summary>
+    /// <remarks>
+    /// The server does not pin a single revision. The specification has clients declare their version
+    /// per request and lets a server accept or reject each one, and it says explicitly that both sides
+    /// may support several revisions at once, so the SDK is left to negotiate every revision it
+    /// implements: the stateless <c>server/discover</c> and <c>_meta</c> model for 2026-07-28 clients,
+    /// and the initialize handshake for 2025-11-25 and earlier.
+    ///
+    /// Pinning this value into the server options made it unreachable rather than modern. 2026-07-28
+    /// removed the handshake, so offering only that revision answers every handshake-based client with
+    /// "Protocol version '2026-07-28' is not available through the initialize handshake" - which today
+    /// is most of them.
+    /// </remarks>
+    public const string ProtocolVersion = "2026-07-28";
+
+    /// <summary>
+    /// How a client reaches this server, measured rather than asserted.
+    /// </summary>
+    /// <remarks>
+    /// Taken from the server's own <c>server/discover</c> response and a live handshake probe, not
+    /// from a list written by hand. <c>server/discover</c> reports <c>supportedVersions</c> of
+    /// <c>["2026-07-28"]</c>, because that method and the stateless model arrived together; older
+    /// clients are served by the initialize handshake instead, verified against 2025-11-25.
+    /// </remarks>
+    public const string HandshakeInteroperability =
+        "server/discover advertises 2026-07-28; the initialize handshake serves 2025-11-25 and earlier.";
 
     public const string ServerInstructions =
         "WinSight exposes read-only observations from the local Windows machine. " +

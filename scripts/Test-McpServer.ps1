@@ -56,6 +56,53 @@ function Receive-McpMessage
 
 try
 {
+    # The server must be reachable both ways, and only exercising one hides a real break. Pinning a
+    # single revision into the server options once made it answer every handshake-based client with
+    # "Protocol version '2026-07-28' is not available through the initialize handshake", which the
+    # handshake leg below catches and a stateless-only contract would not.
+    #
+    # server/discover is a 2026-07-28 method, so it carries the per-request metadata that revision
+    # requires: the protocol version, the client capabilities and the client identity all travel in
+    # `_meta` because there is no handshake left to carry them.
+    $statelessMeta = @{
+        "io.modelcontextprotocol/protocolVersion" = "2026-07-28"
+        "io.modelcontextprotocol/clientCapabilities" = @{}
+        "io.modelcontextprotocol/clientInfo" = @{ name = "winsight-package-smoke"; version = "1.0" }
+    }
+    Send-McpMessage @{
+        jsonrpc = "2.0"
+        id = 100
+        method = "server/discover"
+        params = @{ _meta = $statelessMeta }
+    }
+    $discover = Receive-McpMessage
+    if (@($discover.result.supportedVersions) -notcontains "2026-07-28")
+    {
+        throw "server/discover does not advertise the 2026-07-28 protocol revision."
+    }
+    if ($discover.result._meta."io.modelcontextprotocol/serverInfo".name -ne "winsight" -or
+        $discover.result._meta."io.modelcontextprotocol/serverInfo".version -ne $Version)
+    {
+        throw "server/discover identity does not match the packaged build."
+    }
+
+    # The same tool surface must be reachable without a handshake, or the stateless path advertises a
+    # server that cannot actually be used.
+    Send-McpMessage @{
+        jsonrpc = "2.0"
+        id = 101
+        method = "tools/list"
+        params = @{ _meta = $statelessMeta }
+    }
+    $statelessTools = @((Receive-McpMessage).result.tools | ForEach-Object { $_.name })
+    foreach ($expected in @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts"))
+    {
+        if ($statelessTools -notcontains $expected)
+        {
+            throw "Stateless tools/list is missing $expected."
+        }
+    }
+
     Send-McpMessage @{
         jsonrpc = "2.0"
         id = 1
