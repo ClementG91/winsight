@@ -2,6 +2,22 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+### v0.10.7 - the AI surface can see the whole tool, and speaks the current protocol
+- **What a user of v0.10.6 gains.** An MCP client asking about this machine could reach fifteen
+  scanners and the detection journal, and was blind to WinSight's own outbound firewall: not whether
+  it was armed, not which applications were blocked, not which ones had reached the network before
+  anyone ruled on them. That is now readable, read-only, with the two states that matter kept apart
+  so a client cannot report traffic as blocked while nothing is being filtered.
+- The server also speaks the current `2026-07-28` specification revision without dropping clients on
+  older ones, which the previous release could not do.
+- **What did not change.** No new capability, no new privilege, no listening socket. The one channel
+  the MCP process opens is declared in its capability document and its security model.
+- **Still not production-ready, and the verdict has not moved.** The WFP/SCM qualification is bound
+  to commit `3ad4b92` and has not been re-run against this candidate, the privileged Arm64 gates
+  remain `NOT_RUN` for want of hardware, and this release is unsigned under the explicit policy dated
+  2026-07-30. Windows will show an unknown publisher. The checksums and GitHub attestations prove
+  where the bytes came from; they do not give the operating system a publisher to trust.
+
 ### A scanner test measured machine churn instead of the filter it named
 - `TheFlaggedViewNeverExceedsTheFullOne` ran each scanner twice and compared the counts. A machine
   moves between two scans, so a runner reported `modules: flagged returned 133 of 113` because
