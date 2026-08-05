@@ -2,6 +2,42 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.11.1, 2026-08-05
+
+An audit pass immediately after v0.11.0 found the defect that release was about, a second time, in
+the tool next to the one that was fixed. Shipping the correction rather than holding it, because the
+text a client reads to decide what it may ask for is functional surface, not documentation.
+
+### `winsight_overview` described seven of the ten scanners it runs
+
+- The tool named persistence, camera/mic, network, DNS, extensions, hosts and certificates while
+  `Adapters.OverviewCommands` runs ten. `input`, `integrity` and `hijack` were absent from the
+  description and present in the work.
+- **This is worse than the `winsight_scan` drift it sat beside**, because it understates something
+  the tool already does. A model summarising "the overview covers X" from this description leaves
+  keyboard-interception, code-integrity and hijack findings out of its account of the machine, and
+  nothing anywhere signals the omission — the scanner list at least failed loudly, by making five
+  scanners unreachable.
+- Fixed the way the first one was: by deleting the copy rather than correcting it. The description
+  points at the capability catalog, which marks which scanners are in the overview and is already
+  pinned to the dispatcher by a test. A list that cannot be written twice cannot drift.
+- **The lesson is the miss, not the fix.** v0.11.0 corrected the instance that was reported without
+  sweeping the class, and the second instance was three lines away.
+
+### Smaller corrections from the same pass
+
+- `--help` documents **18** verbs and `README.md` claimed 17. Corrected, and pinned by a test that
+  names the README as the thing to update, so the next verb added fails loudly instead of quietly
+  widening the gap.
+- The prompt bodies and `winsight_process`'s argument guards were reachable only through the
+  protocol integration test, which spawns the real server at a 100-second per-response budget. That
+  test proves the wire format and is worth its cost; it is the wrong sole guardian of a string
+  constant and an input check. Both are now pinned in-process, in milliseconds.
+- Measured while auditing, because the command-line rule had been reasoned about and not timed: the
+  persistence scan is unchanged. v0.10.3 ran 45.1 s and 43.6 s on the same machine, v0.11.0 ran
+  49.9 s and 41.3 s — overlapping ranges, with the cost dominated by Authenticode verification
+  rather than by string matching.
+
 ## v0.11.0, 2026-08-05
 
 Persistence stops trusting a signature to answer a question the signature was never asked, and the

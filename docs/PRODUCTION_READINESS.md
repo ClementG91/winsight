@@ -2,7 +2,8 @@
 
 This is the authoritative status as of 2026-08-05. Evidence is candidate-bound: a successful result
 for one commit or package does not automatically qualify a later one. The privileged evidence below
-was gathered against candidate `3ad4b92`; see [Candidate delta review](#candidate-delta-review-v0110)
+was gathered against candidate `3ad4b92`; see
+[Candidate delta review](#candidate-delta-review-v0110-and-v0111)
 for what changed since and why the open gates are unchanged.
 
 | Target | Verdict |
@@ -65,7 +66,7 @@ The following independent gates also remain open:
 - independent human EN/FR/ES review for the exact candidate;
 - a new exact-candidate CI, CodeQL, package/installer and clean-VM rerun after the protocol changes.
 
-## Candidate delta review, v0.11.0
+## Candidate delta review, v0.11.0 and v0.11.1
 
 Evidence here is candidate-bound, so a release after `3ad4b92` requires this section rather than
 letting the statement above age into an implied pass for code it never covered.
@@ -73,6 +74,11 @@ letting the statement above age into an implied pass for code it never covered.
 **What changed:** autostart command-line triage and scheduled-task argument capture, both in the
 unprivileged detection engine; three presentation paths that render a persistence verdict; and the
 MCP server's tool, prompt and resource surface.
+
+**v0.11.1 on top of that** changed one MCP tool's description string, a count in `README.md`, and
+tests. No behaviour, and nothing outside the unprivileged process. The review below therefore covers
+both candidates without weakening: a smaller delta over the same surface cannot reopen a gate the
+larger one left closed.
 
 **What it touches:** nothing on the privileged boundary. The WFP engine, the SCM lifecycle, the
 service-path trust check and the authenticated named-pipe IPC are byte-identical, and the MCP process
