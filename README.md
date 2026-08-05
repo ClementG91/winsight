@@ -10,6 +10,10 @@
 </p>
 
 <p align="center">
+  <a href="https://winsight.edeveloppe.com/"><strong>winsight.edeveloppe.com</strong></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/ClementG91/winsight/actions/workflows/ci.yml"><img src="https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-informational" alt="Platform: Windows" />
@@ -177,6 +181,7 @@ The authoritative statement, with every limitation named:
 
 | For | Document |
 |---|---|
+| An overview, in English, French or Spanish | [winsight.edeveloppe.com](https://winsight.edeveloppe.com/) |
 | Installing and deploying | [INSTALLATION.md](docs/INSTALLATION.md), [ADMINISTRATION.md](docs/ADMINISTRATION.md) |
 | Something is wrong now | [RECOVERY.md](docs/RECOVERY.md) |
 | What it detects | [DETECTIONS.md](docs/DETECTIONS.md) |
