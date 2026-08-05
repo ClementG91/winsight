@@ -9,6 +9,7 @@ VirusTotal lookup, analysis stays on the device.
 | Area | Evidence and notable signals | User action |
 |---|---|---|
 | Persistence | 22 Windows autostart families, including registry Run keys, services/drivers and `ServiceDll`, scheduled tasks, Winlogon, AppInit, IFEO/SilentProcessExit, WMI subscriptions, startup folders, LSA packages, print monitors/providers, credential providers, browser helper objects, Windows Load/Run values, COM hijacks and screensavers. Images are Authenticode checked. | Inspect details, reveal the validated file location, or open Windows Startup apps. |
+| Autostart command lines | A Windows-signed interpreter (`rundll32`, `mshta`, `regsvr32`, `powershell`, `wscript`, `regsvr32`, `msbuild`, … ) handed a payload its signature does not cover: fetched from a URL or share (`RemotePayload`), read from a per-user or temporary location (`PerUserPayload`), carried inline or encoded (`EncodedCommand`), or run through a scriptlet registration (`ScriptletCom`). Reported in `commandLineConcern`. | Read the entry's full command line, and identify what the interpreter is being pointed at. |
 | Camera and microphone | Current and historical Capability Access usage; live CLI transitions. | Identify the application and open Windows privacy settings. |
 | Network connections | IPv4/IPv6 TCP and UDP owner, process image and signature; external established connections with unsigned/untrusted owners are notable. | Inspect the executable and open Resource Monitor. |
 | DNS | Resolver-cache records and administrator-only live ETW queries. | Correlate domains with activity and open Windows network settings. |
@@ -47,6 +48,37 @@ The lower-level JSON `signature` field is null when no check was possible, while
 `fileStatus`, `image`, `expectedImage`, `signatureChecked` and `signature` together.
 VirusTotal is attempted only for a present, flagged image because an absent file has
 no bytes to hash.
+
+### A valid signature does not clear the command line
+
+The verdicts above are all facts about a **file**, and that model is blind by construction to the
+technique that dominates Windows persistence today: the file is genuinely Microsoft's and genuinely
+signed, and the payload is in the arguments. A Run key holding
+`rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";eval(…)` resolves to
+`C:\Windows\System32\rundll32.exe` and verifies as `SignatureValid`.
+
+Such an entry is now flagged, and carries `commandLineConcern` beside its unchanged `status`. Both
+halves are reported together, because "signature valid" on its own reads as an all-clear on exactly
+the entries the check exists to catch.
+
+**The gate is the interpreter, not the pattern.** Ordinary software passes profile paths and URLs on
+its command line constantly; what is not ordinary is a program whose whole purpose is to execute
+what it is handed being pointed at a per-user location, at the network, or at an encoded body. Both
+halves must hold. Measured on a real desktop: 4 351 autostart items, 15 of which resolve to one of
+the interpreters, and **zero findings** — the intended shape on a healthy machine, which is why the
+rule has tests that make it fire against synthetic entries instead.
+
+**Known limits, stated rather than implied.** Hidden-window and no-profile switches (`-w hidden`,
+`-nop`) are deliberately not sufficient on their own: legitimate deployment tooling uses them
+constantly. An interpreter handed a payload that is neither remote, per-user nor encoded — a planted
+DLL under `Program Files`, say — is not visible here; that is the writability question the `hijack`
+scanner answers. The rule reads the command line as recorded, so a payload assembled at runtime is
+out of reach of static analysis.
+
+Scheduled tasks previously reported the `<Command>` of an Exec action and discarded its
+`<Arguments>`, which reduced every interpreter-based task to a bare, signed, unremarkable binary.
+Measured on the same desktop, **58 of 81** scheduled-task entries carry arguments; none of them was
+visible before. The surface most used for modern persistence was reporting the least evidence.
 
 ### Example: orphaned WinSetupMon driver registration
 

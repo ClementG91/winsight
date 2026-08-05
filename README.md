@@ -35,7 +35,7 @@ traffic at the kernel filtering layer.
 
 | Tool | Objective-See equivalent | What it tells you |
 |---|---|---|
-| **Persistence scanner** | KnockKnock | 22 autostart surfaces, catalog-aware Authenticode verdicts, optional VirusTotal enrichment |
+| **Persistence scanner** | KnockKnock | 22 autostart surfaces, catalog-aware Authenticode verdicts, command-line triage for signed interpreters handed someone else's payload, optional VirusTotal enrichment |
 | **Outbound firewall** | LuLu | Per-application block/allow enforced through the Windows Filtering Platform; audit-only until you arm it |
 | **Guardian** | BlockBlock | Live tray alert the moment a new startup item appears, plus reconciliation of what changed while WinSight was not running |
 | **Ransomware detection** | RansomWhere? | Hidden decoy files, rename/delete-burst and entropy-on-write heuristics |
@@ -71,8 +71,9 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   winsight presence                       when this machine woke, and whether anyone was there
   winsight av --watch | dns --watch | attribution --watch
   ```
-- **MCP server** - `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. No
-  network listener. See [`docs/MCP.md`](docs/MCP.md).
+- **MCP server** - `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. Six
+  tools, three resources and two guided prompts; no network listener. See
+  [`docs/MCP.md`](docs/MCP.md).
 
 All three share one orchestration layer; detection logic is never duplicated in UI or protocol code.
 

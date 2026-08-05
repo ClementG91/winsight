@@ -2,6 +2,112 @@
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
 
+## v0.11.0, 2026-08-05
+
+Persistence stops trusting a signature to answer a question the signature was never asked, and the
+MCP surface stops advertising a third of itself out of a stale sentence.
+
+### Scheduled tasks reported the interpreter and threw away the payload
+
+- An Exec action stores the program in `<Command>` and what it is told to run in `<Arguments>`. The
+  parser read the first and discarded the second, so a task invoking
+  `rundll32.exe C:\Users\…\AppData\Roaming\evil.dll,Start` was recorded as `rundll32.exe`: a
+  Microsoft binary, a valid signature, an unremarkable row, and the DLL it loads appearing **nowhere
+  in the report**. The surface most used for modern persistence was the one producing the least
+  evidence.
+- Measured on a real desktop after the fix: **58 of 81** scheduled-task entries carry arguments.
+  None of them was visible before. Of the 15 autostart entries that resolve to an interpreter,
+  12 were scheduled tasks, and all 12 had an empty command line.
+- **The one test covering this parser had the defect written into it.** Its fixture already
+  contained `<Arguments>/A</Arguments>` and it asserted the value that dropped them, so the bug was
+  certified as the contract. That is the more useful half of this entry: the parser was not
+  untested, it was tested wrong.
+- Pairing is done through each `Command` element's own parent rather than by matching `Exec`
+  elements, so the flat descendant search that made this robust against unexpected nesting is kept:
+  a `Command` somewhere unforeseen still yields its command, simply without arguments, rather than
+  vanishing. Persistence identity is keyed on the resolved target, never the raw command, so
+  Guardian does not see 58 entries change underneath it on first run.
+
+### A valid signature no longer clears the command line
+
+- Every persistence verdict was a fact about a **file** — is it there, is it signed, does the
+  signature stand — which is blind by construction to the technique that dominates Windows
+  persistence, because the file is genuinely Microsoft's and genuinely signed. A Run key holding
+  `rundll32.exe javascript:"\..\mshtml,RunHTMLApplication ";eval(…)` resolved to
+  `C:\Windows\System32\rundll32.exe`, verified as `SignatureValid`, and was reported as routine.
+- Such an entry is now flagged and carries `commandLineConcern` — `RemotePayload`,
+  `PerUserPayload`, `EncodedCommand` or `ScriptletCom` — **beside** its unchanged status, never
+  instead of it. Reporting only the signature reads as an all-clear on exactly the entries this
+  exists to catch.
+- **The gate is the interpreter, not the pattern.** Ordinary software passes profile paths and URLs
+  on its command line all day; what is not ordinary is a program whose whole purpose is to execute
+  what it is handed being pointed at a per-user location, at the network, or at an encoded body.
+  Requiring both halves is what keeps this quiet.
+- **Measured before it was written, and again after.** 4 351 autostart items, 15 resolving to an
+  interpreter, **zero findings** — total and notable counts unchanged. Zero is the intended shape on
+  a healthy machine and the reason the rule has tests that make it fire against synthetic entries: a
+  silent detector and a broken one are indistinguishable from outside.
+- It performs **no I/O**. It runs inside `IsSuspicious`, which is evaluated repeatedly while a
+  report is built, so it is a pure function over two strings and can neither block a scan nor throw
+  into one. The consequence is stated rather than hidden: it claims "runs from a per-user location",
+  never "that directory is writable", which would mean asking the filesystem.
+- Hidden-window and no-profile switches are deliberately **not** sufficient on their own, and a
+  payload assembled at runtime is out of reach of static analysis. Both are recorded as limits in
+  [`docs/DETECTIONS.md`](docs/DETECTIONS.md) rather than implied away.
+- **Three separate surfaces render a persistence verdict, and flagging the entry only fixed one of
+  them.** The report builds its own line, the dashboard rebuilds one from fields in three languages,
+  and Guardian's journal builds a third. The last is the one that mattered most: it is the sentence
+  an operator reads when they come back to a machine that alerted while they were away, and the one
+  `winsight_alerts` hands an MCP client. All three would have announced a notable detection and then
+  described it as "signature valid" — an accurate half-sentence that sends the reader back to bed.
+  All three now carry the reason beside the verdict, with the dashboard's translated into EN/FR/ES
+  and covered by the existing translation-parity gate.
+
+### The MCP surface advertised ten of its fifteen scanners
+
+- `winsight_scan` took a free string whose valid values existed only in its prose description, and
+  that description had gone stale: it named ten scanners while the dispatcher accepted fifteen.
+  `input`, `integrity`, `drivers`, `hijack` and `presence` were reachable by a client that already
+  knew their names and **invisible to one reading the tool schema** — which is how a model decides
+  what it may ask for. A whole privilege-escalation scanner could not be discovered.
+- This was the same failure the CLI had already had once, where `hijack` shipped wired into
+  everything except `--help`. The fix there was to stop maintaining a second copy; this is that fix
+  for the protocol surface. The valid values now travel in the JSON Schema as an enumeration, and
+  tests pin the published set, the capability catalog and the dispatcher to each other.
+- **The first attempt at the fix introduced the same class of bug in the opposite direction, and
+  probing the running server is what caught it.** Relying on a camel-case policy passed to the
+  converter's constructor produced a schema advertising `"Persistence"` while
+  `winsight_get_capabilities` answered `"persistence"` — a client following the catalog would have
+  sent a value its own schema rejected. Naming every member explicitly is the only form both the
+  exporter and the converter read, and a round-trip test now asserts that rather than trusting it.
+
+### `winsight_process` gives an AI client the pivot it was missing
+
+- The per-process drill-down existed and was reachable only from the CLI. An MCP client that saw a
+  flagged outbound connection had to re-run the processes, modules and connections scanners and join
+  them by hand — slow, and the join is where the mistakes are.
+- It shares the single-scan gate rather than taking its own, because it costs what a scan costs: two
+  full signature-verification passes running beside each other is not an improvement.
+- A pid that is not running answers "not running", which is a different answer from a process that
+  is running and has nothing notable. `pid 0` is refused rather than described, because the System
+  Idle Process has no image and "not running" about it would be false.
+
+### Prompts and a verdict model, for the answers that are wrong in a way nobody can see
+
+- The server published no prompts at all. It now publishes two, `winsight_triage_machine` and
+  `winsight_explain_alert`, each encoding a failure whose output reads as a confident, well-formed
+  answer: reporting traffic as blocked when nothing is filtering, and reporting "nobody knows who
+  wrote this" when the truth is "WinSight was not allowed to look".
+- Server instructions already carry those rules, but instructions are advisory context a model may
+  compress or lose behind a long conversation. A prompt is chosen by the user at the moment they
+  ask, which puts the rule in the same turn as the request.
+- `winsight://verdict-model` joins the two existing resources. It states the distinctions where the
+  accurate reading and the natural-sounding one differ and the natural-sounding one is the stronger
+  claim — chiefly that `FileMissing` means the signature was **never checked** rather than that the
+  file is unsigned.
+- The packaged-installer contract, which runs on native x64 and native Arm64, now asserts the
+  published scanner enumeration, the absent-pid answer, both prompts and all three resources.
+
 ### v0.10.7 - the AI surface can see the whole tool, and speaks the current protocol
 - **What a user of v0.10.6 gains.** An MCP client asking about this machine could reach fifteen
   scanners and the detection journal, and was blind to WinSight's own outbound firewall: not whether

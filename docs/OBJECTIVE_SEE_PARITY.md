@@ -54,7 +54,15 @@ prove about itself.
 
 ### What WinSight has that Objective-See does not
 
-- **An MCP server**, so any LLM can run the read-only scanners and read the detection history.
+- **Command-line triage on autostart entries.** Every persistence verdict in both products is a fact
+  about a *file*, and that model is blind by construction to the technique that dominates Windows
+  persistence: the file is genuinely Microsoft's and genuinely signed, and the payload is in the
+  arguments. WinSight reads the command line as well, and flags a signed Windows interpreter handed
+  something its signature does not cover. This has no Objective-See counterpart because it has no
+  macOS counterpart at that scale - the LOLBin surface is a Windows-specific consequence of shipping
+  a large set of signed, general-purpose interpreters in the base OS.
+- **An MCP server**, so any LLM can run the read-only scanners, pivot onto a single process, and read
+  the detection history.
 - **DNS cache, browser extensions, trusted-root certificates, hosts file** scanners.
 - **A local alert journal** surviving suppressed toasts, surfaced in-app and over MCP.
 - **A Controlled Folder Access posture report.** RansomWhere? detects; it does not point you at an OS
