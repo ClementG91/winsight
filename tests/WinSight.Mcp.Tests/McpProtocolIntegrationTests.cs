@@ -57,7 +57,13 @@ public sealed class McpProtocolIntegrationTests
             await SendAsync(process, """{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}""");
             using var tools = await ReadAsync(process);
             var listedTools = tools.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToList();
-            Assert.Equal(6, listedTools.Count);
+            // The count is stated in README.md and docs/MCP.md, so the assertion names them: a tool
+            // added without touching either leaves the project advertising a surface it no longer
+            // has, which is the drift this suite already caught twice in the descriptions.
+            Assert.True(
+                listedTools.Count == 6,
+                $"The server publishes {listedTools.Count} tools; README.md and docs/MCP.md say 6. "
+                + "Update both and this assertion together.");
             Assert.All(listedTools, tool =>
             {
                 var annotations = tool.GetProperty("annotations");
@@ -148,7 +154,12 @@ public sealed class McpProtocolIntegrationTests
 
             await SendAsync(process, """{"jsonrpc":"2.0","id":5,"method":"resources/list","params":{}}""");
             using var resources = await ReadAsync(process);
-            Assert.Equal(3, resources.RootElement.GetProperty("result").GetProperty("resources").GetArrayLength());
+            var resourceCount = resources.RootElement
+                .GetProperty("result").GetProperty("resources").GetArrayLength();
+            Assert.True(
+                resourceCount == 3,
+                $"The server publishes {resourceCount} resources; README.md and docs/MCP.md say 3. "
+                + "Update both and this assertion together.");
 
             await SendAsync(process, """
                 {"jsonrpc":"2.0","id":6,"method":"resources/read","params":{"uri":"winsight://security-model"}}
