@@ -128,6 +128,14 @@
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Access denied, signature not checked</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Verification error</value></data>
 
+  <!-- Shown beside the signature verdict, never instead of it: these entries are flagged because of
+       their command line while their file signature is perfectly valid, so the status alone reads
+       as an all-clear on exactly the items the check exists to catch. -->
+  <data name="PersistenceAbuseRemotePayload" xml:space="preserve"><value>a signed Windows interpreter is pointed at a remote location, so what runs is not on this machine</value></data>
+  <data name="PersistenceAbusePerUserPayload" xml:space="preserve"><value>a signed Windows interpreter is pointed at a file in a per-user or temporary location</value></data>
+  <data name="PersistenceAbuseEncodedCommand" xml:space="preserve"><value>a signed Windows interpreter carries an encoded or inline script body</value></data>
+  <data name="PersistenceAbuseScriptletCom" xml:space="preserve"><value>a signed Windows interpreter is used to register a scriptlet, a known way to run code through a trusted host</value></data>
+
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Overview</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>The recommended one-click check</value></data>
   <data name="ToolOverviewDescription" xml:space="preserve"><value>Checks the main signals: startup items, camera/microphone, connections, DNS, extensions, hosts and certificates.</value></data>

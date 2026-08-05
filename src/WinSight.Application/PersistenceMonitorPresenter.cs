@@ -45,10 +45,23 @@ public static class PersistenceMonitorPresenter
         ArgumentNullException.ThrowIfNull(detection);
         var entry = detection.Entry;
         var target = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
-        var line = $"{entry.Name} — {target} [{StatusLabel(entry.Status)}]";
+        var line = $"{entry.Name} — {target} [{StatusLabel(entry.Status)}{AbuseSuffix(entry)}]";
         return AttributionNote.Describe(
             line, attribute?.Invoke(entry.Location, detection.FirstSeenUtc), health);
     }
+
+    /// <summary>
+    /// The command-line reason, appended to the signature verdict rather than replacing it.
+    /// </summary>
+    /// <remarks>
+    /// This is the line an operator reads when they come back to a machine that alerted while they
+    /// were away, and it is what <c>winsight_alerts</c> hands an MCP client. An entry flagged for
+    /// its command line has a perfectly valid signature, so without this the loudest, least
+    /// attended path in the product would announce a notable detection and then describe it as
+    /// "signature valid" — the one reading that would send somebody back to bed.
+    /// </remarks>
+    private static string AbuseSuffix(AutostartEntry entry) =>
+        InterpreterAbuseTriage.Describe(entry.Abuse) is { } reason ? $"; {reason}" : string.Empty;
 
     /// <summary>
     /// The localization key for the tray balloon shown when a new entry is detected. A notable

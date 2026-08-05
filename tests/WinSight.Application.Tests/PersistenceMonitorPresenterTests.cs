@@ -78,6 +78,46 @@ public sealed class PersistenceMonitorPresenterTests
         Assert.Contains("author unknown (attribution not running)", detail, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// An entry flagged for its command line says so in the journal, beside its valid signature.
+    /// </summary>
+    /// <remarks>
+    /// This is the least attended path in the product: the sentence an operator reads when they come
+    /// back to a machine that alerted while they were away, and the one <c>winsight_alerts</c> hands
+    /// an MCP client. Rendering a notable arrival as "signature valid" and nothing else would be an
+    /// accurate half-sentence that sends the reader back to bed.
+    /// </remarks>
+    [Fact]
+    public void AlertDetail_ExplainsANotableEntryWhoseSignatureIsValid()
+    {
+        var signedInterpreter = new AutostartEntry(
+            AutostartVector.ScheduledTask,
+            "Updater",
+            @"C:\Windows\System32\Tasks\Updater",
+            @"rundll32.exe C:\Users\me\AppData\Roaming\update.dll,Start",
+            @"C:\Windows\System32\rundll32.exe",
+            @"C:\Windows\System32\rundll32.exe",
+            ImageResolutionStatus.Present,
+            new SignatureVerdict(SignatureState.SignedTrusted, "CN=Microsoft Windows"));
+
+        var detection = Event(signedInterpreter);
+        var detail = PersistenceMonitorPresenter.AlertDetail(detection);
+
+        Assert.True(detection.IsNotable);
+        Assert.Contains("signature valid", detail, StringComparison.Ordinal);
+        Assert.Contains("per-user or temporary location", detail, StringComparison.Ordinal);
+        Assert.Equal("GuardianDetectedNotable", PersistenceMonitorPresenter.BalloonMessageKey(detection));
+    }
+
+    /// <summary>An ordinary signed arrival gains no extra clause and stays calm.</summary>
+    [Fact]
+    public void AlertDetail_AddsNothingWhenTheCommandLineIsUnremarkable()
+    {
+        var detail = PersistenceMonitorPresenter.AlertDetail(Event(Signed("X", @"C:\Program Files\App\x.exe")));
+
+        Assert.Contains("[signature valid]", detail, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AlertDetail_DistinguishesUnelevatedFromWatchingAndSeeingNothing()
     {

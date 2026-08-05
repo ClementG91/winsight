@@ -31,8 +31,18 @@ public sealed class ScheduledTaskEnumeratorTests
         </Task>
         """;
 
+    /// <summary>
+    /// The reported command line includes the action's arguments, which are the part that says what
+    /// actually runs.
+    /// </summary>
+    /// <remarks>
+    /// This assertion — like the one in <c>ScheduledTaskTests</c> — previously expected the command
+    /// alone, from a fixture that has always carried <c>&lt;Arguments&gt;</c>. Both tests therefore
+    /// certified the parser's blind spot as its contract, which is why the defect survived: it was
+    /// not untested, it was tested wrong.
+    /// </remarks>
     [Fact]
-    public void ReportsTheCommandOfEveryVisibleTask()
+    public void ReportsTheFullCommandLineOfEveryVisibleTask()
     {
         var source = new ScriptedSource([
             new ScheduledTaskDefinition(@"\Updater\RunDaily", TaskXml),
@@ -42,7 +52,7 @@ public sealed class ScheduledTaskEnumeratorTests
 
         Assert.Equal(AutostartVector.ScheduledTask, entry.Vector);
         Assert.Equal(@"Updater\RunDaily", entry.Name);
-        Assert.Equal(@"C:\Users\me\AppData\Local\Updater\update.exe", entry.Command);
+        Assert.Equal(@"C:\Users\me\AppData\Local\Updater\update.exe /silent", entry.Command);
     }
 
     [Fact]

@@ -63,20 +63,30 @@ a `.docx` or a `.jpg` never trips it. Loud alert on detection.
 
 ### Native Arm64 privileged qualification
 
-The only work blocked on hardware. Build, PE architecture, packaging and the full installer lifecycle
-are already verified on a **native** Arm64 runner on every CI run. What remains is the privileged
-runtime - WFP, SCM, path trust, IPC - plus emulated-x64 application identity, the one behaviour with
-no x64 analogue.
+**Blocked on hardware nobody on the project has, not on unwritten work.** Build, PE architecture,
+packaging and the full installer lifecycle are already verified on a **native** Arm64 runner on
+every CI run. What remains is the privileged runtime - WFP, SCM, path trust, IPC - plus emulated-x64
+application identity, the one behaviour with no x64 analogue.
 
 Nothing new needs writing: the protocol, scripts and binding method exist and ship inside the Arm64
-package. The exact procedure is in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
+package. The exact procedure is in [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md). It needs a
+physical Windows-on-Arm machine, because the gates it runs are precisely the ones a CI container and
+an emulator cannot answer for. Until one is available this stays `NOT_RUN`, and the readiness
+verdict says so rather than aging into an implied pass.
 
 ### Authenticode signing
 
 The optional fail-closed signing path is implemented, but no certificate is configured. SignPath
 Foundation declined the free-program application on 2026-07-29 because public adoption signals are
-still insufficient. Releases use an explicit visible unsigned policy for now; reapplying or obtaining
-a regular certificate remains future work. See [`RELEASE.md`](RELEASE.md).
+still insufficient, and **the project has decided not to buy a commercial certificate for now** -
+which is a deliberate position, not an oversight.
+
+It is worth naming the shape of the problem, because it is circular rather than technical: an
+unknown-publisher warning suppresses the adoption that the free programmes require as evidence of
+adoption. The three exits are a commercial OV certificate, Azure Trusted Signing (which requires a
+verified legal entity with three years of history), or re-applying to SignPath once the repository
+has the public signals it asks for. None is engineering work. Until then the release policy is
+explicitly and visibly unsigned. See [`RELEASE.md`](RELEASE.md).
 
 ### Broader write attribution
 

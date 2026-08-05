@@ -1,7 +1,9 @@
 # Production readiness
 
-This is the authoritative status as of 2026-07-30. Evidence is candidate-bound: a successful result
-for one commit or package does not automatically qualify a later one.
+This is the authoritative status as of 2026-08-05. Evidence is candidate-bound: a successful result
+for one commit or package does not automatically qualify a later one. The privileged evidence below
+was gathered against candidate `3ad4b92`; see [Candidate delta review](#candidate-delta-review-v0110)
+for what changed since and why the open gates are unchanged.
 
 | Target | Verdict |
 |---|---|
@@ -62,6 +64,31 @@ The following independent gates also remain open:
 - x64-on-Arm64 application-identity qualification;
 - independent human EN/FR/ES review for the exact candidate;
 - a new exact-candidate CI, CodeQL, package/installer and clean-VM rerun after the protocol changes.
+
+## Candidate delta review, v0.11.0
+
+Evidence here is candidate-bound, so a release after `3ad4b92` requires this section rather than
+letting the statement above age into an implied pass for code it never covered.
+
+**What changed:** autostart command-line triage and scheduled-task argument capture, both in the
+unprivileged detection engine; three presentation paths that render a persistence verdict; and the
+MCP server's tool, prompt and resource surface.
+
+**What it touches:** nothing on the privileged boundary. The WFP engine, the SCM lifecycle, the
+service-path trust check and the authenticated named-pipe IPC are byte-identical, and the MCP process
+still reaches the service through the same posture-only interface with no mutation path. The gates
+whose surface is unchanged therefore keep the standing recorded in the validation files, and were not
+re-run — which is the delta review this project's rule asks for, not a claim that they were repeated.
+
+**What it does not change:** the verdict. All three targets remain **not production-ready** for
+exactly the reasons above. The three x64 protocol gaps, native Arm64 privileged behaviour and
+x64-on-Arm64 identity are all still open, and native Arm64 is blocked on hardware the project does
+not have rather than on unwritten work.
+
+**What was verified for this candidate:** the full suite on x64 including the packaged MCP stdio
+contract, the engine-library and privileged-managed coverage gates, and formatting. Native Arm64
+build, packaging and installer lifecycle run in CI on a native runner as usual; the Arm64 *privileged
+runtime* remains `NOT_RUN`.
 
 ## Authenticode policy
 

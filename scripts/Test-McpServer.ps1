@@ -40,12 +40,21 @@ function Send-McpMessage([hashtable]$Message)
     $process.StandardInput.Flush()
 }
 
-function Receive-McpMessage
+# The budget is per response, not per script, and it is tight on purpose: a handshake or a listing
+# that has not answered in ten seconds has hung, and failing fast is the point of a smoke test.
+#
+# One call legitimately costs far more. The per-process pivot takes a full process snapshot and
+# verifies a signature for every entry -- measured at about four seconds on a warm desktop, and it
+# overran ten on a cold CI runner whose Authenticode cache is empty, which is exactly how this
+# surfaced. Its budget is the server's own 90-second scan limit plus margin, so a genuinely stuck
+# scan is still caught while the server's own timeout error gets the chance to arrive and be read as
+# a response rather than as silence.
+function Receive-McpMessage([int]$TimeoutMs = 10000)
 {
     $read = $process.StandardOutput.ReadLineAsync()
-    if (-not $read.Wait(10000))
+    if (-not $read.Wait($TimeoutMs))
     {
-        throw "MCP response timed out."
+        throw "MCP response timed out after $TimeoutMs ms."
     }
     if ($null -eq $read.Result)
     {
@@ -95,7 +104,7 @@ try
         params = @{ _meta = $statelessMeta }
     }
     $statelessTools = @((Receive-McpMessage).result.tools | ForEach-Object { $_.name })
-    foreach ($expected in @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts", "winsight_outbound_firewall"))
+    foreach ($expected in @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_process", "winsight_alerts", "winsight_outbound_firewall"))
     {
         if ($statelessTools -notcontains $expected)
         {
@@ -125,7 +134,7 @@ try
     Send-McpMessage @{ jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{} }
     $toolList = Receive-McpMessage
     $tools = @($toolList.result.tools)
-    $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_alerts", "winsight_outbound_firewall")
+    $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_process", "winsight_alerts", "winsight_outbound_firewall")
     if ($tools.Count -ne $expectedTools.Count)
     {
         throw "Expected $($expectedTools.Count) MCP tools, got $($tools.Count)."
@@ -174,6 +183,62 @@ try
         $reports[0].returnedItemCount -ne 0 -or @($reports[0].items).Count -ne 0)
     {
         throw "MCP default scan did not preserve the summary-only disclosure contract."
+    }
+
+    # The scanner names must travel in the published schema, because that is what a model reads to
+    # decide what it may ask for. They were once prose that listed ten of the fifteen, leaving five
+    # scanners reachable and undiscoverable, so the packaged surface pins the enumeration itself.
+    $scannerSchema = ($tools | Where-Object name -EQ "winsight_scan").inputSchema.properties.scanner
+    $offeredScanners = @($scannerSchema.enum)
+    if ($offeredScanners.Count -ne 15)
+    {
+        throw "winsight_scan publishes $($offeredScanners.Count) scanners in its schema, expected 15."
+    }
+    foreach ($required in @("hijack", "integrity", "drivers", "input", "presence"))
+    {
+        if ($offeredScanners -notcontains $required)
+        {
+            throw "winsight_scan schema does not offer '$required'."
+        }
+    }
+
+    # A pid that cannot be running must answer "not running" rather than describing an absent
+    # process as one with nothing wrong.
+    Send-McpMessage @{
+        jsonrpc = "2.0"
+        id = 7
+        method = "tools/call"
+        params = @{ name = "winsight_process"; arguments = @{ pid = 999999 } }
+    }
+    $drillDown = Receive-McpMessage -TimeoutMs 100000
+    $processReports = @($drillDown.result.structuredContent.reports)
+    if ($drillDown.result.structuredContent.evidenceIncluded -or
+        $processReports.Count -ne 1 -or $processReports[0].tool -ne "process" -or
+        $processReports[0].summary -notmatch "not running")
+    {
+        throw "MCP process tool did not report an absent pid honestly."
+    }
+
+    # Prompts carry the two interpretation rules whose wrong answer reads as a confident one, so an
+    # empty prompt surface is a regression even though every tool still works.
+    Send-McpMessage @{ jsonrpc = "2.0"; id = 8; method = "prompts/list"; params = @{} }
+    $promptNames = @((Receive-McpMessage).result.prompts | ForEach-Object { $_.name })
+    foreach ($expected in @("winsight_triage_machine", "winsight_explain_alert"))
+    {
+        if ($promptNames -notcontains $expected)
+        {
+            throw "MCP prompt '$expected' is not published by the packaged server."
+        }
+    }
+
+    Send-McpMessage @{ jsonrpc = "2.0"; id = 9; method = "resources/list"; params = @{} }
+    $resourceUris = @((Receive-McpMessage).result.resources | ForEach-Object { $_.uri })
+    foreach ($expected in @("winsight://capabilities", "winsight://security-model", "winsight://verdict-model"))
+    {
+        if ($resourceUris -notcontains $expected)
+        {
+            throw "MCP resource '$expected' is not published by the packaged server."
+        }
     }
 
     Send-McpMessage @{

@@ -128,6 +128,11 @@
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Accès refusé, signature non vérifiée</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Erreur de vérification</value></data>
 
+  <data name="PersistenceAbuseRemotePayload" xml:space="preserve"><value>un interpréteur Windows signé pointe vers un emplacement distant : ce qui s'exécute n'est pas sur cette machine</value></data>
+  <data name="PersistenceAbusePerUserPayload" xml:space="preserve"><value>un interpréteur Windows signé pointe vers un fichier situé dans un emplacement utilisateur ou temporaire</value></data>
+  <data name="PersistenceAbuseEncodedCommand" xml:space="preserve"><value>un interpréteur Windows signé transporte un script encodé ou intégré à la ligne de commande</value></data>
+  <data name="PersistenceAbuseScriptletCom" xml:space="preserve"><value>un interpréteur Windows signé sert à enregistrer un scriptlet, une méthode connue pour exécuter du code via un hôte de confiance</value></data>
+
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vue d’ensemble</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>Le contrôle recommandé en un clic</value></data>
   <data name="ToolOverviewDescription" xml:space="preserve"><value>Vérifie les principaux signaux : démarrage automatique, caméra/micro, connexions, DNS, extensions, hosts et certificats.</value></data>

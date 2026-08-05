@@ -45,6 +45,14 @@ public static class DashboardFindingPresenter
         var suffix = HasVirusTotal(item, out var malicious, out var total)
             ? $"{label}; VT {malicious}/{total}"
             : label;
+        // Appended, never substituted. This presenter rebuilds the line from fields rather than
+        // reusing item.Detail, so an entry flagged for its command line would otherwise render in
+        // the dashboard as "Signature valid" alone — the reassuring half of the finding, and the
+        // one sentence this check exists to stop anybody reading on its own.
+        if (Field(item, "commandLineConcern") is { } concern)
+        {
+            suffix = $"{suffix}; {text.GetOrFallback($"PersistenceAbuse{concern}", concern)}";
+        }
         var vector = Field(item, "vector");
         var name = Field(item, "name");
         var localizedVector = string.IsNullOrWhiteSpace(vector)
