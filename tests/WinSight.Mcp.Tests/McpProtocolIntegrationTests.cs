@@ -216,9 +216,12 @@ public sealed class McpProtocolIntegrationTests
 
     private static async Task<JsonDocument> ReadAsync(Process process)
     {
-        // Per-response rather than per-test, and sized for the slowest single call under load: a
-        // scan that has to take a process snapshot before it can answer.
-        var line = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(60));
+        // Per-response, and deliberately longer than the server's own 90-second scan limit. Sizing it
+        // below that budget makes the client give up first, so a scan the server would have refused
+        // with a clear message becomes an opaque client-side timeout instead — and on a loaded runner
+        // that shows up as a flake rather than as the real answer. The packaged smoke test sizes the
+        // same call the same way, for the same reason.
+        var line = await process.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(100));
         if (line is null)
         {
             var error = await process.StandardError.ReadToEndAsync();

@@ -40,12 +40,21 @@ function Send-McpMessage([hashtable]$Message)
     $process.StandardInput.Flush()
 }
 
-function Receive-McpMessage
+# The budget is per response, not per script, and it is tight on purpose: a handshake or a listing
+# that has not answered in ten seconds has hung, and failing fast is the point of a smoke test.
+#
+# One call legitimately costs far more. The per-process pivot takes a full process snapshot and
+# verifies a signature for every entry -- measured at about four seconds on a warm desktop, and it
+# overran ten on a cold CI runner whose Authenticode cache is empty, which is exactly how this
+# surfaced. Its budget is the server's own 90-second scan limit plus margin, so a genuinely stuck
+# scan is still caught while the server's own timeout error gets the chance to arrive and be read as
+# a response rather than as silence.
+function Receive-McpMessage([int]$TimeoutMs = 10000)
 {
     $read = $process.StandardOutput.ReadLineAsync()
-    if (-not $read.Wait(10000))
+    if (-not $read.Wait($TimeoutMs))
     {
-        throw "MCP response timed out."
+        throw "MCP response timed out after $TimeoutMs ms."
     }
     if ($null -eq $read.Result)
     {
@@ -201,7 +210,7 @@ try
         method = "tools/call"
         params = @{ name = "winsight_process"; arguments = @{ pid = 999999 } }
     }
-    $drillDown = Receive-McpMessage
+    $drillDown = Receive-McpMessage -TimeoutMs 100000
     $processReports = @($drillDown.result.structuredContent.reports)
     if ($drillDown.result.structuredContent.evidenceIncluded -or
         $processReports.Count -ne 1 -or $processReports[0].tool -ne "process" -or
