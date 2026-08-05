@@ -50,7 +50,8 @@ public static class WinSightMcpHost
             })
             .WithStdioServerTransport()
             .WithTools<WinSightMcpTools>()
-            .WithResources<WinSightMcpResources>();
+            .WithResources<WinSightMcpResources>()
+            .WithPrompts<WinSightMcpPrompts>();
 
         await builder.Build().RunAsync(cancellationToken).ConfigureAwait(false);
         return 0;

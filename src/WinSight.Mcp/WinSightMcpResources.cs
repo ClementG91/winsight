@@ -21,4 +21,15 @@ public sealed class WinSightMcpResources(McpSecurityOptions security)
         MimeType = "text/markdown")]
     [Description("Read-only boundaries, privacy defaults and interpretation rules for WinSight MCP.")]
     public static string GetSecurityModel() => McpCatalog.SecurityModel;
+
+    [McpServerResource(
+        UriTemplate = "winsight://verdict-model",
+        Name = "winsight-verdict-model",
+        Title = "How to read a WinSight verdict",
+        MimeType = "text/markdown")]
+    [Description(
+        "How to read a WinSight finding without overstating it: what a file-status verdict does and " +
+        "does not establish, why a valid signature can still be notable, and which pairs of fields " +
+        "must never be merged into one sentence.")]
+    public static string GetVerdictModel() => McpCatalog.VerdictModel;
 }

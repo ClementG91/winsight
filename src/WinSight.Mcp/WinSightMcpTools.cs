@@ -2,6 +2,7 @@ using System.ComponentModel;
 using ModelContextProtocol;
 using ModelContextProtocol.Server;
 using WinSight.Application;
+using WinSight.Reporting;
 
 namespace WinSight.Mcp;
 
@@ -42,8 +43,10 @@ public sealed class WinSightMcpTools(
         "Run one read-only local Windows security scanner. Network reputation lookups are always disabled. " +
         "Use summary-only output first; request evidence only when item-level investigation is needed.")]
     public async Task<McpScanResult> ScanAsync(
-        [Description("Canonical scanner: persistence, av, net, dns, firewall, processes, modules, extensions, certs, or hosts.")]
-        string scanner,
+        // The valid values are the schema's enumeration, not prose in this description. A
+        // hand-written list here is what previously advertised ten of the fifteen scanners.
+        [Description("Which scanner to run. winsight_get_capabilities describes what each one covers.")]
+        McpScanner scanner,
         [Description("Return only noteworthy findings. Keep true for normal AI triage.")]
         bool flaggedOnly = true,
         [Description("Include item-level evidence. False returns counts and summaries only.")]
@@ -54,18 +57,70 @@ public sealed class WinSightMcpTools(
         int maxItems = 50,
         CancellationToken cancellationToken = default)
     {
-        if (!Adapters.SnapshotCommands.Contains(scanner))
+        var command = McpScanners.Command(scanner);
+
+        // The schema already constrains the value, so this can only fire if a scanner were added to
+        // the protocol enum without being wired into the dispatcher. Kept as a defence in depth in a
+        // security tool: the alternative is an ArgumentOutOfRangeException surfacing as a generic
+        // failure, and a test pins the two sets together so this should be unreachable.
+        if (!Adapters.SnapshotCommands.Contains(command))
         {
-            throw new McpException("Unknown WinSight scanner. Call winsight_get_capabilities first.");
+            throw new McpException($"WinSight cannot run '{command}' on this build.");
         }
 
         return await RunAndProjectAsync(
-            scanner,
+            command,
             flaggedOnly,
             includeEvidence,
             includeSensitive,
             maxItems,
             cancellationToken).ConfigureAwait(false);
+    }
+
+    [McpServerTool(
+        Name = "winsight_process",
+        Title = "Inspect one running process",
+        ReadOnly = true,
+        Idempotent = true,
+        Destructive = false,
+        OpenWorld = false,
+        UseStructuredContent = true)]
+    [Description(
+        "Everything WinSight can say about one running process, gathered into a single view: its image and " +
+        "signature, its parent, how many modules it has loaded and which of them are unsigned, and its live " +
+        "external connections. Use this to follow up a process another scanner named, instead of re-running " +
+        "and cross-referencing the processes, modules and connections scanners by hand. Read-only: it cannot " +
+        "terminate, suspend or modify the process. A pid that is not running is reported as not running, " +
+        "which is a different answer from a process that is running and has nothing notable.")]
+    public async Task<McpScanResult> ProcessAsync(
+        [Description("The process id to inspect.")]
+        int pid,
+        [Description("Include the unsigned modules and individual connections. False returns counts and the summary only.")]
+        bool includeEvidence = false,
+        [Description("Include raw command lines and user paths. Requires WINSIGHT_MCP_ALLOW_SENSITIVE=1 on the server.")]
+        bool includeSensitive = false,
+        [Description("Maximum evidence items returned, from 1 to 200.")]
+        int maxItems = 50,
+        CancellationToken cancellationToken = default)
+    {
+        // Windows pids are positive; 0 is the System Idle Process, which has no image to inspect.
+        // Rejecting it here keeps the tool from answering "not running" about something that is.
+        if (pid <= 0)
+        {
+            throw new McpException("A process id must be greater than zero.");
+        }
+
+        ValidateDisclosure(includeEvidence, includeSensitive, maxItems);
+
+        // Routed through the same failure mapping as the scanners rather than left bare. The pivot
+        // runs a process list, a module read and a connection sweep, so it can hit exactly the
+        // access denials and timeouts a scan can, and a raw exception reaching the client turns a
+        // known condition into an unexplained protocol failure.
+        return await ProjectAsync(
+            async () => [await scans.RunProcessAsync(pid, cancellationToken).ConfigureAwait(false)],
+            includeEvidence,
+            includeSensitive,
+            maxItems).ConfigureAwait(false);
     }
 
     [McpServerTool(
@@ -196,9 +251,31 @@ public sealed class WinSightMcpTools(
     {
         ValidateDisclosure(includeEvidence, includeSensitive, maxItems);
 
+        return await ProjectAsync(
+            () => scans.RunAsync(scanner, flaggedOnly, cancellationToken),
+            includeEvidence,
+            includeSensitive,
+            maxItems).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Runs an acquisition and projects it, translating the conditions a local scan legitimately
+    /// hits into protocol errors a client can act on.
+    /// </summary>
+    /// <remarks>
+    /// Shared rather than repeated so a new tool cannot ship without the mapping, which is how
+    /// <c>winsight_process</c> first shipped: it would have surfaced an access denial as an
+    /// unexplained failure while every other tool explained the same condition.
+    /// </remarks>
+    private async Task<McpScanResult> ProjectAsync(
+        Func<Task<IReadOnlyList<ToolReport>>> acquire,
+        bool includeEvidence,
+        bool includeSensitive,
+        int maxItems)
+    {
         try
         {
-            var reports = await scans.RunAsync(scanner, flaggedOnly, cancellationToken).ConfigureAwait(false);
+            var reports = await acquire().ConfigureAwait(false);
             return McpResultProjector.Project(
                 reports,
                 includeEvidence,
