@@ -64,7 +64,7 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
 
 - **Dashboard** - a WPF desktop and tray application, in **English, French and Spanish**. Every check
   explains what it observes and what an alert means.
-- **Command line** - 17 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
+- **Command line** - 18 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
   notable, so it drops straight into a scheduled task:
 
   ```

@@ -131,9 +131,14 @@ public sealed class WinSightMcpTools(
         Destructive = false,
         OpenWorld = false,
         UseStructuredContent = true)]
+    // Deliberately does not enumerate the set. The previous wording named seven scanners while the
+    // overview ran ten, silently omitting keyboard-interception, code-integrity and hijack findings
+    // from any summary a model wrote from this description. The catalog already marks which scanners
+    // are in the overview and is pinned to the dispatcher by a test, so naming them again here would
+    // reintroduce exactly the copy that drifted.
     [Description(
-        "Run WinSight's balanced read-only overview across persistence, camera/mic, network, DNS, " +
-        "extensions, hosts and certificates. Large inventories remain opt-in through winsight_scan.")]
+        "Run WinSight's balanced read-only overview. It covers the scanners winsight_get_capabilities " +
+        "marks as in-overview; the large inventories stay opt-in through winsight_scan.")]
     public Task<McpScanResult> OverviewAsync(
         [Description("Return only noteworthy findings. Keep true for normal AI triage.")]
         bool flaggedOnly = true,

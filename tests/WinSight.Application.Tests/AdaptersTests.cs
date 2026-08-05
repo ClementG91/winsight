@@ -55,6 +55,27 @@ public sealed class AdaptersTests
         Assert.DoesNotContain("kernel", CliHelp.DocumentedCommands);
     }
 
+    /// <summary>
+    /// Pins the number of verbs <c>--help</c> documents, because the README states it.
+    /// </summary>
+    /// <remarks>
+    /// It had already drifted: the README said seventeen while the help documented eighteen, which
+    /// is what happens to a number written in prose that nothing compares against. This does not
+    /// make the README self-updating — nothing can — but it turns "somebody eventually notices" into
+    /// a failing test the moment a verb is added or removed, with the README named as the thing to
+    /// go and change.
+    /// </remarks>
+    [Fact]
+    public void DocumentedCommandCount_MatchesTheNumberTheReadmeClaims()
+    {
+        const int ReadmeClaimsVerbs = 18;
+
+        Assert.True(
+            CliHelp.DocumentedCommands.Count == ReadmeClaimsVerbs,
+            $"`winsight --help` documents {CliHelp.DocumentedCommands.Count} verbs and README.md says "
+            + $"{ReadmeClaimsVerbs}. Update the README and this constant together.");
+    }
+
     [Fact]
     public void OverviewCommands_AreSupportedAndUnique()
     {

@@ -54,7 +54,7 @@ PowerShell, `cmd.exe`, an HTTP relay or a network tunnel.
 | Tool | Purpose | Default disclosure |
 |---|---|---|
 | `winsight_get_capabilities` | Lists scanners and active privacy controls without scanning. | Product metadata only. |
-| `winsight_overview` | Runs the balanced seven-scanner overview. | Summaries/counts; noteworthy-only. |
+| `winsight_overview` | Runs the balanced overview: the scanners the capability catalog marks as in-overview. | Summaries/counts; noteworthy-only. |
 | `winsight_scan` | Runs one named scanner, including large opt-in inventories. | Summaries/counts; noteworthy-only. |
 | `winsight_process` | Everything WinSight knows about one pid — image, signature, parent, loaded-module counts with the unsigned ones named, and live external connections — gathered in one view. | Summary and counts. |
 | `winsight_alerts` | Reads WinSight's own real-time detection journal (persistence and ransomware activity its background protection flagged, including while unattended). History, not a live scan. | Summaries/counts; noteworthy-only. |
