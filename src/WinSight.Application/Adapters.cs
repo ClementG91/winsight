@@ -140,9 +140,18 @@ public static class Adapters
         {
             var report = e.ImagePath is not null && vt.TryGetValue(e.ImagePath, out var v) ? v : null;
             var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? e.Command;
-            var detail = report is not null
-                ? $"{displayedPath}  [VT {report.Malicious}/{report.Total}]"
-                : $"{displayedPath}  [{PersistenceStatusLabel(e.Status)}]";
+            var verdict = report is not null
+                ? $"VT {report.Malicious}/{report.Total}"
+                : PersistenceStatusLabel(e.Status);
+            // The command-line reason has to ride beside the signature verdict rather than replace
+            // it, because the pair is the finding: "signature valid" alone reads as an all-clear on
+            // exactly the entries this rule exists to catch. The raw command line stays in the
+            // fields below rather than moving into the detail, so MCP's existing rule — command
+            // text is withheld unless the operator opened the sensitive gate — keeps governing it.
+            var abuse = InterpreterAbuseTriage.Describe(e.Abuse);
+            var detail = abuse is null
+                ? $"{displayedPath}  [{verdict}]"
+                : $"{displayedPath}  [{verdict}; {abuse}]";
             b.Add(
                 e.IsSuspicious ? Severity.Notable : Severity.Info,
                 $"{e.Vector}/{e.Name}",
@@ -161,6 +170,10 @@ public static class Adapters
                         : null,
                     ["signatureChecked"] = (e.ImageStatus == ImageResolutionStatus.Present).ToString(),
                     ["status"] = e.Status.ToString(),
+                    // Null rather than "None" when there is nothing to report: a machine consumer
+                    // should be able to test for the key's presence, and the MCP projector drops
+                    // null-valued fields, so a clean entry costs nothing on the wire.
+                    ["commandLineConcern"] = e.Abuse == InterpreterAbuse.None ? null : e.Abuse.ToString(),
                     ["signer"] = e.Signature.Signer,
                     ["vtMalicious"] = report?.Malicious.ToString(),
                     ["vtTotal"] = report?.Total.ToString(),

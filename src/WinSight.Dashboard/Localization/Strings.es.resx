@@ -128,6 +128,11 @@
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Acceso denegado, firma no comprobada</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Error de verificación</value></data>
 
+  <data name="PersistenceAbuseRemotePayload" xml:space="preserve"><value>un intérprete de Windows firmado apunta a una ubicación remota: lo que se ejecuta no está en este equipo</value></data>
+  <data name="PersistenceAbusePerUserPayload" xml:space="preserve"><value>un intérprete de Windows firmado apunta a un archivo en una ubicación de usuario o temporal</value></data>
+  <data name="PersistenceAbuseEncodedCommand" xml:space="preserve"><value>un intérprete de Windows firmado lleva un script codificado o incrustado en la línea de comandos</value></data>
+  <data name="PersistenceAbuseScriptletCom" xml:space="preserve"><value>un intérprete de Windows firmado se usa para registrar un scriptlet, una vía conocida para ejecutar código a través de un host de confianza</value></data>
+
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vista general</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>La comprobación recomendada en un clic</value></data>
   <data name="ToolOverviewDescription" xml:space="preserve"><value>Comprueba las señales principales: inicio automático, cámara/micrófono, conexiones, DNS, extensiones, hosts y certificados.</value></data>

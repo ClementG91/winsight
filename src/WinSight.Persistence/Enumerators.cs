@@ -307,10 +307,30 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
     }
 
     /// <summary>
-    /// Extracts the Exec-action commands from a Task Scheduler XML definition. The
+    /// Extracts the Exec-action command lines from a Task Scheduler XML definition. The
     /// schema uses a default namespace, so matching is by local element name. Invalid
     /// XML yields nothing (isolated, never throws).
     /// </summary>
+    /// <remarks>
+    /// <b>The arguments are the payload, and they used to be discarded.</b> An Exec action stores
+    /// the interpreter in <c>&lt;Command&gt;</c> and what it is told to run in
+    /// <c>&lt;Arguments&gt;</c>, so reading only the first reduces
+    /// <c>rundll32.exe C:\Users\…\AppData\Roaming\evil.dll,Start</c> to <c>rundll32.exe</c> — a
+    /// Microsoft-signed binary with a valid signature, and no trace anywhere in the report of the
+    /// DLL it loads. Measured on a real desktop: <b>12 of the 15</b> autostart entries resolving to
+    /// an interpreter were scheduled tasks, and every one of them carried an empty command line.
+    /// The surface most used for modern persistence was the one reporting the least evidence.
+    ///
+    /// Pairing is done through each <c>Command</c> element's own parent rather than by matching
+    /// <c>Exec</c> elements, so the flat descendant search that made this robust against unexpected
+    /// nesting is preserved: a <c>Command</c> the schema puts somewhere unforeseen still yields its
+    /// command, simply without arguments, instead of disappearing from the scan.
+    ///
+    /// The two are joined with a space into one command line because that is the string
+    /// <see cref="CommandLine.ResolveExecutable"/> already parses — it takes the longest leading
+    /// prefix that exists on disk, so a spaced or quoted program path still resolves and the
+    /// arguments become inert trailing text rather than a second parsing rule to keep correct.
+    /// </remarks>
     public static IReadOnlyList<string> ParseTaskCommands(string xml)
     {
         XDocument doc;
@@ -324,10 +344,23 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
         }
         return doc.Descendants()
             .Where(e => e.Name.LocalName == "Command")
-            .Select(e => e.Value.Trim())
+            .Select(e => Join(e.Value.Trim(), SiblingArguments(e)))
             .Where(c => c.Length > 0)
             .ToList();
     }
+
+    /// <summary>The <c>Arguments</c> value beside a given <c>Command</c>, or null when it has none.</summary>
+    private static string? SiblingArguments(XElement command) =>
+        command.Parent?
+            .Elements()
+            .FirstOrDefault(sibling => sibling.Name.LocalName == "Arguments")?
+            .Value
+            .Trim();
+
+    private static string Join(string command, string? arguments) =>
+        command.Length == 0 || string.IsNullOrEmpty(arguments)
+            ? command
+            : $"{command} {arguments}";
 
 }
 

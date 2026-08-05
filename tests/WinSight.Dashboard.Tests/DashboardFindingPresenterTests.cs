@@ -36,6 +36,64 @@ public sealed class DashboardFindingPresenterTests
         });
     }
 
+    /// <summary>
+    /// An entry flagged for its command line shows the reason next to its signature verdict, in
+    /// every language.
+    /// </summary>
+    /// <remarks>
+    /// This presenter rebuilds the persistence line out of fields rather than reusing the report's
+    /// own detail, so the command-line reason does not arrive here for free. Without it the
+    /// dashboard would render a notable item as "Signature valid" and nothing else — the reassuring
+    /// half of the finding, on precisely the entries the check exists to catch, which is the same
+    /// misreading in the UI that the check removed from the report.
+    /// </remarks>
+    [Theory]
+    [InlineData("en", "Signature valid", "per-user or temporary location")]
+    [InlineData("fr", "Signature valide", "emplacement utilisateur ou temporaire")]
+    [InlineData("es", "Firma válida", "ubicación de usuario o temporal")]
+    public void PersistencePresentation_ShowsTheCommandLineReasonBesideAValidSignature(
+        string culture,
+        string expectedStatus,
+        string expectedReason)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["vector"] = "ScheduledTask",
+                ["name"] = "Updater",
+                ["image"] = @"C:\Windows\System32\rundll32.exe",
+                ["status"] = "SignatureValid",
+                ["commandLineConcern"] = "PerUserPayload",
+            });
+
+            var result = DashboardFindingPresenter.Present("persistence", item, text);
+
+            Assert.Contains(expectedStatus, result.Detail, StringComparison.Ordinal);
+            Assert.Contains(expectedReason, result.Detail, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>An entry with nothing to say about its command line gains no trailing clause.</summary>
+    [Fact]
+    public void PersistencePresentation_SaysNothingExtraWhenTheCommandLineIsUnremarkable()
+    {
+        WithCulture("en", text =>
+        {
+            var item = Item(Severity.Info, new()
+            {
+                ["vector"] = "ScheduledTask",
+                ["name"] = "Updater",
+                ["image"] = @"C:\Windows\System32\rundll32.exe",
+                ["status"] = "SignatureValid",
+            });
+
+            var result = DashboardFindingPresenter.Present("persistence", item, text);
+
+            Assert.EndsWith("[Signature valid]", result.Detail, StringComparison.Ordinal);
+        });
+    }
+
     [Theory]
     [InlineData("en", "Webcam/Browser", "In use now")]
     [InlineData("fr", "Caméra/Browser", "Utilisé actuellement")]

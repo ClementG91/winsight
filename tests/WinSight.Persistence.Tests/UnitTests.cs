@@ -128,7 +128,7 @@ public sealed class WinlogonTests
 
 public sealed class ScheduledTaskTests
 {
-    private static readonly string[] NotepadCommand = [@"C:\Windows\System32\notepad.exe"];
+    private static readonly string[] NotepadCommand = [@"C:\Windows\System32\notepad.exe /A"];
 
     private const string TaskXml = """
         <?xml version="1.0" encoding="UTF-16"?>
@@ -142,11 +142,75 @@ public sealed class ScheduledTaskTests
         </Task>
         """;
 
+    /// <summary>
+    /// The arguments are part of the command line, because they are the part that says what runs.
+    /// </summary>
+    /// <remarks>
+    /// This fixture already carried <c>&lt;Arguments&gt;/A&lt;/Arguments&gt;</c> and the assertion
+    /// pinned the value that dropped it, so the one test covering this parser certified the defect
+    /// as the contract. On a real desktop the consequence was total: every scheduled task
+    /// invoking an interpreter reported the interpreter alone, which is Microsoft-signed and
+    /// therefore unremarkable, while the DLL or script it was pointed at appeared nowhere.
+    /// </remarks>
     [Fact]
-    public void ParseTaskCommands_ExtractsExecCommand_NamespaceAgnostic()
+    public void ParseTaskCommands_KeepsTheArgumentsThatSayWhatActuallyRuns()
     {
         Assert.Equal(NotepadCommand,
             ScheduledTaskEnumerator.ParseTaskCommands(TaskXml));
+    }
+
+    /// <summary>An action with no arguments must not gain a trailing space.</summary>
+    [Fact]
+    public void ParseTaskCommands_WithoutArguments_ReturnsTheCommandUnchanged()
+    {
+        const string xml = """
+            <Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <Actions><Exec><Command>C:\Windows\System32\notepad.exe</Command></Exec></Actions>
+            </Task>
+            """;
+
+        Assert.Equal([@"C:\Windows\System32\notepad.exe"], ScheduledTaskEnumerator.ParseTaskCommands(xml));
+    }
+
+    /// <summary>
+    /// Each action keeps its own arguments. A task may register several, and pairing them by
+    /// document order rather than by parent would attach the first action's payload to the second.
+    /// </summary>
+    [Fact]
+    public void ParseTaskCommands_PairsEachActionWithItsOwnArguments()
+    {
+        const string xml = """
+            <Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <Actions>
+                <Exec><Command>rundll32.exe</Command><Arguments>first.dll,Start</Arguments></Exec>
+                <Exec><Command>cmd.exe</Command><Arguments>/c second.bat</Arguments></Exec>
+              </Actions>
+            </Task>
+            """;
+
+        Assert.Equal(
+            ["rundll32.exe first.dll,Start", "cmd.exe /c second.bat"],
+            ScheduledTaskEnumerator.ParseTaskCommands(xml));
+    }
+
+    /// <summary>
+    /// The executable still resolves once the arguments ride along, including the case the
+    /// resolver exists for: an unquoted program path containing spaces.
+    /// </summary>
+    [Fact]
+    public void ParseTaskCommands_ProducesACommandLineTheResolverStillReads()
+    {
+        var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var notepad = Path.Combine(system32, "notepad.exe");
+        var xml = $"""
+            <Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+              <Actions><Exec><Command>{notepad}</Command><Arguments>C:\payload.dll,Start</Arguments></Exec></Actions>
+            </Task>
+            """;
+
+        var command = Assert.Single(ScheduledTaskEnumerator.ParseTaskCommands(xml));
+
+        Assert.Equal(notepad, CommandLine.ExtractExecutable(command));
     }
 
     [Fact]

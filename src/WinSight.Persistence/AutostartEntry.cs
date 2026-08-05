@@ -85,12 +85,25 @@ public sealed record AutostartEntry(
     };
 
     /// <summary>
-    /// True when the item is worth a second look: no resolvable image, or an image
-    /// that is unsigned / signed-but-untrusted. This is a triage hint, not a verdict.
+    /// Why this entry's <b>command line</b> is worth a second look, independently of its file.
+    /// </summary>
+    /// <remarks>
+    /// Kept separate from <see cref="Status"/> because the two answer different questions and the
+    /// interesting case is precisely where they disagree: a Windows-signed interpreter handed
+    /// somebody else's payload is <see cref="PersistenceStatus.SignatureValid"/> and still worth
+    /// investigating. See <see cref="InterpreterAbuseTriage"/>.
+    /// </remarks>
+    public InterpreterAbuse Abuse => InterpreterAbuseTriage.Classify(this);
+
+    /// <summary>
+    /// True when the item is worth a second look: no resolvable image, an image that is
+    /// unsigned / signed-but-untrusted, or a command line handing a signed interpreter a payload
+    /// its signature does not cover. This is a triage hint, not a verdict.
     /// </summary>
     public bool IsSuspicious =>
         Status is PersistenceStatus.FileMissing
             or PersistenceStatus.Unsigned
             or PersistenceStatus.InvalidSignature
-            or PersistenceStatus.AccessDenied;
+            or PersistenceStatus.AccessDenied
+        || Abuse != InterpreterAbuse.None;
 }
