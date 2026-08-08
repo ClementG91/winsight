@@ -22,7 +22,10 @@ Renseigner les valeurs du nouveau run CI réussi :
 ```powershell
 $Repo = 'ClementG91/winsight'
 $CandidateSha = '<SHA complet de 40 caractères>'
-$RunId = '<id du run CI réussi>'
+# 'release' pour qualifier le binaire publié, 'ci' pour qualifier un commit avant publication.
+# Voir « Quel artefact qualifier » en section 2 : les deux ne sont pas interchangeables.
+$ArtifactKind = 'release'
+$RunId = '<id du run réussi correspondant à ArtifactKind>'
 $ProductVersion = '<version produit>'
 $ExpectedZipSha256 = '<SHA-256 du ZIP portable>'
 $ExpectedInstallerSha256 = '<SHA-256 du setup>'
@@ -44,6 +47,7 @@ Set-StrictMode -Version Latest
 if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'CandidateSha non lié.' }
 if ($Repo -cne 'ClementG91/winsight') { throw 'Dépôt non lié.' }
 if ([string]$RunId -notmatch '^[0-9]+$') { throw 'RunId non lié.' }
+if ($ArtifactKind -cnotin @('release', 'ci')) { throw 'ArtifactKind non lié.' }
 if ($ProductVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$') {
     throw 'ProductVersion non lié.'
 }
@@ -193,12 +197,30 @@ $NativeArchitecture = switch ($cpuArchitectures[0]) {
     12 { 'arm64' }
     default { throw "Architecture native non supportée : $($cpuArchitectures[0])." }
 }
-$ArtifactName = "winsight-win-$NativeArchitecture"
-if ($ArtifactName -cne "winsight-win-$NativeArchitecture") {
-    throw 'Artefact et architecture native divergent.'
+$ArtifactName = switch ($ArtifactKind) {
+    'release' { "release-$NativeArchitecture" }
+    'ci'      { "winsight-win-$NativeArchitecture" }
+    default   { throw "ArtifactKind non lié : '$ArtifactKind'." }
 }
-"native=$NativeArchitecture process=$env:PROCESSOR_ARCHITECTURE artifact=$ArtifactName"
+"native=$NativeArchitecture process=$env:PROCESSOR_ARCHITECTURE kind=$ArtifactKind artifact=$ArtifactName"
 ```
+
+### Quel artefact qualifier, et pourquoi ce n'est pas indifférent
+
+`ci.yml` et `release.yml` compilent et empaquettent séparément, et le packaging n'est pas
+reproductible bit à bit : mesuré sur le candidat `3c8066f9`, le ZIP CI vaut
+`C6D28EEB…` et le ZIP publié `CEC7D469…`. Chacun est cohérent avec son propre `.sha256`, mais
+**qualifier l'un ne qualifie pas l'autre**.
+
+- `$ArtifactKind = 'release'` lie `$RunId` au run `release.yml` du tag et récupère
+  `release-<arch>`. Le job `publish` republie ces fichiers tels quels
+  (`files: release-assets/*`), donc l'artefact qualifié est **octet pour octet celui que
+  l'utilisateur télécharge**. C'est le seul mode qui produit une preuve sur le binaire distribué.
+- `$ArtifactKind = 'ci'` lie `$RunId` à un run `ci.yml`. Utile pour qualifier un commit avant
+  publication ; ne dit rien sur les fichiers de la release.
+
+Un rapport doit énoncer son `ArtifactKind`. Un rapport qui ne le dit pas laisse le lecteur
+supposer la portée la plus large, qui est justement celle qu'il n'a peut-être pas.
 
 Pour un test x64 émulé sur Arm64, utiliser un dossier de preuves et un intitulé séparés. Ne jamais
 modifier `$NativeArchitecture` pour faire passer l’artefact x64 comme preuve Arm64 native.
@@ -248,7 +270,8 @@ Set-StrictMode -Version Latest
 
 $Repo = 'ClementG91/winsight'
 $CandidateSha = '<même SHA complet de 40 caractères>'
-$RunId = '<même id du run CI réussi>'
+$ArtifactKind = '<même valeur : release ou ci>'
+$RunId = '<même id du run réussi>'
 $ProductVersion = '<même version produit>'
 $ExpectedZipSha256 = '<même SHA-256 du ZIP portable>'
 $ExpectedInstallerSha256 = '<même SHA-256 du setup>'
@@ -261,6 +284,7 @@ $EvidenceStorageOutsideSnapshot = $true
 if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'CandidateSha non lié.' }
 if ($Repo -cne 'ClementG91/winsight') { throw 'Dépôt non lié.' }
 if ([string]$RunId -notmatch '^[0-9]+$') { throw 'RunId non lié.' }
+if ($ArtifactKind -cnotin @('release', 'ci')) { throw 'ArtifactKind non lié.' }
 if ($ProductVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$') {
     throw 'ProductVersion non lié.'
 }
