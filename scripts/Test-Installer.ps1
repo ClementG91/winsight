@@ -119,10 +119,17 @@ try
 
     foreach ($language in @("en", "fr", "es"))
     {
-        & $dashboard --language $language --smoke-test
-        if ($LASTEXITCODE -ne 0)
+        # PowerShell does not reliably wait for a Windows GUI application when it is invoked with
+        # the call operator. Waiting for the concrete process prevents the uninstaller from racing
+        # the dashboard's WPF/tray cleanup and then reporting a locked installed executable.
+        $dashboardSmoke = Start-Process -FilePath $dashboard -ArgumentList @(
+            "--language", $language, "--smoke-test"
+        ) -Wait -PassThru
+        $dashboardExitCode = $dashboardSmoke.ExitCode
+        $dashboardSmoke.Dispose()
+        if ($dashboardExitCode -ne 0)
         {
-            throw "Installed dashboard $language smoke test failed with exit code $LASTEXITCODE."
+            throw "Installed dashboard $language smoke test failed with exit code $dashboardExitCode."
         }
     }
 
