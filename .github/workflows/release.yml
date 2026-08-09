@@ -66,7 +66,10 @@ jobs:
         run: |
           dotnet restore winsight.sln
           dotnet build winsight.sln -c Release --no-restore
-          dotnet test winsight.sln -c Release --no-build --logger "trx;LogFilePrefix=release-${{ matrix.architecture }}"
+          # Keep the release oracle deterministic on the smaller native Arm64 runner. Running all
+          # test projects at once can starve independent five-second filesystem/concurrency
+          # rendezvous even though each project passes on the same runner in the CI coverage gate.
+          dotnet test winsight.sln -c Release --no-build --maxcpucount:1 --logger "trx;LogFilePrefix=release-${{ matrix.architecture }}"
 
       - name: Verify formatting and dependencies
         if: matrix.architecture == 'x64'

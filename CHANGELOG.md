@@ -1,3 +1,15 @@
+## v0.11.5, 2026-08-09
+
+Step-by-step progress log. Newest first. Every CI-green step lands here.
+
+- The signed `v0.11.4` tag produced no release. Its x64 release package and native installer gate
+  passed, but the Arm64 release launched every test project concurrently. On two attempts, two
+  different timing-sensitive tests that were already green on the same native Arm64 runner in PR
+  and `main` missed independent five-second rendezvous under testhost contention: first the policy
+  store identity-change hook, then a `FileSystemWatcher` notification. Release tests now run one
+  project at a time with MSBuild's `--maxcpucount:1`; the assertions and their timeouts remain
+  unchanged. The version advances to `0.11.5` instead of moving the published signed tag.
+
 ## v0.11.4, 2026-08-09
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
