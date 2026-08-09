@@ -37,6 +37,8 @@ public sealed class FirewallServiceClient : IFirewallServiceClient
     /// correlation cannot be proven, <see cref="FirewallLegacyPeerClosedException"/> only
     /// when the authenticated peer closes before the first response byte, and
     /// <see cref="FirewallProtocolException"/> for an invalid reply frame.
+    /// The current dashboard treats the typed empty response as unavailability and does
+    /// not retry a lower protocol version.
     /// </summary>
     public async Task<FirewallCommandResponse> SendAsync(
         FirewallCommandRequest request,

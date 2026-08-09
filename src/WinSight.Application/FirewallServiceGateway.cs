@@ -68,13 +68,9 @@ public enum FirewallMutationResult
 public sealed class FirewallServiceGateway
 {
     private static readonly TimeSpan DefaultConnectTimeout = TimeSpan.FromSeconds(2);
-    // Static for process lifetime: no per-window disposable synchronization primitive is left
-    // behind when the dashboard reconstructs a gateway.
-    private static readonly SemaphoreSlim ProtocolNegotiation = new(1, 1);
 
     private readonly IFirewallServiceClient _client;
     private readonly TimeSpan _connectTimeout;
-    private int _negotiatedProtocolVersion;
 
     public FirewallServiceGateway(IFirewallServiceClient client, TimeSpan? connectTimeout = null)
     {
@@ -209,9 +205,7 @@ public sealed class FirewallServiceGateway
             ValidateSnapshotPage(response, offset, snapshotVersion, snapshotCount,
                 PendingOutboundLog.MaxPendingApps, response.Pending.Length);
             snapshotVersion ??= response.SnapshotVersion;
-            snapshotCount ??= response.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                ? response.SnapshotCount
-                : response.Pending.Length;
+            snapshotCount ??= response.SnapshotCount;
             foreach (var app in response.Pending)
             {
                 if (!paths.Add(app.ExecutablePath)) throw IncompletePagination();
@@ -257,9 +251,7 @@ public sealed class FirewallServiceGateway
             ValidateSnapshotPage(response, offset, snapshotVersion, snapshotCount,
                 FirewallPolicyStore.MaxPolicyCount, response.Policies.Length);
             snapshotVersion ??= response.SnapshotVersion;
-            snapshotCount ??= response.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                ? response.SnapshotCount
-                : response.Policies.Length;
+            snapshotCount ??= response.SnapshotCount;
             foreach (var policy in response.Policies)
             {
                 if (!paths.Add(policy.ExecutablePath)) throw IncompletePagination();
@@ -284,60 +276,18 @@ public sealed class FirewallServiceGateway
     private async Task<FirewallCommandResponse> SendAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
-        var version = await GetProtocolVersionAsync(cancellationToken).ConfigureAwait(false);
-        return await _client.SendAsync(
-            request with { ProtocolVersion = version }, _connectTimeout, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Probe v3, then v2, then v1 with a read-only status request before sending any mutation.
-    /// Only an authenticated close before the first response byte permits the next lower probe.
-    /// No timeout, malformed frame, partial reply or generic I/O fault can downgrade or cache.
-    /// </summary>
-    private async Task<int> GetProtocolVersionAsync(CancellationToken cancellationToken)
-    {
-        var cached = Volatile.Read(ref _negotiatedProtocolVersion);
-        if (cached != 0) return cached;
-
-        await ProtocolNegotiation.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        var currentRequest = request with { ProtocolVersion = FirewallProtocolCodec.CurrentVersion };
+        var response = await _client.SendAsync(
+            currentRequest,
+            _connectTimeout,
+            cancellationToken).ConfigureAwait(false);
+        if (response.ProtocolVersion != FirewallProtocolCodec.CurrentVersion
+            || response.RequestId != currentRequest.RequestId)
         {
-            cached = _negotiatedProtocolVersion;
-            if (cached != 0) return cached;
-            var probe = new FirewallCommandRequest(
-                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus);
-            try
-            {
-                var response = await _client.SendAsync(
-                    probe, _connectTimeout, cancellationToken).ConfigureAwait(false);
-                ValidateNegotiationProbe(response);
-                Volatile.Write(ref _negotiatedProtocolVersion, FirewallProtocolCodec.CurrentVersion);
-            }
-            catch (FirewallLegacyPeerClosedException)
-            {
-                var runtimeProofProbe = probe with { ProtocolVersion = FirewallProtocolCodec.RuntimeProofVersion };
-                try
-                {
-                    var response = await _client.SendAsync(
-                        runtimeProofProbe, _connectTimeout, cancellationToken).ConfigureAwait(false);
-                    ValidateNegotiationProbe(response);
-                    Volatile.Write(ref _negotiatedProtocolVersion, FirewallProtocolCodec.RuntimeProofVersion);
-                }
-                catch (FirewallLegacyPeerClosedException)
-                {
-                    var legacyProbe = probe with { ProtocolVersion = FirewallProtocolCodec.LegacyVersion };
-                    var response = await _client.SendAsync(
-                        legacyProbe, _connectTimeout, cancellationToken).ConfigureAwait(false);
-                    ValidateNegotiationProbe(response);
-                    Volatile.Write(ref _negotiatedProtocolVersion, FirewallProtocolCodec.LegacyVersion);
-                }
-            }
-            return _negotiatedProtocolVersion;
+            throw new FirewallPeerValidationException();
         }
-        finally
-        {
-            ProtocolNegotiation.Release();
-        }
+
+        return response;
     }
 
     private static FirewallCommandRequest Request(
@@ -348,16 +298,6 @@ public sealed class FirewallServiceGateway
     private static FirewallProtocolException IncompletePagination() =>
         new(FirewallProtocolError.InvalidRequest, "Firewall service pagination is incomplete.");
 
-    private static void ValidateNegotiationProbe(FirewallCommandResponse response)
-    {
-        if (!response.Success || response.Status is null)
-        {
-            throw new FirewallProtocolException(
-                FirewallProtocolError.InvalidRequest,
-                "Firewall service protocol negotiation failed.");
-        }
-    }
-
     private static void ValidateSnapshotPage(
         FirewallCommandResponse response,
         int offset,
@@ -366,27 +306,15 @@ public sealed class FirewallServiceGateway
         int maximumCount,
         int pageCount)
     {
-        if (response.ProtocolVersion == FirewallProtocolCodec.CurrentVersion)
-        {
-            if (!FirewallProtocolCodec.IsSnapshotVersion(response.SnapshotVersion)
-                || response.SnapshotCount is not { } count
-                || count < 0 || count > maximumCount
-                || (expectedVersion is not null
-                    && !string.Equals(expectedVersion, response.SnapshotVersion, StringComparison.Ordinal))
-                || (expectedCount is not null && expectedCount != count)
-                || offset + pageCount > count
-                || (response.NextOffset is null && offset + pageCount != count)
-                || (response.NextOffset is not null && offset + pageCount >= count))
-            {
-                throw IncompletePagination();
-            }
-            return;
-        }
-
-        // v1/v2 have no snapshot contract and are safe only as one complete page.
-        if (offset != 0 || response.NextOffset is not null
-            || response.SnapshotVersion is not null || response.SnapshotCount is not null
-            || pageCount > maximumCount)
+        if (!FirewallProtocolCodec.IsSnapshotVersion(response.SnapshotVersion)
+            || response.SnapshotCount is not { } count
+            || count < 0 || count > maximumCount
+            || (expectedVersion is not null
+                && !string.Equals(expectedVersion, response.SnapshotVersion, StringComparison.Ordinal))
+            || (expectedCount is not null && expectedCount != count)
+            || offset + pageCount > count
+            || (response.NextOffset is null && offset + pageCount != count)
+            || (response.NextOffset is not null && offset + pageCount >= count))
         {
             throw IncompletePagination();
         }

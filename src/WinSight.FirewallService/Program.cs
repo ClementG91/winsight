@@ -332,7 +332,7 @@ static async Task<int> RunHostAsync()
     // Observation is reporting only and runs whatever the mode: telling the operator what reached
     // the network is worth as much in audit-only, where it is the only thing the tool can do.
     builder.Services.AddHostedService<OutboundObserverService>();
-    builder.Services.AddHostedService<FirewallServiceWorker>();
+    builder.Services.AddFirewallServiceWorker();
 
     // Disposed, and disposed asynchronously. RunAsync starts and stops the host but never disposes
     // it, so the singletons it owns were being left to process exit: EnforcementCoordinator holds a

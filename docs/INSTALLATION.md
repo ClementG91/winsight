@@ -38,6 +38,11 @@ does not request elevation. The installer adds Start-menu shortcuts, offers an
 optional desktop shortcut, and registers a normal Windows uninstaller. It does not
 change `PATH`, install a driver or enable firewall enforcement.
 
+If you intend to use the optional outbound-firewall service, install for **all users**
+instead — the default per-user directory is user-writable, and the service refuses to
+register from it.
+See [Optional outbound-firewall service](#optional-outbound-firewall-service).
+
 The installed `winsight.exe mcp` mode is an on-demand local MCP child process for AI
 clients. The installer does not enable it, add it to startup, create a service or
 open a network port. See [`MCP.md`](MCP.md) before connecting an AI client.
@@ -99,7 +104,30 @@ filtering through the dashboard's authenticated IPC flow; the dashboard reports 
 mode separately from effective runtime state and claims filtering only after the running
 service proves every stored block was applied.
 
-From an **elevated** (Administrator) console, in the install or extracted directory:
+> **The default per-user install directory cannot host this service.** A LocalSystem
+> service whose binary sits where an unprivileged account can rewrite it is a privilege
+> escalation waiting to happen, so `install` refuses that path outright:
+>
+> ```text
+> .\winsight-firewall-service.exe install
+> [FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]
+> ```
+>
+> Exit code 1, and no service is created. This is the trust check doing its job, not a
+> bug — but it means `%LOCALAPPDATA%\Programs\WinSight`, where the installer lands by
+> default, is not a directory the firewall service can be registered from. Use either:
+>
+> - **the portable ZIP**, extracted to a directory only administrators can write, such as
+>   `C:\Program Files\WinSight`; or
+> - **the installer run elevated**, choosing "Install for all users" so it installs under
+>   `C:\Program Files` instead.
+>
+> Everything else — every scanner, the dashboard, the CLI — works normally from the
+> default per-user install. Only outbound firewall enforcement needs the protected path.
+
+From an **elevated** (Administrator) console, in a directory that only administrators
+can write to (see the note above — the default per-user install directory will be
+refused):
 
 ```powershell
 # Register the demand-start, LocalSystem service (initially audit-only)

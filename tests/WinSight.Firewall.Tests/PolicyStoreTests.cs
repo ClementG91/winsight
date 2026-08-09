@@ -203,7 +203,9 @@ public sealed class PolicyStoreTests : IDisposable
         var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() => store.LoadAsync());
 
         Assert.Equal("StorageIdentityChanged", exception.Code);
-        Assert.Equal(["inspect", "revalidate"], guard.Calls);
+        Assert.Equal(
+            ["inspect", "revalidate", "inspect", "revalidate", "inspect", "revalidate"],
+            guard.Calls);
     }
 
     [Fact]
@@ -218,6 +220,134 @@ public sealed class PolicyStoreTests : IDisposable
         Assert.True(File.Exists(PolicyPath));
     }
 
+    [Fact]
+    public async Task ConcurrentSaveAndLoad_ReturnOnlyACompletePreviousOrNextSnapshot()
+    {
+        var previous = new OutboundFirewallConfiguration(
+            OutboundFirewallMode.AuditOnly,
+            [new AppFirewallPolicy(@"C:\previous.exe", OutboundAction.Allow)]);
+        var next = new OutboundFirewallConfiguration(
+            OutboundFirewallMode.AuditOnly,
+            [new AppFirewallPolicy(@"C:\next.exe", OutboundAction.Block)]);
+        var guard = new BlockingFirstInspectionTrustGuard();
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+
+        // Establish a complete on-disk predecessor without the blocking guard, then
+        // hold the next replacement while a reader arrives. The store's own semaphore
+        // must prevent File.Replace from racing a FileShare.Read | FileShare.Delete handle.
+        await new FirewallPolicyStore(PolicyPath).SaveAsync(previous);
+        var save = Task.Run(() => store.SaveAsync(next));
+        await guard.FirstInspectionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var concurrentLoad = store.LoadAsync();
+        Assert.False(concurrentLoad.IsCompleted);
+        guard.ReleaseFirstInspection();
+
+        await save;
+        var observed = await concurrentLoad.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(next.Mode, observed.Mode);
+        Assert.Equal(next.Policies, observed.Policies);
+        Assert.Equal(@"C:\next.exe", Assert.Single(observed.Policies).ExecutablePath);
+    }
+
+    [Fact]
+    public async Task WaiterCancellation_DoesNotPoisonStoreSerialization()
+    {
+        var guard = new BlockingFirstInspectionTrustGuard();
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+        var configuration = new OutboundFirewallConfiguration(
+            OutboundFirewallMode.AuditOnly,
+            [new AppFirewallPolicy(@"C:\after-cancellation.exe", OutboundAction.Ask)]);
+
+        var heldSave = Task.Run(() => store.SaveAsync(configuration));
+        await guard.FirstInspectionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        using var cancelledWaiter = new CancellationTokenSource();
+        var waitingLoad = store.LoadAsync(cancelledWaiter.Token);
+        await cancelledWaiter.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => waitingLoad);
+        guard.ReleaseFirstInspection();
+        await heldSave;
+
+        var afterCancellation = await store.LoadAsync();
+        Assert.Equal(configuration.Mode, afterCancellation.Mode);
+        Assert.Equal(configuration.Policies, afterCancellation.Policies);
+    }
+
+    [Fact]
+    public async Task SeparateStoreInstances_IdentityChangeAfterReplace_RetriesAndReturnsTheNextSnapshot()
+    {
+        var previous = new OutboundFirewallConfiguration(
+            OutboundFirewallMode.AuditOnly,
+            [new AppFirewallPolicy(@"C:\previous-process.exe", OutboundAction.Allow)]);
+        var next = new OutboundFirewallConfiguration(
+            OutboundFirewallMode.AuditOnly,
+            [new AppFirewallPolicy(@"C:\next-process.exe", OutboundAction.Block)]);
+        await new FirewallPolicyStore(PolicyPath).SaveAsync(previous);
+
+        var readerGuard = new IdentityChangeAfterBlockedRevalidationTrustGuard();
+        var readerStore = new FirewallPolicyStore(PolicyPath, storageTrustGuard: readerGuard);
+        var writerStore = new FirewallPolicyStore(PolicyPath);
+
+        // Run the reader on a worker because the guard deliberately blocks the synchronous
+        // revalidation that happens after the FileShare.Read | FileShare.Delete handle opens.
+        var openedReader = Task.Run(() => readerStore.LoadAsync());
+        await readerGuard.RevalidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await writerStore.SaveAsync(next).WaitAsync(TimeSpan.FromSeconds(5));
+        readerGuard.ReleaseFirstRevalidation();
+        var observedNextFromRetry = await openedReader.WaitAsync(TimeSpan.FromSeconds(5));
+        var observedNext = await new FirewallPolicyStore(PolicyPath).LoadAsync();
+
+        Assert.Equal(next.Mode, observedNextFromRetry.Mode);
+        Assert.Equal(next.Policies, observedNextFromRetry.Policies);
+        Assert.Equal(next.Mode, observedNext.Mode);
+        Assert.Equal(next.Policies, observedNext.Policies);
+        Assert.Equal(2, readerGuard.InspectCalls);
+        Assert.Equal(2, readerGuard.RevalidateCalls);
+    }
+
+    [Fact]
+    public async Task PersistentIdentityChange_RetriesExactlyThreeTrustedLoadAttemptsThenFailsClosed()
+    {
+        await new FirewallPolicyStore(PolicyPath).SaveAsync(OutboundFirewallConfiguration.Empty);
+        var guard = new PersistentIdentityChangeTrustGuard();
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+
+        var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() => store.LoadAsync());
+
+        Assert.Equal("IdentityChanged", exception.Code);
+        Assert.Equal(3, guard.InspectCalls);
+        Assert.Equal(3, guard.RevalidateCalls);
+    }
+
+    [Fact]
+    public async Task InspectionFailure_IsNeverRetried()
+    {
+        var guard = new InspectionFailingTrustGuard();
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+
+        var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() => store.LoadAsync());
+
+        Assert.Equal("WritableByUnprivilegedPrincipal", exception.Code);
+        Assert.Equal(1, guard.InspectCalls);
+        Assert.Equal(0, guard.RevalidateCalls);
+    }
+
+    [Fact]
+    public async Task InitialIdentityChanged_IsFailClosedWithoutRetry()
+    {
+        var guard = new InitialIdentityChangedTrustGuard();
+        var store = new FirewallPolicyStore(PolicyPath, storageTrustGuard: guard);
+
+        var exception = await Assert.ThrowsAsync<FirewallStorageTrustException>(() => store.LoadAsync());
+
+        Assert.Equal("IdentityChanged", exception.Code);
+        Assert.Equal(1, guard.InspectCalls);
+        Assert.Equal(0, guard.RevalidateCalls);
+    }
+
     private sealed class ScriptedTrustGuard(bool revalidateTrusted) : IFirewallStorageTrustGuard
     {
         public List<string> Calls { get; } = [];
@@ -230,6 +360,114 @@ public sealed class PolicyStoreTests : IDisposable
         {
             Calls.Add("revalidate");
             return new(revalidateTrusted, revalidateTrusted ? "Trusted" : "StorageIdentityChanged", lease.Evidence);
+        }
+    }
+
+    private sealed class BlockingFirstInspectionTrustGuard : IFirewallStorageTrustGuard
+    {
+        private int _inspectionCount;
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource FirstInspectionEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public FirewallStorageTrustLease Inspect()
+        {
+            if (Interlocked.Increment(ref _inspectionCount) == 1)
+            {
+                FirstInspectionEntered.TrySetResult();
+                _release.Task.GetAwaiter().GetResult();
+            }
+
+            return new FirewallStorageTrustLease(true, "Trusted");
+        }
+
+        public FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease) => lease;
+
+        public void ReleaseFirstInspection() => _release.TrySetResult();
+    }
+
+    private sealed class IdentityChangeAfterBlockedRevalidationTrustGuard : IFirewallStorageTrustGuard
+    {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource RevalidationEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int InspectCalls { get; private set; }
+        public int RevalidateCalls { get; private set; }
+
+        public FirewallStorageTrustLease Inspect()
+        {
+            InspectCalls++;
+            return new(true, "Trusted");
+        }
+
+        public FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease)
+        {
+            RevalidateCalls++;
+            if (RevalidateCalls == 1)
+            {
+                RevalidationEntered.TrySetResult();
+                _release.Task.GetAwaiter().GetResult();
+                return new(false, "IdentityChanged", lease.Evidence);
+            }
+            return lease;
+        }
+
+        public void ReleaseFirstRevalidation() => _release.TrySetResult();
+    }
+
+    private sealed class PersistentIdentityChangeTrustGuard : IFirewallStorageTrustGuard
+    {
+        public int InspectCalls { get; private set; }
+        public int RevalidateCalls { get; private set; }
+
+        public FirewallStorageTrustLease Inspect()
+        {
+            InspectCalls++;
+            return new(true, "Trusted");
+        }
+
+        public FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease)
+        {
+            RevalidateCalls++;
+            return new(false, "IdentityChanged", lease.Evidence);
+        }
+    }
+
+    private sealed class InspectionFailingTrustGuard : IFirewallStorageTrustGuard
+    {
+        public int InspectCalls { get; private set; }
+        public int RevalidateCalls { get; private set; }
+
+        public FirewallStorageTrustLease Inspect()
+        {
+            InspectCalls++;
+            return new(false, "WritableByUnprivilegedPrincipal");
+        }
+
+        public FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease)
+        {
+            RevalidateCalls++;
+            return lease;
+        }
+    }
+
+    private sealed class InitialIdentityChangedTrustGuard : IFirewallStorageTrustGuard
+    {
+        public int InspectCalls { get; private set; }
+        public int RevalidateCalls { get; private set; }
+
+        public FirewallStorageTrustLease Inspect()
+        {
+            InspectCalls++;
+            return new(false, "IdentityChanged");
+        }
+
+        public FirewallStorageTrustLease Revalidate(FirewallStorageTrustLease lease)
+        {
+            RevalidateCalls++;
+            return lease;
         }
     }
 

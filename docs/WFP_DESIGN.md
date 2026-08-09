@@ -105,23 +105,38 @@ process ids or display names, which are transient or ambiguous.
   ad-hoc English presentation; user-facing WinSight presentation continues to use the
   existing EN/FR/ES localization layer. The VM protocol must inspect affected presentation
   in all three locales without changing the underlying codes.
-- Firewall IPC v3 binds paginated collections to a complete stateless snapshot. The dashboard
-  probes read-only status in v3, then v2, then v1; it descends only when the authenticated peer
-  closes before returning any response byte. A timeout, malformed/partial frame or generic I/O
-  fault never downgrades or caches a version, and no mutation is replayed. v2 carries runtime
-  enforcement proof but no snapshot metadata; v1 has neither. A new service emits their exact
-  strict wire shapes and returns a list to v1/v2 only when it fits in one complete page. A v1
-  enforcement response is projected as `Degraded`, never filtering-active.
+- Firewall IPC v3 binds paginated collections to a complete stateless snapshot. The current
+  dashboard sends v3 only; an authenticated zero-byte close, timeout, malformed/partial frame or
+  generic I/O fault makes the service unavailable and never emits a lower-version request or
+  mutation. The service retains strict v1/v2 response support only for older deployed dashboards:
+  v2 carries runtime enforcement proof but no snapshot metadata; v1 has neither. It returns a list
+  to v1/v2 only when it fits in one complete page. A v1 enforcement response is projected as
+  `Degraded`, never filtering-active.
 - The pipe name is not treated as server identity. Before writing any request, the client reads
   the connected pipe object's owner and requires the LocalSystem SID; unreadable or different
-  ownership fails closed with a fixed diagnostic and cannot trigger v1 fallback. Every decoded
-  reply must echo the exact request id and negotiated version before it can be used or cached.
-  The service ACL explicitly assigns LocalSystem as owner and reserves `FirstPipeInstance` once
-  for the listener lifetime, so a pre-existing squatter prevents startup rather than receiving
-  dashboard traffic. The listener announces readiness only after this reservation succeeds.
-- The single pipe instance applies independent bounded deadlines to reading the initial request
-  and writing the completed reply. Those I/O deadlines release a silent client and permit the
-  next connection; they never cancel the intervening dispatcher/WFP transition.
+  ownership fails closed with a fixed diagnostic; the current client has no legacy fallback. Every
+  decoded reply must echo the exact request id and v3 version before it can be used.
+  The service ACL explicitly assigns LocalSystem as owner. The initial server uses
+  `FirstPipeInstance`, so a pre-existing squatter prevents startup rather than receiving dashboard
+  traffic. After each connection the accept loop creates a successor before dispatching or disposing
+  the connected predecessor. The listener announces readiness only after the initial claim succeeds;
+  startup, successor-creation or unexpected processing failure is terminal. Terminal cleanup closes
+  all accepting and connected pipe handles immediately, then gives cooperative work a two-second
+  drain. Before any fallible logging or host-lifetime call, the worker arms a dedicated watchdog;
+  graceful stop and fixed diagnostics are then best-effort. If a non-cooperative operation keeps the
+  process alive, the watchdog invokes `FailFast` with `[FW_PIPE_WATCHDOG_EXPIRED]` eight seconds after
+  arming. That primitive bypasses `ProcessExit` handlers and finalizers; the listener-drain plus
+  watchdog containment budget is therefore two plus eight seconds. Requested shutdown also arms the
+  watchdog after the listener returns, but does so silently, without the unexpected-listener event or
+  a redundant host-stop request. A normal process exit removes its background thread; stuck privileged
+  teardown cannot outlive the bound. Namespace continuity is not promised after terminal loss.
+- Each accepted exchange applies independent bounded deadlines to reading the initial request and
+  writing the completed reply. Read-only/denied callers and machine-policy mutation callers occupy
+  separate bounded admission lanes, with one mutation path remaining available when the read lane is
+  saturated. An over-capacity peer is closed immediately without a request read or response write, so
+  rejection cannot strand the accept loop. Such a zero-byte close is classified as unavailability by
+  the v3-only current dashboard and cannot trigger a lower request. I/O deadlines release a silent
+  client's lane; they never cancel the intervening dispatcher/WFP transition.
 - A v1 response sent by a new service projects `Enforcement` only when the current effective
   state is `Active`. `AuditOnly` and `Degraded` both project audit-only/non-enforcing, protecting
   older dashboards that only understand the legacy desired-mode field.
@@ -221,7 +236,18 @@ evidence.
   temporary file and atomic same-volume replacement. It canonicalizes and
   deduplicates paths, bounds the file to 1 MiB and 4096 entries, rejects unknown or
   duplicate JSON members, caps cumulative path bytes before serialization and
-  refuses reparse-point storage.
+  refuses reparse-point storage. Each `FirewallPolicyStore` object owns an async gate that
+  serializes complete loads and saves through that object only; it is not a process-global lock.
+  Read handles grant delete sharing, so a reader in another process can finish the complete previous
+  snapshot while the authoritative service coordinator, the sole mutation writer, atomically
+  replaces an existing path with Windows `ReplaceFile`; first creation uses a non-overwriting
+  same-volume move. A later reader opens the complete next snapshot. Trust and reparse validation
+  still bracket access and replacement never ignores metadata errors. Only an `IdentityChanged`
+  revalidation caused by replacement of an already-open trusted handle is retried: the old stream is
+  disposed and the complete inspection/open/load is attempted at most twice more. ACL, owner,
+  reparse, generic I/O and initial-inspection failures never retry, even if an initial inspector uses
+  the same `IdentityChanged` code. The coordinator retains its whole-transition lock across load,
+  WFP and save.
 - Enforcement values require an explicit service-side gate. `LoadOrAuditAsync`
   converts corrupt, inaccessible or unsafe state to an empty audit-only snapshot;
   cancellation is never swallowed.
@@ -245,8 +271,9 @@ evidence.
   `FirewallServiceSecurity.CreateHardenedSecurity` grants full control to SYSTEM and
   Administrators, read/write to interactive local users, and explicitly denies network
   logons so the pipe is never reachable remotely. The connected Windows identity is
-  verified while impersonating the client before any command runs, and the exchange is
-  serialized one connection at a time. `FirewallServiceClient` is the unprivileged
+  verified while impersonating the client before admission. A successor accept instance is
+  posted before dispatch, and read versus mutation exchanges run concurrently only within
+  separate bounded lanes. `FirewallServiceClient` is the unprivileged
   dashboard counterpart; it requires a LocalSystem-owned connected pipe before writing,
   then validates strict framing and request correlation on every reply.
 - Framing is not authentication. Client-side pipe-owner verification authenticates the
@@ -266,6 +293,8 @@ evidence.
   so rollback and uninstall are deterministic.
 - Keep emergency disable available through the authenticated IPC contract so a separate
   recovery client can invoke the same serialized authority without any direct WFP alias.
+  The mutation admission lane is distinct from read capacity so read-only saturation cannot
+  consume this recovery path.
 - Test on an isolated Windows VM before enabling persistent filters.
 
 ## Phase 2 implementation and qualification state
@@ -277,8 +306,10 @@ evidence.
    status through `FirewallServiceGateway`/`FirewallServiceAdapter`; an unreachable pipe is
    presented as unavailable, never as an unverified SCM installation state. The executable has
    opt-in, elevated `install`/`uninstall` verbs; the per-user setup never installs it. The x64 IPC
-   capability boundary passed 7/7 on candidate `c9177cd`; native Arm64, dedicated
-   unelevated-administrator and network-logon sessions remain pending.
+   capability boundary passed 7/7 on candidate `c9177cd`. The current successor/admission/store
+   changes alter that boundary, so the old record does not qualify this candidate. Clean x64 and
+   native Arm64 runs, including dedicated unelevated-administrator and network-logon sessions,
+   remain pending.
 2. Done in code. WFP engine/session/provider/sublayer interop
    applies per-application IPv4 and IPv6 block filters after an explicit elevated
    enforcement transition. Candidate `f0a3f16` passed the candidate-bound x64 WFP/SCM,

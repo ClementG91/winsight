@@ -1,6 +1,95 @@
-## Unreleased
+## v0.11.2, 2026-08-09
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
+
+### The firewall control channel now reserves capacity for recovery
+
+- A fresh Windows 11 x64 VM stress run found a second peer-controlled failure after the pool work:
+  a client could connect and close before the overlapped `WaitForConnectionAsync` completion was
+  observed. Windows surfaced that one-instance race as `IOException`; the accept loop treated it as
+  systemic, emitted `[FW_PIPE_LISTENER_FAILED]` and stopped the otherwise healthy LocalSystem
+  service. The fixed loop creates the failed instance's successor before closing it and continues;
+  creation, DACL and configuration failures remain terminal. Failure diagnostics now select one
+  fixed redacted category instead of discarding the cause or logging exception text. The failing
+  binary stopped in the first hostile round. The corrected binary completed 25 rounds comprising
+  150 silent connections, 150 parallel valid clients (25 served and 125 explicitly unavailable
+  under deliberate same-privilege lane saturation) and 625 abrupt closes with no listener-failure
+  event, then left WFP empty and SCM absent (1060).
+- The corrected source was rebuilt as the complete local x64 package, not only as an instrumented
+  service. That package passed the native installer lifecycle, MCP, dashboard EN/FR/ES smoke tests,
+  protected-path and hostile-account trust gates, WFP contract/pre-arm checks, LocalSystem SCM and
+  elevated/restricted IPC. Its packaged service then repeated the same 25-round hostile stress with
+  no listener-loss event and cleaned back to empty WFP plus SCM 1060. This remains local pre-publish
+  evidence; GitHub CI/release artifacts retain their own immutable gates and attestations.
+- Found while qualifying the published v0.11.1 artifact on a clean VM. The dashboard reported
+  "firewall service unavailable" while `sc query WinSightFirewall` reported `RUNNING`, the pipe
+  existed in the namespace, and every connection attempt returned `ERROR_SEM_TIMEOUT`. A stop and
+  start restored it. The state survived for minutes and looked healthy to anything watching the SCM.
+- **The cause was one accept instance.** `NamedPipeFirewallServer` created a single
+  `NamedPipeServerStream` with `maxNumberOfServerInstances: 1` and served it in a serial loop. A peer
+  that connects and then sends nothing holds that instance for the whole request read timeout — five
+  seconds — and a peer that reconnects in a loop holds it indefinitely. Unprivileged callers may open
+  this pipe by design: they get a read-only capability. So any local user could deny the dashboard
+  its control channel, and the service would keep reporting itself Running throughout.
+- The first pool correction was insufficient: a local caller could occupy every identical slot, and
+  the pool could lose instances independently while the service still appeared healthy. It also
+  created readiness before every slot existed and could release the name reservation during repair.
+- The listener now owns one accept loop. It claims the name with `FirstPipeInstance`, then creates a
+  successor instance before dispatching or disposing each connected predecessor. A startup,
+  successor-creation or unexpected request-processing failure is terminal: every accepting and
+  connected pipe is closed immediately. Cooperative tasks drain for a fixed bound; a task that
+  ignores cancellation is observed in the background after the listener's two-second drain. The
+  service host takes the fixed `[FW_PIPE_LISTENER_FAILED]` path, requests graceful shutdown and arms
+  a dedicated background-thread watchdog. If the process is still alive eight seconds later, it
+  invokes `FailFast` with the fixed `[FW_PIPE_WATCHDOG_EXPIRED]` code. This bypasses `ProcessExit`
+  handlers and finalizers instead of letting either delay containment. The worker arms the watchdog
+  before calling the logger or host lifetime; both diagnostics and graceful stop are best-effort.
+  Requested shutdown arms it silently only after the listener has returned: it emits no listener-
+  failure diagnostic and does not request host stop again. Normal process exit removes the background
+  thread; a stuck privileged teardown still reaches the same hard bound.
+- Caller identity is established before admission. Read-only/denied callers and callers allowed to
+  mutate machine policy use distinct bounded lanes; read saturation cannot consume the reserved
+  mutation lane used by emergency disable. An over-capacity connection is closed immediately without
+  reading or writing, so rejection cannot block the accept loop. The current dashboard now sends v3
+  only: a zero-byte close is service unavailability and can never trigger a v2/v1 request or mutation.
+  The service keeps strict v1/v2 response support only for already-deployed older dashboards. The
+  service-side coordinator still serializes every WFP transition.
+- Each policy-store instance serializes complete loads and saves. Read handles also share deletion,
+  so another process can finish reading the complete previous snapshot while the single writer
+  atomically replaces an existing path with Windows `ReplaceFile` semantics; first creation uses a
+  non-overwriting move, and replacement never ignores metadata errors. If revalidation reports only
+  the stable `IdentityChanged` classification after an old trusted handle opened, the complete load
+  is retried from a fresh inspection/handle at most twice. Every ACL, owner, reparse or inspection
+  failure — including `IdentityChanged` from the initial inspection — remains immediately fail-closed.
+  The coordinator retains its whole-transition writer lock.
+- These changes alter the privileged IPC boundary. Earlier IPC VM evidence does not qualify this
+  candidate; clean x64 and native Arm64 service/IPC/WFP qualification remains required.
+
+### The service could outlive its own endpoint
+
+- `FirewallServiceWorker` stopped the host when the listener threw, but not when it returned. A
+  listener that completed quietly — before readiness, or after announcing itself listening — left
+  `ExecuteAsync` returning normally, which does not stop a `BackgroundService` host. The service
+  stayed Running with nothing accepting connections.
+- Now any exit the shutdown token did not ask for is treated as endpoint loss: it logs
+  `[FW_PIPE_LISTENER_FAILED]` and stops the host. Reporting Running while serving nobody is the state
+  that makes every caller's timeout look like the caller's fault.
+- Pinned by three tests covering the quiet completion before readiness, the accept loop returning
+  after readiness, and the mirror case where a requested shutdown must **not** raise the fault path.
+
+### `INSTALLATION.md` prescribed a firewall-service install that cannot succeed
+
+- The document told operators to run `winsight-firewall-service.exe install` from "the install or
+  extracted directory". For the default per-user installation under `%LOCALAPPDATA%\Programs\WinSight`
+  that command returns `[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]` with exit 1 and creates nothing —
+  verified on a clean VM against the published artifact.
+- The refusal is correct: a LocalSystem service whose binary sits where an unprivileged account can
+  rewrite it is a privilege escalation waiting to happen. The documentation was the part that was
+  wrong, by describing a path the product deliberately refuses.
+- It now states the refusal, shows the exact diagnostic code, and names the two directories that do
+  work — the portable ZIP extracted somewhere only administrators can write, or the installer run
+  elevated for all users. The per-user install section points forward to it, so the choice is visible
+  before the install rather than after the failure.
 
 ## v0.11.1, 2026-08-05
 

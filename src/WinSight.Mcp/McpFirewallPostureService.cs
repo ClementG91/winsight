@@ -13,10 +13,9 @@ namespace WinSight.Mcp;
 /// may run for a minute and a half; a posture read is a short IPC exchange, and queueing it behind
 /// a running scan would make the cheapest question on the server the slowest to answer.
 ///
-/// It still needs a gate of its own. The service publishes a single pipe instance and serves one
-/// exchange at a time, so two concurrent reads from this process would contend for it and could
-/// time each other out into a false "unavailable" - which is precisely the answer that must never
-/// be produced by accident.
+/// It still needs a gate of its own. One posture read spans several paginated IPC exchanges; bounding
+/// this process to one such read prevents duplicate page workloads and local timeout amplification.
+/// The service transport itself has separate bounded concurrent admission lanes.
 /// </remarks>
 public sealed class McpFirewallPostureService : IDisposable
 {

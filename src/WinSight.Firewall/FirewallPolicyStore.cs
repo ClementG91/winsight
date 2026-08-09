@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -53,6 +54,10 @@ public interface IFirewallStorageTrustGuard
 /// ACL-protected directory; the dashboard must access it only through authenticated
 /// IPC.
 /// </summary>
+[SuppressMessage(
+    "Design",
+    "CA1001:Types that own disposable fields should be disposable",
+    Justification = "The process-lifetime async gate does not allocate a wait handle and must remain usable by in-flight operations.")]
 public sealed class FirewallPolicyStore
 {
     public const int CurrentSchemaVersion = 1;
@@ -79,6 +84,7 @@ public sealed class FirewallPolicyStore
     private readonly bool _allowEnforcement;
     private readonly Func<(bool Trusted, string Code)>? _storageTrust;
     private readonly IFirewallStorageTrustGuard? _storageTrustGuard;
+    private readonly SemaphoreSlim _access = new(1, 1);
 
     public FirewallPolicyStore(
         string path,
@@ -101,6 +107,38 @@ public sealed class FirewallPolicyStore
     public async Task<OutboundFirewallConfiguration> LoadAsync(
         CancellationToken cancellationToken = default)
     {
+        await _access.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            const int maximumIdentityChangeRetries = 2;
+            for (var attempt = 0; ; attempt++)
+            {
+                try
+                {
+                    return await LoadCoreAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (OpenedStorageIdentityChangedException) when (
+                    attempt < maximumIdentityChangeRetries)
+                {
+                    // The path was atomically replaced after this attempt opened its
+                    // trusted old handle. LoadCore has unwound and disposed that handle;
+                    // retry from a fresh trust inspection and a newly opened handle.
+                }
+                catch (OpenedStorageIdentityChangedException ex)
+                {
+                    throw ex.StorageTrustException;
+                }
+            }
+        }
+        finally
+        {
+            _access.Release();
+        }
+    }
+
+    private async Task<OutboundFirewallConfiguration> LoadCoreAsync(
+        CancellationToken cancellationToken)
+    {
         var trustLease = DemandTrustedStorage();
         FileAttributes attributes;
         try
@@ -120,10 +158,12 @@ public sealed class FirewallPolicyStore
             {
                 Mode = FileMode.Open,
                 Access = FileAccess.Read,
-                Share = FileShare.Read,
+                // Another service/CLI process may atomically replace the path while this
+                // handle keeps reading the complete previous snapshot.
+                Share = FileShare.Read | FileShare.Delete,
                 Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
             });
-        RevalidateTrustedStorage(trustLease);
+        RevalidateOpenedStorage(trustLease);
         if (stream.Length is <= 0 or > MaxFileBytes)
         {
             throw new InvalidDataException(
@@ -173,6 +213,21 @@ public sealed class FirewallPolicyStore
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(configuration);
+        await _access.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await SaveCoreAsync(configuration, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            _access.Release();
+        }
+    }
+
+    private async Task SaveCoreAsync(
+        OutboundFirewallConfiguration configuration,
+        CancellationToken cancellationToken)
+    {
         var trustLease = DemandTrustedStorage();
         var validated = Validate(new PolicyDocument(
             CurrentSchemaVersion,
@@ -221,7 +276,18 @@ public sealed class FirewallPolicyStore
 
             cancellationToken.ThrowIfCancellationRequested();
             RevalidateTrustedStorage(trustLease);
-            File.Move(temporaryPath, _path, overwrite: true);
+            if (File.Exists(_path))
+            {
+                File.Replace(
+                    temporaryPath,
+                    _path,
+                    destinationBackupFileName: null,
+                    ignoreMetadataErrors: false);
+            }
+            else
+            {
+                File.Move(temporaryPath, _path);
+            }
             _ = DemandTrustedStorage();
         }
         finally
@@ -261,6 +327,18 @@ public sealed class FirewallPolicyStore
         }
     }
 
+    private void RevalidateOpenedStorage(FirewallStorageTrustLease lease)
+    {
+        try
+        {
+            RevalidateTrustedStorage(lease);
+        }
+        catch (FirewallStorageTrustException ex) when (IsRetryableIdentityChange(ex.Code))
+        {
+            throw new OpenedStorageIdentityChangedException(ex);
+        }
+    }
+
     private static void Demand(FirewallStorageTrustLease lease)
     {
         if (!lease.Trusted) throw new FirewallStorageTrustException(NormalizeCode(lease.Code));
@@ -268,6 +346,10 @@ public sealed class FirewallPolicyStore
 
     private static string NormalizeCode(string? code) =>
         string.IsNullOrWhiteSpace(code) ? "StorageInspectionFailed" : code;
+
+    private static bool IsRetryableIdentityChange(string code) =>
+        string.Equals(code, "IdentityChanged", StringComparison.Ordinal)
+        || string.Equals(code, "StorageIdentityChanged", StringComparison.Ordinal);
 
     private OutboundFirewallConfiguration Validate(PolicyDocument document)
     {
@@ -348,4 +430,14 @@ public sealed class FirewallPolicyStore
         int SchemaVersion,
         OutboundFirewallMode Mode,
         AppFirewallPolicy[] Policies);
+
+    private sealed class OpenedStorageIdentityChangedException : Exception
+    {
+        internal OpenedStorageIdentityChangedException(
+            FirewallStorageTrustException storageTrustException)
+            : base("Firewall policy storage identity changed after opening.", storageTrustException) =>
+            StorageTrustException = storageTrustException;
+
+        internal FirewallStorageTrustException StorageTrustException { get; }
+    }
 }

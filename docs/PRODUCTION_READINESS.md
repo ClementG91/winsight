@@ -1,14 +1,16 @@
 # Production readiness
 
-This is the authoritative status as of 2026-08-05. Evidence is candidate-bound: a successful result
-for one commit or package does not automatically qualify a later one. The privileged evidence below
-was gathered against candidate `3ad4b92`; see
-[Candidate delta review](#candidate-delta-review-v0110-and-v0111)
-for what changed since and why the open gates are unchanged.
+This is the authoritative status as of 2026-08-09. Evidence is candidate-bound: a successful result
+for one commit or package does not automatically qualify a later one. The current AC109 candidate
+changes named-pipe ownership/admission, service-listener lifecycle and privileged policy storage
+concurrency. A local pre-publish x64 package passed the isolated-VM gates recorded below, but it is
+not an immutable CI or release artifact. The earlier privileged evidence was gathered against
+historical candidate `3ad4b92`; see
+[Current AC109 candidate delta](#current-ac109-candidate-delta).
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Not production-ready** - candidate `3ad4b92` passed the executed ETW, WFP/SCM, trust, IPC-workaround and installer gates, but host snapshot continuity and the exact Network Logon gate were not run |
+| **x64** | **Not production-ready** - the AC109 local package passed installer, trust, IPC and hostile-listener VM gates, but exact release-artifact CI/CodeQL, full WFP enforcement, literal Network Logon and human review remain open |
 | **Arm64 (native)** | **Not production-ready** - native CI build/package/installer passed for `3ad4b92`; privileged WFP/SCM/trust/IPC/session behavior remains unverified |
 | **x64 on Arm64** | **Not production-ready** - emulated application identity and privileged runtime behavior remain unverified |
 
@@ -66,7 +68,7 @@ The following independent gates also remain open:
 - independent human EN/FR/ES review for the exact candidate;
 - a new exact-candidate CI, CodeQL, package/installer and clean-VM rerun after the protocol changes.
 
-## Candidate delta review, v0.11.0 and v0.11.1
+## Historical candidate delta review, v0.11.0 and v0.11.1
 
 Evidence here is candidate-bound, so a release after `3ad4b92` requires this section rather than
 letting the statement above age into an implied pass for code it never covered.
@@ -80,11 +82,10 @@ tests. No behaviour, and nothing outside the unprivileged process. The review be
 both candidates without weakening: a smaller delta over the same surface cannot reopen a gate the
 larger one left closed.
 
-**What it touches:** nothing on the privileged boundary. The WFP engine, the SCM lifecycle, the
-service-path trust check and the authenticated named-pipe IPC are byte-identical, and the MCP process
-still reaches the service through the same posture-only interface with no mutation path. The gates
-whose surface is unchanged therefore keep the standing recorded in the validation files, and were not
-re-run — which is the delta review this project's rule asks for, not a claim that they were repeated.
+**What it touched at that historical point:** nothing on the privileged boundary. For the v0.11.1
+candidate reviewed here, the WFP engine, SCM lifecycle, service-path trust check and authenticated
+named-pipe IPC were byte-identical to their recorded predecessors. That statement does not apply to
+the current AC109 candidate, which changes the named-pipe and policy-store implementation.
 
 **What it does not change:** the verdict. All three targets remain **not production-ready** for
 exactly the reasons above. The three x64 protocol gaps, native Arm64 privileged behaviour and
@@ -95,6 +96,45 @@ not have rather than on unwritten work.
 contract, the engine-library and privileged-managed coverage gates, and formatting. Native Arm64
 build, packaging and installer lifecycle run in CI on a native runner as usual; the Arm64 *privileged
 runtime* remains `NOT_RUN`.
+
+## Current AC109 candidate delta
+
+AC109 replaces the fixed named-pipe accept pool with successor-before-dispatch ownership, separates
+bounded read and machine-policy-mutation admission, makes unexpected listener/handler loss terminal,
+awaits readiness as a lifecycle signal, and serializes complete policy-store load/save operations.
+An x64 VM then exposed an overlapped-accept race: a peer that vanished before Windows completed
+`WaitForConnectionAsync` produced a per-instance `IOException` and stopped the service. The listener
+now posts that failed instance's successor before closing it; creation and security failures remain
+terminal. Diagnostics classify listener failures with fixed redacted categories and never log the
+exception object or its message. The corrected diagnostic build survived 25 hostile rounds (150
+silent peers, 150 parallel valid clients — 25 served and 125 explicitly unavailable under deliberate
+same-privilege lane saturation — and 625 abrupt closes), emitted no listener-failure event, and
+cleaned up to SCM 1060 with WFP empty.
+The current dashboard is v3-only while the service retains legacy replies for older clients. Trusted
+loads retry a concurrent path-identity replacement only twice from a fresh inspection; every other
+trust failure remains fail-closed. Endpoint loss closes pipes, drains for two seconds, then arms an
+eight-second watchdog before fallible diagnostics or graceful-stop calls. On expiry it invokes
+`FailFast` with a fixed code, bypassing `ProcessExit` handlers/finalizers rather than promising exit
+code 1. Requested shutdown arms the same watchdog silently after the listener returns; normal process
+exit removes the background thread, while stuck privileged teardown remains bounded. These are
+security and availability changes inside the LocalSystem service boundary, not a docs-only or
+unprivileged delta.
+
+The full local x64 package was then rebuilt from the corrected source. On the clean Windows 11 x64
+VM it passed native PE and installer install/uninstall, MCP stdio, dashboard smoke tests in EN/FR/ES,
+protected-path trust, the 26/26 WFP protocol contract plus its one-failure negative control, 16/16
+pre-arm cleanup, the 12/12 hostile-account trust boundary, LocalSystem SCM binding and the 7/7
+elevated/restricted IPC boundary. The packaged service repeated the 25 hostile rounds above with the
+same 150 silent, 150 valid and 625 abrupt-client counts, no listener-failure event, WFP empty and SCM
+1060 after cleanup. The VM was then powered off and restored to its named clean snapshot.
+
+This is strong local pre-publish evidence, but it does not qualify bytes that CI has not built and
+attested yet. Before the release can be treated as production-ready, the immutable release artifact
+still requires green CI and CodeQL, the full 25/25 WFP enforcement transition, the literal Network
+Logon scenario and independent human review. Native Arm64 CI continues to build, test and run the
+installer on GitHub's native runner; privileged Arm64 WFP/SCM/session qualification and x64-on-Arm64
+identity remain blocked on suitable hardware. Until those records exist, all targets remain
+**not production-ready**.
 
 ## Authenticode policy
 
