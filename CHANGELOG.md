@@ -1,6 +1,14 @@
-## v0.11.2, 2026-08-09
+## v0.11.3, 2026-08-09
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
+
+- The signed `v0.11.2` tag produced no release: its x64 release runner exposed a missing
+  `TimeoutException` allowance in the hostile peer-storm test while the listener remained healthy;
+  the same SHA was green in PR/main, Arm64 release, and the packaged-service VM stress. The test
+  already allowed capacity/scheduling rejection during deliberate saturation and asserted recovery
+  after drain, but caught only the equivalent `IOException`. It now accepts both peer-local outcomes
+  and keeps the post-drain response as the product invariant. The version advances to `0.11.3`
+  instead of moving the published signed tag.
 
 ### The firewall control channel now reserves capacity for recovery
 

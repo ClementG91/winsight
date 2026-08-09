@@ -962,9 +962,12 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
                 {
                     _ = await GetStatusAsync(pipeName, cts.Token);
                 }
-                catch (IOException)
+                catch (Exception ex) when (ex is IOException or TimeoutException)
                 {
-                    // Read admission is intentionally saturated during this phase.
+                    // Read admission is intentionally saturated during this phase. A
+                    // busy release runner may spend the whole client budget waiting for
+                    // an instance, which is equivalent to the peer-local I/O rejection
+                    // for this storm. Recovery after the peers drain is asserted below.
                 }
             });
 
