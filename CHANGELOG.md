@@ -1,3 +1,15 @@
+## v0.11.4, 2026-08-09
+
+Step-by-step progress log. Newest first. Every CI-green step lands here.
+
+- The signed `v0.11.3` tag produced no release: its x64 release runner passed the product, PE and
+  MCP checks, then found that the installer harness invoked each WPF dashboard smoke test with
+  PowerShell's call operator. Windows GUI applications are not reliably waited for by that form, so
+  uninstall cleanup raced a still-terminating dashboard and reported its executable as locked. The
+  harness now uses `Start-Process -Wait -PassThru` for every language, verifies the concrete exit
+  code, and cannot begin uninstall until each dashboard process has exited. The version advances to
+  `0.11.4` instead of moving the published signed tag.
+
 ## v0.11.3, 2026-08-09
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.
