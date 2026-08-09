@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.IO.Pipes;
+using System.Reflection;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using WinSight.Firewall;
@@ -818,11 +820,46 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
     }
 
     [Fact]
+    public void PublicConstructor_PreservesTheHistoricalSevenParameterContract()
+    {
+        var constructor = Assert.Single(typeof(NamedPipeFirewallServer).GetConstructors(
+            BindingFlags.Instance | BindingFlags.Public));
+        var parameters = constructor.GetParameters();
+
+        Assert.Equal(7, parameters.Length);
+        Assert.Equal(
+        [
+            typeof(FirewallConnectionHandler),
+            typeof(string),
+            typeof(Func<NamedPipeServerStream, bool>),
+            typeof(Func<PipeSecurity>),
+            typeof(Func<NamedPipeServerStream, FirewallCallerCapability>),
+            typeof(TimeSpan?),
+            typeof(TimeSpan?),
+        ], parameters.Select(parameter => parameter.ParameterType));
+        Assert.DoesNotContain(parameters, parameter =>
+            string.Equals(parameter.Name, "maxServerInstances", StringComparison.Ordinal));
+    }
+
+    [Theory]
+    [InlineData(0, 2)]
+    [InlineData(1, 1)]
+    [InlineData(252, 2)]
+    public void InternalConstructor_RejectsAdmissionBoundsThatCannotReserveTheHandoffInstance(
+        int readCapacity, int mutationCapacity)
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new NamedPipeFirewallServer(
+            Handler(), UniquePipeName(), _ => true, CurrentUserSecurity, null,
+            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1), readCapacity, mutationCapacity));
+    }
+
+    [Fact]
     public async Task AuthorisedClient_GetStatus_RoundTripsOverPipe()
     {
         var pipeName = UniquePipeName();
         var server = new NamedPipeFirewallServer(
-            Handler(), pipeName, authorise: _ => true, securityFactory: CurrentUserSecurity);
+            Handler(), pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
 
         var serverTask = server.ServeOnceAsync(cts.Token);
@@ -835,6 +872,237 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
 
         Assert.True(response.Success);
         Assert.Equal(OutboundFirewallMode.AuditOnly, response.Status!.Mode);
+    }
+
+    private async Task<FirewallCommandResponse> GetStatusAsync(string pipeName, CancellationToken cancellationToken) =>
+        await TrustedTestClient(pipeName).SendAsync(
+            new FirewallCommandRequest(FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus),
+            TimeSpan.FromSeconds(10),
+            cancellationToken);
+
+    [Fact]
+    public async Task AcceptLoop_KeepsServing_AfterAPeerConnectsAndVanishesWithoutSendingAnything()
+    {
+        // The service hands off connected predecessors to successor pipe instances. A peer
+        // that connects and drops - a crash, a cancelled dashboard, a hostile local user -
+        // must cost one connection, not the control channel. Losing the channel while the
+        // SCM still reports Running is exactly the state that looks healthy and serves
+        // nobody.
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(10), cts.Token);
+
+        // One peer is enough to prove the expected-disconnect path. Do not manufacture a
+        // capacity test here: admission reservation is covered separately below.
+        for (var i = 0; i < 1; i++)
+        {
+            using var rude = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut);
+            await rude.ConnectAsync(5000, cts.Token);
+        }
+
+        Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+        Assert.False(loop.IsCompleted, "the accept loop must still be running");
+
+        // Cancellation is an ordinary stop: the loop returns rather than throwing.
+        await cts.CancelAsync();
+        await loop.WaitAsync(TimeSpan.FromSeconds(15), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task AcceptLoop_ConcurrentSilentAndAbruptPeerStormKeepsServing()
+    {
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus,
+            requestReadTimeout: TimeSpan.FromMilliseconds(400),
+            responseWriteTimeout: TimeSpan.FromSeconds(2));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(10), cts.Token);
+
+        var silentPeers = new List<NamedPipeClientStream>();
+        try
+        {
+            for (var index = 0; index < 6; index++)
+            {
+                var peer = new NamedPipeClientStream(
+                    ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                await peer.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+                silentPeers.Add(peer);
+            }
+
+            var successfulAbruptConnections = 0;
+            var abruptWorkers = Enumerable.Range(0, 8).Select(async _ =>
+            {
+                for (var index = 0; index < 25; index++)
+                {
+                    await using var peer = new NamedPipeClientStream(
+                        ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                    try
+                    {
+                        await peer.ConnectAsync(TimeSpan.FromSeconds(2), cts.Token);
+                        Interlocked.Increment(ref successfulAbruptConnections);
+                    }
+                    catch (Exception ex) when (ex is IOException or TimeoutException)
+                    {
+                        // Capacity rejection and scheduling timeouts are allowed under the
+                        // storm; only listener loss after the peers drain is a failure.
+                    }
+                }
+            });
+            var validWorkers = Enumerable.Range(0, 6).Select(async workerIndex =>
+            {
+                try
+                {
+                    _ = await GetStatusAsync(pipeName, cts.Token);
+                }
+                catch (IOException)
+                {
+                    // Read admission is intentionally saturated during this phase.
+                }
+            });
+
+            await Task.WhenAll(abruptWorkers.Concat(validWorkers));
+            Assert.True(successfulAbruptConnections > 0);
+            Assert.False(loop.IsCompleted, "peer-local accept I/O must not terminate the listener");
+        }
+        finally
+        {
+            foreach (var peer in silentPeers)
+            {
+                await peer.DisposeAsync();
+            }
+        }
+
+        await Task.Delay(TimeSpan.FromSeconds(1), cts.Token);
+        Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+        Assert.False(loop.IsCompleted);
+
+        await cts.CancelAsync();
+        await loop.WaitAsync(TimeSpan.FromSeconds(15), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task AcceptLoop_DefaultReservedMutationLane_SurvivesReadOnlySilentPeerSaturation()
+    {
+        // The denial-of-service shape that matters: a local caller opens the pipe and
+        // simply holds it. With a single accept instance this locked out the dashboard
+        // for the whole read timeout, and indefinitely if the peer reconnected in a loop,
+        // all while the SCM reported the service as Running.
+        var pipeName = UniquePipeName();
+        var authority = new RecordingMutationAuthority();
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "reserved-lane-policies.json")), authority));
+        var readLaneSaturated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var rejectedReadAuthorised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var authorisationCalls = 0;
+        var server = new NamedPipeFirewallServer(
+            handler, pipeName,
+            authorise: null,
+            securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => Interlocked.Increment(ref authorisationCalls) switch
+            {
+                <= 3 => FirewallCallerCapability.ReadStatus,
+                4 => SignalReadStatus(readLaneSaturated),
+                5 => FirewallCallerCapability.MutateMachinePolicy,
+                _ => SignalReadStatus(rejectedReadAuthorised),
+            },
+            requestReadTimeout: TimeSpan.FromSeconds(10),
+            responseWriteTimeout: TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(10), cts.Token);
+
+        var silentReadPeers = new List<NamedPipeClientStream>();
+        try
+        {
+            for (var index = 0; index < 4; index++)
+            {
+                var silentReadPeer = new NamedPipeClientStream(
+                    ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+                await silentReadPeer.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+                silentReadPeers.Add(silentReadPeer);
+            }
+            await readLaneSaturated.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+            // The four default standard-user permits are occupied by silent peers. The
+            // mutation request must use its reserved lane rather than wait for their
+            // ten-second request deadline.
+            var elapsed = Stopwatch.StartNew();
+            var mutationResponse = await TrustedTestClient(pipeName).SendAsync(
+                new FirewallCommandRequest(
+                    FirewallProtocolCodec.CurrentVersion,
+                    Guid.NewGuid(),
+                    FirewallCommand.EmergencyDisable),
+                TimeSpan.FromSeconds(5), cts.Token);
+            elapsed.Stop();
+
+            Assert.True(mutationResponse.Success);
+            Assert.Equal(1, authority.EmergencyDisableCalls);
+            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5),
+                $"reserved mutation admission took {elapsed.Elapsed} while the read deadline is 10 seconds");
+
+            // Admission rejection closes the authenticated pipe promptly. The transport
+            // intentionally reports zero-byte EOF here; the gateway tests separately hold
+            // the v3-only invariant that no lower protocol is probed or cached.
+            var rejected = TrustedTestClient(pipeName).SendAsync(
+                new FirewallCommandRequest(
+                    FirewallProtocolCodec.CurrentVersion,
+                    Guid.NewGuid(),
+                    FirewallCommand.GetStatus),
+                TimeSpan.FromSeconds(5), cts.Token);
+            await rejectedReadAuthorised.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+            var rejectionElapsed = Stopwatch.StartNew();
+            await Assert.ThrowsAnyAsync<IOException>(() => rejected);
+            rejectionElapsed.Stop();
+            Assert.True(rejectionElapsed.Elapsed < TimeSpan.FromSeconds(2),
+                $"admission rejection was not prompt: {rejectionElapsed.Elapsed}");
+        }
+        finally
+        {
+            await cts.CancelAsync();
+            foreach (var peer in silentReadPeers)
+            {
+                await peer.DisposeAsync();
+            }
+        }
+
+        await loop.WaitAsync(TimeSpan.FromSeconds(15), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task AcceptLoop_KeepsServing_AfterAPeerSendsGarbage()
+    {
+        // Same contract for an unparseable frame: the handler already refuses to answer
+        // it, and the loop must go back to accepting rather than ending.
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: _ => true, securityFactory: CurrentUserSecurity);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(10), cts.Token);
+
+        using (var rude = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut))
+        {
+            await rude.ConnectAsync(5000, cts.Token);
+            await rude.WriteAsync(new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }, cts.Token);
+            await rude.FlushAsync(cts.Token);
+        }
+
+        Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+        Assert.False(loop.IsCompleted, "the accept loop must still be running");
+
+        // Cancellation is an ordinary stop: the loop returns rather than throwing.
+        await cts.CancelAsync();
+        await loop.WaitAsync(TimeSpan.FromSeconds(15), CancellationToken.None);
     }
 
     [Fact]
@@ -1119,6 +1387,299 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
     }
 
     [Fact]
+    public async Task InitialSecurityCreationFailure_FaultsReadyAndRunAsync()
+    {
+        var server = new NamedPipeFirewallServer(
+            Handler(), UniquePipeName(), authorise: _ => true,
+            securityFactory: () => throw new InvalidOperationException("test initial creation failure"));
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            server.RunAsync(CancellationToken.None));
+
+        Assert.Equal("test initial creation failure", error.Message);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => server.Ready);
+    }
+
+    [Fact]
+    public async Task SuccessorCreationFailure_IsTerminalAfterReadiness_AndReleasesThePipeName()
+    {
+        var pipeName = UniquePipeName();
+        var securityCalls = 0;
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: _ => true,
+            securityFactory: () => Interlocked.Increment(ref securityCalls) == 1
+                ? CurrentUserSecurity()
+                : throw new InvalidOperationException("test successor creation failure"));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var runTask = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await using (var client = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            await client.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runTask);
+        Assert.Equal("test successor creation failure", error.Message);
+        Assert.True(server.Ready.IsCompletedSuccessfully);
+
+        await using var replacement = NamedPipeServerStreamAcl.Create(
+            pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 0, 0, CurrentUserSecurity());
+    }
+
+    [Fact]
+    public async Task UnexpectedAuthorisationFailure_IsTerminal()
+    {
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName,
+            authorise: _ => throw new NotSupportedException("test authorisation failure"),
+            securityFactory: CurrentUserSecurity);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var runTask = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await using (var client = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            await client.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runTask);
+        Assert.IsType<NotSupportedException>(error.InnerException);
+    }
+
+    [Fact]
+    public async Task UnexpectedDispatcherFailure_IsTerminal()
+    {
+        var pipeName = UniquePipeName();
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "dispatcher-failure-policies.json")),
+            new ThrowingStatusAuthority()));
+        var server = new NamedPipeFirewallServer(
+            handler, pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var runTask = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await using (var client = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            await client.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+            await FirewallProtocolCodec.WriteRequestAsync(client, new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus), cts.Token);
+            await client.FlushAsync(cts.Token);
+        }
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runTask);
+        Assert.IsType<NotSupportedException>(error.InnerException);
+    }
+
+    [Fact]
+    public async Task FatalConnection_DrainsNonCooperativeMutationWithinTheConfiguredBound()
+    {
+        var pipeName = UniquePipeName();
+        var authority = new NonCooperativeEmergencyAuthority();
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "non-cooperative-policies.json")), authority));
+        var authorisationCalls = 0;
+        var server = new NamedPipeFirewallServer(
+            handler, pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => Interlocked.Increment(ref authorisationCalls) == 1
+                ? FirewallCallerCapability.MutateMachinePolicy
+                : throw new NotSupportedException("test terminal authorisation failure"),
+            requestReadTimeout: TimeSpan.FromSeconds(10),
+            responseWriteTimeout: TimeSpan.FromSeconds(5),
+            readAdmissionCapacity: 4,
+            mutationAdmissionCapacity: 2,
+            terminalDrainTimeout: TimeSpan.FromMilliseconds(100));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var runTask = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await using var blockedMutation = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await blockedMutation.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await FirewallProtocolCodec.WriteRequestAsync(blockedMutation, new FirewallCommandRequest(
+            FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.EmergencyDisable), cts.Token);
+        await blockedMutation.FlushAsync(cts.Token);
+        await authority.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        await using (var fatalPeer = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            await fatalPeer.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+        }
+
+        var elapsed = Stopwatch.StartNew();
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runTask.WaitAsync(TimeSpan.FromSeconds(2), cts.Token));
+        elapsed.Stop();
+        Assert.IsType<NotSupportedException>(failure.InnerException);
+        Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(2),
+            $"terminal drain exceeded its bounded test window: {elapsed.Elapsed}");
+
+        await using (var replacement = NamedPipeServerStreamAcl.Create(
+            pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 0, 0, CurrentUserSecurity()))
+        {
+        }
+
+        authority.Release();
+        await authority.Completed.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+    }
+
+    [Fact]
+    public async Task HealthyChurn_NeverReleasesFirstPipeInstanceOwnership()
+    {
+        var pipeName = UniquePipeName();
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        for (var attempt = 0; attempt < 4; attempt++)
+        {
+            await using (var churn = new NamedPipeClientStream(
+                ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+            {
+                await churn.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+            }
+
+            AssertFirstPipeInstanceClaimFails(pipeName);
+            Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+            AssertFirstPipeInstanceClaimFails(pipeName);
+            Assert.False(loop.IsCompleted);
+        }
+
+        await cts.CancelAsync();
+        await loop.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+        await using var replacement = NamedPipeServerStreamAcl.Create(
+            pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 0, 0, CurrentUserSecurity());
+    }
+
+    [Fact]
+    public async Task SuccessorHandoff_KeepsTheConnectedPredecessorOwningTheNamespaceUntilSuccessorExists()
+    {
+        var pipeName = UniquePipeName();
+        var securityCalls = 0;
+        var secondFactoryEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseSecondFactory = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: null,
+            securityFactory: () =>
+            {
+                if (Interlocked.Increment(ref securityCalls) == 2)
+                {
+                    secondFactoryEntered.TrySetResult();
+                    releaseSecondFactory.Task.GetAwaiter().GetResult();
+                }
+                return CurrentUserSecurity();
+            },
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus,
+            requestReadTimeout: TimeSpan.FromSeconds(10));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        await using var predecessor = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await predecessor.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await secondFactoryEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        // The second factory is deliberately stopped before a successor exists. The
+        // connected predecessor must still carry FirstPipeInstance ownership here.
+        AssertFirstPipeInstanceClaimFails(pipeName);
+        releaseSecondFactory.TrySetResult();
+
+        Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+        Assert.False(loop.IsCompleted);
+
+        await cts.CancelAsync();
+        await loop.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task AdmissionPermits_RemainHeldUntilBlockedDisposalCompletes()
+    {
+        var pipeName = UniquePipeName();
+        var authority = new RecordingMutationAuthority();
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "permit-dispose-policies.json")), authority));
+        var authorisationCalls = 0;
+        var hookEnteredCount = 0;
+        var hookExitedCount = 0;
+        var allInitialHooksEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allInitialHooksExited = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHook = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new NamedPipeFirewallServer(
+            handler, pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => Interlocked.Increment(ref authorisationCalls) switch
+            {
+                <= 4 => FirewallCallerCapability.ReadStatus,
+                5 => FirewallCallerCapability.MutateMachinePolicy,
+                _ => FirewallCallerCapability.ReadStatus,
+            },
+            requestReadTimeout: TimeSpan.FromSeconds(10),
+            responseWriteTimeout: TimeSpan.FromSeconds(5),
+            readAdmissionCapacity: 4,
+            mutationAdmissionCapacity: 2,
+            beforeAdmittedConnectionDispose: () =>
+            {
+                if (Interlocked.Increment(ref hookEnteredCount) == 5)
+                {
+                    allInitialHooksEntered.TrySetResult();
+                }
+                releaseHook.Task.GetAwaiter().GetResult();
+                if (Interlocked.Increment(ref hookExitedCount) == 5)
+                {
+                    allInitialHooksExited.TrySetResult();
+                }
+            });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        var loop = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        try
+        {
+            for (var index = 0; index < 4; index++)
+            {
+                Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+            }
+            var mutation = await TrustedTestClient(pipeName).SendAsync(
+                new FirewallCommandRequest(
+                    FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.EmergencyDisable),
+                TimeSpan.FromSeconds(5), cts.Token);
+            Assert.True(mutation.Success);
+            await allInitialHooksEntered.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+            for (var churn = 0; churn < 2; churn++)
+            {
+                await Assert.ThrowsAnyAsync<IOException>(() =>
+                    GetStatusAsync(pipeName, cts.Token));
+                Assert.False(loop.IsCompleted, "rejected churn must not make successor creation terminal");
+            }
+
+            releaseHook.TrySetResult();
+            await allInitialHooksExited.Task.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+            Assert.True((await GetStatusAsync(pipeName, cts.Token)).Success);
+        }
+        finally
+        {
+            releaseHook.TrySetResult();
+            await cts.CancelAsync();
+        }
+
+        await loop.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+    }
+
+    [Fact]
     public async Task RunAsync_UsesOneReservedListenerForConsecutiveClients()
     {
         var pipeName = UniquePipeName();
@@ -1142,7 +1703,7 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
     }
 
     [Fact]
-    public async Task SilentClient_TimesOutAndTheSameListenerServesTheNextClient()
+    public async Task SilentClient_DoesNotBlockSuccessorOrTheNextClient()
     {
         var pipeName = UniquePipeName();
         var server = new NamedPipeFirewallServer(
@@ -1154,7 +1715,9 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         await using var silent = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await silent.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
 
-        await Task.Delay(TimeSpan.FromMilliseconds(300), cts.Token);
+        // The successor is posted before this silent predecessor enters its 150 ms
+        // read deadline. A real request must therefore progress immediately, not after
+        // that deadline.
         var client = TrustedTestClient(pipeName);
         var response = await client.SendAsync(
             new FirewallCommandRequest(FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus),
@@ -1163,6 +1726,121 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         Assert.True(response.Success);
         cts.Cancel();
         await runTask;
+    }
+
+    [Fact]
+    public async Task ResponseWriteTimeout_ReleasesAdmissionWhenClientSendsValidRequestButNeverReadsResponse()
+    {
+        var pipeName = UniquePipeName();
+        var handlerDisposed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = new NamedPipeFirewallServer(
+            Handler(), pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus,
+            requestReadTimeout: TimeSpan.FromSeconds(5),
+            responseWriteTimeout: TimeSpan.FromMilliseconds(150),
+            readAdmissionCapacity: 4,
+            mutationAdmissionCapacity: 2,
+            beforeAdmittedConnectionDispose: () => handlerDisposed.TrySetResult());
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var runTask = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        await using var nonReadingClient = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+        await nonReadingClient.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+        await FirewallProtocolCodec.WriteRequestAsync(nonReadingClient, new FirewallCommandRequest(
+            FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus), cts.Token);
+        await nonReadingClient.FlushAsync(cts.Token);
+
+        // Whether Windows buffers this compact response or its write deadline expires,
+        // the client never consumes it. The admission must nevertheless be released;
+        // a handler stuck behind a non-reading peer would otherwise exhaust the listener.
+        await handlerDisposed.Task.WaitAsync(TimeSpan.FromSeconds(2), cts.Token);
+        Assert.False(runTask.IsCompleted);
+
+        await cts.CancelAsync();
+        await runTask.WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+    }
+
+    private static FirewallCallerCapability SignalReadStatus(TaskCompletionSource signal)
+    {
+        signal.TrySetResult();
+        return FirewallCallerCapability.ReadStatus;
+    }
+
+    private static void AssertFirstPipeInstanceClaimFails(string pipeName)
+    {
+        var error = Record.Exception(() =>
+        {
+            using var hostile = NamedPipeServerStreamAcl.Create(
+                pipeName, PipeDirection.InOut, 1, PipeTransmissionMode.Byte,
+                PipeOptions.Asynchronous | PipeOptions.FirstPipeInstance, 0, 0, CurrentUserSecurity());
+        });
+        Assert.NotNull(error);
+        Assert.True(error is IOException or UnauthorizedAccessException, error.GetType().FullName);
+    }
+
+    private sealed class RecordingMutationAuthority : IFirewallMutationAuthority
+    {
+        public int EmergencyDisableCalls { get; private set; }
+        public bool EngineSupported => true;
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default)
+        {
+            EmergencyDisableCalls++;
+            return Task.FromResult(OutboundFirewallConfiguration.Empty);
+        }
+    }
+
+    private sealed class ThrowingStatusAuthority : IFirewallMutationAuthority
+    {
+        public bool EngineSupported => true;
+        public Task<FirewallRuntimeStatus> GetRuntimeStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("test dispatcher failure");
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+    }
+
+    private sealed class NonCooperativeEmergencyAuthority : IFirewallMutationAuthority
+    {
+        private readonly TaskCompletionSource<OutboundFirewallConfiguration> _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Completed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool EngineSupported => true;
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+
+        public async Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult();
+            try
+            {
+                return await _release.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                Completed.TrySetResult();
+            }
+        }
+
+        public void Release() => _release.TrySetResult(OutboundFirewallConfiguration.Empty);
     }
 
     [Fact]

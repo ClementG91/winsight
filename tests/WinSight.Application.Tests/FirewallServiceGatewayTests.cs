@@ -75,75 +75,53 @@ public sealed class FirewallServiceGatewayTests
         Assert.Equal(finalState, view.EffectiveState);
         Assert.False(view.EnforcementEnabled);
         Assert.True(client.PageWasRead);
-        Assert.True(client.StatusCalls >= 3);
+        Assert.True(client.StatusCalls >= 2);
     }
 
-    // An old service closes v3 and v2 probes. Only those read-only status probes may be retried;
-    // the v1 response has no runtime proof and must never project Active.
     [Fact]
-    public async Task GetViewAsync_OlderService_FallsBackWithReadOnlyProbeAndNeverClaimsActive()
+    public async Task GetViewAsync_EmptyResponse_IsUnavailableAfterExactlyOneV3Request()
     {
-        var client = new LegacyOnlyClient();
+        var client = new EmptyResponseClient();
         var gateway = new FirewallServiceGateway(client);
 
         var view = await gateway.GetViewAsync();
 
-        Assert.True(view.ServiceAvailable);
-        Assert.Collection(client.Requests.Take(3),
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            },
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.RuntimeProofVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            },
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.LegacyVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            });
-        Assert.DoesNotContain(client.Requests, request => request.Command is
-            FirewallCommand.UpsertPolicy or FirewallCommand.RemovePolicy or
-            FirewallCommand.EmergencyDisable or FirewallCommand.EnableEnforcement);
+        Assert.False(view.ServiceAvailable);
+        var request = Assert.Single(client.Requests);
+        Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+        Assert.Equal(FirewallCommand.GetStatus, request.Command);
         Assert.False(view.EnforcementEnabled);
-        Assert.Equal(FirewallEnforcementState.Degraded, view.EffectiveState);
     }
 
-    // Negotiation happens before mutation. If v2 is rejected, only GetStatus may be repeated as
-    // v1; EnableEnforcement must appear exactly once and only after the cached v1 capability.
     [Fact]
-    public async Task EnableEnforcementAsync_OlderService_NeverReplaysMutationDuringFallback()
+    public async Task TransientSaturationEof_IsV3OnlyOnEveryCallAndNeverCachesDowngrade()
     {
-        var client = new LegacyOnlyClient();
+        var client = new EmptyResponseClient();
+        var gateway = new FirewallServiceGateway(client);
+
+        Assert.False((await gateway.GetViewAsync()).ServiceAvailable);
+        Assert.False((await gateway.GetViewAsync()).ServiceAvailable);
+
+        Assert.Equal(2, client.Requests.Count);
+        Assert.All(client.Requests, request =>
+        {
+            Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+            Assert.Equal(FirewallCommand.GetStatus, request.Command);
+        });
+    }
+
+    [Fact]
+    public async Task EnableEnforcementAsync_EmptyResponse_IsUnavailableWithoutAnyDowngradeOrReplay()
+    {
+        var client = new EmptyResponseClient();
         var gateway = new FirewallServiceGateway(client);
 
         var result = await gateway.EnableEnforcementAsync();
 
-        Assert.Equal(FirewallMutationResult.Applied, result);
-        Assert.Collection(client.Requests,
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            },
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.RuntimeProofVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            },
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.LegacyVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            },
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.LegacyVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.EnableEnforcement, request.Command);
-            });
+        Assert.Equal(FirewallMutationResult.ServiceUnavailable, result);
+        var request = Assert.Single(client.Requests);
+        Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+        Assert.Equal(FirewallCommand.EnableEnforcement, request.Command);
         Assert.Equal(1, client.Requests.Count(request => request.Command == FirewallCommand.EnableEnforcement));
     }
 
@@ -165,7 +143,7 @@ public sealed class FirewallServiceGatewayTests
     }
 
     [Fact]
-    public async Task Mutation_PeerValidationFailureDuringNegotiation_SendsNoMutationAndNoLegacyProbe()
+    public async Task Mutation_PeerValidationFailure_SendsExactlyOneV3Mutation()
     {
         var client = new AlwaysPeerRejectingClient();
         var gateway = new FirewallServiceGateway(client);
@@ -173,32 +151,77 @@ public sealed class FirewallServiceGatewayTests
         var result = await gateway.EnableEnforcementAsync();
 
         Assert.Equal(FirewallMutationResult.ServiceUnavailable, result);
-        var probe = Assert.Single(client.Requests);
-        Assert.Equal(FirewallProtocolCodec.CurrentVersion, probe.ProtocolVersion);
-        Assert.Equal(FirewallCommand.GetStatus, probe.Command);
+        var request = Assert.Single(client.Requests);
+        Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+        Assert.Equal(FirewallCommand.EnableEnforcement, request.Command);
     }
 
     [Fact]
-    public async Task Mutation_PeerValidationFailureAfterV2Probe_IsNeverRetriedOrDowngraded()
+    public async Task Mutation_PeerValidationFailure_IsNeverRetriedOrDowngraded()
     {
-        var client = new ProbeThenMutationPeerRejectingClient();
+        var client = new MutationPeerRejectingClient();
         var gateway = new FirewallServiceGateway(client);
 
         var result = await gateway.EmergencyDisableAsync();
 
         Assert.Equal(FirewallMutationResult.ServiceUnavailable, result);
-        Assert.Collection(client.Requests,
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.GetStatus, request.Command);
-            },
-            request =>
-            {
-                Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
-                Assert.Equal(FirewallCommand.EmergencyDisable, request.Command);
-            });
+        var request = Assert.Single(client.Requests);
+        Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+        Assert.Equal(FirewallCommand.EmergencyDisable, request.Command);
         Assert.Equal(1, client.Requests.Count(request => request.Command == FirewallCommand.EmergencyDisable));
+    }
+
+    [Theory]
+    [InlineData(FirewallEnvelopeFault.ResponseV1)]
+    [InlineData(FirewallEnvelopeFault.ResponseV2)]
+    [InlineData(FirewallEnvelopeFault.WrongRequestId)]
+    public async Task GetViewAsync_RejectsStatusResponseThatViolatesTheV3Envelope(
+        FirewallEnvelopeFault fault)
+    {
+        var client = new EnvelopeFaultClient(FirewallCommand.GetStatus, fault);
+        var gateway = new FirewallServiceGateway(client);
+
+        var view = await gateway.GetViewAsync();
+
+        Assert.False(view.ServiceAvailable);
+        Assert.NotEmpty(client.Requests);
+        Assert.All(client.Requests, request =>
+            Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion));
+    }
+
+    [Theory]
+    [InlineData(FirewallCommand.ListPolicies)]
+    [InlineData(FirewallCommand.ListPending)]
+    public async Task GetViewAsync_RejectsNonV3ListResponseEvenWhenItLooksComplete(
+        FirewallCommand command)
+    {
+        var client = new EnvelopeFaultClient(command, FirewallEnvelopeFault.ResponseV1);
+        var gateway = new FirewallServiceGateway(client);
+
+        var view = await gateway.GetViewAsync();
+
+        Assert.False(view.ServiceAvailable);
+        Assert.Contains(client.Requests, request => request.Command == command);
+        Assert.All(client.Requests, request =>
+            Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion));
+    }
+
+    [Theory]
+    [InlineData(FirewallEnvelopeFault.ResponseV1)]
+    [InlineData(FirewallEnvelopeFault.ResponseV2)]
+    [InlineData(FirewallEnvelopeFault.WrongRequestId)]
+    public async Task Mutation_RejectsSuccessfulResponseThatViolatesTheV3Envelope(
+        FirewallEnvelopeFault fault)
+    {
+        var client = new EnvelopeFaultClient(FirewallCommand.EmergencyDisable, fault);
+        var gateway = new FirewallServiceGateway(client);
+
+        var result = await gateway.EmergencyDisableAsync();
+
+        Assert.Equal(FirewallMutationResult.ServiceUnavailable, result);
+        var request = Assert.Single(client.Requests);
+        Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+        Assert.Equal(FirewallCommand.EmergencyDisable, request.Command);
     }
 
     [Fact]
@@ -298,7 +321,21 @@ public sealed class FirewallServiceGatewayTests
         Assert.False(view.ServiceAvailable);
         Assert.Empty(view.Policies);
         Assert.Empty(view.Pending);
-        Assert.Contains(client.Requests, request => request.Command == command);
+        var targetRequests = client.Requests.Where(request => request.Command == command).ToArray();
+        var expectedCount = fault switch
+        {
+            PaginationFault.IntermediateFailure or PaginationFault.IntermediateNull => 2,
+            PaginationFault.MaxPagesExhausted => command == FirewallCommand.ListPolicies
+                ? (FirewallPolicyStore.MaxPolicyCount / FirewallProtocolCodec.MaxPoliciesPerMessage) + 4
+                : (PendingOutboundLog.MaxPendingApps / FirewallProtocolCodec.MaxPoliciesPerMessage) + 4,
+            _ => 1,
+        };
+        Assert.Equal(expectedCount, targetRequests.Length);
+        Assert.Equal(
+            Enumerable.Range(0, expectedCount),
+            targetRequests.Select(request => request.Offset!.Value));
+        Assert.All(targetRequests, request =>
+            Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion));
         Assert.DoesNotContain(client.Requests, request => request.Command is
             FirewallCommand.UpsertPolicy or FirewallCommand.RemovePolicy or
             FirewallCommand.EnableEnforcement or FirewallCommand.EmergencyDisable);
@@ -339,67 +376,37 @@ public sealed class FirewallServiceGatewayTests
             FirewallCommand.EnableEnforcement or FirewallCommand.EmergencyDisable);
     }
 
-    [Fact]
-    public async Task Mutation_V3ThenV2TypedEofThenV1_SendsMutationExactlyOnce()
-    {
-        var client = new LegacyOnlyClient();
-        var gateway = new FirewallServiceGateway(client);
-
-        Assert.Equal(FirewallMutationResult.Applied, await gateway.EnableEnforcementAsync());
-
-        Assert.Equal(
-            [FirewallProtocolCodec.CurrentVersion, FirewallProtocolCodec.RuntimeProofVersion,
-                FirewallProtocolCodec.LegacyVersion],
-            client.Requests.Where(request => request.Command == FirewallCommand.GetStatus)
-                .Select(request => request.ProtocolVersion));
-        var mutation = Assert.Single(client.Requests,
-            request => request.Command == FirewallCommand.EnableEnforcement);
-        Assert.Equal(FirewallProtocolCodec.LegacyVersion, mutation.ProtocolVersion);
-    }
-
     [Theory]
-    [InlineData(NegotiationFault.Timeout)]
-    [InlineData(NegotiationFault.MalformedProtocol)]
-    [InlineData(NegotiationFault.GenericIo)]
-    [InlineData(NegotiationFault.PeerValidation)]
-    public async Task Mutation_V2ProbeFaultAfterTypedV3EofDoesNotDowngradeCacheOrReplay(
-        NegotiationFault fault)
+    [InlineData(V3TransportFault.Timeout)]
+    [InlineData(V3TransportFault.MalformedProtocol)]
+    [InlineData(V3TransportFault.UnsupportedVersionException)]
+    [InlineData(V3TransportFault.UnsupportedVersionResponse)]
+    [InlineData(V3TransportFault.GenericIo)]
+    [InlineData(V3TransportFault.PeerValidation)]
+    public async Task Mutation_V3FailureNeverFallsBackCachesOrReplays(
+        V3TransportFault fault)
     {
-        var client = new SecondProbeFaultClient(fault);
+        var client = new V3TransportFaultClient(fault);
         var gateway = new FirewallServiceGateway(client);
 
-        Assert.Equal(FirewallMutationResult.ServiceUnavailable, await gateway.EnableEnforcementAsync());
-        Assert.Equal(FirewallMutationResult.ServiceUnavailable, await gateway.EmergencyDisableAsync());
-
-        Assert.Equal(
-            [FirewallProtocolCodec.CurrentVersion, FirewallProtocolCodec.RuntimeProofVersion,
-                FirewallProtocolCodec.CurrentVersion, FirewallProtocolCodec.RuntimeProofVersion],
-            client.Requests.Select(request => request.ProtocolVersion));
-        Assert.All(client.Requests, request => Assert.Equal(FirewallCommand.GetStatus, request.Command));
-    }
-
-    [Theory]
-    [InlineData(NegotiationFault.Timeout)]
-    [InlineData(NegotiationFault.MalformedProtocol)]
-    [InlineData(NegotiationFault.UnsupportedVersionException)]
-    [InlineData(NegotiationFault.UnsupportedVersionResponse)]
-    [InlineData(NegotiationFault.GenericIo)]
-    [InlineData(NegotiationFault.PeerValidation)]
-    public async Task Mutation_NonLegacyNegotiationFailureNeverFallsBackCachesOrSendsMutation(
-        NegotiationFault fault)
-    {
-        var client = new NegotiationFaultClient(fault);
-        var gateway = new FirewallServiceGateway(client);
-
-        Assert.Equal(FirewallMutationResult.ServiceUnavailable, await gateway.EnableEnforcementAsync());
-        Assert.Equal(FirewallMutationResult.ServiceUnavailable, await gateway.EmergencyDisableAsync());
+        var expected = fault == V3TransportFault.UnsupportedVersionResponse
+            ? FirewallMutationResult.Rejected
+            : FirewallMutationResult.ServiceUnavailable;
+        Assert.Equal(expected, await gateway.EnableEnforcementAsync());
+        Assert.Equal(expected, await gateway.EmergencyDisableAsync());
 
         Assert.Equal(2, client.Requests.Count);
-        Assert.All(client.Requests, request =>
-        {
-            Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
-            Assert.Equal(FirewallCommand.GetStatus, request.Command);
-        });
+        Assert.Collection(client.Requests,
+            request =>
+            {
+                Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+                Assert.Equal(FirewallCommand.EnableEnforcement, request.Command);
+            },
+            request =>
+            {
+                Assert.Equal(FirewallProtocolCodec.CurrentVersion, request.ProtocolVersion);
+                Assert.Equal(FirewallCommand.EmergencyDisable, request.Command);
+            });
     }
 
     [Fact]
@@ -582,10 +589,8 @@ public sealed class FirewallServiceGatewayTests
             _policyPageIndex++;
             return new FirewallCommandResponse(
                 request.ProtocolVersion, request.RequestId, Success: true, Policies: policies, NextOffset: nextOffset,
-                SnapshotVersion: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion ? PolicySnapshot : null,
-                SnapshotCount: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                    ? _pages.Sum(page => page.Policies.Length)
-                    : null);
+                SnapshotVersion: PolicySnapshot,
+                SnapshotCount: _pages.Sum(page => page.Policies.Length));
         }
 
         private FirewallCommandResponse NextPendingPage(FirewallCommandRequest request)
@@ -594,14 +599,12 @@ public sealed class FirewallServiceGatewayTests
             _pendingPageIndex++;
             return new FirewallCommandResponse(
                 request.ProtocolVersion, request.RequestId, Success: true, Pending: pending, NextOffset: nextOffset,
-                SnapshotVersion: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion ? PendingSnapshot : null,
-                SnapshotCount: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                    ? _pendingPages.Sum(page => page.Pending.Length)
-                    : null);
+                SnapshotVersion: PendingSnapshot,
+                SnapshotCount: _pendingPages.Sum(page => page.Pending.Length));
         }
     }
 
-    private sealed class LegacyOnlyClient : IFirewallServiceClient
+    private sealed class EmptyResponseClient : IFirewallServiceClient
     {
         public List<FirewallCommandRequest> Requests { get; } = [];
 
@@ -609,37 +612,7 @@ public sealed class FirewallServiceGatewayTests
             FirewallCommandRequest request, TimeSpan connectTimeout, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            if (request.ProtocolVersion is FirewallProtocolCodec.CurrentVersion
-                or FirewallProtocolCodec.RuntimeProofVersion)
-            {
-                throw new FirewallLegacyPeerClosedException();
-            }
-
-            return Task.FromResult(request.Command switch
-            {
-                FirewallCommand.GetStatus => new FirewallCommandResponse(
-                    FirewallProtocolCodec.LegacyVersion,
-                    request.RequestId,
-                    Success: true,
-                    Status: new FirewallServiceStatus(
-                        OutboundFirewallMode.Enforcement,
-                        EngineSupported: true,
-                        // This is the v1 wire response after FirewallProtocolCodec has projected
-                        // it to the conservative v2 in-memory representation.
-                        EnforcementEnabled: false,
-                        EffectiveState: FirewallEnforcementState.Degraded)),
-                FirewallCommand.EnableEnforcement => new FirewallCommandResponse(
-                    FirewallProtocolCodec.LegacyVersion, request.RequestId, Success: true),
-                FirewallCommand.ListPolicies => new FirewallCommandResponse(
-                    FirewallProtocolCodec.LegacyVersion, request.RequestId, Success: true, Policies: []),
-                FirewallCommand.ListPending => new FirewallCommandResponse(
-                    FirewallProtocolCodec.LegacyVersion, request.RequestId, Success: true, Pending: []),
-                _ => new FirewallCommandResponse(
-                    FirewallProtocolCodec.LegacyVersion,
-                    request.RequestId,
-                    Success: false,
-                    FirewallProtocolError.InvalidRequest),
-            });
+            throw new FirewallLegacyPeerClosedException();
         }
     }
 
@@ -655,7 +628,16 @@ public sealed class FirewallServiceGatewayTests
         }
     }
 
-    private sealed class SecondProbeFaultClient(NegotiationFault fault) : IFirewallServiceClient
+    public enum FirewallEnvelopeFault
+    {
+        ResponseV1,
+        ResponseV2,
+        WrongRequestId,
+    }
+
+    private sealed class EnvelopeFaultClient(
+        FirewallCommand faultedCommand,
+        FirewallEnvelopeFault fault) : IFirewallServiceClient
     {
         public List<FirewallCommandRequest> Requests { get; } = [];
 
@@ -665,23 +647,39 @@ public sealed class FirewallServiceGatewayTests
             CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
-            if (request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion)
+            var isFaulted = request.Command == faultedCommand;
+            var responseVersion = isFaulted
+                ? fault switch
+                {
+                    FirewallEnvelopeFault.ResponseV1 => FirewallProtocolCodec.LegacyVersion,
+                    FirewallEnvelopeFault.ResponseV2 => FirewallProtocolCodec.RuntimeProofVersion,
+                    _ => FirewallProtocolCodec.CurrentVersion,
+                }
+                : FirewallProtocolCodec.CurrentVersion;
+            var responseRequestId = isFaulted && fault == FirewallEnvelopeFault.WrongRequestId
+                ? Guid.NewGuid()
+                : request.RequestId;
+
+            return Task.FromResult(request.Command switch
             {
-                throw new FirewallLegacyPeerClosedException();
-            }
-            return fault switch
-            {
-                NegotiationFault.Timeout => throw new TimeoutException(),
-                NegotiationFault.MalformedProtocol => throw new FirewallProtocolException(
-                    FirewallProtocolError.InvalidRequest, "malformed"),
-                NegotiationFault.GenericIo => throw new IOException("transport"),
-                NegotiationFault.PeerValidation => throw new FirewallPeerValidationException(),
-                _ => throw new InvalidOperationException(),
-            };
+                FirewallCommand.GetStatus => new FirewallCommandResponse(
+                    responseVersion, responseRequestId, Success: true,
+                    Status: new FirewallServiceStatus(
+                        OutboundFirewallMode.AuditOnly, EngineSupported: true, EnforcementEnabled: false)),
+                FirewallCommand.ListPolicies => new FirewallCommandResponse(
+                    responseVersion, responseRequestId, Success: true, Policies: [],
+                    SnapshotVersion: new string('A', 64),
+                    SnapshotCount: 0),
+                FirewallCommand.ListPending => new FirewallCommandResponse(
+                    responseVersion, responseRequestId, Success: true, Pending: [],
+                    SnapshotVersion: new string('B', 64),
+                    SnapshotCount: 0),
+                _ => new FirewallCommandResponse(responseVersion, responseRequestId, Success: true),
+            });
         }
     }
 
-    private sealed class ProbeThenMutationPeerRejectingClient : IFirewallServiceClient
+    private sealed class MutationPeerRejectingClient : IFirewallServiceClient
     {
         public List<FirewallCommandRequest> Requests { get; } = [];
 
@@ -704,7 +702,7 @@ public sealed class FirewallServiceGatewayTests
         }
     }
 
-    public enum NegotiationFault
+    public enum V3TransportFault
     {
         Timeout,
         MalformedProtocol,
@@ -714,7 +712,7 @@ public sealed class FirewallServiceGatewayTests
         PeerValidation,
     }
 
-    private sealed class NegotiationFaultClient(NegotiationFault fault) : IFirewallServiceClient
+    private sealed class V3TransportFaultClient(V3TransportFault fault) : IFirewallServiceClient
     {
         public List<FirewallCommandRequest> Requests { get; } = [];
 
@@ -726,18 +724,18 @@ public sealed class FirewallServiceGatewayTests
             Requests.Add(request);
             return fault switch
             {
-                NegotiationFault.Timeout => throw new TimeoutException(),
-                NegotiationFault.MalformedProtocol => throw new FirewallProtocolException(
+                V3TransportFault.Timeout => throw new TimeoutException(),
+                V3TransportFault.MalformedProtocol => throw new FirewallProtocolException(
                     FirewallProtocolError.InvalidRequest, "malformed"),
-                NegotiationFault.UnsupportedVersionException => throw new FirewallProtocolException(
+                V3TransportFault.UnsupportedVersionException => throw new FirewallProtocolException(
                     FirewallProtocolError.UnsupportedVersion, "unsupported"),
-                NegotiationFault.UnsupportedVersionResponse => Task.FromResult(new FirewallCommandResponse(
+                V3TransportFault.UnsupportedVersionResponse => Task.FromResult(new FirewallCommandResponse(
                     request.ProtocolVersion,
                     request.RequestId,
                     Success: false,
                     FirewallProtocolError.UnsupportedVersion)),
-                NegotiationFault.GenericIo => throw new IOException("transport"),
-                NegotiationFault.PeerValidation => throw new FirewallPeerValidationException(),
+                V3TransportFault.GenericIo => throw new IOException("transport"),
+                V3TransportFault.PeerValidation => throw new FirewallPeerValidationException(),
                 _ => throw new InvalidOperationException(),
             };
         }
@@ -879,7 +877,7 @@ public sealed class FirewallServiceGatewayTests
             if (request.Command == FirewallCommand.GetStatus)
             {
                 StatusCalls++;
-                var final = PageWasRead && StatusCalls >= 3;
+                var final = PageWasRead && StatusCalls >= 2;
                 var state = final ? finalState : FirewallEnforcementState.Active;
                 var mode = final ? finalMode : OutboundFirewallMode.Enforcement;
                 return Task.FromResult(new FirewallCommandResponse(
@@ -956,12 +954,17 @@ public sealed class FirewallServiceGatewayTests
                 PaginationFault.IntermediateFailure when page > 0 => Failure(request),
                 PaginationFault.IntermediateNull when page > 0 => NullPage(request),
                 PaginationFault.IntermediateFailure or PaginationFault.IntermediateNull =>
-                    ItemPage(request, nextOffset: 1),
-                PaginationFault.NonAdvancing => ItemPage(request, nextOffset: request.Offset ?? 0),
-                PaginationFault.WrongNextOffset => ItemPage(request, nextOffset: checked((request.Offset ?? 0) + 2)),
-                PaginationFault.EmptyWithNextOffset => EmptyPage(request, nextOffset: checked((request.Offset ?? 0) + 1)),
+                    ItemPage(request, nextOffset: 1, snapshotCount: 2),
+                PaginationFault.NonAdvancing => ItemPage(
+                    request, nextOffset: request.Offset ?? 0, snapshotCount: 2),
+                PaginationFault.WrongNextOffset => ItemPage(
+                    request, nextOffset: checked((request.Offset ?? 0) + 2), snapshotCount: 3),
+                PaginationFault.EmptyWithNextOffset => EmptyPage(
+                    request, nextOffset: checked((request.Offset ?? 0) + 1), snapshotCount: 1),
                 PaginationFault.MaxPagesExhausted => ItemPage(
-                    request, nextOffset: checked((request.Offset ?? 0) + 1)),
+                    request,
+                    nextOffset: checked((request.Offset ?? 0) + 1),
+                    snapshotCount: MaximumPages(request.Command) + 1),
                 _ => throw new InvalidOperationException(),
             };
             return Task.FromResult(response);
@@ -973,28 +976,32 @@ public sealed class FirewallServiceGatewayTests
         private static FirewallCommandResponse NullPage(FirewallCommandRequest request) =>
             new(request.ProtocolVersion, request.RequestId, Success: true);
 
-        private static FirewallCommandResponse EmptyPage(FirewallCommandRequest request, int? nextOffset = null) =>
+        private static FirewallCommandResponse EmptyPage(
+            FirewallCommandRequest request,
+            int? nextOffset = null,
+            int snapshotCount = 0) =>
             request.Command == FirewallCommand.ListPolicies
                 ? new(request.ProtocolVersion, request.RequestId, Success: true,
                     Policies: [], NextOffset: nextOffset,
-                    SnapshotVersion: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                        ? new string('A', 64) : null,
-                    SnapshotCount: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                        ? nextOffset ?? 0 : null)
+                    SnapshotVersion: new string('A', 64),
+                    SnapshotCount: snapshotCount)
                 : new(request.ProtocolVersion, request.RequestId, Success: true,
                     Pending: [], NextOffset: nextOffset,
-                    SnapshotVersion: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                        ? new string('B', 64) : null,
-                    SnapshotCount: request.ProtocolVersion == FirewallProtocolCodec.CurrentVersion
-                        ? nextOffset ?? 0 : null);
+                    SnapshotVersion: new string('B', 64),
+                    SnapshotCount: snapshotCount);
 
-        private static FirewallCommandResponse ItemPage(FirewallCommandRequest request, int nextOffset)
+        private static FirewallCommandResponse ItemPage(
+            FirewallCommandRequest request,
+            int nextOffset,
+            int snapshotCount)
         {
             var index = request.Offset ?? 0;
             return request.Command == FirewallCommand.ListPolicies
                 ? new(request.ProtocolVersion, request.RequestId, Success: true,
                     Policies: [new AppFirewallPolicy($@"C:\apps\policy-{index}.exe", OutboundAction.Ask)],
-                    NextOffset: nextOffset)
+                    NextOffset: nextOffset,
+                    SnapshotVersion: new string('A', 64),
+                    SnapshotCount: snapshotCount)
                 : new(request.ProtocolVersion, request.RequestId, Success: true,
                     Pending:
                     [
@@ -1005,7 +1012,13 @@ public sealed class FirewallServiceGatewayTests
                             DateTimeOffset.UnixEpoch,
                             1),
                     ],
-                    NextOffset: nextOffset);
+                    NextOffset: nextOffset,
+                    SnapshotVersion: new string('B', 64),
+                    SnapshotCount: snapshotCount);
         }
+
+        private static int MaximumPages(FirewallCommand command) => command == FirewallCommand.ListPolicies
+            ? (FirewallPolicyStore.MaxPolicyCount / FirewallProtocolCodec.MaxPoliciesPerMessage) + 4
+            : (PendingOutboundLog.MaxPendingApps / FirewallProtocolCodec.MaxPoliciesPerMessage) + 4;
     }
 }

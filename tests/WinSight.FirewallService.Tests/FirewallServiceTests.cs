@@ -1,6 +1,12 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Diagnostics;
+using System.IO.Pipes;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Security.AccessControl;
 using System.Security.Principal;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,6 +18,189 @@ namespace WinSight.FirewallService.Tests;
 
 public sealed class FirewallServiceWorkerTests
 {
+    [Fact]
+    public async Task HardExitWatchdog_UsesInjectedImmediateTerminatorOnceWithFixedReason()
+    {
+        var terminated = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseTerminator = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminationCalls = 0;
+        var watchdog = new HardExitFirewallEndpointLossWatchdog(
+            TimeSpan.FromMilliseconds(25),
+            reason =>
+            {
+                Interlocked.Increment(ref terminationCalls);
+                terminated.TrySetResult(reason);
+                releaseTerminator.Task.GetAwaiter().GetResult();
+            });
+
+        try
+        {
+            watchdog.Arm();
+            watchdog.Arm();
+
+            Assert.Equal(
+                HardExitFirewallEndpointLossWatchdog.ExpiredCode,
+                await terminated.Task.WaitAsync(TimeSpan.FromSeconds(2)));
+            await Task.Delay(100);
+            Assert.Equal(1, Volatile.Read(ref terminationCalls));
+        }
+        finally
+        {
+            releaseTerminator.TrySetResult();
+        }
+    }
+
+    [Fact]
+    public void HardExitWatchdog_ProductionConfigurationUsesEightSecondsAndEnvironmentFailFast()
+    {
+        var watchdog = new HardExitFirewallEndpointLossWatchdog();
+
+        Assert.Equal(TimeSpan.FromSeconds(8), watchdog.HardExitDelay);
+        Assert.Equal(
+            typeof(Environment).GetMethod(nameof(Environment.FailFast), [typeof(string)]),
+            watchdog.TerminateImmediately.Method);
+    }
+
+    [Fact]
+    public void HardExitWatchdog_RejectsAnUnsafeDelay()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HardExitFirewallEndpointLossWatchdog(
+            TimeSpan.Zero, _ => { }));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new HardExitFirewallEndpointLossWatchdog(
+            HardExitFirewallEndpointLossWatchdog.ProductionHardExitDelay + TimeSpan.FromMilliseconds(1), _ => { }));
+    }
+
+    [Fact]
+    public void Program_ExecutesTheDedicatedWorkerCompositionBoundary()
+    {
+        var serviceAssembly = typeof(HardExitFirewallEndpointLossWatchdog).Assembly;
+        var program = serviceAssembly.GetType("Program", throwOnError: true)!;
+        var runHost = Assert.Single(program.GetMethods(
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public),
+            method => method.Name.Contains("RunHostAsync", StringComparison.Ordinal));
+        var stateMachine = runHost.GetCustomAttribute<System.Runtime.CompilerServices.AsyncStateMachineAttribute>()
+            ?.StateMachineType;
+        var moveNext = Assert.IsAssignableFrom<MethodInfo>(stateMachine?.GetMethod(
+            "MoveNext", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public));
+        var composition = Assert.IsAssignableFrom<MethodInfo>(typeof(FirewallServiceWorkerComposition).GetMethod(
+            nameof(FirewallServiceWorkerComposition.AddFirewallServiceWorker),
+            BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public));
+
+        Assert.Equal(1, CalledMethods(moveNext).Count(method => method == composition));
+    }
+
+    [Fact]
+    public void WorkerComposition_RegistersOneHardExitSingletonAndInjectsItIntoTheFourParameterWorker()
+    {
+        var services = new ServiceCollection();
+        var listener = new SignalingListener();
+        var lifetime = new EndpointLossLifetime();
+        services.AddSingleton<IFirewallServiceListener>(listener);
+        services.AddSingleton<IHostApplicationLifetime>(lifetime);
+        services.AddSingleton<ILogger<FirewallServiceWorker>>(NullLogger<FirewallServiceWorker>.Instance);
+        services.AddFirewallServiceWorker();
+
+        using var provider = services.BuildServiceProvider();
+        var watchdog = provider.GetRequiredService<IFirewallEndpointLossWatchdog>();
+        var worker = Assert.Single(provider.GetServices<IHostedService>().OfType<FirewallServiceWorker>());
+
+        Assert.IsType<HardExitFirewallEndpointLossWatchdog>(watchdog);
+        Assert.Same(watchdog, worker.EndpointLossWatchdog);
+        Assert.DoesNotContain(provider.GetServices<IHostedService>(), service => service is not FirewallServiceWorker);
+    }
+
+    [Fact]
+    public async Task RealNamedPipeSuccessorFailure_ArmsWatchdogAndStopsWorkerExactlyOnce()
+    {
+        var pipeName = $"WinSight\\worker-terminal-{Guid.NewGuid():N}";
+        var securityCalls = 0;
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(Path.GetTempPath(), $"worker-terminal-{Guid.NewGuid():N}.json")),
+            new PassiveMutationAuthority()));
+        var listener = new NamedPipeFirewallServer(
+            handler,
+            pipeName,
+            authorise: _ => true,
+            securityFactory: () => Interlocked.Increment(ref securityCalls) == 1
+                ? CurrentUserSecurity()
+                : throw new InvalidOperationException("deterministic successor security failure"));
+        var lifetime = new EndpointLossLifetime();
+        var watchdog = new EndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(
+            listener, NullLogger<FirewallServiceWorker>.Instance, lifetime, watchdog);
+
+        await worker.StartAsync(CancellationToken.None);
+        await listener.Ready.WaitAsync(TimeSpan.FromSeconds(5));
+        using (var client = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
+        {
+            await client.ConnectAsync(5000);
+        }
+
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(2, Volatile.Read(ref securityCalls));
+        Assert.Equal(1, lifetime.StopCalls);
+        Assert.Equal(1, watchdog.ArmCalls);
+    }
+
+    [Fact]
+    public async Task RealNamedPipeRequestedShutdown_DrainsNonCooperativeMutationAndArmsWatchdogSilently()
+    {
+        var pipeName = $"WinSight\\worker-shutdown-{Guid.NewGuid():N}";
+        var authority = new NonCooperativeEmergencyAuthority();
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(
+                Path.GetTempPath(), $"worker-shutdown-{Guid.NewGuid():N}.json")),
+            authority));
+        var listener = new NamedPipeFirewallServer(
+            handler,
+            pipeName,
+            authorise: null,
+            securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.MutateMachinePolicy,
+            requestReadTimeout: TimeSpan.FromSeconds(5),
+            responseWriteTimeout: TimeSpan.FromSeconds(5));
+        var logger = new MessageLogger<FirewallServiceWorker>();
+        var lifetime = new EndpointLossLifetime();
+        var watchdog = new EndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(listener, logger, lifetime, watchdog);
+        using var testTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        await using var client = new NamedPipeClientStream(
+            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+
+        await worker.StartAsync(CancellationToken.None);
+        await listener.Ready.WaitAsync(TimeSpan.FromSeconds(5), testTimeout.Token);
+        await client.ConnectAsync(TimeSpan.FromSeconds(5), testTimeout.Token);
+        await FirewallProtocolCodec.WriteRequestAsync(client, new FirewallCommandRequest(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            FirewallCommand.EmergencyDisable), testTimeout.Token);
+        await client.FlushAsync(testTimeout.Token);
+        await authority.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5), testTimeout.Token);
+
+        try
+        {
+            using var stopTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            var elapsed = Stopwatch.StartNew();
+            await worker.StopAsync(stopTimeout.Token);
+            elapsed.Stop();
+
+            Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(5),
+                $"requested shutdown did not honor the bounded listener drain: {elapsed.Elapsed}");
+            Assert.False(authority.Completed.Task.IsCompleted);
+            Assert.Equal(1, watchdog.ArmCalls);
+            Assert.Equal(0, lifetime.StopCalls);
+            Assert.DoesNotContain(logger.Messages,
+                message => message.Contains("LISTENER_FAILED", StringComparison.Ordinal));
+        }
+        finally
+        {
+            authority.Release();
+            await authority.Completed.Task.WaitAsync(TimeSpan.FromSeconds(5), CancellationToken.None);
+        }
+    }
+
     [Fact]
     public async Task Worker_RunsListenerUntilStopped()
     {
@@ -29,16 +218,21 @@ public sealed class FirewallServiceWorkerTests
     }
 
     [Fact]
-    public async Task Worker_StopsCleanly_WhenListenerCompletesOnItsOwn()
+    public async Task Worker_ListenerCompletionIsEndpointLossAndArmsWatchdog()
     {
         var listener = new SignalingListener();
-        using var worker = new FirewallServiceWorker(listener, NullLogger<FirewallServiceWorker>.Instance);
+        var lifetime = new EndpointLossLifetime();
+        var watchdog = new EndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(
+            listener, NullLogger<FirewallServiceWorker>.Instance, lifetime, watchdog);
 
         await worker.StartAsync(CancellationToken.None);
-        // Await the signal rather than a plain field, so completion is observed
-        // deterministically regardless of which thread ran ExecuteAsync.
-        await listener.Ran.WaitAsync(TimeSpan.FromSeconds(5));
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await worker.StopAsync(CancellationToken.None);
+
+        Assert.True(listener.Ran.IsCompleted);
+        Assert.Equal(1, lifetime.StopCalls);
+        Assert.Equal(1, watchdog.ArmCalls);
     }
 
     private sealed class BlockingListener : IFirewallServiceListener
@@ -84,6 +278,159 @@ public sealed class FirewallServiceWorkerTests
             return Task.CompletedTask;
         }
     }
+
+    private sealed class EndpointLossLifetime : IHostApplicationLifetime
+    {
+        public TaskCompletionSource Stopping { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int StopCalls { get; private set; }
+        public CancellationToken ApplicationStarted => CancellationToken.None;
+        public CancellationToken ApplicationStopping => CancellationToken.None;
+        public CancellationToken ApplicationStopped => CancellationToken.None;
+        public void StopApplication()
+        {
+            StopCalls++;
+            Stopping.TrySetResult();
+        }
+    }
+
+    private sealed class EndpointLossWatchdog : IFirewallEndpointLossWatchdog
+    {
+        public int ArmCalls { get; private set; }
+        public void Arm() => ArmCalls++;
+    }
+
+    private static List<MethodBase> CalledMethods(MethodInfo method)
+    {
+        var body = method.GetMethodBody();
+        Assert.NotNull(body);
+        var bytes = body.GetILAsByteArray();
+        Assert.NotNull(bytes);
+        var opCodes = typeof(OpCodes)
+            .GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(field => field.FieldType == typeof(OpCode))
+            .Select(field => (OpCode)field.GetValue(null)!)
+            .ToDictionary(opCode => unchecked((ushort)opCode.Value));
+        var called = new List<MethodBase>();
+        var offset = 0;
+        while (offset < bytes.Length)
+        {
+            var first = bytes[offset++];
+            var value = first == 0xfe
+                ? checked((ushort)(0xfe00 | bytes[offset++]))
+                : first;
+            var opCode = opCodes[value];
+            var operandOffset = offset;
+            var operandSize = OperandSize(opCode.OperandType, bytes, operandOffset);
+            if ((opCode == OpCodes.Call || opCode == OpCodes.Callvirt)
+                && opCode.OperandType == OperandType.InlineMethod)
+            {
+                var token = BitConverter.ToInt32(bytes, operandOffset);
+                var calledMethod = method.Module.ResolveMethod(
+                    token,
+                    method.DeclaringType?.GetGenericArguments(),
+                    method.GetGenericArguments());
+                if (calledMethod is not null)
+                {
+                    called.Add(calledMethod);
+                }
+            }
+            offset = checked(offset + operandSize);
+        }
+        return called;
+    }
+
+    private static int OperandSize(OperandType operandType, byte[] bytes, int operandOffset) =>
+        operandType switch
+        {
+            OperandType.InlineNone => 0,
+            OperandType.ShortInlineBrTarget or OperandType.ShortInlineI or OperandType.ShortInlineVar => 1,
+            OperandType.InlineVar => 2,
+            OperandType.InlineBrTarget or OperandType.InlineField or OperandType.InlineI
+                or OperandType.InlineMethod or OperandType.InlineSig or OperandType.InlineString
+                or OperandType.InlineTok or OperandType.InlineType or OperandType.ShortInlineR => 4,
+            OperandType.InlineI8 or OperandType.InlineR => 8,
+            OperandType.InlineSwitch => checked(sizeof(int)
+                + (BitConverter.ToInt32(bytes, operandOffset) * sizeof(int))),
+            _ => throw new InvalidOperationException($"Unsupported IL operand type: {operandType}."),
+        };
+
+    private static PipeSecurity CurrentUserSecurity()
+    {
+        var security = new PipeSecurity();
+        using var identity = WindowsIdentity.GetCurrent();
+        security.SetOwner(identity.User!);
+        security.AddAccessRule(new PipeAccessRule(
+            identity.User!, PipeAccessRights.FullControl, AccessControlType.Allow));
+        return security;
+    }
+
+    private sealed class PassiveMutationAuthority : IFirewallMutationAuthority
+    {
+        public bool EngineSupported => true;
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new OutboundFirewallConfiguration(OutboundFirewallMode.Enforcement, []));
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(new OutboundFirewallConfiguration(OutboundFirewallMode.AuditOnly, []));
+    }
+
+    private sealed class NonCooperativeEmergencyAuthority : IFirewallMutationAuthority
+    {
+        private readonly TaskCompletionSource<OutboundFirewallConfiguration> _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Entered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Completed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool EngineSupported => true;
+
+        public Task UpsertPolicyAsync(
+            AppFirewallPolicy policy,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task RemovePolicyAsync(
+            string executablePath,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+
+        public async Task<OutboundFirewallConfiguration> EmergencyDisableAsync(
+            CancellationToken cancellationToken = default)
+        {
+            Entered.TrySetResult();
+            try
+            {
+                return await _release.Task.ConfigureAwait(false);
+            }
+            finally
+            {
+                Completed.TrySetResult();
+            }
+        }
+
+        public void Release() => _release.TrySetResult(OutboundFirewallConfiguration.Empty);
+    }
+
+    private sealed class MessageLogger<T> : ILogger<T>
+    {
+        public ConcurrentQueue<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter) =>
+            Messages.Enqueue(formatter(state, exception));
+    }
 }
 
 public sealed class FirewallServiceDiagnosticTests : IDisposable
@@ -114,7 +461,8 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
     {
         var logger = new CapturingLogger<FirewallServiceWorker>();
         var lifetime = new RecordingLifetime();
-        using var worker = new FirewallServiceWorker(new NativeFailingListener(), logger, lifetime);
+        var watchdog = new RecordingEndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(new NativeFailingListener(), logger, lifetime, watchdog);
 
         await worker.StartAsync(CancellationToken.None);
         await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -122,10 +470,84 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
 
         AssertInvariantEntries(logger.Entries,
         [
-            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly.",
+            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly. Failure=Native.",
             "[FW_SERVICE_STOPPED] WinSight firewall service stopped.",
         ]);
         Assert.Equal(1, lifetime.StopCalls);
+        Assert.Equal(1, watchdog.ArmCalls);
+    }
+
+    [Fact]
+    public async Task EndpointLoss_ThrowingLoggerCannotBlockWatchdogOrHostStop()
+    {
+        var logger = new ThrowingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        var watchdog = new RecordingEndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(new NativeFailingListener(), logger, lifetime, watchdog);
+
+        await worker.StartAsync(CancellationToken.None);
+        await logger.LogAttempted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, watchdog.ArmCalls);
+        Assert.Equal(1, lifetime.StopCalls);
+    }
+
+    [Fact]
+    public async Task ListenerFailureClassification_UsesOnlyFixedRedactedKinds()
+    {
+        var cases = new (Exception Failure, string Kind)[]
+        {
+            (new IOException(@"native detail C:\attacker\secret.exe S-1-5-21-666"), "IO"),
+            (new InvalidOperationException(@"native detail C:\attacker\secret.exe S-1-5-21-666"), "InvalidOperation"),
+            (new ObjectDisposedException("secret.exe"), "ObjectDisposed"),
+            (new UnauthorizedAccessException(@"native detail C:\attacker\secret.exe S-1-5-21-666"), "Unauthorized"),
+            (new ArgumentException(@"native detail C:\attacker\secret.exe S-1-5-21-666"), "Configuration"),
+            (new UnexpectedListenerException(@"native detail C:\attacker\secret.exe S-1-5-21-666"), "Unexpected"),
+        };
+
+        foreach (var (failure, kind) in cases)
+        {
+            var logger = new CapturingLogger<FirewallServiceWorker>();
+            var lifetime = new RecordingLifetime();
+            var watchdog = new RecordingEndpointLossWatchdog();
+            using var worker = new FirewallServiceWorker(
+                new ExceptionFailingListener(failure), logger, lifetime, watchdog);
+
+            await worker.StartAsync(CancellationToken.None);
+            await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await worker.StopAsync(CancellationToken.None);
+
+            var failureEntry = Assert.Single(logger.Entries,
+                entry => entry.Message.Contains("LISTENER_FAILED", StringComparison.Ordinal));
+            Assert.Equal(
+                $"[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly. Failure={kind}.",
+                failureEntry.Message);
+            Assert.Null(failureEntry.Exception);
+            Assert.False(ContainsSecret(failureEntry.Message));
+            Assert.False(ContainsSecret(failureEntry.StableState));
+            Assert.Equal(1, lifetime.StopCalls);
+            Assert.Equal(1, watchdog.ArmCalls);
+        }
+    }
+
+    [Fact]
+    public async Task EndpointLoss_BlocksDiagnosticsOnlyAfterWatchdogArmsAndHostStopIsRequested()
+    {
+        var logger = new BlockingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        var watchdog = new RecordingEndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(new NativeFailingListener(), logger, lifetime, watchdog);
+
+        await worker.StartAsync(CancellationToken.None);
+        await logger.LogEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(1, watchdog.ArmCalls);
+        Assert.Equal(1, lifetime.StopCalls);
+
+        logger.Release();
+        await worker.StopAsync(CancellationToken.None);
     }
 
     [Fact]
@@ -161,7 +583,7 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
 
         Assert.Equal(
         [
-            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly.",
+            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly. Failure=Native.",
             "[FW_SERVICE_STOPPED] WinSight firewall service stopped.",
         ], logger.Entries.Select(entry => entry.Message));
         Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("LISTENING", StringComparison.Ordinal));
@@ -171,6 +593,182 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             Assert.False(ContainsSecret(entry.Message));
             Assert.False(ContainsSecret(entry.StableState));
         });
+    }
+
+    [Fact]
+    public async Task FaultedReadinessWithoutListenerCompletion_NeverClaimsListeningAndStopsTheHost()
+    {
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        var watchdog = new RecordingEndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(new FaultedReadyBlockingListener(), logger, lifetime, watchdog);
+
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, lifetime.StopCalls);
+        Assert.Equal(1, watchdog.ArmCalls);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("LISTENING", StringComparison.Ordinal));
+        Assert.Contains(logger.Entries, entry => entry.Message.Contains("LISTENER_FAILED", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task CancelledReadinessDuringRequestedShutdown_DoesNotReportListenerFailure()
+    {
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        var listener = new CancelledReadyListener();
+        using var worker = new FirewallServiceWorker(listener, logger, lifetime);
+
+        await worker.StartAsync(CancellationToken.None);
+        await listener.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(0, lifetime.StopCalls);
+        Assert.DoesNotContain(logger.Entries,
+            entry => entry.Message.Contains("LISTENER_FAILED", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Entries,
+            entry => entry.Message.Contains("LISTENING", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ReadyAndRunCompletionRace_IsEndpointFailureNotAFalseListeningAnnouncement()
+    {
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        using var worker = new FirewallServiceWorker(new ReadyAndCompletedListener(), logger, lifetime);
+
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, lifetime.StopCalls);
+        Assert.DoesNotContain(logger.Entries,
+            entry => entry.Message.Contains("LISTENING", StringComparison.Ordinal));
+        Assert.Contains(logger.Entries,
+            entry => entry.Message.Contains("LISTENER_FAILED", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ListenerCompletingQuietlyBeforeReadiness_StopsTheHostAndNeverClaimsListening()
+    {
+        // The endpoint never came up, and the listener returned without faulting. Left
+        // alone the service would report Running to the SCM with nothing on the pipe,
+        // so every caller would time out against an apparently healthy machine.
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        var watchdog = new RecordingEndpointLossWatchdog();
+        using var worker = new FirewallServiceWorker(new QuietBeforeReadyListener(), logger, lifetime, watchdog);
+
+        await worker.StartAsync(CancellationToken.None);
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(
+        [
+            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly. Failure=ListenerCompleted.",
+            "[FW_SERVICE_STOPPED] WinSight firewall service stopped.",
+        ], logger.Entries.Select(entry => entry.Message));
+        Assert.Equal(1, lifetime.StopCalls);
+        Assert.Equal(1, watchdog.ArmCalls);
+        Assert.DoesNotContain(logger.Entries, entry => entry.Message.Contains("LISTENING", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task AcceptLoopReturningAfterReadiness_StopsTheHost()
+    {
+        // Readiness was reached, so the service announced itself listening - and then the
+        // accept loop ended anyway. The announcement must not outlive the endpoint.
+        var logger = new CapturingLogger<FirewallServiceWorker>();
+        var lifetime = new RecordingLifetime();
+        var listener = new ReadyThenReturningListener();
+        using var worker = new FirewallServiceWorker(listener, logger, lifetime);
+
+        await worker.StartAsync(CancellationToken.None);
+        // Wait for the listening announcement before releasing the loop, so the ordering
+        // under test is the one asserted rather than a race between readiness and return.
+        await logger.Logged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        listener.Release();
+
+        await lifetime.Stopping.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await worker.StopAsync(CancellationToken.None);
+
+        Assert.Equal(
+        [
+            "[FW_PIPE_LISTENING] WinSight firewall service listening.",
+            "[FW_PIPE_LISTENER_FAILED] The firewall listener stopped unexpectedly. Failure=ListenerCompleted.",
+            "[FW_SERVICE_STOPPED] WinSight firewall service stopped.",
+        ], logger.Entries.Select(entry => entry.Message));
+        Assert.Equal(1, lifetime.StopCalls);
+    }
+
+    /// <summary>Returns without faulting and never signals readiness.</summary>
+    private sealed class QuietBeforeReadyListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _never = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Ready => _never.Task;
+
+        public Task RunAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FaultedReadyBlockingListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public FaultedReadyBlockingListener() => _ready.TrySetException(new InvalidOperationException("test readiness fault"));
+
+        public Task Ready => _ready.Task;
+
+        public Task RunAsync(CancellationToken cancellationToken) =>
+            Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+    }
+
+    private sealed class CancelledReadyListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Ready => _ready.Task;
+
+        public async Task RunAsync(CancellationToken cancellationToken)
+        {
+            Started.TrySetResult();
+            using var registration = cancellationToken.Register(() => _ready.TrySetCanceled(cancellationToken));
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private sealed class ReadyAndCompletedListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Ready => _ready.Task;
+
+        public Task RunAsync(CancellationToken cancellationToken)
+        {
+            _ready.TrySetResult();
+            return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>Signals readiness, then ends the accept loop on demand without being cancelled.</summary>
+    private sealed class ReadyThenReturningListener : IFirewallServiceListener, IFirewallServiceReadiness
+    {
+        private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Ready => _ready.Task;
+
+        public void Release() => _release.TrySetResult();
+
+        public async Task RunAsync(CancellationToken cancellationToken)
+        {
+            _ready.TrySetResult();
+            await _release.Task.ConfigureAwait(false);
+        }
     }
 
     private static void AssertInvariantEntries(IReadOnlyList<CapturedLogEntry> entries, string[] expectedTemplates)
@@ -318,6 +916,13 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             throw new Win32Exception(5, @"native detail C:\attacker\secret.exe S-1-5-21-666");
     }
 
+    private sealed class ExceptionFailingListener(Exception failure) : IFirewallServiceListener
+    {
+        public Task RunAsync(CancellationToken cancellationToken) => throw failure;
+    }
+
+    private sealed class UnexpectedListenerException(string message) : Exception(message);
+
     private sealed class ReadinessFailingListener : IFirewallServiceListener, IFirewallServiceReadiness
     {
         private readonly TaskCompletionSource _ready = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -349,6 +954,12 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
         public void StopApplication() { StopCalls++; Stopping.TrySetResult(); }
     }
 
+    private sealed class RecordingEndpointLossWatchdog : IFirewallEndpointLossWatchdog
+    {
+        public int ArmCalls { get; private set; }
+        public void Arm() => ArmCalls++;
+    }
+
     private sealed class CapturingLogger<T> : ILogger<T>
     {
         public List<CapturedLogEntry> Entries { get; } = [];
@@ -370,6 +981,47 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             Entries.Add(new(logLevel, formatter(state, exception), exception, structured,
                 originalFormat ?? stableState, stableState));
             Logged.TrySetResult();
+        }
+    }
+
+    private sealed class ThrowingLogger<T> : ILogger<T>
+    {
+        public TaskCompletionSource LogAttempted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            LogAttempted.TrySetResult();
+            throw new InvalidOperationException("test logger failure");
+        }
+    }
+
+    private sealed class BlockingLogger<T> : ILogger<T>
+    {
+        private readonly TaskCompletionSource _release =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource LogEntered { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Release() => _release.TrySetResult();
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel != LogLevel.Error)
+            {
+                return;
+            }
+
+            LogEntered.TrySetResult();
+            _release.Task.GetAwaiter().GetResult();
         }
     }
 

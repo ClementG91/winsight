@@ -119,7 +119,8 @@ public sealed class McpOutboundFirewallToolTests
     [Fact]
     public async Task AFailedRead_ReleasesTheGateForTheNextCaller()
     {
-        // The service publishes a single pipe instance, so this tool holds a gate. A read that
+        // The service admits several successor-before-dispatch pipe connections, while this tool
+        // still holds a gate. A read that
         // throws must not keep it: the tool would answer once and then refuse forever.
         var reader = new ScriptedReader(_ => throw new InvalidOperationException("pipe fault"));
         var tools = Build(reader);

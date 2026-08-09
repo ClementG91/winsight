@@ -106,14 +106,14 @@ public sealed class FirewallPeerValidationException : IOException
 }
 
 /// <summary>
-/// An authenticated peer closed a version probe before writing any response byte. This
-/// is the only legacy-service signal that permits a read-only v1 retry; partial, malformed
-/// or timed-out responses remain failures and must never trigger protocol downgrade.
+/// An authenticated peer closed before writing any response byte. The typed exception is
+/// retained for low-level API compatibility and diagnostics; the current dashboard treats
+/// it as service unavailability and never retries with a lower protocol version.
 /// </summary>
 public sealed class FirewallLegacyPeerClosedException : IOException
 {
     public const string FixedMessage =
-        "The WinSight firewall service closed the protocol probe without a response.";
+        "The WinSight firewall service closed without a response.";
 
     public FirewallLegacyPeerClosedException()
         : base(FixedMessage)
@@ -186,7 +186,7 @@ public static class FirewallProtocolCodec
     {
         ValidateResponse(response);
         // Version 1 clients reject unmapped JSON members. Never send effectiveState to one:
-        // legacy protocol has no runtime proof and must remain conservative at the new client.
+        // legacy protocol has no runtime proof and must remain conservative for older clients.
         return response.ProtocolVersion switch
         {
             LegacyVersion => WriteFrameAsync(stream, LegacyResponse.From(response), cancellationToken),

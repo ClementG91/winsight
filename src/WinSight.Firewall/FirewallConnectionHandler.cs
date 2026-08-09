@@ -57,9 +57,14 @@ public sealed class FirewallConnectionHandler
             // Unparseable or over-sized frame: no valid reply is possible, so close.
             return;
         }
+        catch (IOException)
+        {
+            // The peer disconnected before a complete request was available.
+            return;
+        }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // A silent peer must not monopolise the service's only pipe instance.
+            // A silent peer must release its bounded admission lane.
             return;
         }
 
