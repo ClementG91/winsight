@@ -29,15 +29,15 @@ git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 `release.yml` then builds both architectures - x64 on the pinned `windows-2025` image, Arm64 on the
-**native** `windows-11-arm` runner - runs the full installer lifecycle on each, signs, checksums,
-attests and publishes.
+**native** `windows-11-vs2026-arm` runner - runs the full installer lifecycle on each, signs,
+checksums, attests and publishes.
 
 Runner images are pinned rather than following `windows-latest`. The label resolves to `windows-2025`
 today, so the pin changes nothing now - that is the point. It moves on GitHub's schedule, and this
 workflow produces the binaries someone downloads and runs; a release built on an image no CI leg ever
 exercised is an unreviewed change to the artifact arriving without a commit. `ci.yml` pins the same
-image and covers `windows-2022` and native `windows-11-arm` beside it. Moving to a newer image is a
-deliberate one-line commit.
+image and covers `windows-2022` and native `windows-11-vs2026-arm` beside it. Moving to a newer image
+is a deliberate one-line commit.
 
 **Pinning the label is not the same as pinning the image**, and this document should not pretend
 otherwise. GitHub migrated both `windows-latest` and `windows-2025` to a Visual Studio 2026 image in
@@ -186,11 +186,13 @@ What this does **not** defend against: a compromise of the GitHub account or of 
 certificate itself. Provenance proves *which workflow built it*, not that the workflow was
 trustworthy at the time.
 
-None of the historical release evidence qualifies the current source candidate. Before another
-release, exact-candidate CI, CodeQL, package/installer lifecycle, current x64 WFP/SCM qualification,
-privileged Arm64 and remaining session checks must be evaluated. The Authenticode result must match
-the explicit repository policy; under the current unsigned policy it must be `NotSigned` and visibly
-reported. Historical validation records remain bound to their original commits.
+The current native-x64 runtime candidate has a candidate-bound VM record covering installer,
+WFP/SCM, trust, local/Network IPC and ETW/session recovery. Before another release, the final pushed
+commit still needs green CI and CodeQL, native Arm64 build/test/package/installer evidence and
+independent EN/FR/ES review. Privileged Arm64 and x64-on-Arm64 identity remain hardware-bound gates
+for Arm64 production claims. The Authenticode result must match the explicit repository policy;
+under the current unsigned policy it must be `NotSigned` and visibly reported. Historical validation
+records remain bound to their original commits.
 
 ## Release checklist
 

@@ -1,202 +1,82 @@
 # Production readiness
 
-This is the authoritative status as of 2026-08-20. Evidence is candidate-bound: a successful result
-for one commit or package does not qualify later source. The current post-v0.11.5 source changes WFP
-lifetime, SCM registration, signature verification, acquisition completeness, alert/crash handling,
-VirusTotal secret isolation and release hardening. No historical VM record covers that combined
-surface. The records below remain useful regression evidence, but none is a current-candidate pass;
-see [Current source delta](#current-source-delta-2026-08-20).
+This is the authoritative status as of 2026-08-23. Evidence is candidate-bound: a successful result
+for one commit or package does not qualify different executable bytes.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Not production-ready** - current code builds and is locally testable, but its privileged WFP/SCM/trust/IPC surface needs a new exact-candidate clean-VM run |
-| **Arm64 (native)** | **Not production-ready** - build, full tests, packaging and installer are assigned to native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an Arm64 VM |
-| **x64 on Arm64** | **Not production-ready** - emulated application identity and privileged runtime behavior remain unverified |
+| **x64** | **Technical VM qualification passed** for runtime candidate `8486155`; publication readiness remains pending the first pushed CI/CodeQL result for the final documentation/tooling delta and independent human EN/FR/ES presentation review |
+| **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
+| **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
-Authenticode is an accepted distribution limitation for now and is not counted as the blocker in
-these verdicts. It still means Windows cannot establish a publisher identity.
+Authenticode is an accepted distribution limitation and is not counted as a blocker here. Public
+binaries remain deliberately unsigned and Windows therefore cannot establish a publisher identity.
 
-## Historical x64 evidence
+## Current x64 qualification
 
-Candidate:
+The exact runtime candidate is commit
+`8486155b5d09b57e424c513863b0b15498e4a472`. It was built locally as v0.11.6, protected by exact
+SHA-256 values, and exercised on a native-x64 Windows 11 VM with a separate isolated control VM.
 
-- commit `3ad4b92d0b9a6ebc6ab0b99b082e2a0c4569f327`;
-- CI run `30536205557`, successful for verify and native x64/Arm64 package/installer jobs;
-- CodeQL run `30536201742`, successful;
-- clean Windows 11 native-x64 VM campaign supplied on 2026-07-30;
-- sealed VM manifest: 46 entries, SHA-256
-  `20e3b8f8651923f9b09dda1db7eeba5210726cba5651bbf1d9ea4bea97cc63e3`.
+The campaign passed:
 
-The supplied VM campaign confirmed:
+- native x64 PE checks, installer install/uninstall, MCP stdio and EN/FR/ES dashboard smoke;
+- WFP contract 26/26 and its expected one-failure negative control;
+- pre-arm cleanup 17/17 and full WFP/SCM transition 35/35;
+- hostile path/ACL/TOCTOU trust boundary 13/13 with no skip;
+- elevated/restricted local IPC 7/7;
+- real remote Network Logon IPC 7/7 plus independent target observer 3/3;
+- ETW lifecycle 19/19: collision safety, tray semantics, forced-kill orphan recovery, DNS Ctrl+C,
+  SCM automatic recovery, final zero sessions and zero `.NET Runtime` crash events;
+- final candidate immutability, AuditOnly state, empty WFP namespace and HTTPS connectivity.
 
-- ETW session names bind profile, PID and process-start identity;
-- closing the dashboard with **X** keeps the tray process and its live session by design;
-- forced termination leaves an orphan, and relaunch reclaims it without deleting another live
-  instance's session;
-- repeated Attribution cycles remain bounded by live dashboard instances;
-- tray Exit releases Attribution sessions;
-- DNS kill/relaunch recovery works and Ctrl+C exits 0 with cleanup;
-- an Outbound service restart reclaims the old service session;
-- no `.NET Runtime` event 1026 occurred during the qualification window;
-- the former `0x800705AA` ETW exhaustion crash did not recur;
-- WFP full gate 25/25, trust 12/12, installer lifecycle and final SCM/WFP/connectivity cleanup passed.
+The Network Logon leg used a temporary account over WinRM HTTPS on a host-only network scoped to the
+two VM addresses. The real token contained `S-1-5-2` (Network), excluded `S-1-5-4` (Interactive),
+received `ServiceUnavailable`, performed no mutation, and left the observed service PID/path intact.
+The temporary secret is not retained.
 
-Full supplied-result classification:
-[`validation/2026-07-30-x64-qualification-3ad4b92.md`](validation/2026-07-30-x64-qualification-3ad4b92.md).
+The full record, including artifact and evidence hashes, is
+[`validation/2026-08-23-x64-qualification-8486155.md`](validation/2026-08-23-x64-qualification-8486155.md).
 
-## Limitations of the historical x64 campaign
+## Candidate boundary after the VM run
 
-Three protocol gaps prevented a complete campaign:
+The post-`8486155` working delta is limited to the ETW validation module, its deterministic tests and
+documentation. It does not change any CLI, dashboard, service or shared runtime source. The module
+now retries only the observed transient Windows `0x800705AA` result, at most eight times with a fixed
+250 ms delay; every other nonzero result and exhausted retry remains fail-closed.
 
-1. **IPC default-path drift.** The shipped probe still defaulted to the obsolete
-   `C:\Program Files\WinSight-VM` root. The gate passed 7/7 only when the operator supplied the
-   protected CLI path explicitly. The corrected probe derives both binaries from its own package
-   directory, and the runbook still passes the paths explicitly. This correction needs a new
-   candidate-bound package and VM rerun.
-2. **Network Logon was `NOT_RUN`.** A real Network token proved pipe denial under impersonation, but
-   that was not the literal process-level protocol. The corrected runbook requires a second isolated
-   control machine and WinRM. The probe itself fails unless `S-1-5-2` is present, `S-1-5-4` is absent,
-   the self-test returns exit 3 / `ServiceUnavailable` / no mutation. Because hardened SCM/WMI ACLs
-   deny service observation to that account, a separate elevated target observer proves the same
-   SCM process and command remain running.
-3. **S0/S1/S2 were `NOT_RUN`.** Snapshot take/restore is an authority of the hypervisor host;
-   `VBoxManage` is not expected inside the guest. The corrected runbook labels host-only operations,
-   records `showvminfo` evidence outside the VM disk, and makes the guest stop when that evidence is
-   missing.
+This distinction prevents a documentation or qualification-harness edit from being misrepresented
+as if different product executable bytes had run in the VM. The final pushed commit must still pass
+the complete x64/Arm64 CI matrix and packaging jobs.
 
-The following independent gates also remain open:
+## Remaining gates
 
-- native Arm64 privileged WFP/SCM/trust/IPC/session qualification;
-- x64-on-Arm64 application-identity qualification;
-- independent human EN/FR/ES review for the exact candidate;
-- a new exact-candidate CI, CodeQL, package/installer and clean-VM rerun after the protocol changes.
+- green CI and CodeQL for the final pushed commit, including native Arm64 build/test/package/installer;
+- independent human EN/FR/ES presentation review for the release candidate;
+- native Arm64 privileged WFP/SCM/trust/IPC/session qualification when suitable hardware is available;
+- x64-on-Arm64 application-identity qualification when suitable hardware is available;
+- the signed Authenticode path if and when a publisher certificate is configured.
 
-## Historical candidate delta review, v0.11.0 and v0.11.1
+The first two items gate a public release of the current x64 candidate. The Arm64-specific items gate
+Arm64 production claims, not the already executed x64 security/runtime result. The absence of a
+certificate is explicitly accepted for now but must remain visible to users.
 
-Evidence here is candidate-bound, so a release after `3ad4b92` requires this section rather than
-letting the statement above age into an implied pass for code it never covered.
+## Historical evidence
 
-**What changed:** autostart command-line triage and scheduled-task argument capture, both in the
-unprivileged detection engine; three presentation paths that render a persistence verdict; and the
-MCP server's tool, prompt and resource surface.
-
-**v0.11.1 on top of that** changed one MCP tool's description string, a count in `README.md`, and
-tests. No behaviour, and nothing outside the unprivileged process. The review below therefore covers
-both candidates without weakening: a smaller delta over the same surface cannot reopen a gate the
-larger one left closed.
-
-**What it touched at that historical point:** nothing on the privileged boundary. For the v0.11.1
-candidate reviewed here, the WFP engine, SCM lifecycle, service-path trust check and authenticated
-named-pipe IPC were byte-identical to their recorded predecessors. That statement does not apply to
-the later AC109 candidate, which changed the named-pipe and policy-store implementation.
-
-**What it does not change:** the verdict. All three targets remain **not production-ready** for
-exactly the reasons above. The three x64 protocol gaps, native Arm64 privileged behaviour and
-x64-on-Arm64 identity are all still open, and native Arm64 is blocked on hardware the project does
-not have rather than on unwritten work.
-
-**What was verified for this candidate:** the full suite on x64 including the packaged MCP stdio
-contract, the engine-library and privileged-managed coverage gates, and formatting. Native Arm64
-build, packaging and installer lifecycle run in CI on a native runner as usual; the Arm64 *privileged
-runtime* remains `NOT_RUN`.
-
-## Historical AC109 candidate delta
-
-AC109 replaces the fixed named-pipe accept pool with successor-before-dispatch ownership, separates
-bounded read and machine-policy-mutation admission, makes unexpected listener/handler loss terminal,
-awaits readiness as a lifecycle signal, and serializes complete policy-store load/save operations.
-An x64 VM then exposed an overlapped-accept race: a peer that vanished before Windows completed
-`WaitForConnectionAsync` produced a per-instance `IOException` and stopped the service. The listener
-now posts that failed instance's successor before closing it; creation and security failures remain
-terminal. Diagnostics classify listener failures with fixed redacted categories and never log the
-exception object or its message. The corrected diagnostic build survived 25 hostile rounds (150
-silent peers, 150 parallel valid clients — 25 served and 125 explicitly unavailable under deliberate
-same-privilege lane saturation — and 625 abrupt closes), emitted no listener-failure event, and
-cleaned up to SCM 1060 with WFP empty.
-The current dashboard is v3-only while the service retains legacy replies for older clients. Trusted
-loads retry a concurrent path-identity replacement only twice from a fresh inspection; every other
-trust failure remains fail-closed. Endpoint loss closes pipes, drains for two seconds, then arms an
-eight-second watchdog before fallible diagnostics or graceful-stop calls. On expiry it invokes
-`FailFast` with a fixed code, bypassing `ProcessExit` handlers/finalizers rather than promising exit
-code 1. Requested shutdown arms the same watchdog silently after the listener returns; normal process
-exit removes the background thread, while stuck privileged teardown remains bounded. These are
-security and availability changes inside the LocalSystem service boundary, not a docs-only or
-unprivileged delta.
-
-The full local x64 package was then rebuilt from the corrected source. On the clean Windows 11 x64
-VM it passed native PE and installer install/uninstall, MCP stdio, dashboard smoke tests in EN/FR/ES,
-protected-path trust, the 26/26 WFP protocol contract plus its one-failure negative control, 16/16
-pre-arm cleanup, the 12/12 hostile-account trust boundary, LocalSystem SCM binding and the 7/7
-elevated/restricted IPC boundary. The packaged service repeated the 25 hostile rounds above with the
-same 150 silent, 150 valid and 625 abrupt-client counts, no listener-failure event, WFP empty and SCM
-1060 after cleanup. The VM was then powered off and restored to its named clean snapshot.
-
-This is strong local pre-publish evidence, but it does not qualify bytes that CI has not built and
-attested yet. Before the release can be treated as production-ready, the immutable release artifact
-still requires green CI and CodeQL, the full 25/25 WFP enforcement transition, the literal Network
-Logon scenario and independent human review. Native Arm64 CI continues to build, test and run the
-installer on GitHub's native runner; privileged Arm64 WFP/SCM/session qualification and x64-on-Arm64
-identity remain blocked on suitable hardware. Until those records exist, all targets remain
-**not production-ready**.
-
-## Current source delta, 2026-08-20
-
-The current source is materially newer than every record above. In particular:
-
-- WFP objects are owned by one dynamic session, stop/process loss removes them, startup rebuilds
-  persisted intent, corrupt or partial state fails closed, and durable `Ask` is treated as no ruling;
-- service installation now rolls back any partial post-create configuration and applies an exact
-  SID/required-privilege/recovery profile, which the VM protocol queries through
-  `QueryServiceConfig2W`;
-- executable trust uses in-process, cache-only WinTrust plus Windows catalog verification and keeps
-  the file handle open while hashing/verifying; no scanner launches PowerShell for signatures;
-- collectors expose incomplete/unreadable acquisition instead of manufacturing clean results, and
-  inaccessible signatures remain `Unknown` rather than being called missing or trusted;
-- a dashboard-stored VirusTotal key stays out of the environment, product-launched children have the
-  managed environment key removed, redirects are refused and response/quota files are bounded;
-- the alert journal is serialized and bounded, corrupted input is reported, and fatal WPF UI
-  exceptions are recorded before termination instead of continuing in an unknown state;
-- release jobs use read-only source-build credentials, current servicing dependencies, exact
-  artifact/checksum sets, and native Arm64 CI for build/test/package/installer work.
-
-These are improvements, not qualification evidence. The next x64 VM run must exercise 35/35 WFP and
-SCM checks, 13/13 path-trust checks, forced service termination, IPC identities and final cleanup
-against one immutable package. Arm64 build and ordinary tests must run only in native CI as planned;
-its privileged runtime campaign remains a VM task because no suitable local hardware is available.
+Earlier candidate-bound records remain under [`validation/`](validation/README.md). They are useful
+regression history, but the current verdict relies on the 2026-08-23 record rather than inheriting an
+older pass. The invalid early 18/18 transcript remains marked as superseded and is not evidence.
 
 ## Authenticode policy
 
-Public binaries have no Authenticode publisher certificate. SignPath Foundation declined the free
-application on 2026-07-29 because public adoption signals were insufficient. The current repository
-policy is therefore deliberately `REQUIRE_SIGNED_RELEASE=false`.
+SignPath Foundation declined the free application on 2026-07-29 because public adoption signals
+were insufficient. Repository policy is therefore deliberately `REQUIRE_SIGNED_RELEASE=false`:
 
-This is an accepted and visible distribution limitation, not a passed security gate:
-
-- Windows displays an unknown publisher;
-- the four release targets must report `NotSigned`, with no signer or timestamp;
+- all four release targets must report `NotSigned`, with no signer or timestamp;
 - users must verify SHA-256 checksums and GitHub provenance/SBOM attestations;
-- the workflow fails if the signing-policy variable is absent or malformed;
-- unsigned policy forces `-DisableSignature`, so residual credentials cannot sign opportunistically;
-- the optional signed path remains available for a future certificate and requires full
-  publisher/timestamp verification when re-enabled.
+- an absent or malformed workflow policy fails the release;
+- unsigned mode disables opportunistic signing even if credentials exist;
+- re-enabling signing requires a complete publisher/timestamp validation run.
 
-Unsigned distribution does not by itself make the product production-ready or unsafe; it removes
-Windows publisher identity and shifts artifact authentication to explicit hash and provenance checks.
-
-## Required next qualification
-
-Use [`validation/VM_QUALIFICATION_KIT.md`](validation/VM_QUALIFICATION_KIT.md) from the exact new
-package:
-
-1. bind commit, successful CI run, architecture and both artifact hashes;
-2. create and record S0 from the hypervisor host;
-3. install prerequisites in the guest and construct the protected candidate root;
-4. record the expected unsigned status and run the installer/integrity gates;
-5. restore S0 from the host, recreate the protected candidate and record S1;
-6. run ETW lifecycle gates, then WFP/SCM 35/35, trust 13/13 and local IPC 7/7 from separate S1 restores;
-7. create S2 on the host before full WFP and prove every restore from the host;
-8. while the AuditOnly service is running, run Network Logon 7/7 from a second isolated machine over
-   ephemeral WinRM HTTPS and combine it with the target observer 3/3;
-9. seal manifests outside the VM disk, restore S0 from the host and verify final absence.
-
-Only a complete evidence set for the exact candidate can change the verdict above.
+Unsigned distribution does not make the binaries signed by implication; it shifts artifact
+authentication to the documented hashes and attestations.

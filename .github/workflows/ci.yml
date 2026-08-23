@@ -51,7 +51,9 @@ jobs:
   # fail-fast is off on purpose: when one Windows breaks, the interesting question is immediately
   # whether the other one did too, and cancelling the sibling throws that away.
   #
-  # `windows-11-arm` runs the suite on **native Arm64**, and it earned its place the hard way. Until
+  # `windows-11-vs2026-arm` runs the suite on **native Arm64**, and it earned its place the hard way.
+  # The explicit VS2026 label also avoids GitHub's announced September 2026 migration of the moving
+  # `windows-11-arm` label changing the toolchain without a repository diff. Until
   # it existed, CI tested only x64: `package` built an Arm64 installer without ever running a test on
   # that architecture, so the only Arm64 test run in the whole project happened inside `release.yml`,
   # after a tag. On 2026-07-27 that is exactly where a thread-pool starvation defect surfaced — a
@@ -66,7 +68,7 @@ jobs:
             architecture: x64
           - os: windows-2022
             architecture: x64
-          - os: windows-11-arm
+          - os: windows-11-vs2026-arm
             architecture: arm64
     runs-on: ${{ matrix.os }}
     # Arm64 runners are slower than the x64 images and this job builds, runs the whole suite and
@@ -176,7 +178,7 @@ jobs:
             runner: windows-2025
             installer_language: french
           - architecture: arm64
-            runner: windows-11-arm
+            runner: windows-11-vs2026-arm
             installer_language: spanish
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35

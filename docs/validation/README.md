@@ -11,12 +11,12 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
-| ETW lifecycle, WFP/SCM, trust, IPC with path workaround, installer and final cleanup | Executed gates passed; Network Logon and host snapshot continuity `NOT_RUN` | `3ad4b92` | `30536205557` | [record](2026-07-30-x64-qualification-3ad4b92.md) |
+| ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | Pending first push; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
 
-This campaign confirmed the ETW exhaustion/crash correction and reran the current WFP/SCM surface.
-It also exposed an obsolete IPC default path, the absence of a reproducible Network Logon method and
-guest/host confusion for snapshots. The corrected kit needs a new exact-candidate package and VM
-rerun; the partial record is not a production-readiness verdict.
+This campaign exercised the current dynamic WFP/SCM and ETW surfaces, exact protected-path trust,
+local IPC and a real Network Logon from a second isolated VM. It retains harness-only red attempts
+and binds the final green result to exact local artifact hashes. The previous partial campaign remains
+historical rather than being silently overwritten.
 
 ## Closed on x64
 
@@ -46,14 +46,13 @@ kept as a record of what that script printed, not as evidence.
 |---|---|
 | Native Arm64 privileged runtime | Native Arm64 CI build/package/installer passes, but WFP/SCM/trust/IPC/session needs an isolated Arm64 VM. See [`../ARM64_VALIDATION.md`](../ARM64_VALIDATION.md). |
 | x64 emulated on Arm64 | Application-identity behavior has no x64-native equivalent and needs Arm64 hardware. |
-| Exact Network Logon IPC | Impersonation denial was observed, but the literal process-level gate requires the new second-machine WinRM procedure. |
-| Host-bound S0/S1/S2 continuity | The latest campaign attempted snapshot control from the guest; host take/restore records remain absent. |
 | Signed Authenticode path | The current release policy is explicitly unsigned after SignPath Foundation declined the free application. A future certificate path remains unexercised. |
 | EN/FR/ES presentation | User attestation completed on 2026-07-26; this is not independent evidence. |
 
-**Production readiness is not established.** These records close the largest gates on x64; they do not
-close the list above. In particular, a green CI installer lifecycle is automation evidence, and
-unsigned distribution has no Windows publisher identity even when hashes and attestations verify.
+Native x64 technical qualification is established for candidate `8486155`; release readiness still
+requires the final pushed CI/CodeQL result and independent presentation review. Arm64-specific gates
+remain open. Unsigned distribution has no Windows publisher identity even when hashes and
+attestations verify.
 
 ## Why three of these records exist at all
 

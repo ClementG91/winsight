@@ -47,8 +47,8 @@ The full release candidate can be reproduced with:
 ```
 
 Developer workstations build and exercise x64 only. Native Arm64 build, full tests, packaging and
-installer execution belong to the `windows-11-arm` CI runner; privileged qualification is performed
-later on an isolated VM.
+installer execution belong to the `windows-11-vs2026-arm` CI runner; privileged qualification is
+performed later on an isolated VM.
 
 CI builds/tests on Windows, audits dependencies, constructs x64 and Arm64 packages,
 and executes each installer plus the trilingual WPF smoke test on a native runner.

@@ -823,8 +823,11 @@ Après chaque restore `S1`, conserver le transcript de ce bootstrap sous un nom 
 
 ## 6. Inventaire et récupération ETW native
 
-Le module du clone exact fait échouer `logman` non nul. Il accepte les sorties tabulaires,
-multi-colonnes ou localisées de l’outil, mais ne retourne que les tokens canoniques fermés legacy/v2 :
+Le module du clone exact ne reprend que l'erreur transitoire Windows `0x800705AA`
+(`-2147020696`) : au plus huit tentatives, espacées de 250 ms. Tout autre code non nul échoue dès
+la première tentative, et l'épuisement des huit tentatives échoue également. Il accepte les sorties
+tabulaires, multi-colonnes ou localisées de l'outil, mais ne retourne que les tokens canoniques
+fermés legacy/v2 :
 
 ```powershell
 Assert-CandidateFiles

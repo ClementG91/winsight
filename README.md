@@ -154,7 +154,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Current source builds and tests locally; its WFP/SCM, trust and IPC changes require a new exact-candidate VM campaign; **product readiness not established** |
+| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; final pushed CI/CodeQL and independent EN/FR/ES review remain release gates |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
@@ -165,14 +165,12 @@ each run bound to the commit and CI run that built it:
 | WFP enforcement, SCM, rollback, per-app scoping | 25 checks, 0 failures | [record](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md) |
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
-| Current x64 ETW, WFP/SCM, trust, IPC workaround and installer | supplied VM campaign; limits recorded | [record](docs/validation/2026-07-30-x64-qualification-3ad4b92.md) |
+| Current x64 ETW, WFP/SCM, trust, local/Network IPC, installer and cleanup | 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | [record](docs/validation/2026-08-23-x64-qualification-8486155.md) |
 
-Each record qualifies its exact candidate. Candidate `3ad4b92` fixed the ETW exhaustion/crash and
-passed the privileged x64 gates that were executed, but the original kit had an IPC path defect, no
-reproducible Network Logon method and no host-side snapshot proof. The corrected kit must be rerun on
-its own exact CI artifact. Native Arm64 privileged gates, x64-on-Arm64 identity and independent
-EN/FR/ES review also remain open. Unsigned distribution is an accepted visible limitation, not a
-claim that signing has passed.
+Each record qualifies its exact candidate. The 2026-08-23 campaign closes the former IPC-path,
+Network Logon, host-control and current WFP/SCM/session gaps on native x64. Native Arm64 privileged
+gates, x64-on-Arm64 identity, independent EN/FR/ES review and final pushed CI/CodeQL remain open.
+Unsigned distribution is an accepted visible limitation, not a claim that signing has passed.
 
 The authoritative statement, with every limitation named:
 [`docs/PRODUCTION_READINESS.md`](docs/PRODUCTION_READINESS.md).
@@ -212,7 +210,7 @@ To reproduce the full release payload, including SBOM, installer and signing sta
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned Inno Setup compiler
 after verifying **both** its official SHA-256 and its Authenticode signature.
-Native Arm64 build, tests and packaging run on the `windows-11-arm` CI runner; an x64 workstation
+Native Arm64 build, tests and packaging run on the `windows-11-vs2026-arm` CI runner; an x64 workstation
 does not substitute a cross-published binary for that native evidence.
 
 ## Contributing

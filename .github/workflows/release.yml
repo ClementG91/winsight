@@ -29,7 +29,8 @@ jobs:
             runner: windows-2025
             installer_language: french
           - architecture: arm64
-            runner: windows-11-arm
+            # Explicit ahead of the announced migration of the moving windows-11-arm label.
+            runner: windows-11-vs2026-arm
             installer_language: spanish
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40

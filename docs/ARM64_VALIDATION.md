@@ -17,7 +17,7 @@ promotes none of these gates.
 
 ## What CI already covers, and what it cannot
 
-CI runs a native `windows-11-arm` runner, so this is **already automated** - please don't spend
+CI runs a native `windows-11-vs2026-arm` runner, so this is **already automated** - please don't spend
 time re-doing it:
 
 - native Arm64 build of every project,

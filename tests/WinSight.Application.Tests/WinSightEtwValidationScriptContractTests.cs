@@ -20,7 +20,10 @@ public sealed class WinSightEtwValidationScriptContractTests
         Assert.Contains("[Environment]::SystemDirectory", module, StringComparison.Ordinal);
         Assert.Contains("[IO.Path]::Combine($systemDirectory, 'logman.exe')", module, StringComparison.Ordinal);
         Assert.Contains("[IO.File]::Exists($logmanPath)", module, StringComparison.Ordinal);
-        Assert.Contains("& $logmanPath query -ets", module, StringComparison.Ordinal);
+        Assert.Contains("& $ResolvedLogmanPath query -ets", module, StringComparison.Ordinal);
+        Assert.Contains("$script:WinSightLogmanTransientExitCode = -2147020696", module, StringComparison.Ordinal);
+        Assert.Contains("$script:WinSightLogmanMaximumAttempts = 8", module, StringComparison.Ordinal);
+        Assert.Contains("$exitCode -ne $script:WinSightLogmanTransientExitCode", module, StringComparison.Ordinal);
         Assert.DoesNotContain("& logman query -ets", module, StringComparison.Ordinal);
         Assert.DoesNotContain("$env:SystemRoot", module, StringComparison.Ordinal);
     }

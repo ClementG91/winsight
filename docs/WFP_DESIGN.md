@@ -233,12 +233,10 @@ process ids or display names, which are transient or ambiguous.
   boundary changed or its impact is uncertain. No record is inherited automatically, and none
   retroactively validates the invalid 18/18 transcript.
 
-Qualification remains explicitly `NOT_RUN`/`BLOCKED` for native Arm64, the foreign-owner-SID trust
-sub-case, and dedicated unelevated-administrator and network-logon IPC sessions. The x64 trust record
-covers the owner-trust path through a TrustedInstaller-owned leaf refusal, but not the separate
-hostile-account variant; the x64 IPC record uses a SAFER basic-user token as the non-administrator
-capability class, while the network-logon deny remains unit-tested rather than live. The three x64
-records cannot convert those remaining native or independent gates to PASS.
+Candidate `8486155` closes the renewed native-x64 gates: WFP/SCM passed 35/35, trust 13/13 including
+the hostile-account variant, local elevated/restricted IPC 7/7, real remote Network Logon 7/7 and
+the independent service observer 3/3. Native Arm64 privileged behavior remains explicitly
+`NOT_RUN`/`BLOCKED`; x64 evidence cannot promote that separate architecture.
 
 User attestation for EN/FR/ES human presentation was completed on 2026-07-26; this is not independent
 evidence.
@@ -320,17 +318,14 @@ evidence.
    status through `FirewallServiceGateway`/`FirewallServiceAdapter`; an unreachable pipe is
    presented as unavailable, never as an unverified SCM installation state. The executable has
    opt-in, elevated `install`/`uninstall` verbs; the per-user setup never installs it. The x64 IPC
-   capability boundary passed 7/7 on candidate `c9177cd`. The current successor/admission/store
-   changes alter that boundary, so the old record does not qualify this candidate. Clean x64 and
-   native Arm64 runs, including dedicated unelevated-administrator and network-logon sessions,
-   remain pending.
-2. Done in code, pending renewed VM qualification. WFP engine/session/provider/sublayer interop
+   capability boundary passed 7/7 historically, and current candidate `8486155` passed the renewed
+   local 7/7 plus real Network Logon 7/7 and observer 3/3 gates. Native Arm64 remains pending.
+2. Done in code and qualified on current native x64. WFP engine/session/provider/sublayer interop
    applies per-application IPv4 and IPv6 block filters after an explicit elevated
    enforcement transition. Production policy is now owned by a crash-cleaned dynamic session;
-   the earlier candidate `f0a3f16` passed the static-session x64 WFP/SCM, rollback, connectivity and
-   per-application-scoping gate 25/25 but does not qualify this lifecycle change. A clean x64 VM must
-   prove graceful stop, forced process termination, automatic removal, restart/reapply and uninstall
-   cleanup. Native Arm64 remains pending; unit tests alone do not establish native behavior.
+   candidate `8486155` passed the renewed 35/35 gate including graceful stop, forced process
+   termination, dynamic removal, restart/reapply and uninstall cleanup. Native Arm64 remains
+   pending; unit tests alone do not establish native behavior.
 3. Done within the documented user-mode limit. `Ask` is no longer stored as a durable ruling: an
    `Ask` mutation removes the existing Allow/Block policy, and the observer records the next
    connection as pending. The triggering connection has already completed because a user-mode WFP
