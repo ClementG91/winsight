@@ -76,6 +76,7 @@ public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher
         CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(onEvent);
+        token.ThrowIfCancellationRequested();
 
         var index = new ProcessPathIndex();
         // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
@@ -93,12 +94,14 @@ public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher
                 // Session already gone, nothing to do.
             }
         });
+        token.ThrowIfCancellationRequested();
 
         // Process gives the command line the attribution depends on; NetworkTCPIP gives the
         // connections. One session, so the two arrive in order and a connection is never seen
         // before the process that made it.
         session.EnableKernelProvider(
             KernelTraceEventParser.Keywords.Process | KernelTraceEventParser.Keywords.NetworkTCPIP);
+        token.ThrowIfCancellationRequested();
 
         // The start group covers processes already running when the session opens, not just new
         // ones, so a long-lived program's connections are attributed from the first event.

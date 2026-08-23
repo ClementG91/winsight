@@ -1197,7 +1197,8 @@ New-WSManInstance -ResourceURI 'winrm/config/Listener' `
 Set-Item 'WSMan:\localhost\Service\Auth\Basic' -Value $true -Force
 $WinRmFirewallRule = 'WinSight qualification WinRM HTTPS'
 New-NetFirewallRule -DisplayName $WinRmFirewallRule -Direction Inbound -Action Allow `
-    -Protocol TCP -LocalPort 5986 -RemoteAddress $ControlAddress -Profile Private | Out-Null
+    -Protocol TCP -LocalPort 5986 -LocalAddress $TargetAddress `
+    -RemoteAddress $ControlAddress -Profile Any | Out-Null
 Restart-Service WinRM -Force
 ```
 
@@ -1236,6 +1237,9 @@ $ControlEvidenceRoot = '<même stockage de preuves hors snapshot>'
 $CertificatePath = Join-Path $ControlEvidenceRoot 'winrm-network-probe.cer'
 $CompletionSignal = Join-Path $ControlEvidenceRoot 'network-probe-complete.signal'
 $credential = Get-Credential 'WinSightNetworkProbe'
+Set-Service WinRM -StartupType Manual
+Start-Service WinRM
+Import-Module Microsoft.WSMan.Management
 $importedCertificate = Import-Certificate -FilePath $CertificatePath `
     -CertStoreLocation 'Cert:\LocalMachine\Root'
 $clientBasicPath = 'WSMan:\localhost\Client\Auth\Basic'

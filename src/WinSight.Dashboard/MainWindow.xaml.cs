@@ -60,7 +60,7 @@ public partial class MainWindow : Window, IDisposable
     /// <summary>The catalog command whose report renders <see cref="AlertJournal"/>.</summary>
     private const string AlertsCommand = "alerts";
 
-    public MainWindow()
+    public MainWindow(bool startMonitors = true)
     {
         InitializeComponent();
         DashboardTools.Reload();
@@ -95,7 +95,10 @@ public partial class MainWindow : Window, IDisposable
         LanguagePicker.SelectedValue = Text.CurrentCode;
         _initializing = false;
 
-        Loaded += (_, _) => StartGuardian();
+        if (startMonitors)
+        {
+            Loaded += (_, _) => StartGuardian();
+        }
     }
 
     /// <summary>

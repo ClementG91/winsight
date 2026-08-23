@@ -54,6 +54,7 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
         CancellationToken token)
     {
         ArgumentNullException.ThrowIfNull(onWrite);
+        token.ThrowIfCancellationRequested();
 
         var processes = new ProcessPathIndex();
         var normalizer = new KernelPathNormalizer(VolumeMap.Current(), CurrentUserSid());
@@ -72,6 +73,7 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
                 // Session already gone, nothing to do.
             }
         });
+        token.ThrowIfCancellationRequested();
 
         // Process gives the command line attribution depends on; Registry and FileIOInit give the
         // writes. One session, so they arrive in order and a write is never seen before the process
@@ -80,6 +82,7 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
             KernelTraceEventParser.Keywords.Process
             | KernelTraceEventParser.Keywords.Registry
             | KernelTraceEventParser.Keywords.FileIOInit);
+        token.ThrowIfCancellationRequested();
 
         // The start group covers processes already running when the session opens, not just new
         // ones, so a long-lived program's writes are attributed from the first event.

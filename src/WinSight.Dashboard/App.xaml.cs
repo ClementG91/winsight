@@ -21,15 +21,31 @@ public partial class App : System.Windows.Application
             LocalizationManager.Instance.SetCulture(e.Args[languageIndex + 1]);
         }
 
-        var window = new MainWindow();
+        var startup = DashboardStartupPolicy.FromArguments(e.Args);
+        var window = new MainWindow(startup.StartMonitors);
         window.Show();
 
         // Exercises construction, XAML loading, bindings, layout and tray setup in CI
         // without requiring an interactive test driver. A startup crash is a failed
         // process, so the publish workflow cannot ship a broken dashboard again.
-        if (e.Args.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase))
+        if (startup.ExitAfterIdle)
         {
             _ = window.Dispatcher.InvokeAsync(window.ExitForSmokeTest, DispatcherPriority.ApplicationIdle);
         }
+    }
+}
+
+/// <summary>
+/// Keeps the smoke path from racing long-lived native monitors during its immediate shutdown.
+/// The smoke test validates construction, XAML, bindings and tray setup; starting ETW or device
+/// watchers would add no coverage and can outlive the deliberately short-lived process.
+/// </summary>
+internal readonly record struct DashboardStartupPolicy(bool StartMonitors, bool ExitAfterIdle)
+{
+    internal static DashboardStartupPolicy FromArguments(IEnumerable<string> arguments)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var smokeTest = arguments.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
+        return new DashboardStartupPolicy(StartMonitors: !smokeTest, ExitAfterIdle: smokeTest);
     }
 }

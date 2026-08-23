@@ -14,6 +14,16 @@ public sealed class AttributionHostTests
     private const string RunKey = @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
 
     [Fact]
+    public void ConcreteWatcherDoesNotOpenANativeSessionWhenAlreadyCancelled()
+    {
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            new WriteAttributionWatcher().Watch(_ => { }, cancellation.Token));
+    }
+
+    [Fact]
     public void AnObservedWriteBecomesAnAnswer()
     {
         var watcher = new ScriptedWatcher(
