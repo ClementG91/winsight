@@ -96,6 +96,226 @@ class HostExpectation {
     }
 }
 
+# QueryServiceConfig2W exposes the installed SCM profile without parsing localized
+# sc.exe output or relying on undocumented registry serialization. Keep this C# 5
+# compatible because the qualification script is deliberately exercised on
+# Windows PowerShell 5.1.
+if ($null -eq ('WinSightServiceProfileInspector' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+
+public static class WinSightServiceProfileInspector
+{
+    private const uint ScManagerConnect = 0x0001;
+    private const uint ServiceQueryConfig = 0x0001;
+    private const int ErrorInsufficientBuffer = 122;
+    private const int ErrorServiceDoesNotExist = 1060;
+    private const int ServiceConfigFailureActions = 2;
+    private const int ServiceConfigFailureActionsFlag = 4;
+    private const int ServiceConfigServiceSidInfo = 5;
+    private const int ServiceConfigRequiredPrivilegesInfo = 6;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ServiceFailureActions
+    {
+        public uint ResetPeriodSeconds;
+        public IntPtr RebootMessage;
+        public IntPtr Command;
+        public uint ActionCount;
+        public IntPtr Actions;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ScAction
+    {
+        public int Type;
+        public uint DelayMilliseconds;
+    }
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenSCManagerW(string machineName, string databaseName, uint access);
+
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr OpenServiceW(IntPtr manager, string serviceName, uint access);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryServiceConfig2W(
+        IntPtr service, int infoLevel, IntPtr buffer, int bufferSize, out int bytesNeeded);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool CloseServiceHandle(IntPtr handle);
+
+    public static bool MatchesExpected(string serviceName)
+    {
+        IntPtr manager = OpenSCManagerW(null, null, ScManagerConnect);
+        if (manager == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            IntPtr service = OpenServiceW(manager, serviceName, ServiceQueryConfig);
+            if (service == IntPtr.Zero)
+            {
+                int error = Marshal.GetLastWin32Error();
+                if (error == ErrorServiceDoesNotExist) return false;
+                throw new Win32Exception(error);
+            }
+            try
+            {
+                return QueryUInt32(service, ServiceConfigServiceSidInfo) == 1U
+                    && RequiredPrivilegesMatch(service)
+                    && FailureActionsMatch(service)
+                    && QueryInt32(service, ServiceConfigFailureActionsFlag) == 1;
+            }
+            finally { CloseServiceHandle(service); }
+        }
+        finally { CloseServiceHandle(manager); }
+    }
+
+    private static uint QueryUInt32(IntPtr service, int level)
+    {
+        int size;
+        IntPtr buffer = QueryBuffer(service, level, out size);
+        try
+        {
+            if (size < sizeof(uint)) throw new InvalidOperationException("Truncated SCM profile field.");
+            return unchecked((uint)Marshal.ReadInt32(buffer));
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static int QueryInt32(IntPtr service, int level)
+    {
+        int size;
+        IntPtr buffer = QueryBuffer(service, level, out size);
+        try
+        {
+            if (size < sizeof(int)) throw new InvalidOperationException("Truncated SCM profile field.");
+            return Marshal.ReadInt32(buffer);
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static bool RequiredPrivilegesMatch(IntPtr service)
+    {
+        int size;
+        IntPtr buffer = QueryBuffer(service, ServiceConfigRequiredPrivilegesInfo, out size);
+        try
+        {
+            if (size < IntPtr.Size) return false;
+            IntPtr values = Marshal.ReadIntPtr(buffer);
+            if (!Inside(buffer, size, values, 2)) return false;
+            List<string> privileges = new List<string>();
+            IntPtr cursor = values;
+            while (privileges.Count <= 4)
+            {
+                if (!Inside(buffer, size, cursor, 2)) return false;
+                string value = ReadBoundedUnicodeString(buffer, size, cursor);
+                if (value == null) return false;
+                if (value.Length == 0) break;
+                privileges.Add(value);
+                cursor = IntPtr.Add(cursor, checked((value.Length + 1) * 2));
+            }
+            string[] expected = new[] {
+                "SeChangeNotifyPrivilege", "SeImpersonatePrivilege", "SeSystemProfilePrivilege"
+            };
+            if (privileges.Count != expected.Length) return false;
+            foreach (string value in expected)
+            {
+                if (!privileges.Contains(value)) return false;
+            }
+            return true;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static bool FailureActionsMatch(IntPtr service)
+    {
+        int size;
+        IntPtr buffer = QueryBuffer(service, ServiceConfigFailureActions, out size);
+        try
+        {
+            if (size < Marshal.SizeOf(typeof(ServiceFailureActions))) return false;
+            ServiceFailureActions actions = (ServiceFailureActions)Marshal.PtrToStructure(
+                buffer, typeof(ServiceFailureActions));
+            if (actions.ResetPeriodSeconds != 86400U || actions.ActionCount != 3U) return false;
+            int actionSize = Marshal.SizeOf(typeof(ScAction));
+            if (!Inside(buffer, size, actions.Actions, checked(actionSize * 3))) return false;
+            ScAction first = ReadAction(actions.Actions, actionSize, 0);
+            ScAction second = ReadAction(actions.Actions, actionSize, 1);
+            ScAction third = ReadAction(actions.Actions, actionSize, 2);
+            return first.Type == 1 && first.DelayMilliseconds == 5000U
+                && second.Type == 1 && second.DelayMilliseconds == 30000U
+                && third.Type == 0 && third.DelayMilliseconds == 0U;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static ScAction ReadAction(IntPtr actions, int actionSize, int index)
+    {
+        return (ScAction)Marshal.PtrToStructure(
+            IntPtr.Add(actions, checked(actionSize * index)), typeof(ScAction));
+    }
+
+    private static string ReadBoundedUnicodeString(IntPtr buffer, int size, IntPtr value)
+    {
+        List<char> characters = new List<char>();
+        IntPtr cursor = value;
+        while (Inside(buffer, size, cursor, 2))
+        {
+            char character = unchecked((char)(ushort)Marshal.ReadInt16(cursor));
+            if (character == '\0') return new string(characters.ToArray());
+            characters.Add(character);
+            cursor = IntPtr.Add(cursor, 2);
+        }
+        return null;
+    }
+
+    private static IntPtr QueryBuffer(IntPtr service, int level, out int size)
+    {
+        int ignored;
+        QueryServiceConfig2W(service, level, IntPtr.Zero, 0, out ignored);
+        int error = Marshal.GetLastWin32Error();
+        if (error != ErrorInsufficientBuffer || ignored <= 0)
+            throw new Win32Exception(error);
+        IntPtr buffer = Marshal.AllocHGlobal(ignored);
+        try
+        {
+            if (!QueryServiceConfig2W(service, level, buffer, ignored, out size))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            if (size <= 0 || size > ignored)
+                throw new InvalidOperationException("Invalid SCM profile buffer length.");
+            return buffer;
+        }
+        catch
+        {
+            Marshal.FreeHGlobal(buffer);
+            throw;
+        }
+    }
+
+    private static bool Inside(IntPtr buffer, int size, IntPtr value, int length)
+    {
+        if (value == IntPtr.Zero || length < 0) return false;
+        long start = buffer.ToInt64();
+        long candidate = value.ToInt64();
+        long end;
+        long candidateEnd;
+        try
+        {
+            end = checked(start + size);
+            candidateEnd = checked(candidate + length);
+        }
+        catch (OverflowException) { return false; }
+        return candidate >= start && candidateEnd <= end;
+    }
+}
+'@
+}
+
 $script:PathDenialCodes = @(
     '[FW_INSTALL_PATH_INVALID]', '[FW_INSTALL_PATH_OUTSIDE_MACHINE_DATA]',
     '[FW_INSTALL_PATH_MISSING_COMPONENT]', '[FW_INSTALL_PATH_REPARSE_POINT]',
@@ -271,6 +491,9 @@ function Invoke-WfpValidationWorkflow($Operations, [switch]$SkipEnforcement) {
     $bindingCapture = Capture-Decision $Operations.Binding ([bool])
     $binding = $bindingCapture.Valid -and [bool]$bindingCapture.Value
     if (-not (Check-Step 'SCM binds the canonical candidate and run verb' $binding 'exact case-sensitive quoted candidate plus run')) { return Stop-Workflow 'SCM registration does not bind the requested candidate exactly.' }
+    $profileCapture = Capture-Decision $Operations.SecurityProfile ([bool])
+    $profile = $profileCapture.Valid -and [bool]$profileCapture.Value
+    if (-not (Check-Step 'SCM security and recovery profile is exact' $profile 'service SID unrestricted; exact three privileges; restart 5s/30s/none; 24h reset; non-crash failures enabled')) { return Stop-Workflow 'SCM security or recovery profile does not match the qualified baseline.' }
     $startCapture = Capture-Decision $Operations.Start ([NativeResult])
     $runningCapture = Capture-Decision $Operations.PollRunning ([bool])
     $running = $startCapture.Valid -and $runningCapture.Valid -and
@@ -323,6 +546,59 @@ function Invoke-WfpValidationWorkflow($Operations, [switch]$SkipEnforcement) {
     $unblockedCapture = Capture-Decision $Operations.Unblocked ([NativeResult])
     Check-Step 'PowerShell HTTP control still reaches the network' ($unblockedCapture.Valid -and (Test-WebSuccess ([NativeResult]$unblockedCapture.Value))) 'http 200 and exit 0 from absolute System32 PowerShell' | Out-Null
 
+    # The service control plane must own the lifetime of effective filtering. Stop it while a real
+    # block is active: a dynamic WFP session removes every object on close, then startup must rebuild
+    # the same persisted intent. This is the crash/upgrade safety property; rolling back before stop
+    # would only test explicit cleanup.
+    $armedStopCapture = Capture-Decision $Operations.Stop ([NativeResult])
+    $armedStop = $armedStopCapture.Valid -and (Test-NativeSuccess ([NativeResult]$armedStopCapture.Value))
+    if (-not (Check-Step 'armed service stop succeeds' $armedStop 'absolute System32 sc.exe stop exits 0 while enforcement is active')) {
+        return Stop-Workflow 'armed service stop failed; restore the clean VM snapshot.'
+    }
+    $armedStoppedCapture = Capture-Decision $Operations.PollStopped ([bool])
+    $armedStopped = $armedStoppedCapture.Valid -and [bool]$armedStoppedCapture.Value
+    if (-not (Check-Step 'armed service reaches stopped state' $armedStopped 'bounded locale-invariant stopped poll')) {
+        return Stop-Workflow 'armed service did not stop; restore the clean VM snapshot.'
+    }
+    $stoppedWfpCapture = Capture-Decision $Operations.WfpArmed ([NativeResult])
+    $stoppedWfpAbsent = Check-Step 'dynamic WFP state disappears with the stopped service' (
+        $stoppedWfpCapture.Valid -and
+        (Test-WfpState ([NativeResult]$stoppedWfpCapture.Value) 'absent' 'absent' 'absent')) 'provider, sublayer and permit-filter exactly absent after stop'
+    $stoppedConnectivityCapture = Capture-Decision $Operations.Baseline ([BaselineResult])
+    $stoppedConnectivity = Check-Step 'service stop restores target and control connectivity' (
+        $stoppedConnectivityCapture.Valid -and
+        (Test-WebSuccess ([BaselineResult]$stoppedConnectivityCapture.Value).Target) -and
+        (Test-WebSuccess ([BaselineResult]$stoppedConnectivityCapture.Value).Control)) 'both fixed HTTP clients return 200 after dynamic-session teardown'
+    if (-not ($stoppedWfpAbsent -and $stoppedConnectivity)) {
+        return Stop-Workflow 'dynamic-session stop postcondition failed; restore the clean VM snapshot.'
+    }
+
+    $restartCapture = Capture-Decision $Operations.Start ([NativeResult])
+    $restart = $restartCapture.Valid -and (Test-NativeSuccess ([NativeResult]$restartCapture.Value))
+    if (-not (Check-Step 'service restarts with persisted enforcement' $restart 'absolute System32 sc.exe start exits 0')) {
+        return Stop-Workflow 'service restart failed; restore the clean VM snapshot.'
+    }
+    $restartedCapture = Capture-Decision $Operations.PollRunning ([bool])
+    $restarted = $restartedCapture.Valid -and [bool]$restartedCapture.Value
+    if (-not (Check-Step 'restarted service reaches Running' $restarted 'bounded locale-invariant Running poll')) {
+        return Stop-Workflow 'service did not return to Running; restore the clean VM snapshot.'
+    }
+    $rearmedCapture = Capture-Decision $Operations.WfpArmed ([NativeResult])
+    Check-Step 'restart recreates the exact WFP namespace' ($rearmedCapture.Valid -and
+        (Test-WfpState ([NativeResult]$rearmedCapture.Value) 'present' 'present' 'absent')) 'provider and sublayer present; permit-filter absent' | Out-Null
+    $reblockedCapture = Capture-Decision $Operations.BlockStatus ([NativeResult])
+    Check-Step 'restart recreates the target block' ($reblockedCapture.Valid -and
+        (Test-BlockedStatus ([NativeResult]$reblockedCapture.Value))) 'FW_APP_BLOCKED and exit 0 after restart' | Out-Null
+    $reblockedWebCapture = Capture-Decision $Operations.Blocked ([NativeResult])
+    $restartControlCapture = Capture-Decision $Operations.Unblocked ([NativeResult])
+    $restartEnforcement = Check-Step 'restart restores scoped enforcement and control connectivity' (
+        $reblockedWebCapture.Valid -and $restartControlCapture.Valid -and
+        (Test-WebBlocked ([NativeResult]$reblockedWebCapture.Value)) -and
+        (Test-WebSuccess ([NativeResult]$restartControlCapture.Value))) 'target http 000/non-zero and control http 200/zero after restart'
+    if (-not $restartEnforcement) {
+        return Stop-Workflow 'persisted enforcement was not safely rebuilt; restore the clean VM snapshot.'
+    }
+
     if (-not (Invoke-Effect $Operations.PromptRollback)) { $state.Failures++; return Stop-Workflow 'rollback prompt violated the zero-output contract.' }
     $rollbackAuditCapture = Capture-Decision $Operations.RollbackAudit ([NativeResult])
     $rollbackWfpCapture = Capture-Decision $Operations.RollbackWfp ([NativeResult])
@@ -361,6 +637,9 @@ function New-RealHostEffects {
                 }
                 catch { return [ServiceObservation]::new($false, '', '') }
             }
+            'InspectServiceProfile' {
+                return [bool][WinSightServiceProfileInspector]::MatchesExpected($call.Path)
+            }
             'FileExists' { return [bool](Test-Path -LiteralPath $call.Path -PathType Leaf) }
             'CreateDirectory' { New-Item -ItemType Directory -Path $call.Path -ErrorAction Stop | Out-Null; return }
             'CreateFile' { New-Item -ItemType File -Path $call.Path -ErrorAction Stop | Out-Null; return }
@@ -391,15 +670,23 @@ function New-ScriptedHostEffects([HostExpectation[]]$expectations, [string]$wind
     $invoke = {
         param([HostCall]$call)
         [void]$state.Calls.Add($call)
-        if ($queue.Count -eq 0) { $state.Mismatch = 'unexpected-call'; throw $state.Mismatch }
-        $expected = [HostExpectation]$queue.Dequeue()
-        if (-not (& $testHostCall $call $expected.Call)) {
-            $state.Mismatch = 'expected {0}:{1} [{2}], got {3}:{4} [{5}]' -f
-                $expected.Call.Kind, $expected.Call.Path, ($expected.Call.Arguments -join '|'),
-                $call.Kind, $call.Path, ($call.Arguments -join '|')
+        if ($queue.Count -eq 0) {
+            if ([string]::IsNullOrEmpty($state.Mismatch)) { $state.Mismatch = 'unexpected-call' }
             throw $state.Mismatch
         }
-        foreach ($result in $expected.Results) { Write-Output -NoEnumerate $result }
+        $expected = [HostExpectation]$queue.Dequeue()
+        if (-not (& $testHostCall $call $expected.Call)) {
+            if ([string]::IsNullOrEmpty($state.Mismatch)) {
+                $state.Mismatch = 'expected {0}:{1} [{2}], got {3}:{4} [{5}]' -f
+                    $expected.Call.Kind, $expected.Call.Path, ($expected.Call.Arguments -join '|'),
+                    $call.Kind, $call.Path, ($call.Arguments -join '|')
+            }
+            throw $state.Mismatch
+        }
+        # Unary comma preserves one result as one pipeline object on both Windows PowerShell and
+        # current PowerShell. `Write-Output -NoEnumerate` wraps scalars in List<object> on current
+        # pwsh, making every strict type check fail before the first real contract operation.
+        foreach ($result in $expected.Results) { , $result }
     }.GetNewClosure()
     return [pscustomobject]@{
         Invoke = $invoke; WindowsRoot = $windowsRoot; UserProfile = $userProfile
@@ -490,6 +777,7 @@ function New-ValidationAdapter($HostEffects, [string]$candidateServicePath) {
         CleanSnapshot = { $query = & $native $scPath @('query', $serviceName); return [bool]($query.ExitCode -eq 1060) }.GetNewClosure()
         Install = { return (& $native $canonicalPath @('install')) }.GetNewClosure()
         Binding = { $observation = [ServiceObservation](& $observe); return [bool]($observation.Found -and (& $testServiceBinding $observation.PathName $canonicalPath)) }.GetNewClosure()
+        SecurityProfile = { return [bool](& $hostDecision 'InspectServiceProfile' $serviceName @() ([bool])) }.GetNewClosure()
         Start = { return (& $native $scPath @('start', $serviceName)) }.GetNewClosure()
         PollRunning = { return [bool](& $pollLifecycle 'State' 'Running') }.GetNewClosure()
         Audit = { return (& $native $canonicalPath @('enforce-status')) }.GetNewClosure()
@@ -607,13 +895,15 @@ function New-ScriptedPlan(
     Add-HostExpectation $list 'ObserveService' $paths.Service @() @(
         [ServiceObservation]::new($true, 'Stopped', ('"{0}" run' -f $paths.Candidate)))
     Add-OutputExpectation $list '  [PASS] SCM binds the canonical candidate and run verb'
+    Add-HostExpectation $list 'InspectServiceProfile' $paths.Service @() @($true)
+    Add-OutputExpectation $list '  [PASS] SCM security and recovery profile is exact'
     Add-HostExpectation $list 'Native' $paths.Sc @('start', $paths.Service) @([NativeResult]::new('ok', 0))
     Add-ServicePollExpectations $list $paths $runningStates
     if ($runningStates[$runningStates.Count - 1] -cne 'Running') {
         Add-OutputExpectation $list '  [FAIL] service starts and reaches Running: start exits 0 and bounded CIM polling reaches Running'
         Add-HostExpectation $list 'RemoveDirectory' $paths.Directory @() @()
         Add-OutputExpectation $list 'STOP: service is not running; do not arm enforcement and restore the clean VM snapshot.'
-        return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $false; Checks = 7 }
+        return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $false; Checks = 8 }
     }
     Add-OutputExpectation $list '  [PASS] service starts and reaches Running'
     Add-HostExpectation $list 'Native' $paths.Candidate @('enforce-status') @([NativeResult]::new($audit, 0))
@@ -646,6 +936,26 @@ function New-ScriptedPlan(
         Add-OutputExpectation $list '  [PASS] blocked System32 curl cannot reach the network'
         Add-HostExpectation $list 'Native' $paths.Control $paths.HttpArguments @([NativeResult]::new('200', 0))
         Add-OutputExpectation $list '  [PASS] PowerShell HTTP control still reaches the network'
+        Add-HostExpectation $list 'Native' $paths.Sc @('stop', $paths.Service) @([NativeResult]::new('ok', 0))
+        Add-OutputExpectation $list '  [PASS] armed service stop succeeds'
+        Add-ServicePollExpectations $list $paths $stoppedStates
+        Add-OutputExpectation $list '  [PASS] armed service reaches stopped state'
+        Add-HostExpectation $list 'Native' $paths.Candidate @('wfp-status') @($wfpAbsent)
+        Add-OutputExpectation $list '  [PASS] dynamic WFP state disappears with the stopped service'
+        Add-HostExpectation $list 'Native' $paths.Target $paths.CurlArguments @([NativeResult]::new('200', 0))
+        Add-HostExpectation $list 'Native' $paths.Control $paths.HttpArguments @([NativeResult]::new('200', 0))
+        Add-OutputExpectation $list '  [PASS] service stop restores target and control connectivity'
+        Add-HostExpectation $list 'Native' $paths.Sc @('start', $paths.Service) @([NativeResult]::new('ok', 0))
+        Add-OutputExpectation $list '  [PASS] service restarts with persisted enforcement'
+        Add-ServicePollExpectations $list $paths $runningStates
+        Add-OutputExpectation $list '  [PASS] restarted service reaches Running'
+        Add-HostExpectation $list 'Native' $paths.Candidate @('wfp-status') @($wfpArmed)
+        Add-OutputExpectation $list '  [PASS] restart recreates the exact WFP namespace'
+        Add-HostExpectation $list 'Native' $paths.Candidate @('wfp-block-status', $paths.Target) @([NativeResult]::new('[FW_APP_BLOCKED]', 0))
+        Add-OutputExpectation $list '  [PASS] restart recreates the target block'
+        Add-HostExpectation $list 'Native' $paths.Target $paths.CurlArguments @([NativeResult]::new('000', 2))
+        Add-HostExpectation $list 'Native' $paths.Control $paths.HttpArguments @([NativeResult]::new('200', 0))
+        Add-OutputExpectation $list '  [PASS] restart restores scoped enforcement and control connectivity'
         Add-HostExpectation $list 'Prompt' 'ACTION REQUIRED -- dashboard: Emergency disable, then press Enter' @() @()
         Add-HostExpectation $list 'Native' $paths.Candidate @('enforce-status') @([NativeResult]::new($audit, 0))
         Add-HostExpectation $list 'Native' $paths.Candidate @('wfp-status') @($wfpAbsent)
@@ -662,7 +972,7 @@ function New-ScriptedPlan(
     if ($stoppedStates[$stoppedStates.Count - 1] -cne 'Stopped') {
         Add-OutputExpectation $list '  [FAIL] service reaches stopped state before uninstall: bounded locale-invariant stopped poll'
         Add-OutputExpectation $list 'STOP: service did not stop; do not uninstall and restore the clean VM snapshot.'
-        return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $false; Checks = $(if ($full) { 23 } else { 14 }) }
+        return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $false; Checks = $(if ($full) { 33 } else { 15 }) }
     }
     Add-OutputExpectation $list '  [PASS] service reaches stopped state before uninstall'
     Add-HostExpectation $list 'Native' $paths.Candidate @('uninstall') @([NativeResult]::new('ok', 0))
@@ -671,10 +981,10 @@ function New-ScriptedPlan(
     if ($absentExitCodes[$absentExitCodes.Count - 1] -ne 1060) {
         Add-OutputExpectation $list '  [FAIL] uninstall leaves no service: bounded absolute sc.exe query reaches 1060'
         Add-OutputExpectation $list 'STOP: service deletion did not complete; restore the clean VM snapshot.'
-        return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $false; Checks = $(if ($full) { 25 } else { 16 }) }
+        return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $false; Checks = $(if ($full) { 35 } else { 17 }) }
     }
     Add-OutputExpectation $list '  [PASS] uninstall leaves no service'
-    return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $true; Checks = $(if ($full) { 25 } else { 16 }) }
+    return [pscustomobject]@{ Expectations = @($list); Paths = $paths; Full = $full; Success = $true; Checks = $(if ($full) { 35 } else { 17 }) }
 }
 
 function Invoke-ScriptedPlan($plan, [switch]$QuietFailure) {
@@ -782,7 +1092,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         else { $script:ContractFailures++; Write-Host ('  [FAIL] {0} ({1})' -f $name, $capture.Reason) }
     }
 
-    Contract 'skip traverses production adapter primitive calls with 16 checks' {
+    Contract 'skip traverses production adapter primitive calls with 17 checks' {
         $plan = New-ScriptedPlan $false
         if ($negativeControl) {
             $plan.Expectations = Copy-Expectations $plan.Expectations
@@ -792,7 +1102,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         }
         return Invoke-ScriptedPlan $plan
     }
-    Contract 'full traverses production adapter target control prompts with 25 checks' {
+    Contract 'full traverses production adapter lifecycle target control prompts with 35 checks' {
         return Invoke-ScriptedPlan (New-ScriptedPlan $true)
     }
     Contract 'Running poll pins delayed and exact ten-attempt timeout' {
@@ -1005,7 +1315,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
             $tail = New-Object System.Collections.ArrayList
             Add-OutputExpectation $tail '  [FAIL] no WFP state before arming: provider, sublayer and permit-filter exactly absent'
             Add-OutputExpectation $tail 'STOP: pre-arm WFP state is not empty; do not arm enforcement.'
-            Set-ScriptedPlanTail $plan $index @($tail) 11 $false $true 1
+            Set-ScriptedPlanTail $plan $index @($tail) 12 $false $true 1
             [void]$plans.Add($plan)
         }
 
@@ -1017,7 +1327,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         $directTail = New-Object System.Collections.ArrayList
         Add-OutputExpectation $directTail '  [FAIL] direct mutation is refused without changing WFP: exact refusal/exit 1 followed immediately by exact empty WFP state'
         Add-OutputExpectation $directTail 'STOP: direct mutation refusal or post-state check failed; do not arm enforcement.'
-        Set-ScriptedPlanTail $directPlan $afterDirect @($directTail) 12 $false $true 1
+        Set-ScriptedPlanTail $directPlan $afterDirect @($directTail) 13 $false $true 1
         [void]$plans.Add($directPlan)
 
         foreach ($plan in $plans) {
@@ -1030,29 +1340,29 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
 
         $wfpPlan = New-ScriptedPlan $true
         $wfpPlan.Expectations = Copy-Expectations $wfpPlan.Expectations
-        $rollbackWfp = Find-HostExpectationIndex $wfpPlan 'Native' $wfpPlan.Paths.Candidate 'wfp-status' 3
+        $rollbackWfp = Find-HostExpectationIndex $wfpPlan 'Native' $wfpPlan.Paths.Candidate 'wfp-status' 5
         $wfpPlan.Expectations[$rollbackWfp].Results = @(
             (New-WfpStateResult 'present' 'present' 'absent'))
-        $restoredControl = Find-HostExpectationIndex $wfpPlan 'Native' $wfpPlan.Paths.Control '*' 2
+        $restoredControl = Find-HostExpectationIndex $wfpPlan 'Native' $wfpPlan.Paths.Control '*' 4
         $wfpTail = New-Object System.Collections.ArrayList
         Add-OutputExpectation $wfpTail '  [PASS] back to audit-only'
         Add-OutputExpectation $wfpTail '  [FAIL] all WFP state is removed: provider, sublayer and permit-filter exactly absent'
         Add-OutputExpectation $wfpTail '  [PASS] target and control connectivity are restored'
         Add-OutputExpectation $wfpTail 'STOP: rollback proof failed; do not uninstall and restore the clean VM snapshot.'
-        Set-ScriptedPlanTail $wfpPlan $restoredControl @($wfpTail) 21 $false $true 1
+        Set-ScriptedPlanTail $wfpPlan $restoredControl @($wfpTail) 31 $false $true 1
         [void]$plans.Add($wfpPlan)
 
         $connectivityPlan = New-ScriptedPlan $true
         $connectivityPlan.Expectations = Copy-Expectations $connectivityPlan.Expectations
-        $restoredTarget = Find-HostExpectationIndex $connectivityPlan 'Native' $connectivityPlan.Paths.Target '*' 2
+        $restoredTarget = Find-HostExpectationIndex $connectivityPlan 'Native' $connectivityPlan.Paths.Target '*' 4
         $connectivityPlan.Expectations[$restoredTarget].Results = @([NativeResult]::new('000', 2))
-        $restoredControl = Find-HostExpectationIndex $connectivityPlan 'Native' $connectivityPlan.Paths.Control '*' 2
+        $restoredControl = Find-HostExpectationIndex $connectivityPlan 'Native' $connectivityPlan.Paths.Control '*' 4
         $connectivityTail = New-Object System.Collections.ArrayList
         Add-OutputExpectation $connectivityTail '  [PASS] back to audit-only'
         Add-OutputExpectation $connectivityTail '  [PASS] all WFP state is removed'
         Add-OutputExpectation $connectivityTail '  [FAIL] target and control connectivity are restored: both fixed HTTP clients return 200/exit 0'
         Add-OutputExpectation $connectivityTail 'STOP: rollback proof failed; do not uninstall and restore the clean VM snapshot.'
-        Set-ScriptedPlanTail $connectivityPlan $restoredControl @($connectivityTail) 21 $false $true 1
+        Set-ScriptedPlanTail $connectivityPlan $restoredControl @($connectivityTail) 31 $false $true 1
         [void]$plans.Add($connectivityPlan)
 
         foreach ($plan in $plans) {
@@ -1096,6 +1406,17 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         Set-ScriptedPlanTail $bindingPlan $binding @($bindingTail) 6 $false $true 1
         [void]$plans.Add($bindingPlan)
 
+        $profilePlan = New-ScriptedPlan $false
+        $profilePlan.Expectations = Copy-Expectations $profilePlan.Expectations
+        $profile = Find-HostExpectationIndex $profilePlan 'InspectServiceProfile' $profilePlan.Paths.Service
+        $profilePlan.Expectations[$profile].Results = @($false)
+        $profileTail = New-Object System.Collections.ArrayList
+        Add-OutputExpectation $profileTail '  [FAIL] SCM security and recovery profile is exact: service SID unrestricted; exact three privileges; restart 5s/30s/none; 24h reset; non-crash failures enabled'
+        Add-HostExpectation $profileTail 'RemoveDirectory' $profilePlan.Paths.Directory @() @()
+        Add-OutputExpectation $profileTail 'STOP: SCM security or recovery profile does not match the qualified baseline.'
+        Set-ScriptedPlanTail $profilePlan $profile @($profileTail) 7 $false $true 1
+        [void]$plans.Add($profilePlan)
+
         $nativePlan = New-ScriptedPlan $false
         $nativePlan.Expectations = Copy-Expectations $nativePlan.Expectations
         $install = Find-HostExpectationIndex $nativePlan 'Native' $nativePlan.Paths.Candidate 'install'
@@ -1115,7 +1436,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         $promptPlan.Expectations[$prompt].Results = @('pollution')
         $promptTail = New-Object System.Collections.ArrayList
         Add-OutputExpectation $promptTail 'STOP: arm prompt violated the zero-output contract.'
-        Set-ScriptedPlanTail $promptPlan $prompt @($promptTail) 13 $false $true 1
+        Set-ScriptedPlanTail $promptPlan $prompt @($promptTail) 14 $false $true 1
         [void]$plans.Add($promptPlan)
 
         $effectPlan = New-ScriptedPlan $false
@@ -1125,7 +1446,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         $effectTail = New-Object System.Collections.ArrayList
         Add-HostExpectation $effectTail 'RemoveDirectory' $effectPlan.Paths.Directory @() @()
         Add-OutputExpectation $effectTail 'STOP: stage cleanup violated the zero-output contract.'
-        Set-ScriptedPlanTail $effectPlan $removeStage @($effectTail) 9 $false $true 1
+        Set-ScriptedPlanTail $effectPlan $removeStage @($effectTail) 10 $false $true 1
         [void]$plans.Add($effectPlan)
 
         foreach ($plan in $plans) {
@@ -1138,8 +1459,8 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         $nativeCalls = @($plan.Expectations | Where-Object { $_.Call.Kind -ceq 'Native' })
         return [bool](@($nativeCalls | Where-Object { $_.Call.Arguments[0] -ceq 'install-path-trust-check' }).Count -eq 1 -and
             @($nativeCalls | Where-Object { $_.Call.Path -ceq $plan.Paths.Sentinel }).Count -eq 0 -and
-            @($nativeCalls | Where-Object { $_.Call.Path -ceq $plan.Paths.Target }).Count -eq 3 -and
-            @($nativeCalls | Where-Object { $_.Call.Path -ceq $plan.Paths.Control }).Count -eq 3)
+            @($nativeCalls | Where-Object { $_.Call.Path -ceq $plan.Paths.Target }).Count -eq 5 -and
+            @($nativeCalls | Where-Object { $_.Call.Path -ceq $plan.Paths.Control }).Count -eq 5)
     }
     Contract 'workflow returns one typed result and queue drains' {
         $plan = New-ScriptedPlan $false

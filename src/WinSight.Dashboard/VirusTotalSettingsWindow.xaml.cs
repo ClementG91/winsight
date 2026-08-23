@@ -5,6 +5,7 @@ using System.Runtime.InteropServices;
 using System.Security;
 using System.Security.Cryptography;
 using System.Windows;
+using WinSight.Core;
 
 namespace WinSight.Dashboard;
 
@@ -64,11 +65,16 @@ public partial class VirusTotalSettingsWindow : Window
 
     private void GetKeyButton_Click(object sender, RoutedEventArgs e)
     {
-        TrySettingsAction(() => _ = Process.Start(new ProcessStartInfo(
-            "https://www.virustotal.com/gui/my-apikey")
+        TrySettingsAction(() =>
         {
-            UseShellExecute = true,
-        }));
+            var explorer = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+                "explorer.exe");
+            var startInfo = new ProcessStartInfo(explorer) { UseShellExecute = false };
+            startInfo.ArgumentList.Add("https://www.virustotal.com/gui/my-apikey");
+            VirusTotalConfiguration.RemoveFromChildEnvironment(startInfo);
+            _ = Process.Start(startInfo);
+        });
     }
 
     private void TrySettingsAction(Action action)

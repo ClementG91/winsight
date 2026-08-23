@@ -15,6 +15,10 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
     public IReadOnlyList<LoadedModule> Snapshot(CancellationToken cancellationToken = default) =>
+        SnapshotWithCoverage(cancellationToken).Items;
+
+    public AcquisitionSnapshot<LoadedModule> SnapshotWithCoverage(
+        CancellationToken cancellationToken = default) =>
         Collect(Process.GetProcesses(), cancellationToken);
 
     /// <summary>
@@ -31,6 +35,14 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
     /// interesting and exited, which is precisely the case worth investigating.
     /// </remarks>
     public IReadOnlyList<LoadedModule> SnapshotFor(int pid, CancellationToken cancellationToken = default)
+        => SnapshotForWithCoverage(pid, cancellationToken).Items;
+
+    /// <summary>
+    /// The modules of one process plus whether Windows allowed the process to be opened.
+    /// </summary>
+    public AcquisitionSnapshot<LoadedModule> SnapshotForWithCoverage(
+        int pid,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Process process;
@@ -40,7 +52,8 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            return [];
+            // The pid does not exist. This is a complete observation, not an access failure.
+            return new AcquisitionSnapshot<LoadedModule>([]);
         }
         return Collect([process], cancellationToken);
     }
@@ -53,10 +66,11 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
     /// skip-don't-fabricate rule below is the whole reason this scanner can be trusted, and a second
     /// copy of it is a second chance to get it wrong.
     /// </remarks>
-    private List<LoadedModule> Collect(
+    private AcquisitionSnapshot<LoadedModule> Collect(
         IReadOnlyList<Process> processes, CancellationToken cancellationToken)
     {
         var raw = new List<(int Pid, string Proc, string Mod, string? Path)>();
+        var unreadableProcesses = 0;
         foreach (var p in processes)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -71,7 +85,7 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
             catch (Exception ex) when (
                 ex is Win32Exception or InvalidOperationException or NotSupportedException)
             {
-                // Access denied / process exited / cross-bitness, skip, don't fabricate.
+                unreadableProcesses++;
             }
             finally
             {
@@ -84,9 +98,15 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
             cancellationToken);
 
-        return raw.Select(r => new LoadedModule(
-            r.Pid, r.Proc, r.Mod, r.Path,
-            r.Path is not null && verdicts.TryGetValue(r.Path, out var v) ? v : SignatureVerdict.Missing)).ToList();
+        return new AcquisitionSnapshot<LoadedModule>(
+            raw.Select(r => new LoadedModule(
+                r.Pid, r.Proc, r.Mod, r.Path,
+                r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
+                    ? v
+                    // No path means Windows did not expose the module identity. It does not mean
+                    // a file known to exist has disappeared.
+                    : SignatureVerdict.Unknown)).ToList(),
+            unreadableItems: unreadableProcesses);
     }
 
     private static string? SafePath(ProcessModule module)

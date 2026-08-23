@@ -1,5 +1,6 @@
 using System.IO;
 
+using WinSight.Core;
 using WinSight.Dashboard;
 
 using Xunit;
@@ -117,5 +118,28 @@ public sealed class CrashReporterTests
     {
         // Reporting must never become the thing that crashes the app.
         CrashReporter.TryCapture(new InvalidOperationException("boom"), "test", "\0:\\invalid<>path");
+    }
+
+    [Fact]
+    public void Format_RedactsTheOptionalNetworkCredentialAndBoundsTheReport()
+    {
+        var key = new string('v', 64);
+        try
+        {
+            VirusTotalConfiguration.SetStoredProcessKey(key);
+
+            var report = CrashReporter.Format(
+                new InvalidOperationException(key + new string('x', CrashReporter.MaxReportCharacters * 2)),
+                "test",
+                DateTimeOffset.UtcNow);
+
+            Assert.DoesNotContain(key, report, StringComparison.Ordinal);
+            Assert.True(report.Length <= CrashReporter.MaxReportCharacters);
+            Assert.Contains("[REDACTED]", report, StringComparison.Ordinal);
+        }
+        finally
+        {
+            VirusTotalConfiguration.SetStoredProcessKey(null);
+        }
     }
 }

@@ -9,6 +9,12 @@ namespace WinSight.Application;
 /// <param name="Detail">What it fired on — enough to act, without further lookup.</param>
 public sealed record SecurityAlert(DateTimeOffset TimeUtc, string Source, string Kind, string Detail);
 
+/// <summary>A journal read plus corruption/availability information.</summary>
+public sealed record AlertJournalSnapshot(
+    IReadOnlyList<SecurityAlert> Entries,
+    bool Unreadable,
+    int MalformedEntries);
+
 /// <summary>
 /// A bounded, local-only journal of every security detection, written the moment one fires.
 /// </summary>
@@ -34,7 +40,12 @@ public static class AlertJournal
     /// <summary>Kept small; a journal is for recent history, not an archive.</summary>
     internal const int MaxEntries = 500;
 
+    internal const int MaxFieldCharacters = 4096;
+
+    private const long MaximumJournalBytes = 16 * 1024 * 1024;
+
     private const char Separator = '\t';
+    private static readonly Lock Gate = new();
 
     /// <summary>The default local-only location: <c>%LocalAppData%\WinSight\alerts.log</c>.</summary>
     public static string DefaultPath => Path.Combine(
@@ -54,13 +65,28 @@ public static class AlertJournal
         ArgumentNullException.ThrowIfNull(alert);
         try
         {
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory))
+            lock (Gate)
             {
-                Directory.CreateDirectory(directory);
+                var directory = Path.GetDirectoryName(path);
+                if (!string.IsNullOrEmpty(directory))
+                {
+                    Directory.CreateDirectory(directory);
+                }
+                PreserveOversizedJournal(path);
+                var payload = System.Text.Encoding.UTF8.GetBytes(Format(alert) + Environment.NewLine);
+                using (var stream = new FileStream(
+                           path,
+                           FileMode.Append,
+                           FileAccess.Write,
+                           FileShare.Read,
+                           bufferSize: 4096,
+                           FileOptions.WriteThrough))
+                {
+                    stream.Write(payload);
+                    stream.Flush(flushToDisk: true);
+                }
+                Trim(path);
             }
-            File.AppendAllText(path, Format(alert) + Environment.NewLine);
-            Trim(path);
         }
         // Deliberately broad: this runs on a detection path, so a malformed path or an unwritable
         // target must never turn a real alert into an exception that takes the monitor down.
@@ -74,27 +100,48 @@ public static class AlertJournal
     }
 
     /// <summary>The most recent entries, newest first. Empty when there is no readable journal.</summary>
-    public static IReadOnlyList<SecurityAlert> Read(int max = 100) => Read(DefaultPath, max);
+    public static IReadOnlyList<SecurityAlert> Read(int max = 100) =>
+        ReadWithCoverage(DefaultPath, max).Entries;
 
-    internal static IReadOnlyList<SecurityAlert> Read(string path, int max)
+    internal static IReadOnlyList<SecurityAlert> Read(string path, int max) =>
+        ReadWithCoverage(path, max).Entries;
+
+    internal static AlertJournalSnapshot ReadWithCoverage(string path, int max)
     {
         if (max <= 0)
         {
-            return [];
+            return new AlertJournalSnapshot([], Unreadable: false, MalformedEntries: 0);
         }
         try
         {
-            if (!File.Exists(path))
+            lock (Gate)
             {
-                return [];
+                if (!File.Exists(path))
+                {
+                    return new AlertJournalSnapshot([], Unreadable: false, MalformedEntries: 0);
+                }
+                if (new FileInfo(path).Length > MaximumJournalBytes)
+                {
+                    return new AlertJournalSnapshot([], Unreadable: true, MalformedEntries: 0);
+                }
+                var malformed = 0;
+                var entries = new List<SecurityAlert>();
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (Parse(line) is { } alert)
+                    {
+                        entries.Add(alert);
+                    }
+                    else
+                    {
+                        malformed++;
+                    }
+                }
+                return new AlertJournalSnapshot(
+                    entries.AsEnumerable().Reverse().Take(max).ToArray(),
+                    Unreadable: false,
+                    malformed);
             }
-            return File.ReadLines(path)
-                .Select(Parse)
-                .Where(alert => alert is not null)
-                .Select(alert => alert!)
-                .Reverse()
-                .Take(max)
-                .ToArray();
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -102,7 +149,7 @@ public static class AlertJournal
                                      or ArgumentException
                                      or NotSupportedException)
         {
-            return [];
+            return new AlertJournalSnapshot([], Unreadable: true, MalformedEntries: 0);
         }
     }
 
@@ -127,6 +174,7 @@ public static class AlertJournal
         }
         var parts = line.Split(Separator);
         if (parts.Length != 4 ||
+            parts.Skip(1).Any(part => part.Length > MaxFieldCharacters) ||
             !DateTimeOffset.TryParse(
                 parts[0], CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var time))
         {
@@ -137,8 +185,15 @@ public static class AlertJournal
 
     // A tab or newline in a field would break the line format and make the entry unparseable, so
     // they become spaces. Losing exact whitespace matters far less than losing the whole record.
-    private static string Sanitize(string? value) =>
-        string.IsNullOrEmpty(value) ? string.Empty : value.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+    private static string Sanitize(string? value)
+    {
+        var sanitized = string.IsNullOrEmpty(value)
+            ? string.Empty
+            : value.Replace('\t', ' ').Replace('\r', ' ').Replace('\n', ' ');
+        return sanitized.Length <= MaxFieldCharacters
+            ? sanitized
+            : sanitized[..(MaxFieldCharacters - 12)] + " [truncated]";
+    }
 
     /// <summary>Keeps only the newest <see cref="MaxEntries"/> lines, so the journal stays bounded.</summary>
     private static void Trim(string path)
@@ -148,6 +203,42 @@ public static class AlertJournal
         {
             return;
         }
-        File.WriteAllLines(path, lines.Skip(lines.Length - MaxEntries));
+        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(
+                       temporaryPath,
+                       FileMode.CreateNew,
+                       FileAccess.Write,
+                       FileShare.None,
+                       bufferSize: 4096,
+                       FileOptions.WriteThrough))
+            using (var writer = new StreamWriter(stream))
+            {
+                foreach (var line in lines.Skip(lines.Length - MaxEntries))
+                {
+                    writer.WriteLine(line);
+                }
+                writer.Flush();
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporaryPath, path, overwrite: true);
+        }
+        finally
+        {
+            try { File.Delete(temporaryPath); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private static void PreserveOversizedJournal(string path)
+    {
+        if (!File.Exists(path) || new FileInfo(path).Length <= MaximumJournalBytes)
+        {
+            return;
+        }
+        var preserved = path + ".oversized-" + DateTime.UtcNow.ToString(
+            "yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+        File.Move(path, preserved);
     }
 }

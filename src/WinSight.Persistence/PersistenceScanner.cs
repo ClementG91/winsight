@@ -17,7 +17,7 @@ public sealed class PersistenceScanner
         ISignatureVerifier? verifier = null)
     {
         _enumerators = enumerators ?? DefaultEnumerators();
-        _verifier = verifier ?? new AuthenticodeVerifier();
+        _verifier = verifier ?? new NativeSignatureVerifier();
     }
 
     /// <summary>The autostart surfaces covered by a default scan (Phase 1).</summary>
@@ -97,8 +97,9 @@ public sealed class PersistenceScanner
             }
         }
 
-        // 2. Resolve each record's executable, then verify EVERY signature in one
-        //    batch (a single Get-AuthenticodeSignature call, not one process per item).
+        // 2. Resolve each record's executable, then verify every distinct file through the
+        //    in-process WinTrust/catalog verifier. No PowerShell child process or online
+        //    revocation lookup is involved.
         var resolved = raws
             .Select(r => (Raw: r, Resolution: CommandLine.ResolveExecutable(r.Command)))
             .ToList();

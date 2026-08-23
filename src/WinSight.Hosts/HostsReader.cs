@@ -1,3 +1,5 @@
+using System.Net;
+
 namespace WinSight.Hosts;
 
 /// <summary>The hosts file's active entries, and what reading it actually did.</summary>
@@ -10,7 +12,8 @@ namespace WinSight.Hosts;
 public sealed record HostsSnapshot(
     IReadOnlyList<HostEntry> Entries,
     bool Unreadable,
-    bool Missing);
+    bool Missing,
+    int MalformedLines);
 
 /// <summary>
 /// Reads and parses the Windows hosts file into its active entries. Read-only. Parsing
@@ -48,21 +51,22 @@ public sealed class HostsReader(string? path = null)
     {
         try
         {
-            return new HostsSnapshot(Parse(File.ReadLines(_path)), Unreadable: false, Missing: false);
+            var parsed = ParseWithCoverage(File.ReadLines(_path));
+            return new HostsSnapshot(parsed.Entries, Unreadable: false, Missing: false, parsed.MalformedLines);
         }
         catch (FileNotFoundException)
         {
             // Genuinely absent is not suspicious: Windows works fine without the file, and it is
             // materially different from "present but refused".
-            return new HostsSnapshot(Array.Empty<HostEntry>(), Unreadable: false, Missing: true);
+            return new HostsSnapshot([], Unreadable: false, Missing: true, MalformedLines: 0);
         }
         catch (DirectoryNotFoundException)
         {
-            return new HostsSnapshot(Array.Empty<HostEntry>(), Unreadable: false, Missing: true);
+            return new HostsSnapshot([], Unreadable: false, Missing: true, MalformedLines: 0);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new HostsSnapshot(Array.Empty<HostEntry>(), Unreadable: true, Missing: false);
+            return new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
         }
     }
 
@@ -70,9 +74,15 @@ public sealed class HostsReader(string? path = null)
     /// Parses hosts-file lines: strips comments/blanks, then each active line is an IP
     /// followed by one or more hostnames (a line may map several names to one address).
     /// </summary>
-    public static IReadOnlyList<HostEntry> Parse(IEnumerable<string> lines)
+    public static IReadOnlyList<HostEntry> Parse(IEnumerable<string> lines) =>
+        ParseWithCoverage(lines).Entries;
+
+    internal static (IReadOnlyList<HostEntry> Entries, int MalformedLines) ParseWithCoverage(
+        IEnumerable<string> lines)
     {
+        ArgumentNullException.ThrowIfNull(lines);
         var entries = new List<HostEntry>();
+        var malformedLines = 0;
         foreach (var line in lines)
         {
             var trimmed = line.Trim();
@@ -88,8 +98,9 @@ public sealed class HostsReader(string? path = null)
             }
 
             var parts = trimmed.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length < 2)
+            if (parts.Length < 2 || !IPAddress.TryParse(parts[0], out _))
             {
+                malformedLines++;
                 continue;
             }
             var ip = parts[0];
@@ -98,6 +109,6 @@ public sealed class HostsReader(string? path = null)
                 entries.Add(new HostEntry(ip, parts[i]));
             }
         }
-        return entries;
+        return (entries, malformedLines);
     }
 }

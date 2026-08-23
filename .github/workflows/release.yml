@@ -5,9 +5,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
-  id-token: write
-  attestations: write
+  contents: read
 
 jobs:
   # Runner images are pinned, not floated. `windows-latest` currently resolves to `windows-2025`, so
@@ -18,6 +16,11 @@ jobs:
   # `windows-2022` beside it, so the image this release is built on is one the suite has actually run
   # on. Moving to a newer image is then a deliberate one-line commit here, reviewed like any other.
   build:
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      RELEASE_SHA: ${{ github.sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -32,9 +35,12 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.301"
+          dotnet-version: "10.0.303"
           architecture: ${{ matrix.architecture }}
           cache: true
           cache-dependency-path: Directory.Packages.props
@@ -51,13 +57,24 @@ jobs:
           Write-Host $line
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "- $line"
 
-      - name: Validate tag version
+      - name: Validate tag source and version
         shell: pwsh
         run: |
-          $tagVersion = "${{ github.ref_name }}".TrimStart("v")
+          if ($env:RELEASE_TAG -cnotmatch '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)([-.][0-9A-Za-z.-]+)?$') {
+            throw "Release tag is not a strict vX.Y.Z version."
+          }
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:RELEASE_SHA) {
+            throw "Checkout does not match the immutable release SHA."
+          }
+          & git fetch --no-tags origin '+refs/heads/main:refs/remotes/origin/main'
+          if ($LASTEXITCODE -ne 0) { throw "Unable to fetch main for release ancestry proof." }
+          & git merge-base --is-ancestor $env:RELEASE_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Release tag does not point to a commit on main." }
+          $tagVersion = $env:RELEASE_TAG.Substring(1)
           [xml]$props = Get-Content Directory.Build.props
           $projectVersion = $props.Project.PropertyGroup.Version
-          if ($tagVersion -ne $projectVersion) {
+          if ($tagVersion -cne $projectVersion) {
             throw "Tag version $tagVersion does not match project version $projectVersion."
           }
 
@@ -86,9 +103,10 @@ jobs:
         env:
           WINSIGHT_SIGNING_CERT_BASE64: ${{ secrets.WINSIGHT_SIGNING_CERT_BASE64 }}
           WINSIGHT_SIGNING_CERT_PASSWORD: ${{ secrets.WINSIGHT_SIGNING_CERT_PASSWORD }}
+          REQUIRE_SIGNED_RELEASE: ${{ vars.REQUIRE_SIGNED_RELEASE }}
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
-          $signingPolicy = "${{ vars.REQUIRE_SIGNED_RELEASE }}".Trim().ToLowerInvariant()
+          $version = $env:RELEASE_TAG.Substring(1)
+          $signingPolicy = $env:REQUIRE_SIGNED_RELEASE.Trim().ToLowerInvariant()
           if ($signingPolicy -notin @("true", "false")) {
             throw "REQUIRE_SIGNED_RELEASE must be explicitly set to true or false."
           }
@@ -111,7 +129,7 @@ jobs:
       - name: Test native installer lifecycle
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}".TrimStart("v")
+          $version = $env:RELEASE_TAG.Substring(1)
           ./scripts/Test-Installer.ps1 `
             -InstallerPath "out/release/winsight-v$version-win-${{ matrix.architecture }}-setup.exe" `
             -Version $version `
@@ -135,6 +153,12 @@ jobs:
     needs: build
     runs-on: windows-2025
     timeout-minutes: 15
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -145,11 +169,34 @@ jobs:
       - name: Verify release checksums
         shell: pwsh
         run: |
-          foreach ($checksumFile in Get-ChildItem release-assets -Filter *.sha256) {
-            $parts = (Get-Content $checksumFile.FullName).Split(' ', [System.StringSplitOptions]::RemoveEmptyEntries)
-            $artifact = Join-Path $checksumFile.DirectoryName $parts[1]
-            $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
-            if ($actual -ne $parts[0]) { throw "Checksum mismatch for $artifact" }
+          $version = $env:RELEASE_TAG
+          $expected = @(
+            "winsight-$version-win-x64.zip",
+            "winsight-$version-win-x64-setup.exe",
+            "winsight-$version-win-x64.spdx.json",
+            "winsight-$version-win-arm64.zip",
+            "winsight-$version-win-arm64-setup.exe",
+            "winsight-$version-win-arm64.spdx.json"
+          )
+          $files = @(Get-ChildItem -LiteralPath release-assets -File)
+          $actualArtifacts = @($files | Where-Object Extension -ne '.sha256' | ForEach-Object Name)
+          $actualChecksums = @($files | Where-Object Extension -eq '.sha256' | ForEach-Object Name)
+          if (@(Compare-Object $expected $actualArtifacts).Count -ne 0) {
+            throw "Release artifact set is incomplete or contains unexpected files."
+          }
+          if (@(Compare-Object @($expected | ForEach-Object { "$_`.sha256" }) $actualChecksums).Count -ne 0) {
+            throw "Release checksum set is incomplete or contains unexpected files."
+          }
+          foreach ($name in $expected) {
+            $artifact = Join-Path (Resolve-Path -LiteralPath release-assets).Path $name
+            $checksumFile = "$artifact.sha256"
+            $line = [IO.File]::ReadAllText($checksumFile).TrimEnd("`r", "`n")
+            $match = [regex]::Match($line, '^(?<hash>[0-9a-f]{64})  (?<name>[^\\/]+)$', 'CultureInvariant')
+            if (-not $match.Success -or $match.Groups['name'].Value -cne $name) {
+              throw "Malformed or misbound checksum file: $checksumFile"
+            }
+            $actual = (Get-FileHash -LiteralPath $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actual -cne $match.Groups['hash'].Value) { throw "Checksum mismatch for $artifact" }
           }
 
       - name: Attest release provenance
@@ -162,14 +209,14 @@ jobs:
       - name: Attest x64 SBOM
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
-          subject-path: release-assets/winsight-${{ github.ref_name }}-win-x64.zip
-          sbom-path: release-assets/winsight-${{ github.ref_name }}-win-x64.spdx.json
+          subject-path: release-assets/winsight-${{ env.RELEASE_TAG }}-win-x64.zip
+          sbom-path: release-assets/winsight-${{ env.RELEASE_TAG }}-win-x64.spdx.json
 
       - name: Attest Arm64 SBOM
         uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
         with:
-          subject-path: release-assets/winsight-${{ github.ref_name }}-win-arm64.zip
-          sbom-path: release-assets/winsight-${{ github.ref_name }}-win-arm64.spdx.json
+          subject-path: release-assets/winsight-${{ env.RELEASE_TAG }}-win-arm64.zip
+          sbom-path: release-assets/winsight-${{ env.RELEASE_TAG }}-win-arm64.spdx.json
 
       - name: Create release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3

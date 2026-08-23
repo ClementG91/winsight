@@ -52,9 +52,9 @@ public sealed record FirewallCommandRequest(
     string? SnapshotVersion = null);
 
 /// <param name="UnrecordedApps">
-/// Applications seen reaching the network that could not be recorded because the pending log was
-/// full. Carried so a caller can say "and more were not recorded" rather than present a truncated
-/// list as complete: a tool that hides its own blind spot is worse than one without the feature.
+/// Conservative lower bound on outbound observations not represented by the pending-app list:
+/// capacity drops, connections without a safe executable identity, and a terminal observer failure.
+/// The legacy wire name is retained for protocol compatibility.
 /// </param>
 public sealed record FirewallServiceStatus(
     OutboundFirewallMode Mode,

@@ -1,20 +1,22 @@
 # Production readiness
 
-This is the authoritative status as of 2026-08-09. Evidence is candidate-bound: a successful result
-for one commit or package does not automatically qualify a later one. The current AC109 candidate
-changes named-pipe ownership/admission, service-listener lifecycle and privileged policy storage
-concurrency. A local pre-publish x64 package passed the isolated-VM gates recorded below, but it is
-not an immutable CI or release artifact. The earlier privileged evidence was gathered against
-historical candidate `3ad4b92`; see
-[Current AC109 candidate delta](#current-ac109-candidate-delta).
+This is the authoritative status as of 2026-08-20. Evidence is candidate-bound: a successful result
+for one commit or package does not qualify later source. The current post-v0.11.5 source changes WFP
+lifetime, SCM registration, signature verification, acquisition completeness, alert/crash handling,
+VirusTotal secret isolation and release hardening. No historical VM record covers that combined
+surface. The records below remain useful regression evidence, but none is a current-candidate pass;
+see [Current source delta](#current-source-delta-2026-08-20).
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Not production-ready** - the AC109 local package passed installer, trust, IPC and hostile-listener VM gates, but exact release-artifact CI/CodeQL, full WFP enforcement, literal Network Logon and human review remain open |
-| **Arm64 (native)** | **Not production-ready** - native CI build/package/installer passed for `3ad4b92`; privileged WFP/SCM/trust/IPC/session behavior remains unverified |
+| **x64** | **Not production-ready** - current code builds and is locally testable, but its privileged WFP/SCM/trust/IPC surface needs a new exact-candidate clean-VM run |
+| **Arm64 (native)** | **Not production-ready** - build, full tests, packaging and installer are assigned to native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an Arm64 VM |
 | **x64 on Arm64** | **Not production-ready** - emulated application identity and privileged runtime behavior remain unverified |
 
-## Current x64 evidence
+Authenticode is an accepted distribution limitation for now and is not counted as the blocker in
+these verdicts. It still means Windows cannot establish a publisher identity.
+
+## Historical x64 evidence
 
 Candidate:
 
@@ -42,7 +44,7 @@ The supplied VM campaign confirmed:
 Full supplied-result classification:
 [`validation/2026-07-30-x64-qualification-3ad4b92.md`](validation/2026-07-30-x64-qualification-3ad4b92.md).
 
-## Why x64 is still not production-ready
+## Limitations of the historical x64 campaign
 
 Three protocol gaps prevented a complete campaign:
 
@@ -85,7 +87,7 @@ larger one left closed.
 **What it touched at that historical point:** nothing on the privileged boundary. For the v0.11.1
 candidate reviewed here, the WFP engine, SCM lifecycle, service-path trust check and authenticated
 named-pipe IPC were byte-identical to their recorded predecessors. That statement does not apply to
-the current AC109 candidate, which changes the named-pipe and policy-store implementation.
+the later AC109 candidate, which changed the named-pipe and policy-store implementation.
 
 **What it does not change:** the verdict. All three targets remain **not production-ready** for
 exactly the reasons above. The three x64 protocol gaps, native Arm64 privileged behaviour and
@@ -97,7 +99,7 @@ contract, the engine-library and privileged-managed coverage gates, and formatti
 build, packaging and installer lifecycle run in CI on a native runner as usual; the Arm64 *privileged
 runtime* remains `NOT_RUN`.
 
-## Current AC109 candidate delta
+## Historical AC109 candidate delta
 
 AC109 replaces the fixed named-pipe accept pool with successor-before-dispatch ownership, separates
 bounded read and machine-policy-mutation admission, makes unexpected listener/handler loss terminal,
@@ -136,6 +138,31 @@ installer on GitHub's native runner; privileged Arm64 WFP/SCM/session qualificat
 identity remain blocked on suitable hardware. Until those records exist, all targets remain
 **not production-ready**.
 
+## Current source delta, 2026-08-20
+
+The current source is materially newer than every record above. In particular:
+
+- WFP objects are owned by one dynamic session, stop/process loss removes them, startup rebuilds
+  persisted intent, corrupt or partial state fails closed, and durable `Ask` is treated as no ruling;
+- service installation now rolls back any partial post-create configuration and applies an exact
+  SID/required-privilege/recovery profile, which the VM protocol queries through
+  `QueryServiceConfig2W`;
+- executable trust uses in-process, cache-only WinTrust plus Windows catalog verification and keeps
+  the file handle open while hashing/verifying; no scanner launches PowerShell for signatures;
+- collectors expose incomplete/unreadable acquisition instead of manufacturing clean results, and
+  inaccessible signatures remain `Unknown` rather than being called missing or trusted;
+- a dashboard-stored VirusTotal key stays out of the environment, product-launched children have the
+  managed environment key removed, redirects are refused and response/quota files are bounded;
+- the alert journal is serialized and bounded, corrupted input is reported, and fatal WPF UI
+  exceptions are recorded before termination instead of continuing in an unknown state;
+- release jobs use read-only source-build credentials, current servicing dependencies, exact
+  artifact/checksum sets, and native Arm64 CI for build/test/package/installer work.
+
+These are improvements, not qualification evidence. The next x64 VM run must exercise 35/35 WFP and
+SCM checks, 13/13 path-trust checks, forced service termination, IPC identities and final cleanup
+against one immutable package. Arm64 build and ordinary tests must run only in native CI as planned;
+its privileged runtime campaign remains a VM task because no suitable local hardware is available.
+
 ## Authenticode policy
 
 Public binaries have no Authenticode publisher certificate. SignPath Foundation declined the free
@@ -165,7 +192,7 @@ package:
 3. install prerequisites in the guest and construct the protected candidate root;
 4. record the expected unsigned status and run the installer/integrity gates;
 5. restore S0 from the host, recreate the protected candidate and record S1;
-6. run ETW lifecycle gates, then WFP 25/25, trust 12/12 and local IPC 7/7 from separate S1 restores;
+6. run ETW lifecycle gates, then WFP/SCM 35/35, trust 13/13 and local IPC 7/7 from separate S1 restores;
 7. create S2 on the host before full WFP and prove every restore from the host;
 8. while the AuditOnly service is running, run Network Logon 10/10 from a second isolated machine;
 9. seal manifests outside the VM disk, restore S0 from the host and verify final absence.

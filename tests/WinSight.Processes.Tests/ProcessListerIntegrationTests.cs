@@ -21,10 +21,10 @@ public sealed class ProcessListerIntegrationTests
         {
             Assert.True(p.Pid >= 0);
             Assert.False(string.IsNullOrWhiteSpace(p.Name));
-            // A resolvable image gets a real verdict; a protected/system image stays Missing.
+            // A resolvable image gets a real verdict; a protected/system image stays Unknown.
             if (p.Path is null)
             {
-                Assert.Equal(SignatureState.Missing, p.Signature.State);
+                Assert.Equal(SignatureState.Unknown, p.Signature.State);
             }
         });
 

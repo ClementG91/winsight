@@ -457,6 +457,23 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
     }
 
     [Fact]
+    public async Task GracefulStop_DisposesTheOwnedWfpSessionBeforeReturning()
+    {
+        var store = new FirewallPolicyStore(Path.Combine(_directory, "stop-policies.json"), allowEnforcement: true);
+        var reconciler = new DisposableReconciler();
+        await using var coordinator = new EnforcementCoordinator(
+            store, reconciler, new RecordingStartModeController());
+        var service = new EnforcementStartupService(
+            coordinator, new CapturingLogger<EnforcementStartupService>());
+        await service.StartAsync(CancellationToken.None);
+
+        await service.StopAsync(CancellationToken.None);
+
+        Assert.Equal(1, reconciler.CleanupCalls);
+        Assert.Equal(1, reconciler.DisposeCalls);
+    }
+
+    [Fact]
     public async Task WorkerFailureSink_LogsInvariantTemplatesWithoutExceptionAndRequestsCleanStop()
     {
         var logger = new CapturingLogger<FirewallServiceWorker>();
@@ -821,11 +838,13 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
 
         log.StorageProvisioningFailed();
         log.StorageUntrusted();
+        log.PolicyContentInvalid();
         log.HostReady(OutboundFirewallMode.AuditOnly);
 
         Assert.Collection(logger.Entries,
             entry => Assert.Contains("[FW_STORAGE_PROVISIONING_FAILED]", entry.Message, StringComparison.Ordinal),
             entry => Assert.Contains("[FW_STORAGE_UNTRUSTED]", entry.Message, StringComparison.Ordinal),
+            entry => Assert.Contains("[FW_POLICY_CONTENT_INVALID]", entry.Message, StringComparison.Ordinal),
             entry =>
             {
                 Assert.Contains("[FW_HOST_READY]", entry.Message, StringComparison.Ordinal);
@@ -908,6 +927,29 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
         public Task ApplyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
             throw new Win32Exception(5, @"native detail C:\attacker\secret.exe S-1-5-21-666");
         public Task RemoveAsync(string executablePath, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    private sealed class DisposableReconciler : IWinSightWfpReconciler, IDisposable
+    {
+        public bool IsSupported => true;
+        public int CleanupCalls { get; private set; }
+        public int DisposeCalls { get; private set; }
+
+        public Task ReconcileExactAsync(
+            IReadOnlyList<AppFirewallPolicy> policies,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<bool> VerifyExactAsync(
+            IReadOnlyList<AppFirewallPolicy> policies,
+            CancellationToken cancellationToken = default) => Task.FromResult(true);
+
+        public Task CleanupAllAsync(CancellationToken cancellationToken = default)
+        {
+            CleanupCalls++;
+            return Task.CompletedTask;
+        }
+
+        public void Dispose() => DisposeCalls++;
     }
 
     private sealed class NativeFailingListener : IFirewallServiceListener

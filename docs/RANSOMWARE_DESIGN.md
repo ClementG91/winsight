@@ -111,4 +111,6 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
   and the Focus Assist state before concluding a detection failed. Because of this, every detection
   is also written to a local **alert journal** (`%LocalAppData%\WinSight\alerts.log`, see
   `AlertJournal`) *before* the balloon is raised, so a suppressed or missed alert still leaves a
-  record. A detection that leaves no trace is indistinguishable from no detection at all.
+  record. Fields, entries and file size are bounded; malformed/unreadable input is reported, and an
+  oversized journal is preserved aside before a fresh one is created. A detection that leaves no
+  trace is indistinguishable from no detection at all.

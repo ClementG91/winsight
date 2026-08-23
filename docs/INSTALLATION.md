@@ -57,7 +57,9 @@ mix users' quota and remove meaningful consent for sending hashes to a third par
 For an interactive installation, open **Settings** in the WinSight header, paste the
 key and choose **Save securely**. The key is encrypted at rest with Windows DPAPI for
 the current account, is available immediately, and is never written to reports or
-exports. Choose **Disable** in the same dialog to remove the encrypted key.
+exports. The decrypted dashboard key stays in process memory rather than being copied
+to the process environment, and WinSight removes `WINSIGHT_VT_KEY` from child processes
+it launches. Choose **Disable** in the same dialog to remove the encrypted key.
 
 For a standard Community key, WinSight coordinates dashboard and CLI requests with a
 persistent per-user guard: no more than 4 lookups in any rolling 60-second window,
@@ -150,6 +152,10 @@ refused):
 .\winsight-firewall-service.exe enforce-status
 ```
 
+`uninstall` is an ordered recovery operation, not a bare `DeleteService`: it stops the service,
+waits for `Stopped`, removes current dynamic WFP objects plus any legacy static WinSight residue, and
+deletes SCM registration only after cleanup succeeds.
+
 Direct mutation aliases such as `wfp-provision`, `wfp-filter-add`, `wfp-block-add`,
 `enforce-enable`, `enforce-disable`, `block-app` and `allow-app` are intentionally
 disabled with `[FW_DIRECT_MUTATION_DISABLED]`. They cannot bypass service authorization.
@@ -167,10 +173,15 @@ unit tests do not qualify this feature for production.
 Verify a download in PowerShell:
 
 ```powershell
-$artifact = "winsight-v0.8.1-win-x64-setup.exe"
-$expected = (Get-Content "$artifact.sha256").Split()[0]
+$artifact = "winsight-v0.11.6-win-x64-setup.exe"
+$line = [IO.File]::ReadAllText("$artifact.sha256").TrimEnd("`r", "`n")
+$match = [regex]::Match($line, '^(?<hash>[0-9a-f]{64})  (?<name>[^\\/]+)$')
+if (-not $match.Success -or $match.Groups['name'].Value -cne $artifact) {
+    throw "Malformed or misbound WinSight checksum file"
+}
+$expected = $match.Groups['hash'].Value
 $actual = (Get-FileHash $artifact -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actual -ne $expected) { throw "WinSight checksum mismatch" }
+if ($actual -cne $expected) { throw "WinSight checksum mismatch" }
 ```
 
 GitHub releases also carry a build-provenance attestation. The project currently
@@ -182,10 +193,10 @@ protect integrity and provenance, but they are not a substitute for Authenticode
 
 ```powershell
 # Per-user, silent, no automatic launch
-./winsight-v0.8.1-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+./winsight-v0.11.6-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Explicit language: english, french, or spanish
-./winsight-v0.8.1-win-x64-setup.exe /LANG=french
+./winsight-v0.11.6-win-x64-setup.exe /LANG=french
 ```
 
 Use the architecture-specific artifact in deployment tooling. Do not redistribute

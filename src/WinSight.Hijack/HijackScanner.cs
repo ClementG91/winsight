@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using WinSight.Core;
 
 namespace WinSight.Hijack;
 
@@ -12,12 +13,17 @@ public readonly record struct RegisteredService(string Name, string CommandLine,
 public interface IServiceRegistry
 {
     IEnumerable<RegisteredService> Enumerate();
+
+    AcquisitionSnapshot<RegisteredService> ReadWithCoverage() =>
+        new(Enumerate().ToList());
 }
 
 /// <summary>Reads the machine-wide PATH, already split and expanded. A seam, for the same reason.</summary>
 public interface IMachinePath
 {
     IReadOnlyList<string> Directories();
+
+    AcquisitionSnapshot<string> ReadWithCoverage() => new(Directories());
 }
 
 /// <summary>
@@ -28,36 +34,55 @@ public sealed class RegistryServiceSource : IServiceRegistry
 {
     private const string Root = @"SYSTEM\CurrentControlSet\Services";
 
-    public IEnumerable<RegisteredService> Enumerate()
-    {
-        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-        using var services = baseKey.OpenSubKey(Root);
-        if (services is null)
-        {
-            yield break;
-        }
+    public IEnumerable<RegisteredService> Enumerate() => ReadWithCoverage().Items;
 
-        foreach (var name in services.GetSubKeyNames())
+    public AcquisitionSnapshot<RegisteredService> ReadWithCoverage()
+    {
+        var result = new List<RegisteredService>();
+        var unreadableItems = 0;
+        try
         {
-            string? image = null;
-            var autoStarts = false;
-            try
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
+            using var services = baseKey.OpenSubKey(Root);
+            if (services is null)
             {
-                using var service = services.OpenSubKey(name);
-                image = service?.GetValue("ImagePath") as string;
-                // Start: 0=boot 1=system 2=auto 3=manual 4=disabled.
-                autoStarts = service?.GetValue("Start") is int start && start <= 2;
+                return new AcquisitionSnapshot<RegisteredService>([], unreadableSources: 1);
             }
-            catch (Exception ex) when (ex is System.Security.SecurityException
-                                         or UnauthorizedAccessException
-                                         or IOException)
+
+            foreach (var name in services.GetSubKeyNames())
             {
-                // One unreadable service must not cost the rest of the sweep.
+                string? image = null;
+                var autoStarts = false;
+                try
+                {
+                    using var service = services.OpenSubKey(name);
+                    if (service is null)
+                    {
+                        unreadableItems++;
+                        continue;
+                    }
+                    image = service.GetValue("ImagePath") as string;
+                    // Start: 0=boot 1=system 2=auto 3=manual 4=disabled.
+                    autoStarts = service.GetValue("Start") is int start && start <= 2;
+                }
+                catch (Exception ex) when (ex is System.Security.SecurityException
+                                             or UnauthorizedAccessException
+                                             or IOException)
+                {
+                    unreadableItems++;
+                }
+                if (!string.IsNullOrWhiteSpace(image))
+                {
+                    result.Add(new RegisteredService(name, image, autoStarts));
+                }
             }
-            if (!string.IsNullOrWhiteSpace(image))
-            {
-                yield return new RegisteredService(name, image, autoStarts);
-            }
+            return new AcquisitionSnapshot<RegisteredService>(result, unreadableItems: unreadableItems);
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException
+                                     or UnauthorizedAccessException
+                                     or IOException)
+        {
+            return new AcquisitionSnapshot<RegisteredService>(result, unreadableSources: 1, unreadableItems);
         }
     }
 }
@@ -75,7 +100,9 @@ public sealed class RegistryMachinePath : IMachinePath
     private const string EnvironmentKey =
         @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
 
-    public IReadOnlyList<string> Directories()
+    public IReadOnlyList<string> Directories() => ReadWithCoverage().Items;
+
+    public AcquisitionSnapshot<string> ReadWithCoverage()
     {
         try
         {
@@ -85,20 +112,20 @@ public sealed class RegistryMachinePath : IMachinePath
                 "Path", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
             if (string.IsNullOrWhiteSpace(raw))
             {
-                return [];
+                return new AcquisitionSnapshot<string>([]);
             }
-            return raw
+            return new AcquisitionSnapshot<string>(raw
                 .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                 .Select(entry => Environment.ExpandEnvironmentVariables(entry).Trim('"').Trim())
                 .Where(entry => entry.Length > 0)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+                .ToList());
         }
         catch (Exception ex) when (ex is System.Security.SecurityException
                                      or UnauthorizedAccessException
                                      or IOException)
         {
-            return [];
+            return new AcquisitionSnapshot<string>([], unreadableSources: 1);
         }
     }
 }
@@ -131,10 +158,20 @@ public sealed class HijackScanner(
     private readonly HijackTriage _triage = new(probe);
 
     public IReadOnlyList<HijackFinding> Scan(CancellationToken cancellationToken = default)
+        => ScanWithCoverage(cancellationToken).Items;
+
+    public AcquisitionSnapshot<HijackFinding> ScanWithCoverage(
+        CancellationToken cancellationToken = default)
     {
         var findings = new List<HijackFinding>();
-        var pathDirectories = _machinePath.Directories();
-        var known = _knownDlls.Read();
+        var services = _services.ReadWithCoverage();
+        var paths = _machinePath.ReadWithCoverage();
+        var knownDlls = _knownDlls.ReadWithCoverage();
+        var pathDirectories = paths.Items;
+        var known = knownDlls.Items.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unreadableSources = services.UnreadableSources + paths.UnreadableSources + knownDlls.UnreadableSources;
+        var unreadableItems = services.UnreadableItems + paths.UnreadableItems + knownDlls.UnreadableItems;
+        var unreadableProbeStart = (_probe as IWritabilityProbeCoverage)?.UnreadableAttempts ?? 0;
         var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         // Writability is a fact about a directory, not about the service that named it, and the
@@ -152,7 +189,7 @@ public sealed class HijackScanner(
             return writable;
         }
 
-        foreach (var service in _services.Enumerate())
+        foreach (var service in services.Items)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (_triage.AssessCommandLine(service.Name, service.CommandLine) is { } unquoted)
@@ -174,7 +211,10 @@ public sealed class HijackScanner(
             {
                 findings.Add(writable);
             }
-            findings.AddRange(AssessImports(service, directory, system, windows, pathDirectories, known, CanPlantIn));
+            var importAssessment = AssessImports(
+                service, directory, system, windows, pathDirectories, known, CanPlantIn);
+            findings.AddRange(importAssessment.Findings);
+            unreadableItems += importAssessment.UnreadableItems;
         }
 
         foreach (var directory in pathDirectories)
@@ -188,7 +228,7 @@ public sealed class HijackScanner(
 
         // Worst first: an occupied candidate is already a file on disk, an exploitable one is one
         // write away, and a latent one is a hygiene note.
-        return findings
+        var ordered = findings
             .OrderBy(f => f.Exposure switch
             {
                 HijackExposure.Occupied => 0,
@@ -197,6 +237,9 @@ public sealed class HijackScanner(
             })
             .ThenBy(f => f.Subject, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        var unreadableProbeEnd = (_probe as IWritabilityProbeCoverage)?.UnreadableAttempts ?? unreadableProbeStart;
+        unreadableItems += Math.Max(0, unreadableProbeEnd - unreadableProbeStart);
+        return new AcquisitionSnapshot<HijackFinding>(ordered, unreadableSources, unreadableItems);
     }
 
     /// <summary>
@@ -223,7 +266,7 @@ public sealed class HijackScanner(
     /// import in a program that never runs is not a boot-time escalation path, and reading every
     /// registered service's image would multiply the I/O for no added signal.
     /// </remarks>
-    private IEnumerable<HijackFinding> AssessImports(
+    private (IReadOnlyList<HijackFinding> Findings, int UnreadableItems) AssessImports(
         RegisteredService service,
         string directory,
         string system,
@@ -234,18 +277,21 @@ public sealed class HijackScanner(
     {
         if (ExecutablePath(service.CommandLine) is not { } image || !_fileExists(image))
         {
-            yield break;
+            return ([], 0);
         }
         var imports = _readImports(image);
+        if (!imports.IsReadable)
+        {
+            return ([], 1);
+        }
         if (imports.IsEmpty)
         {
-            yield break;
+            return ([], 0);
         }
 
         var order = DllSearchOrder.For(directory, system, windows, pathDirectories);
-        foreach (var phantom in PhantomDllRule.Find(imports, order, known, _fileExists, canPlantIn))
-        {
-            yield return new HijackFinding(
+        return (PhantomDllRule.Find(imports, order, known, _fileExists, canPlantIn)
+            .Select(phantom => new HijackFinding(
                 HijackKind.PhantomImport,
                 $"{service.Name}:{phantom.Dll}",
                 image,
@@ -253,8 +299,8 @@ public sealed class HijackScanner(
                 // someone can fill it today.
                 phantom.PlantableAt is null ? HijackExposure.Latent : HijackExposure.Exploitable,
                 [phantom.Dll],
-                phantom.PlantableAt);
-        }
+                phantom.PlantableAt))
+            .ToList(), 0);
     }
 
     /// <summary>

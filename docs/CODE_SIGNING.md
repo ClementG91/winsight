@@ -52,11 +52,13 @@ controls are technical, not organisational:
 - **Signed commits are required on `main`**, and the requirement binds the maintainer's own account:
   `enforce_admins` is enabled, so the only account able to bypass the rule cannot. A control that
   exempts the one actor capable of breaking it is theatre.
-- **Any future production signing happens only in CI**, from a tagged commit on `main`, in a workflow
+- **Any future accepted release signing happens only in CI**, from a tagged commit whose ancestry on
+  `main` is checked by the workflow, in a workflow
   whose definition is in this repository and covered by the same review requirements as any other
   file.
-- **No signing key ever exists on a developer machine.** There is no local signing path, so a
-  compromised workstation cannot produce a signed WinSight binary.
+- **Release signing credentials belong only in protected CI secrets.** The helper can technically
+  sign a local test file when explicitly given a PFX; such a signature is development evidence only
+  and can never satisfy release provenance or publication policy.
 - **The tag must match the project version.** `release.yml` refuses to build when
   `Directory.Build.props` and the tag disagree, so a mistyped tag stops the release rather than
   shipping a mislabelled artifact.

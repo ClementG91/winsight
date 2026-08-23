@@ -52,6 +52,36 @@ public sealed class ReleaseSigningPolicyContractTests
     }
 
     [Fact]
+    public void ReleaseTagIsDataAndMustPointToMain()
+    {
+        var workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot, ".github", "workflows", "release.yml"));
+
+        Assert.Contains("RELEASE_TAG: ${{ github.ref_name }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("RELEASE_SHA: ${{ github.sha }}", workflow, StringComparison.Ordinal);
+        Assert.Contains("fetch-depth: 0", workflow, StringComparison.Ordinal);
+        Assert.Contains("git merge-base --is-ancestor $env:RELEASE_SHA origin/main", workflow, StringComparison.Ordinal);
+        Assert.Contains("Release tag does not point to a commit on main.", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("$version = \"${{ github.ref_name }}\"", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("$tagVersion = \"${{ github.ref_name }}\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("persist-credentials: false", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PublisherAcceptsOnlyTheExactChecksummedReleaseSet()
+    {
+        var workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot, ".github", "workflows", "release.yml"));
+
+        Assert.Contains("Compare-Object $expected $actualArtifacts", workflow, StringComparison.Ordinal);
+        Assert.Contains("Release artifact set is incomplete or contains unexpected files.", workflow, StringComparison.Ordinal);
+        Assert.Contains("Release checksum set is incomplete or contains unexpected files.", workflow, StringComparison.Ordinal);
+        Assert.Contains("(?<hash>[0-9a-f]{64})  (?<name>[^\\\\/]+)", workflow, StringComparison.Ordinal);
+        Assert.Contains("$match.Groups['name'].Value -cne $name", workflow, StringComparison.Ordinal);
+        Assert.Contains("Get-FileHash -LiteralPath $artifact -Algorithm SHA256", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SigningPolicyDocumentationMatchesTheCurrentRepositoryDecision()
     {
         var policy = File.ReadAllText(Path.Combine(

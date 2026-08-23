@@ -1,3 +1,25 @@
+## v0.11.6, 2026-08-20
+
+- Made WFP ownership crash-safe with one dynamic session, exact startup/teardown reconciliation,
+  fail-closed partial-state handling and non-durable `Ask` semantics.
+- Hardened the LocalSystem service registration with checked rollback, a service SID, an exact
+  required-privilege allowlist and bounded restart recovery; the VM protocol now verifies that SCM
+  profile through `QueryServiceConfig2W` and runs 17/35 skip/full checks.
+- Replaced PowerShell-based/catalog-blind signature paths with in-process, cache-only WinTrust and
+  Windows catalog verification while holding the hashed file open. Inaccessible evidence is now
+  `Unknown`; the content-bound cache also refuses to retain a verdict when the file changes during
+  verification. Collectors surface unreadable or partial acquisition instead of clean-looking gaps.
+  Browser corruption/localization regressions are covered explicitly; the engine is back above the
+  enforced 80% per-library floor rather than weakening the gate.
+- Kept DPAPI VirusTotal keys out of the process environment, stripped managed keys from product-
+  launched children, refused credential-bearing redirects and bounded provider responses/quota
+  state. Alert and crash evidence is bounded, corruption-aware and redacts the active key.
+- Updated .NET 10 servicing dependencies and hardened releases with read-only build credentials,
+  tag-on-main proof, shell-injection-safe tag handling, exact checksum/asset binding and verified
+  Inno Setup reuse. Native Arm64 remains CI-only; privileged runtime qualification remains a VM gate.
+- Corrected stale installation, signing, WFP, Arm64, privacy and production-readiness documentation;
+  historical qualification records remain intact and explicitly candidate-bound.
+
 ## v0.11.5, 2026-08-09
 
 Step-by-step progress log. Newest first. Every CI-green step lands here.

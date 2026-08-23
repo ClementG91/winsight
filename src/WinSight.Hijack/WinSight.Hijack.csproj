@@ -5,4 +5,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="WinSight.Hijack.Tests" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+  </ItemGroup>
 </Project>

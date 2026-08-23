@@ -247,6 +247,31 @@ public sealed class DashboardFindingPresenterTests
     }
 
     [Theory]
+    [InlineData("en", "list is incomplete")]
+    [InlineData("fr", "liste est incomplète")]
+    [InlineData("es", "lista está incompleta")]
+    public void OutboundFirewallPresentation_ObservationGapIsExplicit(
+        string culture, string expectedDetail)
+    {
+        WithCulture(culture, text =>
+        {
+            var result = DashboardFindingPresenter.Present(
+                "outbound-firewall",
+                Item(Severity.Notable, new()
+                {
+                    ["kind"] = "status",
+                    ["available"] = "True",
+                    ["effectiveState"] = "AuditOnly",
+                    ["unrecorded"] = "2",
+                }),
+                text);
+
+            Assert.Contains(expectedDetail, result.Detail, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("2", result.Detail, StringComparison.Ordinal);
+        });
+    }
+
+    [Theory]
     [InlineData("en", "Service endpoint reachable and enforcing")]
     [InlineData("fr", "Point de service accessible ; le filtrage")]
     [InlineData("es", "Punto de servicio accesible; el filtrado")]

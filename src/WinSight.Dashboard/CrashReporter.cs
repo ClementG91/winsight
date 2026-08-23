@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Threading;
+using WinSight.Core;
 
 namespace WinSight.Dashboard;
 
@@ -15,12 +16,14 @@ namespace WinSight.Dashboard;
 /// <remarks>
 /// Local-only, like everything else here: reports are written to
 /// <c>%LocalAppData%\WinSight\crashes</c> and never sent anywhere. They contain the exception, its
-/// stack and the app version — no scan results, no file inventory, nothing about what was found.
+/// stack and the app version. Exception messages can contain local paths or the operation that
+/// failed, so reports remain local; the optional VirusTotal credential is explicitly redacted.
 /// </remarks>
 public static class CrashReporter
 {
     /// <summary>Keep the folder small; a crash loop must not fill the disk.</summary>
     internal const int MaxReports = 20;
+    internal const int MaxReportCharacters = 256 * 1024;
 
     /// <summary>Where reports are written.</summary>
     public static string LogDirectory => Path.Combine(
@@ -33,9 +36,8 @@ public static class CrashReporter
     {
         ArgumentNullException.ThrowIfNull(application);
 
-        // UI thread. The app is still coherent enough to keep running, and for a monitoring tool
-        // staying alive preserves protection — so the exception is recorded and swallowed rather
-        // than taking the process (and Guardian with it) down.
+        // UI thread. The dashboard may be inconsistent after an exception, so capture evidence and
+        // let WPF terminate it. The independently installed firewall service keeps enforcement.
         application.DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         // Background thread: the runtime is already tearing the process down, so this is the last
@@ -49,7 +51,7 @@ public static class CrashReporter
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         TryCapture(e.Exception, "Dispatcher");
-        e.Handled = true;
+        e.Handled = false;
     }
 
     private static void OnAppDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -106,7 +108,18 @@ public static class CrashReporter
             .Append("source  : ").Append(source).AppendLine()
             .AppendLine()
             .Append(exception.ToString()).AppendLine();
-        return builder.ToString();
+        var report = builder.ToString();
+        foreach (var secret in new[]
+                 {
+                     Environment.GetEnvironmentVariable(VirusTotalConfiguration.EnvironmentVariable),
+                     VirusTotalConfiguration.CurrentApiKey,
+                 }.Where(secret => !string.IsNullOrEmpty(secret)).Distinct(StringComparer.Ordinal))
+        {
+            report = report.Replace(secret!, "[REDACTED]", StringComparison.Ordinal);
+        }
+        return report.Length <= MaxReportCharacters
+            ? report
+            : report[..(MaxReportCharacters - 24)] + Environment.NewLine + "[report truncated]";
     }
 
     /// <summary>Writes one report and returns its path.</summary>

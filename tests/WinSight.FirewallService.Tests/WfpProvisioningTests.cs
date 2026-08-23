@@ -8,6 +8,13 @@ namespace WinSight.FirewallService.Tests;
 public sealed class WfpProvisioningTests
 {
     [Fact]
+    public void ProductionSession_IsDynamicWithABoundedTransactionWait()
+    {
+        Assert.Equal(0x00000001u, WfpProvisioning.ProductionSessionFlags);
+        Assert.InRange(WfpProvisioning.ProductionTransactionWaitMilliseconds, 1u, 30_000u);
+    }
+
+    [Fact]
     public void WfpObjectKeys_AreStableAndDistinct()
     {
         var keys = new[]
@@ -53,4 +60,32 @@ public sealed class WfpProvisioningTests
     [Fact]
     public void BlockFilterKeys_RejectsRelativePath() =>
         Assert.Throws<ArgumentException>(() => WfpProvisioning.BlockFilterKeys(@"a.exe"));
+
+    [Fact]
+    public void InterpretLookupResult_OnlyTreatsTheExpectedNotFoundCodeAsAbsent()
+    {
+        const uint expectedNotFound = 0x80320003;
+
+        Assert.True(WfpProvisioning.InterpretLookupResult(0, expectedNotFound));
+        Assert.False(WfpProvisioning.InterpretLookupResult(expectedNotFound, expectedNotFound));
+        var error = Assert.Throws<Win32Exception>(
+            () => WfpProvisioning.InterpretLookupResult(5, expectedNotFound));
+        Assert.Equal(5, error.NativeErrorCode);
+    }
+
+    [Theory]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, true)]
+    public void RequireConsistentIpPair_ReturnsTheSharedState(
+        bool ipv4, bool ipv6, bool expected) =>
+        Assert.Equal(
+            expected,
+            WfpProvisioning.RequireConsistentIpPair(ipv4, ipv6, "test object"));
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void RequireConsistentIpPair_RejectsPartialState(bool ipv4, bool ipv6) =>
+        Assert.Throws<InvalidDataException>(
+            () => WfpProvisioning.RequireConsistentIpPair(ipv4, ipv6, "test object"));
 }

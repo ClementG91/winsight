@@ -28,7 +28,10 @@ public sealed record WakeRecord(
 /// True when the event log could not be queried at all. Distinct from "queried and found nothing",
 /// which is the confusion this flag exists to prevent.
 /// </param>
-public sealed record PresenceReport(IReadOnlyList<WakeRecord> Wakes, bool Unreadable)
+public sealed record PresenceReport(
+    IReadOnlyList<WakeRecord> Wakes,
+    bool Unreadable,
+    int UnreadableItems)
 {
     public int PresenceCount => Wakes.Count(wake => wake.IndicatesPresence);
 }
@@ -41,6 +44,9 @@ public interface IWakeEventSource
 
     /// <summary>True when the source could not be read at all.</summary>
     bool Unreadable { get; }
+
+    /// <summary>Individual event records that existed but could not be parsed.</summary>
+    int UnreadableItems => 0;
 }
 
 /// <summary>
@@ -66,12 +72,16 @@ public sealed class SystemLogWakeSource : IWakeEventSource
     private const int ResumeEventId = 1;
 
     private bool _unreadable;
+    private int _unreadableItems;
 
     public bool Unreadable => _unreadable;
+
+    public int UnreadableItems => _unreadableItems;
 
     public IEnumerable<WakeRecord> Enumerate(int max)
     {
         _unreadable = false;
+        _unreadableItems = 0;
         if (max <= 0)
         {
             return [];
@@ -92,7 +102,7 @@ public sealed class SystemLogWakeSource : IWakeEventSource
         }
     }
 
-    private static List<WakeRecord> Read(int max)
+    private List<WakeRecord> Read(int max)
     {
         var query = new EventLogQuery(
             "System",
@@ -111,6 +121,10 @@ public sealed class SystemLogWakeSource : IWakeEventSource
                 if (Parse(entry) is { } wake)
                 {
                     wakes.Add(wake);
+                }
+                else
+                {
+                    _unreadableItems++;
                 }
             }
         }
@@ -196,6 +210,6 @@ public sealed class PresenceScanner(IWakeEventSource? source = null)
             .OrderByDescending(wake => wake.WokeUtc)
             .ToArray();
 
-        return new PresenceReport(wakes, _source.Unreadable);
+        return new PresenceReport(wakes, _source.Unreadable, _source.UnreadableItems);
     }
 }

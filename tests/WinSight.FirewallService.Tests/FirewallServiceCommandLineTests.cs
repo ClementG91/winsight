@@ -66,6 +66,7 @@ public sealed class FirewallServiceCommandLineTests
         {
             "[FW_INSTALL_FAILED]", "[FW_UNINSTALL_FAILED]", "[FW_SERVICE_STATUS_UNAVAILABLE]",
             "[FW_STORAGE_PROVISIONING_FAILED]", "[FW_STORAGE_UNTRUSTED]",
+            "[FW_POLICY_CONTENT_INVALID]",
             "[FW_ENFORCEMENT_STATUS_UNAVAILABLE]",
         })
         {

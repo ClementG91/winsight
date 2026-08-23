@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using WinSight.Core;
 
 namespace WinSight.Certificates;
 
@@ -16,9 +17,13 @@ public sealed class CertStoreAuditor
         (StoreName.Root, StoreLocation.CurrentUser, "CurrentUser\\Root"),
     };
 
-    public IReadOnlyList<TrustedCertificate> Snapshot()
+    public IReadOnlyList<TrustedCertificate> Snapshot() => SnapshotWithCoverage().Items;
+
+    public AcquisitionSnapshot<TrustedCertificate> SnapshotWithCoverage()
     {
         var results = new List<TrustedCertificate>();
+        var unreadableStores = 0;
+        var unreadableCertificates = 0;
         foreach (var (name, location, label) in Stores)
         {
             using var store = new X509Store(name, location);
@@ -26,9 +31,11 @@ public sealed class CertStoreAuditor
             {
                 store.Open(OpenFlags.ReadOnly | OpenFlags.OpenExistingOnly);
             }
-            catch (CryptographicException)
+            catch (Exception ex) when (ex is CryptographicException
+                                         or UnauthorizedAccessException
+                                         or System.Security.SecurityException)
             {
-                // Store not present for this location, skip, don't guess.
+                unreadableStores++;
                 continue;
             }
 
@@ -36,11 +43,20 @@ public sealed class CertStoreAuditor
             {
                 using (cert)
                 {
-                    results.Add(Describe(cert, label));
+                    try
+                    {
+                        results.Add(Describe(cert, label));
+                    }
+                    catch (Exception ex) when (ex is CryptographicException
+                                                 or NotSupportedException)
+                    {
+                        unreadableCertificates++;
+                    }
                 }
             }
         }
-        return results;
+        return new AcquisitionSnapshot<TrustedCertificate>(
+            results, unreadableStores, unreadableCertificates);
     }
 
     private static TrustedCertificate Describe(X509Certificate2 cert, string store)

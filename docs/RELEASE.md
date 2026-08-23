@@ -25,7 +25,7 @@ Plus GitHub **build provenance** and **SBOM attestations**, signed by GitHub's O
 3. Tag and push:
 
 ```bash
-git tag v0.11.0 && git push origin v0.11.0
+git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 `release.yml` then builds both architectures - x64 on the pinned `windows-2025` image, Arm64 on the
@@ -53,7 +53,7 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-Every public release to date, through v0.10.7, is unsigned and not production-ready. The signed
+Every public release to date, through v0.11.5, is unsigned. The signed
 Authenticode production chain has never been exercised end to end. SignPath Foundation declined the
 free-program application on 2026-07-29 because the project does not yet have sufficient public
 adoption and independent visibility.
@@ -115,7 +115,7 @@ The build still succeeds, and says so loudly:
 
 ```
 [SIGNING] SKIPPED - no certificate configured.
-[SIGNING] 12 file(s) will ship UNSIGNED. Windows will warn users on first run.
+[SIGNING] 3 file(s) will ship UNSIGNED. Windows will warn users on first run.
 ```
 
 It is never silent. `REQUIRE_SIGNED_RELEASE=false` is the current explicit policy, and the workflow
@@ -145,14 +145,14 @@ the `sign` exit code alone would have shipped that.
 **1. Checksum.**
 
 ```powershell
-Get-FileHash winsight-v0.11.0-win-x64.zip -Algorithm SHA256
-Get-Content winsight-v0.11.0-win-x64.zip.sha256
+Get-FileHash winsight-vX.Y.Z-win-x64.zip -Algorithm SHA256
+Get-Content winsight-vX.Y.Z-win-x64.zip.sha256
 ```
 
 **2. Provenance** - proves GitHub Actions built this exact file from this repository:
 
 ```bash
-gh attestation verify winsight-v0.11.0-win-x64.zip --repo ClementG91/winsight
+gh attestation verify winsight-vX.Y.Z-win-x64.zip --repo ClementG91/winsight
 ```
 
 **3. Authenticode**, when the release is signed:

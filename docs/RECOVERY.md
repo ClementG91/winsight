@@ -19,7 +19,7 @@ sc query WinSightFirewall
 
 | Output | Meaning |
 |---|---|
-| `sc query` → error 1060 | The service is not installed. Nothing WinSight owns is filtering. |
+| `sc query` → error 1060 | The service is not installed. Current dynamic-session filters cannot remain active, but run `wfp-status` to detect residue from a pre-dynamic WinSight version. |
 | `wfp-status` → all `absent` | WinSight has no WFP objects. Any blocking you see is not WinSight's. |
 | `wfp-status` → `provider: present, sublayer: present` | WinSight is armed. |
 | `enforce-status` → `AuditOnly` | The persisted intent is not to filter. |
@@ -60,14 +60,16 @@ So a total outage is probably not WinSight. Confirm in seconds:
 & .\winsight-firewall-service.exe wfp-status
 ```
 
-All `absent` means WinSight owns no filters at all. If you want certainty regardless, stop the
-service - this is safe and reversible:
+All `absent` means WinSight owns no filters at all. Stopping a current service closes its dynamic WFP
+session and is safe and reversible; verify the postcondition rather than assuming it:
 
 ```powershell
 sc stop WinSightFirewall
+& .\winsight-firewall-service.exe wfp-status   # must be all absent
 ```
 
-Stopping the service removes WinSight from the picture entirely.
+An all-absent result after the stop removes WinSight from the picture entirely. A present object is
+legacy residue or a defect and should be handled by the elevated `uninstall` recovery path below.
 
 ## The dashboard says the service is unavailable
 
@@ -130,7 +132,7 @@ To reset deliberately, with the service stopped:
 
 ```powershell
 sc stop WinSightFirewall
-Rename-Item "$env:ProgramData\WinSight\firewall-policy.json" "firewall-policy.json.bad"
+Rename-Item "$env:ProgramData\WinSight\firewall\policies.json" "policies.json.bad"
 sc start WinSightFirewall
 ```
 
@@ -139,7 +141,6 @@ Keep the `.bad` file - it is evidence if the corruption was not accidental.
 ## Full removal
 
 ```powershell
-sc stop WinSightFirewall
 & .\winsight-firewall-service.exe uninstall
 sc query WinSightFirewall          # must be error 1060
 & .\winsight-firewall-service.exe wfp-status   # must be all absent

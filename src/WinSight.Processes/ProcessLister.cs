@@ -13,9 +13,15 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
 {
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
-    public IReadOnlyList<ProcessInfo> Snapshot(CancellationToken cancellationToken = default)
+    public IReadOnlyList<ProcessInfo> Snapshot(CancellationToken cancellationToken = default) =>
+        SnapshotWithCoverage(cancellationToken).Items;
+
+    public AcquisitionSnapshot<ProcessInfo> SnapshotWithCoverage(
+        CancellationToken cancellationToken = default)
     {
         var raw = new List<(int Pid, string Name, string? Path, int ParentPid, string? Command)>();
+        var unreadableSources = 0;
+        var unreadableItems = 0;
         try
         {
             var scope = new ManagementScope(@"\\.\root\cimv2");
@@ -26,20 +32,39 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                 cancellationToken.ThrowIfCancellationRequested();
                 using (o)
                 {
-                    raw.Add((
-                        (int)ToUint(o["ProcessId"]),
-                        o["Name"] as string ?? string.Empty,
-                        o["ExecutablePath"] as string,
-                        (int)ToUint(o["ParentProcessId"]),
-                        o["CommandLine"] as string));
+                    try
+                    {
+                        if (!TryToUint(o["ProcessId"], out var processId))
+                        {
+                            unreadableItems++;
+                            continue;
+                        }
+                        var parentReadable = TryToUint(o["ParentProcessId"], out var parentId);
+                        var name = o["Name"] as string;
+                        if (!parentReadable || string.IsNullOrWhiteSpace(name))
+                        {
+                            unreadableItems++;
+                        }
+                        raw.Add((
+                            checked((int)processId),
+                            string.IsNullOrWhiteSpace(name) ? $"(pid {processId})" : name,
+                            o["ExecutablePath"] as string,
+                            parentReadable ? checked((int)parentId) : 0,
+                            o["CommandLine"] as string));
+                    }
+                    catch (Exception ex) when (ex is ManagementException or OverflowException)
+                    {
+                        unreadableItems++;
+                    }
                 }
             }
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            return raw.Count == 0 ? Array.Empty<ProcessInfo>() : Build(raw, cancellationToken);
+            unreadableSources = 1;
         }
-        return Build(raw, cancellationToken);
+        return new AcquisitionSnapshot<ProcessInfo>(
+            Build(raw, cancellationToken), unreadableSources, unreadableItems);
     }
 
     private List<ProcessInfo> Build(
@@ -52,26 +77,39 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
 
         return raw.Select(r => new ProcessInfo(
             r.Pid, r.Name, r.Path, r.ParentPid, r.Command,
-            r.Path is not null && verdicts.TryGetValue(r.Path, out var v) ? v : SignatureVerdict.Missing)).ToList();
+            r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
+                ? v
+                // WMI withheld the image path; no on-disk file was observed to be missing.
+                : SignatureVerdict.Unknown)).ToList();
     }
 
     /// <summary>
     /// Reads a WMI numeric property, which arrives boxed as whichever CIM type the provider chose.
     /// </summary>
     /// <remarks>
-    /// The <c>_ => 0</c> arm is a deliberate, and deliberately narrow, decision: a process id that
-    /// cannot be read becomes 0, the System Idle Process. That is a real mislabel, so it is pinned
-    /// by a test rather than left as an accident — but it is preferred to throwing, because losing
-    /// the whole process snapshot over one unreadable row is the worse failure. Win32_Process
-    /// declares ProcessId and ParentProcessId as uint32, so every arm above it is the normal path
-    /// and the fallback only fires if a provider returns something undeclared or nothing at all.
+    /// An invalid value is reported to the caller rather than fabricated as PID 0. The scanner can
+    /// then skip a row with no identity, or retain a row with an unknown parent while marking its
+    /// coverage incomplete.
     /// </remarks>
-    internal static uint ToUint(object? value) => value switch
+    internal static bool TryToUint(object? value, out uint result)
     {
-        uint u => u,
-        int i => (uint)i,
-        ushort s => s,
-        long l => (uint)l,
-        _ => 0,
-    };
+        switch (value)
+        {
+            case uint u:
+                result = u;
+                return true;
+            case int i when i >= 0:
+                result = (uint)i;
+                return true;
+            case ushort s:
+                result = s;
+                return true;
+            case long l when l is >= 0 and <= uint.MaxValue:
+                result = (uint)l;
+                return true;
+            default:
+                result = 0;
+                return false;
+        }
+    }
 }

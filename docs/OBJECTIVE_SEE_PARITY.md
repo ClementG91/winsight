@@ -43,7 +43,7 @@ behaviour, the foreign-owner-SID trust case, dedicated unelevated-administrator 
 sessions and external release/deployment remain open. Authenticode is an explicitly accepted unsigned
 distribution limitation until a certificate becomes available.
 
-The current local protocol's 24/24 contract self-test and deliberate exit-1 negative control preserve
+The current local protocol's 26/26 contract self-test and deliberate exit-1 negative control preserve
 portable regression evidence but cannot promote candidate CI, CodeQL, package, signing,
 privileged-runtime, release qualification or any other separate technical gate.
 

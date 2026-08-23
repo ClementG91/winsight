@@ -34,7 +34,8 @@ public sealed record Connection(
     public bool Noteworthy =>
         External &&
         State.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) &&
-        Signature.State is SignatureState.Unsigned
-            or SignatureState.SignedUntrusted
-            or SignatureState.Missing;
+        (ImagePath is null ||
+         Signature.State is SignatureState.Unsigned
+             or SignatureState.SignedUntrusted
+             or SignatureState.Missing);
 }

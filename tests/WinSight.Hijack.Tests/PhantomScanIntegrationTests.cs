@@ -33,6 +33,14 @@ public sealed class PhantomScanIntegrationTests
             new HashSet<string>(names, StringComparer.OrdinalIgnoreCase);
     }
 
+    private sealed class ServicesWithGap : IServiceRegistry
+    {
+        public IEnumerable<RegisteredService> Enumerate() => [];
+
+        public WinSight.Core.AcquisitionSnapshot<RegisteredService> ReadWithCoverage() =>
+            new([], unreadableSources: 1, unreadableItems: 2);
+    }
+
     private sealed class Probe(bool writable) : IWritabilityProbe
     {
         public List<string> Asked { get; } = [];
@@ -164,5 +172,35 @@ public sealed class PhantomScanIntegrationTests
         Assert.Equal(
             probe.Asked.Distinct(StringComparer.OrdinalIgnoreCase).Count(),
             probe.Asked.Count);
+    }
+
+    [Fact]
+    public void RegistryCoverageGapsSurviveAnOtherwiseEmptyScan()
+    {
+        var scanner = new HijackScanner(
+            new ServicesWithGap(),
+            new Path(),
+            new Probe(writable: false),
+            new Known());
+
+        var scan = scanner.ScanWithCoverage();
+
+        Assert.Empty(scan.Items);
+        Assert.False(scan.IsComplete);
+        Assert.Equal(1, scan.UnreadableSources);
+        Assert.Equal(2, scan.UnreadableItems);
+    }
+
+    [Fact]
+    public void AnUnreadableServiceImageIsACoverageGapNotAValidEmptyImportTable()
+    {
+        var scanner = Scanner(
+            new RegisteredService("Svc", $@"""{Image}"" -k", AutoStarts: true),
+            PeImportSet.Unreadable);
+
+        var scan = scanner.ScanWithCoverage();
+
+        Assert.DoesNotContain(scan.Items, finding => finding.Kind == HijackKind.PhantomImport);
+        Assert.Equal(1, scan.UnreadableItems);
     }
 }

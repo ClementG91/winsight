@@ -116,6 +116,26 @@ public sealed class AlertsAdapterTests
         }
     }
 
+    [Fact]
+    public void Alerts_ReportsJournalCorruptionInsteadOfClaimingNoDetections()
+    {
+        var path = TempJournal();
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "corrupt line" + Environment.NewLine);
+
+            var report = Adapters.Alerts(path, max: 200);
+
+            Assert.Contains(report.Items, item => item.Fields.GetValueOrDefault("kind") == "acquisitionCoverage");
+            Assert.Contains("incomplete", report.Summary, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Cleanup(path);
+        }
+    }
+
     private static string TempJournal() =>
         Path.Combine(Path.GetTempPath(), $"wsg-alerts-adapter-{Guid.NewGuid():N}", "alerts.log");
 

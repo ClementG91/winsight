@@ -37,9 +37,14 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
     private readonly ISignatureVerifier _verifier =
         verifier ?? new CachingSignatureVerifier(new NativeSignatureVerifier());
 
-    public IReadOnlyList<KernelDriver> Scan(CancellationToken cancellationToken = default)
+    public IReadOnlyList<KernelDriver> Scan(CancellationToken cancellationToken = default) =>
+        ScanWithCoverage(cancellationToken).Items;
+
+    public AcquisitionSnapshot<KernelDriver> ScanWithCoverage(
+        CancellationToken cancellationToken = default)
     {
-        var registrations = ReadRegistrations(cancellationToken);
+        var registrationScan = ReadRegistrations(cancellationToken);
+        var registrations = registrationScan.Items;
         var paths = registrations
             .Where(registration => registration.ImagePath is not null)
             .Select(registration => registration.ImagePath!)
@@ -65,25 +70,33 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
                 verdict,
                 KernelDriverTriage.IsWindowsProvided(registration.ImagePath, verdict, systemDirectory)));
         }
-        return results;
+        return new AcquisitionSnapshot<KernelDriver>(
+            results, registrationScan.UnreadableSources, registrationScan.UnreadableItems);
     }
 
-    private static List<Registration> ReadRegistrations(CancellationToken cancellationToken)
+    private static AcquisitionSnapshot<Registration> ReadRegistrations(
+        CancellationToken cancellationToken)
     {
         var found = new List<Registration>();
+        var unreadableItems = 0;
         try
         {
             using var services = Registry.LocalMachine.OpenSubKey(ServicesRoot);
             if (services is null)
             {
-                return found;
+                return new AcquisitionSnapshot<Registration>(found, unreadableSources: 1);
             }
             foreach (var name in services.GetSubKeyNames())
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (Read(services, name) is { } registration)
+                var (registration, unreadable) = Read(services, name);
+                if (unreadable)
                 {
-                    found.Add(registration);
+                    unreadableItems++;
+                }
+                if (registration is { } value)
+                {
+                    found.Add(value);
                 }
             }
         }
@@ -91,20 +104,22 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
                                      or UnauthorizedAccessException
                                      or IOException)
         {
-            // The services key is readable by any user on a normal machine, but a
-            // locked-down one must degrade to "nothing to report" rather than fail the scan.
+            return new AcquisitionSnapshot<Registration>(
+                found, unreadableSources: 1, unreadableItems: unreadableItems);
         }
-        return found;
+        return new AcquisitionSnapshot<Registration>(
+            found, unreadableItems: unreadableItems);
     }
 
-    private static Registration? Read(RegistryKey services, string name)
+    private static (Registration? Registration, bool Unreadable) Read(
+        RegistryKey services, string name)
     {
         try
         {
             using var key = services.OpenSubKey(name);
             if (key?.GetValue("Type") is not int type)
             {
-                return null;
+                return (null, false);
             }
             var kind = type switch
             {
@@ -114,18 +129,18 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
             };
             if (kind is null)
             {
-                return null;
+                return (null, false);
             }
 
             var (image, expected) = ResolveImage(name, key.GetValue("ImagePath") as string);
-            return new Registration(name, kind.Value, StartOf(key.GetValue("Start")), image, expected);
+            return (new Registration(
+                name, kind.Value, StartOf(key.GetValue("Start")), image, expected), false);
         }
         catch (Exception ex) when (ex is System.Security.SecurityException
                                      or UnauthorizedAccessException
                                      or IOException)
         {
-            // One unreadable service key must not cost the operator the other few hundred.
-            return null;
+            return (null, true);
         }
     }
 

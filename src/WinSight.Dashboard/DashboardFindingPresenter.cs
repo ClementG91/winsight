@@ -212,6 +212,15 @@ public static class DashboardFindingPresenter
             nameof(FirewallEnforcementState.Degraded) => text["OutboundFirewallDegraded"],
             _ => text["OutboundFirewallAuditOnly"],
         };
+        if (int.TryParse(
+                Field(item, "unrecorded"),
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out var unrecorded)
+            && unrecorded > 0)
+        {
+            detail = $"{detail} {text.Format("OutboundFirewallObservationGaps", unrecorded)}";
+        }
         return new FindingPresentation(text["OutboundFirewallServiceTitle"], detail);
     }
 

@@ -174,8 +174,11 @@ public sealed class AlertJournalTests
             File.AppendAllText(path, "corrupt garbage line" + Environment.NewLine);
 
             var read = AlertJournal.Read(path, 10);
+            var coverage = AlertJournal.ReadWithCoverage(path, 10);
 
             Assert.Equal("good", Assert.Single(read).Detail);
+            Assert.Equal(1, coverage.MalformedEntries);
+            Assert.False(coverage.Unreadable);
         }
         finally
         {
@@ -188,5 +191,49 @@ public sealed class AlertJournalTests
     {
         Assert.Empty(AlertJournal.Read(TempJournal(), 0));
         Assert.Empty(AlertJournal.Read(TempJournal(), -5));
+    }
+
+    [Fact]
+    public void AttackerControlledFieldsAreBounded()
+    {
+        var alert = new SecurityAlert(T0, new string('s', 10_000), "kind", new string('d', 20_000));
+
+        var parsed = AlertJournal.Parse(AlertJournal.Format(alert));
+
+        Assert.NotNull(parsed);
+        Assert.True(parsed!.Source.Length <= AlertJournal.MaxFieldCharacters);
+        Assert.True(parsed.Detail.Length <= AlertJournal.MaxFieldCharacters);
+    }
+
+    [Fact]
+    public async Task ConcurrentWritersDoNotLoseOrInterleaveAlerts()
+    {
+        var path = TempJournal();
+        try
+        {
+            var writers = Enumerable.Range(0, 8).Select(worker => Task.Run(() =>
+            {
+                for (var item = 0; item < 25; item++)
+                {
+                    AlertJournal.Append(new SecurityAlert(
+                        T0.AddMilliseconds(worker * 25 + item),
+                        "Guardian",
+                        "Concurrent",
+                        $"{worker}:{item}"), path);
+                }
+            }));
+
+            await Task.WhenAll(writers);
+            var snapshot = AlertJournal.ReadWithCoverage(path, int.MaxValue);
+
+            Assert.False(snapshot.Unreadable);
+            Assert.Equal(0, snapshot.MalformedEntries);
+            Assert.Equal(200, snapshot.Entries.Count);
+            Assert.Equal(200, snapshot.Entries.Select(alert => alert.Detail).Distinct().Count());
+        }
+        finally
+        {
+            Cleanup(path);
+        }
     }
 }

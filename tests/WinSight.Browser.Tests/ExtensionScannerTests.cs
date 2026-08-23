@@ -66,6 +66,102 @@ public sealed class ExtensionScannerTests : IDisposable
     }
 
     [Fact]
+    public void SnapshotWithCoverage_MalformedManifest_IsReportedAsUnreadableItem()
+    {
+        var extensionsDir = Path.Combine(_tempRoot, "Extensions");
+        var versionDir = Path.Combine(extensionsDir, "brokenextension", "1.0.0");
+        Directory.CreateDirectory(versionDir);
+        File.WriteAllText(Path.Combine(versionDir, "manifest.json"), "{ not-json");
+
+        var scanner = new ExtensionScanner(
+        [
+            new ExtensionScanner.Root("TestBrowser", extensionsDir),
+        ]);
+
+        var snapshot = scanner.SnapshotWithCoverage();
+
+        Assert.Empty(snapshot.Items);
+        Assert.Equal(0, snapshot.UnreadableSources);
+        Assert.Equal(1, snapshot.UnreadableItems);
+        Assert.False(snapshot.IsComplete);
+    }
+
+    [Fact]
+    public void Snapshot_UsesIdWhenNameIsMissing_AndMergesOptionalPermissions()
+    {
+        var extDir = Path.Combine(_tempRoot, "Extensions", "extension-id", "1.0.0");
+        Directory.CreateDirectory(extDir);
+        File.WriteAllText(Path.Combine(extDir, "manifest.json"), """
+            {
+              "version": "1.0.0",
+              "permissions": ["storage"],
+              "optional_permissions": ["storage", "tabs"],
+              "host_permissions": ["https://example.test/*"],
+              "optional_host_permissions": ["https://example.test/*", "https://optional.test/*"]
+            }
+            """);
+
+        var scanner = new ExtensionScanner(
+        [
+            new ExtensionScanner.Root("TestBrowser", Path.Combine(_tempRoot, "Extensions")),
+        ]);
+
+        var extension = Assert.Single(scanner.Snapshot());
+
+        Assert.Equal("extension-id", extension.Name);
+        Assert.Equal(["storage", "tabs"], extension.Permissions);
+        Assert.Equal(
+            ["https://example.test/*", "https://optional.test/*"],
+            extension.HostPermissions);
+    }
+
+    [Fact]
+    public void Snapshot_MissingRoot_IsACompleteEmptyObservation()
+    {
+        var scanner = new ExtensionScanner(
+        [
+            new ExtensionScanner.Root("TestBrowser", Path.Combine(_tempRoot, "missing")),
+        ]);
+
+        var snapshot = scanner.SnapshotWithCoverage();
+
+        Assert.Empty(snapshot.Items);
+        Assert.True(snapshot.IsComplete);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void Snapshot_UnresolvableLocalizedName_PreservesManifestToken(
+        bool declaresLocale,
+        bool writesMalformedMessages)
+    {
+        var extensionsDir = Path.Combine(_tempRoot, "Extensions");
+        var versionDir = Path.Combine(extensionsDir, "localized-extension", "1.0.0");
+        Directory.CreateDirectory(versionDir);
+        var localeProperty = declaresLocale ? ", \"default_locale\": \"en\"" : string.Empty;
+        File.WriteAllText(
+            Path.Combine(versionDir, "manifest.json"),
+            "{ \"name\": \"__MSG_extensionName__\"" + localeProperty + " }");
+        if (writesMalformedMessages)
+        {
+            var localeDir = Path.Combine(versionDir, "_locales", "en");
+            Directory.CreateDirectory(localeDir);
+            File.WriteAllText(Path.Combine(localeDir, "messages.json"), "{ not-json");
+        }
+
+        var scanner = new ExtensionScanner(
+        [
+            new ExtensionScanner.Root("TestBrowser", extensionsDir),
+        ]);
+
+        var extension = Assert.Single(scanner.Snapshot());
+
+        Assert.Equal("__MSG_extensionName__", extension.Name);
+    }
+
+    [Fact]
     public void DefaultRootsSnapshot_DoesNotThrow()
     {
         // On CI there may be no browsers installed, must return a (possibly empty) list.

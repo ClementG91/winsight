@@ -74,9 +74,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.301"
+          dotnet-version: "10.0.303"
           # Matrix-driven rather than hardcoded x64: installing an x64 SDK on the Arm64 runner would
           # silently test the emulated target and prove nothing about native Arm64.
           architecture: ${{ matrix.architecture }}
@@ -180,9 +182,11 @@ jobs:
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.301"
+          dotnet-version: "10.0.303"
           architecture: ${{ matrix.architecture }}
           cache: true
           cache-dependency-path: Directory.Packages.props

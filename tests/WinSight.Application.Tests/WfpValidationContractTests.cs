@@ -79,7 +79,7 @@ public sealed class WfpValidationContractTests
         Assert.NotEqual(0, negative.ExitCode);
         Assert.Contains("[CONTRACT-SELFTEST FAIL]", negative.StandardOutput, StringComparison.Ordinal);
         Assert.Contains(
-            "[FAIL] skip traverses production adapter primitive calls with 16 checks",
+            "[FAIL] skip traverses production adapter primitive calls with 17 checks",
             negative.StandardOutput,
             StringComparison.Ordinal);
         Assert.DoesNotContain("operation-threw", negative.StandardOutput, StringComparison.Ordinal);

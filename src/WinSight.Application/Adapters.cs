@@ -36,9 +36,59 @@ public static class Adapters
     // One caching verifier shared across tools, so the same system binaries checked
     // by both persistence and connections in a single `all` run are verified once.
     // Native WinVerifyTrust first (fast, tamper-checking), catalog-aware PS fallback
-    // for catalog-signed binaries, managed fallback below that, all cached.
+    // for catalog-signed binaries, managed fallback below that, all cached. The dashboard and MCP
+    // host this static verifier for their full lifetime, so cached trust is bound to file content;
+    // timestamps and length alone are attacker-controlled metadata.
     private static readonly ISignatureVerifier SharedVerifier =
-        new CachingSignatureVerifier(new NativeSignatureVerifier());
+        new CachingSignatureVerifier(new NativeSignatureVerifier(), verifyContent: true);
+
+    private static void AddCoverageFinding<T>(
+        ToolReport.Builder builder,
+        AcquisitionSnapshot<T> acquisition)
+    {
+        if (acquisition.IsComplete)
+        {
+            return;
+        }
+
+        builder.Add(
+            Severity.Notable,
+            "scan coverage incomplete",
+            $"{acquisition.UnreadableSources} source(s) and {acquisition.UnreadableItems} item(s) could not be read",
+            new Dictionary<string, string?>
+            {
+                ["kind"] = "acquisitionCoverage",
+                ["unreadableSources"] = acquisition.UnreadableSources.ToString(),
+                ["unreadableItems"] = acquisition.UnreadableItems.ToString(),
+            });
+    }
+
+    private static string CoverageSuffix<T>(AcquisitionSnapshot<T> acquisition) =>
+        acquisition.IsComplete ? string.Empty : ", scan incomplete";
+
+    internal static int AddSignatureCoverageFinding(
+        ToolReport.Builder builder,
+        IEnumerable<SignatureVerdict> verdicts)
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentNullException.ThrowIfNull(verdicts);
+        var unknown = verdicts.Count(verdict => verdict.State == SignatureState.Unknown);
+        if (unknown == 0)
+        {
+            return 0;
+        }
+
+        builder.Add(
+            Severity.Notable,
+            "signature verification incomplete",
+            $"{unknown} existing file(s) could not be given an Authenticode verdict",
+            new Dictionary<string, string?>
+            {
+                ["kind"] = "signatureCoverage",
+                ["unknownSignatures"] = unknown.ToString(),
+            });
+        return unknown;
+    }
 
     /// <summary>Runs one snapshot tool by its canonical CLI name.</summary>
     public static ToolReport Run(
@@ -180,6 +230,10 @@ public static class Adapters
                     ["vtLink"] = report?.Permalink,
                 });
         }
+        AddSignatureCoverageFinding(
+            b,
+            entries.Where(entry => entry.ImageStatus == ImageResolutionStatus.Present)
+                .Select(entry => entry.Signature));
         return b.Build(PersistenceSummary(entries, scan.Coverage));
     }
 
@@ -381,7 +435,8 @@ public static class Adapters
 
     public static ToolReport CameraMic(bool flaggedOnly)
     {
-        var usages = new CapabilityAccessReader().Read();
+        var acquisition = new CapabilityAccessReader().ReadWithCoverage();
+        var usages = acquisition.Items;
         var b = new ToolReport.Builder("camera-mic");
         foreach (var u in usages.Where(u => !flaggedOnly || u.Active).OrderByDescending(u => u.Active))
         {
@@ -400,12 +455,14 @@ public static class Adapters
                     ["lastStop"] = u.LastStop?.ToString("o"),
                 });
         }
-        return b.Build($"{usages.Count} recorded use(s), {usages.Count(u => u.Active)} live now");
+        AddCoverageFinding(b, acquisition);
+        return b.Build($"{usages.Count} recorded use(s), {usages.Count(u => u.Active)} live now{CoverageSuffix(acquisition)}");
     }
 
     public static ToolReport Processes(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var procs = new ProcessLister(SharedVerifier).Snapshot(cancellationToken);
+        var acquisition = new ProcessLister(SharedVerifier).SnapshotWithCoverage(cancellationToken);
+        var procs = acquisition.Items;
         var b = new ToolReport.Builder("processes");
         foreach (var p in procs.Where(p => !flaggedOnly || p.Unsigned)
                      .OrderByDescending(p => p.Unsigned).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
@@ -425,7 +482,10 @@ public static class Adapters
                     ["signer"] = p.Signature.Signer,
                 });
         }
-        return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned");
+        AddCoverageFinding(b, acquisition);
+        AddSignatureCoverageFinding(
+            b, procs.Where(process => process.Path is not null).Select(process => process.Signature));
+        return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned{CoverageSuffix(acquisition)}");
     }
 
     /// <summary>
@@ -448,8 +508,24 @@ public static class Adapters
     /// </summary>
     internal static ToolReport Alerts(string journalPath, int max)
     {
-        var alerts = AlertJournal.Read(journalPath, max);
+        var journal = AlertJournal.ReadWithCoverage(journalPath, max);
+        var alerts = journal.Entries;
         var b = new ToolReport.Builder("alerts");
+        if (journal.Unreadable || journal.MalformedEntries > 0)
+        {
+            b.Add(
+                Severity.Notable,
+                "alert journal coverage incomplete",
+                journal.Unreadable
+                    ? "the local alert journal could not be read"
+                    : $"{journal.MalformedEntries} malformed journal line(s) were ignored",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "acquisitionCoverage",
+                    ["unreadable"] = journal.Unreadable.ToString(),
+                    ["malformedEntries"] = journal.MalformedEntries.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
         foreach (var alert in alerts)
         {
             b.Add(
@@ -464,7 +540,9 @@ public static class Adapters
                     ["detail"] = alert.Detail,
                 });
         }
-        return b.Build(alerts.Count == 0
+        return b.Build(journal.Unreadable || journal.MalformedEntries > 0
+            ? "alert journal incomplete; some detection history may be unavailable"
+            : alerts.Count == 0
             ? "no real-time detections recorded yet"
             : $"{alerts.Count} recorded detection(s), newest first");
     }
@@ -487,8 +565,10 @@ public static class Adapters
     /// </remarks>
     public static ToolReport Hijack(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var findings = new HijackScanner().Scan(cancellationToken);
+        var acquisition = new HijackScanner().ScanWithCoverage(cancellationToken);
+        var findings = acquisition.Items;
         var b = new ToolReport.Builder("hijack");
+        AddCoverageFinding(b, acquisition);
         foreach (var f in findings.Where(f => !flaggedOnly || f.Exposure != HijackExposure.Latent))
         {
             b.Add(
@@ -509,7 +589,9 @@ public static class Adapters
                 });
         }
         var exploitable = findings.Count(f => f.Exposure != HijackExposure.Latent);
-        return b.Build(findings.Count == 0
+        return b.Build(!acquisition.IsComplete
+            ? $"hijack scan incomplete: {acquisition.UnreadableSources} source(s) and {acquisition.UnreadableItems} item(s) unreadable"
+            : findings.Count == 0
             ? "nothing found that another program could run in place of"
             : $"{findings.Count} pre-emptable configuration(s), {exploitable} exploitable now");
     }
@@ -548,7 +630,8 @@ public static class Adapters
     public static ToolReport ProcessDrillDown(int pid, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var processes = new ProcessLister(SharedVerifier).Snapshot(cancellationToken);
+        var processAcquisition = new ProcessLister(SharedVerifier).SnapshotWithCoverage(cancellationToken);
+        var processes = processAcquisition.Items;
 
         // Established first, before paying for anything else. A pid that is not running produces
         // the same "not running" answer whatever the other two scans return, and making someone
@@ -556,14 +639,20 @@ public static class Adapters
         // case drops from ~15 s to ~7 s.
         if (!processes.Any(process => process.Pid == pid))
         {
-            return ProcessInsightReport.Render(pid, insight: null);
+            return ProcessInsightReport.Render(
+                pid,
+                insight: null,
+                ProcessInsightCoverage.From(processAcquisition));
         }
 
-        var modules = new ModuleLister(SharedVerifier).SnapshotFor(pid, cancellationToken);
+        var moduleAcquisition = new ModuleLister(SharedVerifier).SnapshotForWithCoverage(pid, cancellationToken);
+        var modules = moduleAcquisition.Items;
         var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
 
         return ProcessInsightReport.Render(
-            pid, ProcessInsightBuilder.Build(pid, processes, modules, connections));
+            pid,
+            ProcessInsightBuilder.Build(pid, processes, modules, connections),
+            ProcessInsightCoverage.From(processAcquisition, moduleAcquisition));
     }
 
     /// <summary>
@@ -602,9 +691,32 @@ public static class Adapters
         {
             // An empty timeline and an unreadable log look identical from outside, and only one of
             // them is a fact about the machine.
+            builder.Add(
+                Severity.Notable,
+                "resume history unavailable",
+                "the Windows System event log could not be queried",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "acquisitionCoverage",
+                    ["unreadableSources"] = "1",
+                });
             return builder.Build("the System event log could not be read, so no resume history is available");
         }
-        return builder.Build(report.Wakes.Count == 0
+        if (report.UnreadableItems > 0)
+        {
+            builder.Add(
+                Severity.Notable,
+                "resume history incomplete",
+                $"{report.UnreadableItems} event record(s) could not be parsed",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "acquisitionCoverage",
+                    ["unreadableItems"] = report.UnreadableItems.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
+        return builder.Build(report.UnreadableItems > 0
+            ? $"resume history incomplete: {report.UnreadableItems} event record(s) unreadable"
+            : report.Wakes.Count == 0
             ? "no resume from sleep recorded"
             : $"{report.Wakes.Count} resume(s), {report.PresenceCount} indicating someone was physically present");
     }
@@ -643,6 +755,18 @@ public static class Adapters
                     ["unreadable"] = bool.TrueString,
                 });
         }
+        if (snapshot.MalformedLines > 0)
+        {
+            b.Add(
+                Severity.Notable,
+                "hosts file contains malformed records",
+                $"{snapshot.MalformedLines} active line(s) could not be interpreted as IP-to-host mappings",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "acquisitionCoverage",
+                    ["malformedLines"] = snapshot.MalformedLines.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
         foreach (var e in entries.Where(e => !flaggedOnly || e.Notable)
                      .OrderByDescending(e => e.Notable)
                      .ThenBy(e => e.Hostname, StringComparer.OrdinalIgnoreCase))
@@ -662,6 +786,8 @@ public static class Adapters
         }
         return b.Build(snapshot.Unreadable
             ? "hosts file exists but could not be read; its contents are unknown"
+            : snapshot.MalformedLines > 0
+            ? $"hosts file parsed incompletely: {snapshot.MalformedLines} malformed active line(s)"
             : $"{entries.Count} hosts entry(ies), {entries.Count(e => e.Notable)} flagged");
     }
 
@@ -678,7 +804,8 @@ public static class Adapters
     /// </remarks>
     public static ToolReport InputHooks(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var filters = new InputFilterScanner().Scan(cancellationToken);
+        var acquisition = new InputFilterScanner().ScanWithCoverage(cancellationToken);
+        var filters = acquisition.Items;
         var b = new ToolReport.Builder("input");
         var notable = 0;
         foreach (var filter in filters)
@@ -708,7 +835,10 @@ public static class Adapters
                     ["concern"] = concern.ToString(),
                 });
         }
-        return b.Build($"{filters.Count} input filter(s), {notable} not installed by Windows");
+        AddCoverageFinding(b, acquisition);
+        AddSignatureCoverageFinding(
+            b, filters.Where(filter => filter.ImagePath is not null).Select(filter => filter.Signature));
+        return b.Build($"{filters.Count} input filter(s), {notable} not installed by Windows{CoverageSuffix(acquisition)}");
 
         static string Explain(InputFilterConcern concern) => concern switch
         {
@@ -735,7 +865,8 @@ public static class Adapters
     /// </remarks>
     public static ToolReport Drivers(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var drivers = new KernelDriverScanner(SharedVerifier).Scan(cancellationToken);
+        var acquisition = new KernelDriverScanner(SharedVerifier).ScanWithCoverage(cancellationToken);
+        var drivers = acquisition.Items;
         var triaged = drivers
             .Select(driver => (Driver: driver, Concern: KernelDriverTriage.Concern(driver)))
             .ToList();
@@ -768,7 +899,10 @@ public static class Adapters
                     ["concern"] = concern.ToString(),
                 });
         }
-        return b.Build($"{drivers.Count} kernel driver(s) registered, {notable} unsigned, untrusted or orphaned");
+        AddCoverageFinding(b, acquisition);
+        AddSignatureCoverageFinding(
+            b, drivers.Where(driver => driver.ImagePath is not null).Select(driver => driver.Signature));
+        return b.Build($"{drivers.Count} kernel driver(s) registered, {notable} unsigned, untrusted or orphaned{CoverageSuffix(acquisition)}");
 
         // Each line states what was established, not what it implies: Windows attests
         // plenty of drivers it did not write, so "signed by somebody other than Windows"
@@ -1179,7 +1313,8 @@ public static class Adapters
 
     public static ToolReport Certificates(bool flaggedOnly)
     {
-        var certs = new CertStoreAuditor().Snapshot();
+        var acquisition = new CertStoreAuditor().SnapshotWithCoverage();
+        var certs = acquisition.Items;
         var b = new ToolReport.Builder("certificates");
         foreach (var c in certs.Where(c => !flaggedOnly || c.Notable)
                      .OrderByDescending(c => c.Notable)
@@ -1204,12 +1339,14 @@ public static class Adapters
                     ["risks"] = c.Risks.Count > 0 ? string.Join("; ", c.Risks) : null,
                 });
         }
-        return b.Build($"{certs.Count} trusted root(s), {certs.Count(c => c.Notable)} flagged");
+        AddCoverageFinding(b, acquisition);
+        return b.Build($"{certs.Count} trusted root(s), {certs.Count(c => c.Notable)} flagged{CoverageSuffix(acquisition)}");
     }
 
     public static ToolReport Extensions(bool flaggedOnly)
     {
-        var extensions = new ExtensionScanner().Snapshot();
+        var acquisition = new ExtensionScanner().SnapshotWithCoverage();
+        var extensions = acquisition.Items;
         var b = new ToolReport.Builder("extensions");
         foreach (var e in extensions.Where(e => !flaggedOnly || e.HighRisk)
                      .OrderByDescending(e => e.HighRisk)
@@ -1233,12 +1370,14 @@ public static class Adapters
                     ["path"] = e.Path,
                 });
         }
-        return b.Build($"{extensions.Count} extension(s), {extensions.Count(e => e.HighRisk)} high-risk");
+        AddCoverageFinding(b, acquisition);
+        return b.Build($"{extensions.Count} extension(s), {extensions.Count(e => e.HighRisk)} high-risk{CoverageSuffix(acquisition)}");
     }
 
     public static ToolReport Modules(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var modules = new ModuleLister(SharedVerifier).Snapshot(cancellationToken);
+        var acquisition = new ModuleLister(SharedVerifier).SnapshotWithCoverage(cancellationToken);
+        var modules = acquisition.Items;
         var flagged = modules.Where(m => m.Unsigned).ToList();
         var b = new ToolReport.Builder("modules");
         // The security signal is an unsigned/untrusted DLL loaded into a running
@@ -1264,14 +1403,18 @@ public static class Adapters
                     ["signer"] = m.Signature.Signer,
                 });
         }
+        AddCoverageFinding(b, acquisition);
+        AddSignatureCoverageFinding(
+            b, modules.Where(module => module.Path is not null).Select(module => module.Signature));
         var processCount = modules.Select(m => m.Pid).Distinct().Count();
         return b.Build(
-            $"{modules.Count} loaded module(s) across {processCount} process(es), {flagged.Count} unsigned");
+            $"{modules.Count} loaded module(s) across {processCount} process(es), {flagged.Count} unsigned{CoverageSuffix(acquisition)}");
     }
 
     public static ToolReport Firewall(bool flaggedOnly)
     {
-        var rules = new FirewallRuleReader().Read();
+        var acquisition = new FirewallRuleReader().ReadWithCoverage();
+        var rules = acquisition.Items;
         var enabled = rules.Where(r => r.Enabled).ToList();
         var b = new ToolReport.Builder("firewall");
         // Read-only rule listing (informational); --flagged shows the summary only.
@@ -1291,7 +1434,8 @@ public static class Adapters
                     });
             }
         }
-        return b.Build($"{rules.Count} rule(s), {enabled.Count} enabled");
+        AddCoverageFinding(b, acquisition);
+        return b.Build($"{rules.Count} rule(s), {enabled.Count} enabled{CoverageSuffix(acquisition)}");
     }
 
     /// <summary>
@@ -1314,7 +1458,8 @@ public static class Adapters
 
     public static ToolReport Dns(bool flaggedOnly)
     {
-        var records = new DnsCacheReader().Read();
+        var acquisition = new DnsCacheReader().ReadWithCoverage();
+        var records = acquisition.Items;
         var b = new ToolReport.Builder("dns");
         // DNS-cache entries are visibility, not verdicts, all informational, so
         // --flagged shows the summary only.
@@ -1332,7 +1477,8 @@ public static class Adapters
                     });
             }
         }
-        return b.Build($"{records.Count} cached DNS record(s)");
+        AddCoverageFinding(b, acquisition);
+        return b.Build($"{records.Count} cached DNS record(s){CoverageSuffix(acquisition)}");
     }
 
     public static ToolReport Connections(
@@ -1375,6 +1521,10 @@ public static class Adapters
                     ["vtLink"] = report?.Permalink,
                 });
         }
+        AddSignatureCoverageFinding(
+            b,
+            connections.Where(connection => connection.ImagePath is not null)
+                .Select(connection => connection.Signature));
         return b.Build($"{connections.Count} connection(s), {connections.Count(c => c.Noteworthy)} noteworthy");
     }
 }

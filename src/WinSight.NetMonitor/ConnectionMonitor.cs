@@ -5,14 +5,14 @@ using WinSight.Core;
 namespace WinSight.NetMonitor;
 
 /// <summary>
-/// Netiquette-class connection monitor: snapshots the active TCP/UDP table (via
-/// `netstat -ano`), attributes each connection to its owning process, and checks
-/// that process's Authenticode signature. A reliable, dependency-light first slice;
-/// a later revision swaps netstat for GetExtendedTcpTable (CsWin32) for live events.
+/// Netiquette-class connection monitor: snapshots active TCP/UDP endpoints through
+/// the native IP Helper tables, attributes each connection to its owning process,
+/// and checks that process's Authenticode signature. A bounded absolute-path
+/// <c>netstat.exe</c> fallback is used only when the native API cannot be queried.
 /// </summary>
 public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
 {
-    private readonly ISignatureVerifier _verifier = verifier ?? new AuthenticodeVerifier();
+    private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
     public IReadOnlyList<Connection> Snapshot(CancellationToken cancellationToken = default)
     {
@@ -36,7 +36,9 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
             var proc = byPid[r.Pid];
             var signature = proc.Path is not null && verdicts.TryGetValue(proc.Path, out var v)
                 ? v
-                : SignatureVerdict.Missing;
+                // An exited/protected process is an attribution gap, not evidence of a deleted
+                // executable. Preserve that distinction for JSON and report consumers.
+                : SignatureVerdict.Unknown;
             connections.Add(new Connection(
                 r.Protocol, r.Local, r.Remote, r.State, r.Pid, proc.Name, proc.Path, signature));
         }
@@ -51,7 +53,8 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
         {
             return NativeConnectionReader.Read();
         }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException)
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException
+                                     or Win32Exception or InvalidDataException)
         {
             return NetstatParser.Parse(RunNetstat(cancellationToken));
         }
@@ -65,15 +68,17 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
             // path (binary-planting resistance).
             var exe = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.System), "netstat.exe");
-            using var p = Process.Start(new ProcessStartInfo(exe, "-ano")
+            var startInfo = new ProcessStartInfo(exe, "-ano")
             {
                 RedirectStandardOutput = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
-            });
+            };
+            VirusTotalConfiguration.RemoveFromChildEnvironment(startInfo);
+            using var p = Process.Start(startInfo);
             if (p is null)
             {
-                return string.Empty;
+                throw new InvalidOperationException("Windows netstat could not be started.");
             }
             // Cancellation kills netstat immediately (closing stdout ends the read).
             using var registration = cancellationToken.Register(static state =>
@@ -111,13 +116,23 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
                 {
                     // Already exited, the read completes either way.
                 }
+                throw new TimeoutException("Windows netstat did not complete within the read deadline.");
             }
             p.WaitForExit();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (p.ExitCode != 0)
+            {
+                throw new InvalidOperationException("Windows netstat returned a failure status.");
+            }
             return stdout.ToString();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException)
         {
-            return string.Empty;
+            throw new InvalidOperationException("The connection table could not be read.", ex);
         }
     }
 

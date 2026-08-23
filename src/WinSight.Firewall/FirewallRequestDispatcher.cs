@@ -116,6 +116,10 @@ public sealed class FirewallRequestDispatcher
         {
             return Failure(request, FirewallProtocolError.NotSupported);
         }
+        if (load.RecoveredToAuditOnly)
+        {
+            return Failure(request, FirewallProtocolError.InternalFailure);
+        }
         // Deterministic ordering so paging is stable across calls.
         var ordered = load.Configuration.Policies
             .OrderBy(policy => policy.ExecutablePath, StringComparer.OrdinalIgnoreCase)
@@ -169,11 +173,16 @@ public sealed class FirewallRequestDispatcher
         {
             return Failure(request, FirewallProtocolError.NotSupported);
         }
+        if (load.RecoveredToAuditOnly)
+        {
+            return Failure(request, FirewallProtocolError.InternalFailure);
+        }
 
         // The observer already filters on a snapshot a few seconds old, so an app ruled on just
         // now could still be in the log. Filtering here too means the operator never sees a
         // decision they have already taken offered back to them.
         var ruled = load.Configuration.Policies
+            .Where(policy => policy.Enabled && policy.Action != OutboundAction.Ask)
             .Select(policy => policy.ExecutablePath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var ordered = _pending.Snapshot()
@@ -218,6 +227,15 @@ public sealed class FirewallRequestDispatcher
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
         var policy = NormalisePolicy(request.Policy!);
+        if (policy.Action == OutboundAction.Ask)
+        {
+            // Ask means "no durable ruling" in the current user-mode design: WFP cannot suspend
+            // a connection while waiting for UI. Remove any prior Allow/Block and keep the app in
+            // pending so its next observed connection is offered again.
+            await _authority.RemovePolicyAsync(policy.ExecutablePath, cancellationToken).ConfigureAwait(false);
+            return Success(request);
+        }
+
         await _authority.UpsertPolicyAsync(policy, cancellationToken).ConfigureAwait(false);
         // Ruled on, so no longer pending: drop it now rather than let it linger until the
         // observer's snapshot goes stale and offer the operator a decision they just took.
@@ -276,10 +294,10 @@ public sealed class FirewallRequestDispatcher
         // not evidence that native filters were applied. Only the serialized authority can
         // attest an active runtime state.
         var enforcementEnabled = status.EnforcementEnabled;
-        // Carrying what the observer could not record keeps the blind spot visible: the dashboard
-        // can say "and more were not recorded" instead of showing a truncated list as complete.
+        // Carry every known observation gap, not only capacity drops. An unrulable connection or a
+        // dead ETW pump must not produce the same zero as a healthy observer on a quiet machine.
         return new FirewallServiceStatus(
-            status.Mode, status.EngineSupported, enforcementEnabled, _pending.DroppedApps,
+            status.Mode, status.EngineSupported, enforcementEnabled, _pending.UnrecordedObservations,
             status.EffectiveState);
     }
 

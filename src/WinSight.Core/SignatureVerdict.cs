@@ -21,8 +21,8 @@ public enum SignatureState
     /// <summary>
     /// Verification could not be completed (e.g. the catalog check could not run), so
     /// the standing is genuinely undetermined, NOT the same as "unsigned". A tool that
-    /// wants to earn trust must not cry wolf on files it simply failed to check, so
-    /// Unknown is never treated as a flag-worthy signal.
+    /// wants to earn trust must not call the file malicious merely because verification failed.
+    /// Consumers surface aggregate Unknown results as a scan-coverage finding instead.
     /// </summary>
     Unknown,
 }

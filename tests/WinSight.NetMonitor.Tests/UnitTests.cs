@@ -51,6 +51,30 @@ public sealed class DnsRecordTypeTests
     }
 }
 
+public sealed class DnsCacheReaderNumericTests
+{
+    [Theory]
+    [InlineData((ushort)1, 1)]
+    [InlineData(65u, 65)]
+    [InlineData(120, 120)]
+    [InlineData(3600L, 3600)]
+    public void AcceptsDocumentedNonNegativeCimNumericTypes(object value, int expected)
+    {
+        Assert.True(DnsCacheReader.TryToInt(value, out var actual));
+        Assert.Equal(expected, actual);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("not a number")]
+    [InlineData(-1)]
+    [InlineData(2147483648u)]
+    public void RejectsValuesThatWouldPreviouslyBecomeOrOverflowZero(object? value)
+    {
+        Assert.False(DnsCacheReader.TryToInt(value, out _));
+    }
+}
+
 // Integration test, reads the real DNS resolver cache on the Windows CI runner.
 public sealed class DnsCacheReaderIntegrationTests
 {

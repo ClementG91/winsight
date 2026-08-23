@@ -34,8 +34,9 @@ internal static class VirusTotalEnricher
         {
             return results;
         }
-        var apiKey = Environment.GetEnvironmentVariable("WINSIGHT_VT_KEY");
-        if (string.IsNullOrWhiteSpace(apiKey))
+        cancellationToken.ThrowIfCancellationRequested();
+        var apiKey = VirusTotalConfiguration.CurrentApiKey;
+        if (apiKey is null)
         {
             return results;
         }

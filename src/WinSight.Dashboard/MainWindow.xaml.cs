@@ -9,6 +9,7 @@ using Microsoft.Win32;
 using WinSight.Application;
 using WinSight.Attribution;
 using WinSight.AvMonitor;
+using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.Persistence;
 using WinSight.Ransomware;
@@ -658,6 +659,7 @@ public partial class MainWindow : Window, IDisposable
 
         var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
         var startInfo = new ProcessStartInfo(explorer) { UseShellExecute = false };
+        VirusTotalConfiguration.RemoveFromChildEnvironment(startInfo);
         startInfo.ArgumentList.Add(Directory.Exists(path) ? path : $"/select,{path}");
         TryUserAction(() => _ = Process.Start(startInfo), Text["LocationOpened"]);
     }

@@ -10,14 +10,14 @@ namespace WinSight.Core;
 /// limit or treat an old verdict as an authorization decision.
 /// </summary>
 /// <remarks>
-/// <b>What "unchanged" means, exactly.</b> By default a file is considered unchanged when its
-/// length and both timestamps match. All three are attacker-controlled: timestomping
+/// <b>What "unchanged" means, exactly.</b> In the optional metadata-only mode a file is considered
+/// unchanged when its length and both timestamps match. All three are attacker-controlled: timestomping
 /// (MITRE T1070.006) is a single API call, so an attacker who replaces a signed binary with an
 /// unsigned one of the same length and restores the timestamps is served the cached <i>trusted</i>
 /// verdict until the entry expires. That window was undocumented, which was the real defect — a
 /// trust core must state the bound it offers.
 ///
-/// <b>Why that default is still right for a scan, and wrong for a watcher.</b> Measured on this
+/// <b>Why metadata-only remains an explicit option.</b> Measured on this
 /// machine over 300 System32 DLLs: an Authenticode verification costs 19.25 ms/file, a SHA-256 of
 /// the content 1.64 ms/file, and the metadata fingerprint 0.052 ms/file. A single <c>modules</c> run
 /// performs ~14 000 lookups over a few thousand distinct files, so hashing every lookup would add
@@ -25,9 +25,9 @@ namespace WinSight.Core;
 /// later. A long-lived host is the opposite case: it makes few lookups, and its verdicts sit on
 /// screen next to security findings for as long as it runs.
 ///
-/// So the strength is a choice, not a default to be guessed: pass
-/// <paramref name="verifyContent"/> <c>true</c> wherever the process outlives the scan.
-/// <see cref="WinSight"/>'s Guardian host does exactly that; the one-shot CLI scans do not.
+/// Secure-by-default wins here: SHA-256 content identity is the default. A measured, short-lived
+/// caller may explicitly pass <paramref name="verifyContent"/> <c>false</c> when the metadata-only
+/// staleness window is acceptable. WinSight's own long-lived hosts never opt out.
 /// </remarks>
 public sealed class CachingSignatureVerifier : ISignatureVerifier
 {
@@ -49,7 +49,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         ISignatureVerifier inner,
         int maxEntries = 4096,
         TimeSpan? maxAge = null,
-        bool verifyContent = false)
+        bool verifyContent = true)
     {
         ArgumentNullException.ThrowIfNull(inner);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxEntries);
@@ -71,16 +71,19 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     {
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var misses = new List<string>();
+        var preVerificationFingerprints = new Dictionary<string, FileFingerprint?>(
+            StringComparer.OrdinalIgnoreCase);
 
         foreach (var path in paths)
         {
-            if (TryGetCached(path, out var verdict))
+            if (TryGetCached(path, out var verdict, out var observedFingerprint))
             {
                 results[path] = verdict;
             }
             else
             {
                 misses.Add(path);
+                preVerificationFingerprints[path] = observedFingerprint;
             }
         }
 
@@ -91,17 +94,20 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             {
                 var verdict = fresh.TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
                 results[path] = verdict;
-                Store(path, verdict);
+                StoreIfUnchanged(path, verdict, preVerificationFingerprints[path]);
             }
         }
         return results;
     }
 
-    private bool TryGetCached(string path, out SignatureVerdict verdict)
+    private bool TryGetCached(
+        string path,
+        out SignatureVerdict verdict,
+        out FileFingerprint? observedFingerprint)
     {
         verdict = default;
-        var fingerprint = Fingerprint(path);
-        if (fingerprint is null)
+        observedFingerprint = Fingerprint(path);
+        if (observedFingerprint is null)
         {
             return false;
         }
@@ -109,7 +115,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         lock (_sync)
         {
             if (!_cache.TryGetValue(path, out var entry) ||
-                entry.Fingerprint != fingerprint ||
+                entry.Fingerprint != observedFingerprint ||
                 Stopwatch.GetElapsedTime(entry.CachedAtTimestamp) > _maxAge)
             {
                 Remove(path, entry);
@@ -123,9 +129,18 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         }
     }
 
-    private void Store(string path, SignatureVerdict verdict)
+    private void StoreIfUnchanged(
+        string path,
+        SignatureVerdict verdict,
+        FileFingerprint? preVerificationFingerprint)
     {
-        if (Fingerprint(path) is not { } fingerprint)
+        var postVerificationFingerprint = Fingerprint(path);
+        // The verifier works on a path, so the file can be replaced after WinVerifyTrust returns
+        // but before this cache entry is written. Never bind that old verdict to the replacement.
+        // Metadata mode deliberately cannot detect a same-metadata swap; content mode can.
+        if (preVerificationFingerprint is null ||
+            postVerificationFingerprint is null ||
+            preVerificationFingerprint != postVerificationFingerprint)
         {
             return;
         }
@@ -144,7 +159,11 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             }
 
             var node = _lru.AddLast(path);
-            _cache[path] = new CacheEntry(fingerprint, verdict, Stopwatch.GetTimestamp(), node);
+            _cache[path] = new CacheEntry(
+                postVerificationFingerprint,
+                verdict,
+                Stopwatch.GetTimestamp(),
+                node);
         }
     }
 

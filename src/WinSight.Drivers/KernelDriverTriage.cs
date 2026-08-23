@@ -52,8 +52,8 @@ public enum KernelDriverConcern
 /// from a download folder is a finding, not an expectation.
 ///
 /// <b>Why an unverifiable driver gets its own answer rather than being called
-/// third-party.</b> Not flagging <see cref="SignatureState.Unknown"/> is the project rule
-/// and it holds here, but silently filing it under "third-party" would state something
+/// third-party.</b> Not calling <see cref="SignatureState.Unknown"/> an untrusted driver is the
+/// project rule, but silently filing it under "third-party" would state something
 /// that was never established. It also hides a condition worth seeing: when catalog
 /// verification stops working on a machine, it stops for *every* catalog-signed file at
 /// once, and the two genuinely unsigned drivers found on the development machine
@@ -106,8 +106,8 @@ public static class KernelDriverTriage
         {
             SignatureState.Missing => KernelDriverConcern.Missing,
             SignatureState.Unsigned or SignatureState.SignedUntrusted => KernelDriverConcern.Untrusted,
-            // Unknown means verification could not run, which is not evidence of anything. Treating
-            // it as suspicious would cry wolf on files WinSight simply failed to check.
+            // Unknown means verification could not run, which is not evidence against this driver.
+            // The adapter separately raises the aggregate verification-coverage gap.
             SignatureState.Unknown => KernelDriverConcern.Unverified,
             _ => KernelDriverConcern.ThirdParty,
         };

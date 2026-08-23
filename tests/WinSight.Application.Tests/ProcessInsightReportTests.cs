@@ -142,4 +142,30 @@ public sealed class ProcessInsightReportTests
         Assert.Equal("100", fields["parentPid"]);
         Assert.Equal(nameof(SignatureState.SignedTrusted), fields["signature"]);
     }
+
+    [Fact]
+    public void AcquisitionGapsAreNotRenderedAsANothingNotableResult()
+    {
+        var coverage = new ProcessInsightCoverage(1, 2, 0, 1);
+
+        var report = ProcessInsightReport.Render(4242, Insight(Process(4242)), coverage);
+
+        var gap = Assert.Single(
+            report.Items,
+            item => item.Fields.GetValueOrDefault("kind") == "acquisitionCoverage");
+        Assert.Equal(Severity.Notable, gap.Severity);
+        Assert.DoesNotContain("nothing notable", report.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void UnknownSignaturesAreReportedAsCoverageRatherThanUnsignedFiles()
+    {
+        var process = Process(4242) with { Signature = SignatureVerdict.Unknown };
+
+        var report = ProcessInsightReport.Render(4242, Insight(process));
+
+        Assert.Contains(report.Items, item => item.Fields.GetValueOrDefault("kind") == "signatureCoverage");
+        Assert.DoesNotContain(report.Items, item => item.Title.Contains("unsigned", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain("nothing notable", report.Summary, StringComparison.OrdinalIgnoreCase);
+    }
 }

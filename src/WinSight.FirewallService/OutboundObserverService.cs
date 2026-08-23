@@ -46,7 +46,6 @@ public sealed partial class OutboundObserverService : BackgroundService
     // The reload in flight. Tracked rather than fired and forgotten: a background file read must not
     // outlive the service that started it, or shutdown races its own store.
     private Task _refresh = Task.CompletedTask;
-    private int _unattributed;
 
     public OutboundObserverService(
         IOutboundConnectionWatcher watcher,
@@ -63,7 +62,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     }
 
     /// <summary>Connections that carried no identity a policy could be keyed on.</summary>
-    public int UnattributedConnections => Volatile.Read(ref _unattributed);
+    public int UnattributedConnections => _log.UnattributedObservations;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -92,6 +91,7 @@ public sealed partial class OutboundObserverService : BackgroundService
             {
                 // A blocking ETW pump should return only after requested shutdown. Returning early
                 // is observational failure just like a contained exception.
+                _log.MarkObserverUnavailable();
                 LogUnavailable();
             }
         }
@@ -103,6 +103,7 @@ public sealed partial class OutboundObserverService : BackgroundService
         {
             // ETW observation is optional. Emit one fixed token without attaching the native
             // exception, then let this hosted observer complete while IPC and enforcement remain.
+            _log.MarkObserverUnavailable();
             LogUnavailable();
         }
     }
@@ -137,7 +138,7 @@ public sealed partial class OutboundObserverService : BackgroundService
         catch (ArgumentException)
         {
             // No absolute path means no identity a policy could be keyed on.
-            Interlocked.Increment(ref _unattributed);
+            _log.RecordUnattributed();
         }
     }
 
@@ -158,7 +159,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     /// </remarks>
     public void OnUnattributedConnection(int processId, string? imageName)
     {
-        Interlocked.Increment(ref _unattributed);
+        _log.RecordUnattributed();
         LogUnattributed(processId, imageName ?? "unknown");
     }
 
@@ -240,7 +241,8 @@ public sealed partial class OutboundObserverService : BackgroundService
         {
             var load = await _store.LoadOrAuditAsync().ConfigureAwait(false);
             var ruled = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var policy in load.Configuration.Policies)
+            foreach (var policy in load.Configuration.Policies.Where(
+                         policy => policy.Enabled && policy.Action != OutboundAction.Ask))
             {
                 ruled.Add(policy.ExecutablePath);
             }

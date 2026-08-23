@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using WinSight.Core;
 
 namespace WinSight.Hijack;
 
@@ -175,6 +176,8 @@ public static class PhantomDllRule
 public interface IKnownDllSource
 {
     IReadOnlySet<string> Read();
+
+    AcquisitionSnapshot<string> ReadWithCoverage() => new(Read().ToList());
 }
 
 /// <summary>
@@ -185,7 +188,10 @@ public sealed class RegistryKnownDllSource : IKnownDllSource
 {
     private const string KnownDllsKey = @"SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs";
 
-    public IReadOnlySet<string> Read()
+    public IReadOnlySet<string> Read() =>
+        ReadWithCoverage().Items.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    public AcquisitionSnapshot<string> ReadWithCoverage()
     {
         var known = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         try
@@ -194,7 +200,7 @@ public sealed class RegistryKnownDllSource : IKnownDllSource
             using var key = baseKey.OpenSubKey(KnownDllsKey);
             if (key is null)
             {
-                return known;
+                return new AcquisitionSnapshot<string>([], unreadableSources: 1);
             }
             foreach (var name in key.GetValueNames())
             {
@@ -213,11 +219,8 @@ public sealed class RegistryKnownDllSource : IKnownDllSource
                                      or UnauthorizedAccessException
                                      or IOException)
         {
-            // An unreadable KnownDLLs list would make every known module look phantom, which would
-            // be a wall of false findings. Returning empty here is safe only because the search-order
-            // check still has to fail for something to be reported, and every KnownDLL is present in
-            // System32 anyway.
+            return new AcquisitionSnapshot<string>([], unreadableSources: 1);
         }
-        return known;
+        return new AcquisitionSnapshot<string>(known.ToList());
     }
 }

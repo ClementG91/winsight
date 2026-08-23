@@ -1080,25 +1080,27 @@ Assert-CandidateFiles
 & $wfpScript -ContractSelfTest -ContractNegativeControl # attendu 26/1, exit 1
 if ($LASTEXITCODE -ne 1) { throw 'NegativeControl non rouge exact.' }
 Assert-CandidateFiles
-& $wfpScript -ServicePath $Service -SkipEnforcement     # attendu 16/16
-if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 16/16 échoué.' }
+& $wfpScript -ServicePath $Service -SkipEnforcement     # attendu 17/17
+if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 17/17 échoué.' }
 ```
 
 Éteindre la VM et faire créer `S2-before-WFP` par l’hôte avec sa preuve `take` scellée. Redémarrer
-seulement après export de cette preuve hote, puis exécuter le full WFP : attendu 25/25, curl cible
-200→000, contrôle 200, rollback AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Toute
+seulement après export de cette preuve hote, puis exécuter le full WFP : attendu 35/35, profil SCM
+exact (SID de service, trois privilèges requis et actions de reprise), curl cible
+200→000, contrôle 200, arrêt armé avec disparition dynamique et retour 200, restart avec retour du
+blocage 000 et contrôle 200, rollback AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Toute
 restauration S2 après échec est également une opération hôte qui exige sa propre preuve
-`operation=restore`. Ensuite trust : attendu 12/12 sans skip, avec un vrai compte standard pour
+`operation=restore`. Ensuite trust : attendu 13/13 sans skip, avec un vrai compte standard pour
 `-HostileAccount`.
 
 ```powershell
 Assert-CandidateFiles
 & $wfpScript -ServicePath $Service
-if ($LASTEXITCODE -ne 0) { throw 'Full WFP 25/25 échoué; restaurer S2.' }
+if ($LASTEXITCODE -ne 0) { throw 'Full WFP 35/35 échoué; restaurer S2.' }
 Assert-CandidateFiles
 & (Join-Path $PackageRoot 'Test-TrustBoundary.ps1') -ServicePath $Service `
     -HostileAccount '<compte standard dédié>'
-if ($LASTEXITCODE -ne 0) { throw 'Trust 12/12 échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Trust 13/13 échoué.' }
 ```
 
 Le gate IPC final part d’un restore `S1` et fournit sa propre séquence complète :

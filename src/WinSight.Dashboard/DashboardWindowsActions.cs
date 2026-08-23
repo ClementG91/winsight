@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.IO;
+using WinSight.Core;
 
 namespace WinSight.Dashboard;
 
@@ -25,12 +26,12 @@ public static class DashboardWindowsActions
         if (action is DashboardWindowsAction.Processes or DashboardWindowsAction.Network)
         {
             var executable = action == DashboardWindowsAction.Processes ? "Taskmgr.exe" : "resmon.exe";
-            return new ProcessStartInfo(Path.Combine(system, executable)) { UseShellExecute = false };
+            return Sanitized(Path.Combine(system, executable));
         }
 
         if (action is DashboardWindowsAction.Firewall or DashboardWindowsAction.Certificates)
         {
-            var startInfo = new ProcessStartInfo(Path.Combine(system, "mmc.exe")) { UseShellExecute = false };
+            var startInfo = Sanitized(Path.Combine(system, "mmc.exe"));
             startInfo.ArgumentList.Add(Path.Combine(
                 system,
                 action == DashboardWindowsAction.Firewall ? "wf.msc" : "certlm.msc"));
@@ -45,6 +46,16 @@ public static class DashboardWindowsActions
             DashboardWindowsAction.InstalledApps => "ms-settings:appsfeatures",
             _ => throw new InvalidOperationException("No Windows action is configured."),
         };
-        return new ProcessStartInfo(settingsUri) { UseShellExecute = true };
+        var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        var settings = Sanitized(explorer);
+        settings.ArgumentList.Add(settingsUri);
+        return settings;
+    }
+
+    private static ProcessStartInfo Sanitized(string executable)
+    {
+        var startInfo = new ProcessStartInfo(executable) { UseShellExecute = false };
+        VirusTotalConfiguration.RemoveFromChildEnvironment(startInfo);
+        return startInfo;
     }
 }

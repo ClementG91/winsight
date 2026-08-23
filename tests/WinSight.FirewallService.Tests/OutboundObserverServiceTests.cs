@@ -60,6 +60,28 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
         Assert.Empty(log.Snapshot());
     }
 
+    [Theory]
+    [InlineData(OutboundAction.Ask, true)]
+    [InlineData(OutboundAction.Allow, false)]
+    [InlineData(OutboundAction.Block, false)]
+    public async Task OnConnection_TreatsAskAndDisabledRowsAsUnresolved(
+        OutboundAction action,
+        bool enabled)
+    {
+        var store = new FirewallPolicyStore(PolicyPath);
+        await store.SaveAsync(OutboundFirewallConfiguration.Empty with
+        {
+            Policies = [new AppFirewallPolicy(@"C:\apps\unresolved.exe", action, enabled)],
+        });
+        var log = new PendingOutboundLog();
+        var observer = Observer(log, store);
+        await observer.RefreshRuledAsync();
+
+        observer.OnConnection(Connection(@"C:\apps\unresolved.exe", "93.184.216.34", 443));
+
+        Assert.Single(log.Snapshot());
+    }
+
     [Fact]
     public void OnConnection_CountsAPathNoPolicyCouldBeKeyedOn()
     {
@@ -70,6 +92,7 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
 
         Assert.Empty(log.Snapshot());
         Assert.Equal(1, observer.UnattributedConnections);
+        Assert.Equal(1, log.UnrecordedObservations);
     }
 
     // The counter existed but could never count the case it is named for: the watcher dropped a
@@ -89,6 +112,7 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
         // Never into the pending log: that log is the list of apps the operator can Allow or Block,
         // and a bare name is not something a rule may be keyed on.
         Assert.Empty(log.Snapshot());
+        Assert.Equal(2, log.UnrecordedObservations);
     }
 
     // The snapshot is reused for a few seconds so file IO stays off the trace callback path; a
@@ -173,7 +197,8 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
     {
         var watcher = new ThrowingWatcher(EtwComFailure(unchecked((int)0x800705AA)));
         var logger = new CapturingLogger<OutboundObserverService>();
-        var observer = Observer(new PendingOutboundLog(), watcher: watcher, logger: logger);
+        var pending = new PendingOutboundLog();
+        var observer = Observer(pending, watcher: watcher, logger: logger);
 
         await observer.StartAsync(CancellationToken.None);
         Assert.True(watcher.Called.Wait(TimeSpan.FromSeconds(5)));
@@ -184,6 +209,7 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
             entry.Message.Contains("[FW_OBSERVER_UNAVAILABLE]", StringComparison.Ordinal));
         Assert.Null(unavailable.Exception);
         Assert.DoesNotContain("native ETW detail", unavailable.Message, StringComparison.Ordinal);
+        Assert.Equal(1, pending.UnrecordedObservations);
     }
 
     [Fact]
@@ -191,7 +217,8 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
     {
         var watcher = new ReturningWatcher(waitForCancellation: false);
         var logger = new CapturingLogger<OutboundObserverService>();
-        var observer = Observer(new PendingOutboundLog(), watcher: watcher, logger: logger);
+        var pending = new PendingOutboundLog();
+        var observer = Observer(pending, watcher: watcher, logger: logger);
 
         await observer.StartAsync(CancellationToken.None);
         Assert.True(watcher.Returned.Wait(TimeSpan.FromSeconds(5)));
@@ -202,6 +229,7 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
         var unavailable = Assert.Single(logger.Entries, entry =>
             entry.Message.Contains("[FW_OBSERVER_UNAVAILABLE]", StringComparison.Ordinal));
         Assert.Null(unavailable.Exception);
+        Assert.Equal(1, pending.UnrecordedObservations);
     }
 
     [Fact]

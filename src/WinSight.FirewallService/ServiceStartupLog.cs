@@ -41,6 +41,11 @@ public sealed partial class ServiceStartupLog
     public partial void StorageUntrusted();
 
     [LoggerMessage(
+        Level = LogLevel.Critical,
+        Message = "[FW_POLICY_CONTENT_INVALID] Policy storage is trusted but its content is invalid; the service will not start.")]
+    public partial void PolicyContentInvalid();
+
+    [LoggerMessage(
         Level = LogLevel.Information,
         Message = "[FW_HOST_READY] Policy storage is trusted; the service is starting in {mode} mode.")]
     public partial void HostReady(OutboundFirewallMode mode);

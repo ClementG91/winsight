@@ -120,9 +120,11 @@ public sealed class ScheduledTaskEnumeratorTests
             new ScheduledTaskDefinition(@"\Good", TaskXml),
         ]);
 
-        var entry = Assert.Single(new ScheduledTaskEnumerator(source).Enumerate());
+        var enumerator = new ScheduledTaskEnumerator(source);
+        var entry = Assert.Single(enumerator.Enumerate());
 
         Assert.Equal("Good", entry.Name);
+        Assert.Equal(1, enumerator.UnreadableLocations);
     }
 
     private sealed class ScriptedSource(

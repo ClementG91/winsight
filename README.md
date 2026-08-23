@@ -154,8 +154,8 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | ETW, WFP/SCM, trust, installer and final cleanup passed on candidate `3ad4b92`; exact Network Logon and snapshot continuity were not run; **product readiness not established** |
-| **Arm64 (native)** | Build, packaging and installer verified in CI; **privileged runtime unqualified and product readiness not established** |
+| **x64** | Current source builds and tests locally; its WFP/SCM, trust and IPC changes require a new exact-candidate VM campaign; **product readiness not established** |
+| **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
 each run bound to the commit and CI run that built it:
@@ -207,11 +207,13 @@ dotnet run --project src/WinSight.Dashboard
 To reproduce the full release payload, including SBOM, installer and signing stage:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.10.5 -DisableSignature
+./scripts/Build-Release.ps1 -Version 0.11.6 -Architectures x64 -DisableSignature
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned Inno Setup compiler
 after verifying **both** its official SHA-256 and its Authenticode signature.
+Native Arm64 build, tests and packaging run on the `windows-11-arm` CI runner; an x64 workstation
+does not substitute a cross-published binary for that native evidence.
 
 ## Contributing
 

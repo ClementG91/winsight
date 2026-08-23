@@ -20,6 +20,13 @@ access if the service crashes or is upgraded.
 4. WFP filters live in one WinSight-owned sublayer. Persistent user choices are
    stored separately and reapplied transactionally at service startup.
 
+The provider, sublayer and filters are non-persistent **dynamic-session objects**. One BFE session
+is opened lazily by the service and remains alive for the service lifetime. Closing that session,
+normal process exit and RPC rundown after a crash all remove its objects. Desired policy survives in
+the hardened store; effective filtering deliberately does not survive without its control plane.
+Exact state reads use separate short-lived read sessions, so an unabortable status read cannot retain
+the mutation session or prevent a later recovery transition.
+
 The shared `AppFirewallPolicy` and `OutboundPolicyEvaluator` contracts are
 implemented and unit-tested. They intentionally use executable paths rather than
 process ids or display names, which are transient or ambiguous.
@@ -175,8 +182,12 @@ process ids or display names, which are transient or ambiguous.
 - No manual arming prompt is reachable after a failed pre-arm check or failed connectivity baseline.
   `-SkipEnforcement` skips WFP arming only: in the VM it still installs/starts the candidate, then
   stops and uninstalls it and requires SCM error 1060. It is not a machine-read-only mode. The skip
-  path requires exactly 16 checks and the full path 25. The normal non-privileged
-  `ContractSelfTest` passes 24/24; its deliberate lifecycle-order negative control exits 1. The
+  path requires exactly 17 checks and the full path 35. Both paths verify the installed service SID,
+  required-privilege allowlist and failure-recovery actions through `QueryServiceConfig2W`, without
+  parsing localized `sc.exe` output. The full path stops the service while
+  a real block is active, proves dynamic-session removal and restored connectivity, restarts it and
+  proves persisted intent is reapplied before rollback. The normal non-privileged
+  `ContractSelfTest` passes 26/26; its deliberate lifecycle-order negative control exits 1. The
   former 14/14 and the first local report based on it are invalid and non-qualifying. The
   intermediate 15/15 was a transient development count and is not evidence.
 - One `New-ValidationAdapter` constructs the commands, staging, all three lifecycle polls and
@@ -291,6 +302,9 @@ evidence.
   is untrusted.
 - Apply and remove filters in WFP transactions, under a single provider/sublayer,
   so rollback and uninstall are deterministic.
+- Own all production objects through one dynamic WFP session. Graceful stop disposes that session;
+  process death relies on BFE RPC rundown. The elevated uninstall verb first stops the service,
+  performs an owner-wide cleanup for legacy static residue, and only then deletes SCM registration.
 - Keep emergency disable available through the authenticated IPC contract so a separate
   recovery client can invoke the same serialized authority without any direct WFP alias.
   The mutation admission lane is distinct from read capacity so read-only saturation cannot
@@ -310,12 +324,18 @@ evidence.
    changes alter that boundary, so the old record does not qualify this candidate. Clean x64 and
    native Arm64 runs, including dedicated unelevated-administrator and network-logon sessions,
    remain pending.
-2. Done in code. WFP engine/session/provider/sublayer interop
+2. Done in code, pending renewed VM qualification. WFP engine/session/provider/sublayer interop
    applies per-application IPv4 and IPv6 block filters after an explicit elevated
-   enforcement transition. Candidate `f0a3f16` passed the candidate-bound x64 WFP/SCM,
-   rollback, connectivity and per-application-scoping gate 25/25. Native Arm64 remains pending;
-   unit tests alone do not establish that a native filter was installed.
-3. Prompt flow using the implemented durable policy store.
+   enforcement transition. Production policy is now owned by a crash-cleaned dynamic session;
+   the earlier candidate `f0a3f16` passed the static-session x64 WFP/SCM, rollback, connectivity and
+   per-application-scoping gate 25/25 but does not qualify this lifecycle change. A clean x64 VM must
+   prove graceful stop, forced process termination, automatic removal, restart/reapply and uninstall
+   cleanup. Native Arm64 remains pending; unit tests alone do not establish native behavior.
+3. Done within the documented user-mode limit. `Ask` is no longer stored as a durable ruling: an
+   `Ask` mutation removes the existing Allow/Block policy, and the observer records the next
+   connection as pending. The triggering connection has already completed because a user-mode WFP
+   filter cannot suspend it while waiting for UI; the dashboard states this explicitly. Legacy
+   stored `Ask` rows are treated as unresolved, not as already ruled applications.
 4. Done in code. Enforcement opt-in, recovery command, and installer/uninstaller integration were
    exercised by the same 25/25 x64 record on candidate `f0a3f16`. The effective state is `Active`
    only after a successful apply; unavailable or degraded is never presented as installed or
