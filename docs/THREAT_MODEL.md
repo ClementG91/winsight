@@ -159,13 +159,12 @@ transmitted anywhere.
 
 ## Residual risk
 
-- **Current-candidate privileged qualification is incomplete.** Historical x64 records remain bound
-  to their named commits, but later WFP/SCM changes require that gate to be rerun for the current
-  candidate. Arm64 has native CI coverage for build, PE architecture, installer lifecycle and smoke
-  tests, but WFP/SCM/TOCTOU/IPC/session behavior on Arm64 still needs an elevated native VM. See
-  [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
+- **Architecture qualification remains asymmetric.** Current native-x64 WFP/SCM, TOCTOU, IPC and
+  session behavior has candidate-bound VM evidence. Arm64 has current native CI coverage for build,
+  tests, PE architecture, installer lifecycle and packaging, but its privileged runtime still needs
+  an elevated native VM. See [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
 - **v0.10.5 is historical, unsigned and not production-ready.** SignPath Foundation declined the
-  free-program application on visibility grounds. Exact-candidate CI/CodeQL/package evidence and the
-  remaining native/session gates are open; unsigned distribution remains a visible accepted risk.
+  free-program application on visibility grounds. That historical release is not promoted by the
+  current candidate's evidence; unsigned distribution remains a visible accepted risk.
 - The service must be deployed to a protected location by an administrator. WinSight verifies this and
   refuses otherwise, but it cannot create the trust root for you.

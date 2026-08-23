@@ -11,7 +11,7 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
-| ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | Successor to initial PR run `32664255351` pending; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
+| ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | CI `32664937545` + CodeQL `32664935397` PASS on successor `eed27a1`; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
 
 This campaign exercised the current dynamic WFP/SCM and ETW surfaces, exact protected-path trust,
 local IPC and a real Network Logon from a second isolated VM. It retains harness-only red attempts
@@ -49,8 +49,8 @@ kept as a record of what that script printed, not as evidence.
 | Signed Authenticode path | The current release policy is explicitly unsigned after SignPath Foundation declined the free application. A future certificate path remains unexercised. |
 | EN/FR/ES presentation | User attestation completed on 2026-07-26; this is not independent evidence. |
 
-Native x64 technical qualification is established for candidate `8486155`; release readiness still
-requires the final pushed CI/CodeQL result and independent presentation review. Arm64-specific gates
+Native x64 technical qualification is established for candidate `8486155`; its successor automation
+passed and release readiness still requires independent presentation review. Arm64-specific gates
 remain open. Unsigned distribution has no Windows publisher identity even when hashes and
 attestations verify.
 

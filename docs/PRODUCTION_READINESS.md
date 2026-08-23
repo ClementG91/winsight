@@ -5,7 +5,7 @@ for one commit or package does not qualify different executable bytes.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Technical VM qualification passed** for runtime candidate `8486155`; publication readiness remains pending the first pushed CI/CodeQL result for the final documentation/tooling delta and independent human EN/FR/ES presentation review |
+| **x64** | **Technical VM qualification passed** for runtime candidate `8486155`; successor CI `32664937545` and CodeQL `32664935397` passed for commit `eed27a1`; publication readiness remains pending independent human EN/FR/ES presentation review |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
@@ -48,19 +48,20 @@ contract harness has coherent bounded process/test budgets and terminates a time
 process tree instead of leaking it into sibling tests.
 
 This distinction prevents a documentation or qualification-harness edit from being misrepresented
-as if different product executable bytes had run in the VM. The final pushed commit must still pass
-the complete x64/Arm64 CI matrix and packaging jobs.
+as if different product executable bytes had run in the VM. Successor commit
+`eed27a173dd70458b816f7f0142a56a9aa15af15` passed CI run `32664937545` across Windows 2022,
+Windows 2025 and native ARM64, including both installer packages. CodeQL run `32664935397` passed its
+C# and Actions analyses.
 
 ## Remaining gates
 
-- green CI and CodeQL for the final pushed commit, including native Arm64 build/test/package/installer;
 - independent human EN/FR/ES presentation review for the release candidate;
 - native Arm64 privileged WFP/SCM/trust/IPC/session qualification when suitable hardware is available;
 - x64-on-Arm64 application-identity qualification when suitable hardware is available;
 - the signed Authenticode path if and when a publisher certificate is configured.
 
-The first two items gate a public release of the current x64 candidate. The Arm64-specific items gate
-Arm64 production claims, not the already executed x64 security/runtime result. The absence of a
+The independent review gates a public release of the current x64 candidate. The Arm64-specific items
+gate Arm64 production claims, not the already executed x64 security/runtime result. The absence of a
 certificate is explicitly accepted for now but must remain visible to users.
 
 ## Historical evidence

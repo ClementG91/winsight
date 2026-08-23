@@ -291,8 +291,8 @@ ahead on the eight tools that matter most - persistence × 2, firewall, ransomwa
 keyboard interception, kernel drivers and hijack analysis - while being one app instead of eight,
 with an MCP server, an alert journal and four scanners Objective-See has no equivalent for. That is
 a product-capability comparison, not a product-readiness verdict: current native-x64 WFP/SCM,
-trust, IPC and session qualification is candidate-bound, while final pushed automation, native Arm64
-privileged runtime, independent presentation review and signing remain separate gates.
+trust, IPC and session qualification is candidate-bound, while native Arm64 privileged runtime,
+independent presentation review and signing remain separate gates.
 
 **Every tool on the list above now has parity-or-better feature coverage**, in one app instead of
 eight, with an MCP server, an alert journal, four scanners Objective-See has no equivalent for, and

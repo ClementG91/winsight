@@ -154,7 +154,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; final pushed CI/CodeQL and independent EN/FR/ES review remain release gates |
+| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; successor CI `32664937545` and CodeQL `32664935397` passed; independent EN/FR/ES review remains a release gate |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
@@ -169,7 +169,7 @@ each run bound to the commit and CI run that built it:
 
 Each record qualifies its exact candidate. The 2026-08-23 campaign closes the former IPC-path,
 Network Logon, host-control and current WFP/SCM/session gaps on native x64. Native Arm64 privileged
-gates, x64-on-Arm64 identity, independent EN/FR/ES review and final pushed CI/CodeQL remain open.
+gates, x64-on-Arm64 identity and independent EN/FR/ES review remain open.
 Unsigned distribution is an accepted visible limitation, not a claim that signing has passed.
 
 The authoritative statement, with every limitation named:
