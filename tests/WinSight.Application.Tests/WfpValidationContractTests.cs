@@ -10,6 +10,9 @@ namespace WinSight.Application.Tests;
 /// </summary>
 public sealed class WfpValidationContractTests
 {
+    private static readonly TimeSpan ScriptProcessTimeout = TimeSpan.FromSeconds(60);
+    private static readonly TimeSpan TimedOutProcessTerminationTimeout = TimeSpan.FromSeconds(10);
+
     private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
@@ -19,7 +22,7 @@ public sealed class WfpValidationContractTests
     // scope whose functions a GetNewClosure() closure cannot resolve. On a real VM that difference
     // killed the protocol on its first output call, at "0 checks", while this suite stayed green at
     // 26/26. Both modes are now measured, because the mode nobody tested is the mode people use.
-    [Theory(Timeout = 60000)]
+    [Theory(Timeout = 90000)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ContractSelfTestPassesUnderBothInvocationModes(bool useCallOperator)
@@ -39,7 +42,7 @@ public sealed class WfpValidationContractTests
     // adapter with a path that does not exist. The workflow emits its banner, runs the preconditions,
     // fails "candidate and protected tools exist" and stops - and every SCM operation lives strictly
     // after that check, so this stays safe even on an elevated CI runner.
-    [Theory(Timeout = 60000)]
+    [Theory(Timeout = 90000)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task RealAdapterReachesPreconditionsAndStopsBeforeAnyScmCall(bool useCallOperator)
@@ -64,7 +67,9 @@ public sealed class WfpValidationContractTests
         Assert.NotEqual(0, run.ExitCode);
     }
 
-    [Fact(Timeout = 30000)]
+    // This case intentionally starts two independent PowerShell processes. Its outer timeout must
+    // exceed two process budgets; otherwise a valid pair of slow runs can never finish in CI.
+    [Fact(Timeout = 150000)]
     public async Task ContractSelfTestPassesAndLifecyclePollNegativeControlFails()
     {
         var normal = await RunContractAsync(negativeControl: false);
@@ -85,7 +90,7 @@ public sealed class WfpValidationContractTests
         Assert.DoesNotContain("operation-threw", negative.StandardOutput, StringComparison.Ordinal);
     }
 
-    [Fact(Timeout = 30000)]
+    [Fact(Timeout = 90000)]
     public async Task ContractSelfTestFailsWhenExactScmAbsencePredicatesAreBroadened()
     {
         const string exactPredicate = "$query.ExitCode -eq 1060";
@@ -116,6 +121,46 @@ public sealed class WfpValidationContractTests
         }
     }
 
+    [Fact(Timeout = 30000)]
+    public async Task TimedOutContractTerminatesThePowerShellProcess()
+    {
+        var temporaryDirectory = Path.Combine(Path.GetTempPath(), "winsight-wfp-timeout-" + Guid.NewGuid());
+        var hangingScript = Path.Combine(temporaryDirectory, "Hang.ps1");
+        var pidPath = Path.Combine(temporaryDirectory, "powershell.pid");
+
+        Directory.CreateDirectory(temporaryDirectory);
+        try
+        {
+            const string source = """
+                [CmdletBinding()]
+                param([Parameter(Mandatory = $true)][string]$PidPath)
+                [IO.File]::WriteAllText($PidPath, [string]$PID)
+                Start-Sleep -Seconds 300
+                """;
+            await File.WriteAllTextAsync(
+                hangingScript,
+                source,
+                new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
+
+            var timeout = await Assert.ThrowsAsync<TimeoutException>(() =>
+                RunScriptAtAsync(
+                    useCallOperator: false,
+                    hangingScript,
+                    TimeSpan.FromSeconds(1),
+                    "-PidPath",
+                    pidPath));
+
+            Assert.Contains("did not exit within 1 seconds (-File)", timeout.Message, StringComparison.Ordinal);
+            Assert.True(File.Exists(pidPath), "The PowerShell process did not publish its PID before timeout.");
+            var processId = int.Parse(await File.ReadAllTextAsync(pidPath), System.Globalization.CultureInfo.InvariantCulture);
+            Assert.Throws<ArgumentException>(() => Process.GetProcessById(processId));
+        }
+        finally
+        {
+            if (Directory.Exists(temporaryDirectory)) Directory.Delete(temporaryDirectory, recursive: true);
+        }
+    }
+
     private static Task<ContractProcessResult> RunContractAsync(
         bool negativeControl,
         bool useCallOperator = false) =>
@@ -134,6 +179,13 @@ public sealed class WfpValidationContractTests
     private static async Task<ContractProcessResult> RunScriptAtAsync(
         bool useCallOperator,
         string script,
+        params string[] scriptArguments) =>
+        await RunScriptAtAsync(useCallOperator, script, ScriptProcessTimeout, scriptArguments);
+
+    private static async Task<ContractProcessResult> RunScriptAtAsync(
+        bool useCallOperator,
+        string script,
+        TimeSpan processTimeout,
         params string[] scriptArguments)
     {
         Assert.True(File.Exists(script), $"Missing WFP validation script: {script}");
@@ -183,7 +235,27 @@ public sealed class WfpValidationContractTests
         using var process = Process.Start(start) ?? throw new InvalidOperationException("Unable to start PowerShell.");
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(25));
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(processTimeout);
+        }
+        catch (TimeoutException)
+        {
+            // Disposing Process does not terminate it. Kill the whole tree so a hung PowerShell
+            // contract cannot leak into sibling tests or keep the CI runner alive after failure.
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync().WaitAsync(TimedOutProcessTerminationTimeout);
+
+            var timedOutStdout = await stdoutTask;
+            var timedOutStderr = await stderrTask;
+            var invocation = useCallOperator ? "call operator" : "-File";
+            throw new TimeoutException(
+                $"PowerShell contract {Path.GetFileName(script)} did not exit within " +
+                $"{processTimeout.TotalSeconds:F0} seconds ({invocation})." +
+                $"{Environment.NewLine}stdout:{Environment.NewLine}{timedOutStdout}" +
+                $"{Environment.NewLine}stderr:{Environment.NewLine}{timedOutStderr}");
+        }
+
         return new ContractProcessResult(process.ExitCode, await stdoutTask, await stderrTask);
     }
 

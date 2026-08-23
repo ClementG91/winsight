@@ -11,7 +11,7 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
-| ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | Pending first push; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
+| ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | Successor to initial PR run `32664255351` pending; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
 
 This campaign exercised the current dynamic WFP/SCM and ETW surfaces, exact protected-path trust,
 local IPC and a real Network Logon from a second isolated VM. It retains harness-only red attempts

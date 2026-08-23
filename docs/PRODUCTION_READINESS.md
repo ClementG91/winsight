@@ -40,10 +40,12 @@ The full record, including artifact and evidence hashes, is
 
 ## Candidate boundary after the VM run
 
-The post-`8486155` working delta is limited to the ETW validation module, its deterministic tests and
-documentation. It does not change any CLI, dashboard, service or shared runtime source. The module
-now retries only the observed transient Windows `0x800705AA` result, at most eight times with a fixed
-250 ms delay; every other nonzero result and exhausted retry remains fail-closed.
+The post-`8486155` working delta is limited to validation tooling, tests, CI runner selection and
+documentation. It does not change any CLI, dashboard, service or shared runtime source. The ETW
+module now retries only the observed transient Windows `0x800705AA` result, at most eight times with
+a fixed 250 ms delay; every other nonzero result and exhausted retry remains fail-closed. The WFP
+contract harness has coherent bounded process/test budgets and terminates a timed-out PowerShell
+process tree instead of leaking it into sibling tests.
 
 This distinction prevents a documentation or qualification-harness edit from being misrepresented
 as if different product executable bytes had run in the VM. The final pushed commit must still pass
