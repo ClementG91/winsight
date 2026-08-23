@@ -109,7 +109,11 @@ public sealed class FirewallServiceGateway
                 finalStatus.Status.UnrecordedApps,
                 finalStatus.Status.EffectiveState);
         }
-        catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
+        catch (Exception ex) when (ex is TimeoutException
+            or FirewallProtocolException
+            or IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
         {
             return FirewallServiceView.Unavailable;
         }
@@ -174,7 +178,11 @@ public sealed class FirewallServiceGateway
                 _ => FirewallMutationResult.Rejected,
             };
         }
-        catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
+        catch (Exception ex) when (ex is TimeoutException
+            or FirewallProtocolException
+            or IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
         {
             return FirewallMutationResult.ServiceUnavailable;
         }

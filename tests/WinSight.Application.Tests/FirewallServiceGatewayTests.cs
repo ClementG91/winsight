@@ -512,11 +512,41 @@ public sealed class FirewallServiceGatewayTests
             await gateway.EmergencyDisableAsync());
     }
 
+    [Fact]
+    public async Task GetViewAsync_PipeAccessDenied_MapsToUnavailable()
+    {
+        var gateway = new FirewallServiceGateway(
+            new FaultingClient(new UnauthorizedAccessException("pipe ACL denied the caller")));
+
+        var view = await gateway.GetViewAsync();
+
+        Assert.False(view.ServiceAvailable);
+        Assert.Equal(FirewallEnforcementState.AuditOnly, view.EffectiveState);
+    }
+
+    [Fact]
+    public async Task Mutation_PipeAccessDenied_MapsToServiceUnavailable()
+    {
+        var gateway = new FirewallServiceGateway(
+            new FaultingClient(new UnauthorizedAccessException("pipe ACL denied the caller")));
+
+        Assert.Equal(
+            FirewallMutationResult.ServiceUnavailable,
+            await gateway.EmergencyDisableAsync());
+    }
+
     private sealed class ThrowingClient : IFirewallServiceClient
     {
         public Task<FirewallCommandResponse> SendAsync(
             FirewallCommandRequest request, TimeSpan connectTimeout, CancellationToken cancellationToken = default) =>
             throw new TimeoutException("no service");
+    }
+
+    private sealed class FaultingClient(Exception failure) : IFirewallServiceClient
+    {
+        public Task<FirewallCommandResponse> SendAsync(
+            FirewallCommandRequest request, TimeSpan connectTimeout, CancellationToken cancellationToken = default) =>
+            Task.FromException<FirewallCommandResponse>(failure);
     }
 
     private sealed class CapturingClient : IFirewallServiceClient

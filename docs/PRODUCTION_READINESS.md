@@ -56,8 +56,9 @@ Three protocol gaps prevented a complete campaign:
 2. **Network Logon was `NOT_RUN`.** A real Network token proved pipe denial under impersonation, but
    that was not the literal process-level protocol. The corrected runbook requires a second isolated
    control machine and WinRM. The probe itself fails unless `S-1-5-2` is present, `S-1-5-4` is absent,
-   the self-test returns exit 3 / `ServiceUnavailable` / no mutation, and the same SCM process and
-   command remain running.
+   the self-test returns exit 3 / `ServiceUnavailable` / no mutation. Because hardened SCM/WMI ACLs
+   deny service observation to that account, a separate elevated target observer proves the same
+   SCM process and command remain running.
 3. **S0/S1/S2 were `NOT_RUN`.** Snapshot take/restore is an authority of the hypervisor host;
    `VBoxManage` is not expected inside the guest. The corrected runbook labels host-only operations,
    records `showvminfo` evidence outside the VM disk, and makes the guest stop when that evidence is
@@ -194,7 +195,8 @@ package:
 5. restore S0 from the host, recreate the protected candidate and record S1;
 6. run ETW lifecycle gates, then WFP/SCM 35/35, trust 13/13 and local IPC 7/7 from separate S1 restores;
 7. create S2 on the host before full WFP and prove every restore from the host;
-8. while the AuditOnly service is running, run Network Logon 10/10 from a second isolated machine;
+8. while the AuditOnly service is running, run Network Logon 7/7 from a second isolated machine over
+   ephemeral WinRM HTTPS and combine it with the target observer 3/3;
 9. seal manifests outside the VM disk, restore S0 from the host and verify final absence.
 
 Only a complete evidence set for the exact candidate can change the verdict above.
