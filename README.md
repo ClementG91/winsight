@@ -154,7 +154,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; successor CI `32664937545` and CodeQL `32664935397` passed; independent EN/FR/ES review remains a release gate |
+| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; exact dashboard/package candidate `3912d67` passed Windows 11 VM layout, posture and EN/FR/ES smoke checks; successor CI is pending |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
@@ -166,10 +166,13 @@ each run bound to the commit and CI run that built it:
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
 | Current x64 ETW, WFP/SCM, trust, local/Network IPC, installer and cleanup | 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | [record](docs/validation/2026-08-23-x64-qualification-8486155.md) |
+| Exact dashboard settings layout, posture interpretation, installer and EN/FR/ES smoke | PASS | [record](docs/validation/2026-08-25-ui-windows-posture-3912d67.md) |
 
 Each record qualifies its exact candidate. The 2026-08-23 campaign closes the former IPC-path,
-Network Logon, host-control and current WFP/SCM/session gaps on native x64. Native Arm64 privileged
-gates, x64-on-Arm64 identity and independent EN/FR/ES review remain open.
+Network Logon, host-control and current WFP/SCM/session gaps on native x64. The 2026-08-25 record
+qualifies only the changed dashboard/package surface and does not pretend to rerun those privileged
+gates. Native Arm64 privileged gates, x64-on-Arm64 identity and independent EN/FR/ES review remain
+open; the latter is recommended rather than a technical publication gate.
 Unsigned distribution is an accepted visible limitation, not a claim that signing has passed.
 
 The authoritative statement, with every limitation named:

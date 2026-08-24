@@ -1,4 +1,4 @@
-## v0.11.6, 2026-08-24
+## v0.11.6, 2026-08-25
 
 - Clarified the dashboard's Windows-security scan so Defender Controlled Folder Access is no
   longer grouped under the misleading "Kernel protections" label. Core isolation, Memory

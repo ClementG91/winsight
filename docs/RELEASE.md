@@ -186,13 +186,16 @@ What this does **not** defend against: a compromise of the GitHub account or of 
 certificate itself. Provenance proves *which workflow built it*, not that the workflow was
 trustworthy at the time.
 
-The current native-x64 runtime candidate has a candidate-bound VM record covering installer,
-WFP/SCM, trust, local/Network IPC and ETW/session recovery. Successor CI `32664937545` and CodeQL
-`32664935397` passed, including native Arm64 build/test/package/installer. Independent EN/FR/ES
-review remains required before another release. Privileged Arm64 and x64-on-Arm64 identity remain
-hardware-bound gates for Arm64 production claims. The Authenticode result must match the explicit
-repository policy; under the current unsigned policy it must be `NotSigned` and visibly reported.
-Historical validation records remain bound to their original commits.
+The native-x64 runtime candidate has a candidate-bound VM record covering installer, WFP/SCM,
+trust, local/Network IPC and ETW/session recovery. Successor CI `32664937545` and CodeQL
+`32664935397` passed, including native Arm64 build/test/package/installer. Exact dashboard/package
+candidate `3912d67` separately passed Windows 11 VM layout, posture and EN/FR/ES smoke checks and
+still requires green successor CI before publication. An independent EN/FR/ES presentation review
+remains recommended; the French flow has project-owner review and all languages have automated
+resource/layout and smoke coverage. Privileged Arm64 and x64-on-Arm64 identity remain hardware-bound
+gates for Arm64 production claims. The Authenticode result must match the explicit repository
+policy; under the current unsigned policy it must be `NotSigned` and visibly reported. Historical
+validation records remain bound to their original commits.
 
 ## Release checklist
 
