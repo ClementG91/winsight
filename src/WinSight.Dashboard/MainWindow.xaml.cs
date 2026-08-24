@@ -549,7 +549,10 @@ public partial class MainWindow : Window, IDisposable
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new VirusTotalSettingsWindow { Owner = this };
-        _ = dialog.ShowDialog();
+        if (dialog.ShowDialog() == true && dialog.SavedMessage is { Length: > 0 } message)
+        {
+            SummaryText.Text = message;
+        }
     }
 
     private void ShowToolExplanation(DashboardTool tool)

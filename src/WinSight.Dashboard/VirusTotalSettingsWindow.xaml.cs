@@ -11,15 +11,23 @@ namespace WinSight.Dashboard;
 
 public partial class VirusTotalSettingsWindow : Window
 {
-    private readonly VirusTotalSettingsStore _store = VirusTotalSettingsStore.Default;
+    private readonly VirusTotalSettingsStore _store;
 
     public VirusTotalSettingsWindow()
+        : this(VirusTotalSettingsStore.Default)
     {
+    }
+
+    internal VirusTotalSettingsWindow(VirusTotalSettingsStore store)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
         InitializeComponent();
         RefreshStatus();
     }
 
     private static LocalizationManager Text => LocalizationManager.Instance;
+
+    public string? SavedMessage { get; private set; }
 
     private void RefreshStatus()
     {
@@ -39,15 +47,20 @@ public partial class VirusTotalSettingsWindow : Window
             return;
         }
 
-        TrySettingsAction(() =>
+        if (!TrySettingsAction(() =>
         {
             _store.Save(key);
             _store.ApplySavedKeyToCurrentProcess(key);
             ApiKeyBox.Clear();
-            StatusText.Text = _store.EnvironmentOverrideActive
-                ? Text["VtSavedEnvironment"]
-                : Text["VtSaved"];
-        });
+        }))
+        {
+            return;
+        }
+
+        SavedMessage = _store.EnvironmentOverrideActive
+            ? Text["VtSavedEnvironment"]
+            : Text["VtSaved"];
+        DialogResult = true;
     }
 
     private void DisableButton_Click(object sender, RoutedEventArgs e)
@@ -77,17 +90,19 @@ public partial class VirusTotalSettingsWindow : Window
         });
     }
 
-    private void TrySettingsAction(Action action)
+    private bool TrySettingsAction(Action action)
     {
         try
         {
             action();
+            return true;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException
                                      or UnauthorizedAccessException or SecurityException
                                      or CryptographicException or Win32Exception or ExternalException)
         {
             ShowError(Text.Format("VtSettingsError", ex.Message));
+            return false;
         }
     }
 

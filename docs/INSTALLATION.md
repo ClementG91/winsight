@@ -55,9 +55,12 @@ never embed, publish or share a single project key: that would expose a credenti
 mix users' quota and remove meaningful consent for sending hashes to a third party.
 
 For an interactive installation, open **Settings** in the WinSight header, paste the
-key and choose **Save securely**. The key is encrypted at rest with Windows DPAPI for
-the current account, is available immediately, and is never written to reports or
-exports. The decrypted dashboard key stays in process memory rather than being copied
+key and choose **Save securely**. A successful save closes the dialog and confirms the
+result in the main window. WinSight validates the key's format locally; it does not call
+an unrelated VirusTotal endpoint merely to label the credential "valid". Provider access
+is established by the next explicit lookup. The key is encrypted at rest with Windows
+DPAPI for the current account, is available immediately, and is never written to reports
+or exports. The decrypted dashboard key stays in process memory rather than being copied
 to the process environment, and WinSight removes `WINSIGHT_VT_KEY` from child processes
 it launches. Choose **Disable** in the same dialog to remove the encrypted key.
 

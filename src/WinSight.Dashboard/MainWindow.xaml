@@ -78,9 +78,14 @@
                               ToolTip="{Binding [RansomwareProtectionTooltip], Source={x:Static local:LocalizationManager.Instance}}"
                               automation:AutomationProperties.Name="{Binding [RansomwareProtectionToggle], Source={x:Static local:LocalizationManager.Instance}}"
                               Checked="RansomwareProtection_Checked" Unchecked="RansomwareProtection_Unchecked" />
-                    <Border Background="#163A2D" CornerRadius="14" Padding="12,6">
-                        <TextBlock Text="{Binding [LocalAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
-                                   Foreground="#86EFAC" FontWeight="SemiBold" />
+                    <Border Height="34" Background="#163A2D" CornerRadius="17" Padding="12,0"
+                            VerticalAlignment="Center" SnapsToDevicePixels="True">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Ellipse Width="6" Height="6" Margin="0,0,6,0" VerticalAlignment="Center"
+                                     Fill="#4ADE80" SnapsToDevicePixels="True" />
+                            <TextBlock Text="{Binding [LocalAnalysis], Source={x:Static local:LocalizationManager.Instance}}"
+                                       Foreground="#86EFAC" FontWeight="SemiBold" VerticalAlignment="Center" />
+                        </StackPanel>
                     </Border>
                 </StackPanel>
             </Grid>
