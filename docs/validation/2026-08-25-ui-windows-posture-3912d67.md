@@ -6,6 +6,7 @@
 |---|---|
 | Candidate | `3912d675dc0917a57c8c05e0bd9c4a2adaa5463b` |
 | Version | `0.11.6` |
+| Successor automation | CI `32789592412` and CodeQL `32789591166` PASS on `8230aa91c3a26e08967124cf3a1a47028a2e2df6` |
 | Platform | Windows 11 build `10.0.26200.0`, native x64 VirtualBox VM |
 | VM snapshot restored after campaign | `dd7ac330-bf18-44f8-bee6-21e2473e04f6` |
 | Network and integration isolation | NAT only; second adapter, clipboard and drag-and-drop disabled |
@@ -66,6 +67,6 @@ Controlled Folder Access does not imply that Core isolation or Memory integrity 
 
 This is an exact UI, package, localization and posture-reading qualification. It is not represented
 as a repeat of the privileged WFP/SCM/trust/IPC/ETW campaign. Those unchanged runtime surfaces remain
-covered by the candidate-bound `8486155` record and its green successor CI. Commit `3912d67` still
-requires green successor CI and CodeQL before publication. Native Arm64 privileged-runtime and
-x64-on-Arm64 identity qualification remain hardware-dependent open gates.
+covered by the candidate-bound `8486155` record and its green successor CI. Successor `8230aa9`
+passed CI and CodeQL, including native Arm64 build/test/package/installer. Native Arm64 privileged
+runtime and x64-on-Arm64 identity qualification remain hardware-dependent open gates.

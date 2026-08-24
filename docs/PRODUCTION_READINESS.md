@@ -5,7 +5,7 @@ for one commit or package does not qualify different executable bytes.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Technical VM qualification passed**: the privileged runtime candidate `8486155` passed the complete security campaign; exact UI/package candidate `3912d67` passed local build, installer and test gates plus Windows 11 VM layout, EN/FR/ES smoke and live posture checks. Publication still requires green successor CI. |
+| **x64** | **Technical VM qualification passed**: the privileged runtime candidate `8486155` passed the complete security campaign; exact UI/package candidate `3912d67` passed local build, installer and test gates plus Windows 11 VM layout, EN/FR/ES smoke and live posture checks; successor `8230aa9` passed CI `32789592412` and CodeQL `32789591166`. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
@@ -63,23 +63,22 @@ This distinction prevents the UI/package run from being misrepresented as a repe
 WFP/SCM qualification. Successor commit
 `eed27a173dd70458b816f7f0142a56a9aa15af15` passed CI run `32664937545` across Windows 2022,
 Windows 2025 and native ARM64, including both installer packages. CodeQL run `32664935397` passed its
-C# and Actions analyses. Commit `3912d67` still requires its own successor CI result before
-publication.
+C# and Actions analyses. Dashboard/package successor `8230aa91c3a26e08967124cf3a1a47028a2e2df6`
+passed CI run `32789592412` across Windows 2022, Windows 2025 and native ARM64, including both
+installer packages. CodeQL run `32789591166` passed its C# and Actions analyses.
 
 ## Remaining gates
 
-- green CI and CodeQL for the exact release successor, including native Arm64 build, tests and
-  installer packaging;
 - independent human EN/FR/ES presentation review remains recommended; the project owner has reviewed
   the French flow interactively, while EN/ES have automated layout/resource and smoke coverage;
 - native Arm64 privileged WFP/SCM/trust/IPC/session qualification when suitable hardware is available;
 - x64-on-Arm64 application-identity qualification when suitable hardware is available;
 - the signed Authenticode path if and when a publisher certificate is configured.
 
-The CI result gates public release of the current successor. The Arm64-specific hardware items gate
-Arm64 privileged-runtime claims, not CI-built native Arm64 artifacts or the already executed x64
-security/runtime result. The absence of a certificate is explicitly accepted for now but must remain
-visible to users.
+Branch protection still requires green CI on the final merge state. The Arm64-specific hardware
+items gate Arm64 privileged-runtime claims, not CI-built native Arm64 artifacts or the already
+executed x64 security/runtime result. The absence of a certificate is explicitly accepted for now
+but must remain visible to users.
 
 ## Historical evidence
 

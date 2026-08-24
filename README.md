@@ -154,7 +154,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; exact dashboard/package candidate `3912d67` passed Windows 11 VM layout, posture and EN/FR/ES smoke checks; successor CI is pending |
+| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; exact dashboard/package candidate `3912d67` passed Windows 11 VM layout, posture and EN/FR/ES smoke checks; successor `8230aa9` passed CI `32789592412` and CodeQL `32789591166` |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,

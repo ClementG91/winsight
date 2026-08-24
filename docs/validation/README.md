@@ -11,7 +11,7 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
-| Dashboard settings layout, EN/FR/ES smoke, installer and Windows-security posture | PASS: exact ZIP/dashboard hashes, 4 equal 244 px buttons in 2-by-2 layout, centred local-analysis badge | `3912d67` | Pending successor CI | [record](2026-08-25-ui-windows-posture-3912d67.md) |
+| Dashboard settings layout, EN/FR/ES smoke, installer and Windows-security posture | PASS: exact ZIP/dashboard hashes, 4 equal 244 px buttons in 2-by-2 layout, centred local-analysis badge | `3912d67` | CI `32789592412` + CodeQL `32789591166` PASS on successor `8230aa9` | [record](2026-08-25-ui-windows-posture-3912d67.md) |
 | ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | CI `32664937545` + CodeQL `32664935397` PASS on successor `eed27a1`; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
 
 The `3912d67` record qualifies the changed dashboard/package surface only; it deliberately does not
@@ -53,9 +53,9 @@ kept as a record of what that script printed, not as evidence.
 | Independent EN/FR/ES presentation | The project owner reviewed the French flow interactively through 2026-08-25; EN/ES have automated resource, minimum-width layout and VM smoke coverage, but no independent human attestation. |
 
 Native x64 privileged-runtime qualification is established for candidate `8486155`; exact UI and
-package qualification is established for `3912d67`, pending its successor CI. Arm64-specific
-hardware gates remain open. Unsigned distribution has no Windows publisher identity even when
-hashes and attestations verify.
+package qualification is established for `3912d67`, with green successor automation on `8230aa9`.
+Arm64-specific hardware gates remain open. Unsigned distribution has no Windows publisher identity
+even when hashes and attestations verify.
 
 ## Why three of these records exist at all
 
