@@ -257,6 +257,63 @@ public sealed class LocalizationTests
     }
 
     [Theory]
+    [InlineData("en", "Windows security", "Core isolation", "Controlled Folder Access")]
+    [InlineData("fr", "Sécurité Windows", "Isolation du noyau", "Accès contrôlé aux dossiers")]
+    [InlineData("es", "Seguridad de Windows", "Aislamiento del núcleo", "Acceso controlado a carpetas")]
+    public void WindowsSecurityCopy_KeepsIndependentControlsDistinct(
+        string culture,
+        string expectedLabel,
+        string coreIsolation,
+        string controlledFolderAccess)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            DashboardTools.Reload();
+
+            var tool = DashboardTools.ForCommand("integrity");
+            Assert.NotNull(tool);
+            Assert.Equal(expectedLabel, tool.Label);
+            Assert.Contains(coreIsolation, tool.Guidance, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(controlledFolderAccess, tool.Guidance, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(coreIsolation, localization["CfaOff"], StringComparison.OrdinalIgnoreCase);
+            Assert.Contains(controlledFolderAccess, localization["CfaOff"], StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            localization.SetCulture(original);
+            DashboardTools.Reload();
+        }
+    }
+
+    [Theory]
+    [InlineData("en", "Save securely", "format is recognized")]
+    [InlineData("fr", "Enregistrer en toute sécurité", "format est reconnu")]
+    [InlineData("es", "Guardar de forma segura", "Se reconoce su formato")]
+    public void VirusTotalSaveCopy_StatesWhatWasActuallyValidated(
+        string culture,
+        string expectedButton,
+        string expectedSavedDetail)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+
+            Assert.Equal(expectedButton, localization["VtSave"]);
+            Assert.Contains(expectedSavedDetail, localization["VtSaved"], StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("●", localization["LocalAnalysis"], StringComparison.Ordinal);
+        }
+        finally
+        {
+            localization.SetCulture(original);
+        }
+    }
+
+    [Theory]
     [InlineData("en", "requested mode", "effective runtime state", "service registration", "LocalSystem", "degraded", "installation")]
     [InlineData("fr", "mode demandé", "état effectif", "enregistrement du service", "LocalSystem", "dégradé", "installation")]
     [InlineData("es", "modo solicitado", "estado efectivo", "registro del servicio", "LocalSystem", "degradado", "instalacion")]

@@ -6,7 +6,7 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="WindowTitle" xml:space="preserve"><value>WinSight, sécurité Windows</value></data>
   <data name="AppTagline" xml:space="preserve"><value>Comprendre ce qui se passe sur votre PC, sans télémétrie</value></data>
-  <data name="LocalAnalysis" xml:space="preserve"><value>● Analyse locale</value></data>
+  <data name="LocalAnalysis" xml:space="preserve"><value>Analyse locale</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Langue</value></data>
   <data name="LanguagePickerAutomation" xml:space="preserve"><value>Langue de l’interface</value></data>
   <data name="SettingsButton" xml:space="preserve"><value>⚙ Paramètres</value></data>
@@ -22,11 +22,11 @@
   <data name="VtStatusEnvironment" xml:space="preserve"><value>Activé pour cette session. Une clé fournie par l’environnement reste prioritaire.</value></data>
   <data name="VtGetKey" xml:space="preserve"><value>Obtenir ma clé</value></data>
   <data name="VtDisable" xml:space="preserve"><value>Désactiver</value></data>
-  <data name="VtSave" xml:space="preserve"><value>Enregistrer sûrement</value></data>
+  <data name="VtSave" xml:space="preserve"><value>Enregistrer en toute sécurité</value></data>
   <data name="Cancel" xml:space="preserve"><value>Annuler</value></data>
   <data name="VtInvalidKey" xml:space="preserve"><value>Saisissez une clé API VirusTotal valide (32 à 128 lettres, chiffres, « - » ou « _ »).</value></data>
-  <data name="VtSaved" xml:space="preserve"><value>Activé, la clé API a été enregistrée de manière sécurisée.</value></data>
-  <data name="VtSavedEnvironment" xml:space="preserve"><value>Clé chiffrée enregistrée. WINSIGHT_VT_KEY reste active et prioritaire pour cette session.</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>Clé VirusTotal enregistrée de manière sécurisée. Son format est reconnu ; l’accès sera confirmé lors de la prochaine recherche.</value></data>
+  <data name="VtSavedEnvironment" xml:space="preserve"><value>Clé chiffrée enregistrée. WINSIGHT_VT_KEY reste active et prioritaire pour cette session ; la clé enregistrée s’appliquera après la suppression de cette priorité.</value></data>
   <data name="VtDisabled" xml:space="preserve"><value>VirusTotal est désactivé pour WinSight.</value></data>
   <data name="VtDisabledEnvironment" xml:space="preserve"><value>Clé chiffrée supprimée. VirusTotal reste activé par WINSIGHT_VT_KEY ; supprimez cette variable pour le désactiver.</value></data>
   <data name="VtSettingsError" xml:space="preserve"><value>Le paramètre n’a pas pu être modifié : {0}</value></data>
@@ -249,10 +249,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Un nouvel élément de démarrage a été ajouté et n'est pas de confiance (non signé, non approuvé ou fichier absent). À vérifier.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Un nouvel élément de démarrage signé a été ajouté.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protection rançongiciel</value></data>
-  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Protections du noyau</value></data>
-  <data name="ToolIntegrityShort" xml:space="preserve"><value>Ce que ce PC refuse d'exécuter</value></data>
-  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Demande au noyau lui-même ce qu'il applique réellement : signature des pilotes, test signing, intégrité mémoire, Secure Boot, et présence d'un débogueur noyau. C'est ce qui donne son sens à tous les autres résultats concernant le noyau.</value></data>
-  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Le test signing activé est le point sur lequel agir : ce PC accepte alors un pilote signé par n'importe qui, et un « pilote non signé » signalé ailleurs devient attendu plutôt que surprenant. Secure Boot et l'intégrité mémoire désactivés sont des réglages plus faibles, pas une preuve — mais si ce n'est pas vous qui les avez désactivés, cherchez qui l'a fait.</value></data>
+  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Sécurité Windows</value></data>
+  <data name="ToolIntegrityShort" xml:space="preserve"><value>États indépendants des protections Windows</value></data>
+  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Vérifie séparément les contrôles de sécurité Windows : signature des pilotes, test signing, intégrité de la mémoire, Secure Boot, débogage du noyau, antivirus et Accès contrôlé aux dossiers de Defender. Un contrôle activé n’implique jamais que les autres le sont.</value></data>
+  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Examinez chaque ligne séparément. L’Isolation du noyau et l’Intégrité de la mémoire protègent le noyau ; l’Accès contrôlé aux dossiers protège certains dossiers contre les applications non approuvées ; Secure Boot protège la chaîne de démarrage. Le test signing activé exige une action. Un réglage désactivé affaiblit la posture sans prouver une compromission ; recherchez toutefois toute modification inattendue.</value></data>
   <data name="ToolInputLabel" xml:space="preserve"><value>Interception clavier</value></data>
   <data name="ToolInputShort" xml:space="preserve"><value>Ce qui peut lire vos frappes</value></data>
   <data name="ToolInputDescription" xml:space="preserve"><value>Liste les pilotes noyau placés sur le chemin du clavier et de la souris. Un pilote ici voit chaque touche que vous tapez, avant toute application — c'est exactement là qu'un keylogger sérieux s'installe.</value></data>
@@ -291,7 +291,7 @@
   <data name="AntivirusStateExpired" xml:space="preserve"><value>Expiré</value></data>
   <data name="AntivirusStateGroup" xml:space="preserve"><value>{0} : {1}</value></data>
   <data name="CfaTitle" xml:space="preserve"><value>Accès contrôlé aux dossiers (bouclier anti-rançongiciel)</value></data>
-  <data name="CfaOff" xml:space="preserve"><value>Désactivé. L'Accès contrôlé aux dossiers ne bloque pas la modification des dossiers protégés par les programmes non approuvés.</value></data>
+  <data name="CfaOff" xml:space="preserve"><value>Désactivé. L’Accès contrôlé aux dossiers est distinct de l’Isolation du noyau et de l’Intégrité de la mémoire ; il ne bloque pas la modification des dossiers protégés par les programmes non approuvés.</value></data>
   <data name="CfaAuditOnly" xml:space="preserve"><value>Audit seul. Windows consigne ce qu'il bloquerait, mais ne le bloque pas.</value></data>
   <data name="CfaBlockDiskModificationOnly" xml:space="preserve"><value>Blocage des modifications disque uniquement. Ce mode n'établit pas la protection de dossiers tels que Documents, Images et Bureau.</value></data>
   <data name="CfaAuditDiskModificationOnly" xml:space="preserve"><value>Audit des modifications disque uniquement. Ce mode consigne les changements sans établir l'application de la protection des dossiers.</value></data>

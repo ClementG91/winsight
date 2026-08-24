@@ -11,9 +11,12 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
+| Dashboard settings layout, EN/FR/ES smoke, installer and Windows-security posture | PASS: exact ZIP/dashboard hashes, 4 equal 244 px buttons in 2-by-2 layout, centred local-analysis badge | `3912d67` | CI `32789592412` + CodeQL `32789591166` PASS on successor `8230aa9` | [record](2026-08-25-ui-windows-posture-3912d67.md) |
 | ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | CI `32664937545` + CodeQL `32664935397` PASS on successor `eed27a1`; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
 
-This campaign exercised the current dynamic WFP/SCM and ETW surfaces, exact protected-path trust,
+The `3912d67` record qualifies the changed dashboard/package surface only; it deliberately does not
+claim that privileged WFP/SCM gates were rerun. The `8486155` campaign exercised the current dynamic
+WFP/SCM and ETW surfaces, exact protected-path trust,
 local IPC and a real Network Logon from a second isolated VM. It retains harness-only red attempts
 and binds the final green result to exact local artifact hashes. The previous partial campaign remains
 historical rather than being silently overwritten.
@@ -47,12 +50,12 @@ kept as a record of what that script printed, not as evidence.
 | Native Arm64 privileged runtime | Native Arm64 CI build/package/installer passes, but WFP/SCM/trust/IPC/session needs an isolated Arm64 VM. See [`../ARM64_VALIDATION.md`](../ARM64_VALIDATION.md). |
 | x64 emulated on Arm64 | Application-identity behavior has no x64-native equivalent and needs Arm64 hardware. |
 | Signed Authenticode path | The current release policy is explicitly unsigned after SignPath Foundation declined the free application. A future certificate path remains unexercised. |
-| EN/FR/ES presentation | User attestation completed on 2026-07-26; this is not independent evidence. |
+| Independent EN/FR/ES presentation | The project owner reviewed the French flow interactively through 2026-08-25; EN/ES have automated resource, minimum-width layout and VM smoke coverage, but no independent human attestation. |
 
-Native x64 technical qualification is established for candidate `8486155`; its successor automation
-passed and release readiness still requires independent presentation review. Arm64-specific gates
-remain open. Unsigned distribution has no Windows publisher identity even when hashes and
-attestations verify.
+Native x64 privileged-runtime qualification is established for candidate `8486155`; exact UI and
+package qualification is established for `3912d67`, with green successor automation on `8230aa9`.
+Arm64-specific hardware gates remain open. Unsigned distribution has no Windows publisher identity
+even when hashes and attestations verify.
 
 ## Why three of these records exist at all
 

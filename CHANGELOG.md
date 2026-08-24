@@ -1,5 +1,14 @@
-## v0.11.6, 2026-08-20
+## v0.11.6, 2026-08-25
 
+- Clarified the dashboard's Windows-security scan so Defender Controlled Folder Access is no
+  longer grouped under the misleading "Kernel protections" label. Core isolation, Memory
+  integrity, Secure Boot and ransomware folder protection are now described as independent
+  controls; a disabled CFA result remains notable when Defender reports the documented mode `0`.
+- Made a successful VirusTotal key save close the modal and report the outcome in the main window,
+  corrected the French action to "Enregistrer en toute sécurité", and separated the local-analysis
+  status dot from translated text so the badge is geometrically centred in every language. The
+  resizable settings dialog now separates provider and confirmation actions into two responsive
+  rows, preventing translated labels or larger text from clipping the primary action.
 - Made WFP ownership crash-safe with one dynamic session, exact startup/teardown reconciliation,
   fail-closed partial-state handling and non-durable `Ask` semantics.
 - Hardened the LocalSystem service registration with checked rollback, a service SID, an exact

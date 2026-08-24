@@ -124,8 +124,10 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
 - Real-time persistence blocking and ransomware interception require a separately
   signed and safety-reviewed driver and are not shipped. WinSight's own ransomware
   feature therefore detects and alerts but does not block. It does, however, **report**
-  whether Windows' own kernel-level blocker - Microsoft Defender **Controlled Folder
-  Access** - configured and operational posture can be read: the `integrity` check uses
+  whether Windows' separate ransomware control - Microsoft Defender **Controlled Folder
+  Access** - configured and operational posture can be read. Controlled Folder Access is
+  independent from Core isolation, Memory integrity and Secure Boot: one being enabled says
+  nothing about the others. The `integrity` check uses
   Defender WMI (unelevated) and distinguishes Disabled, Audit, block/audit disk-modification-only,
   and a fully observed Enabled posture. The latter requires Defender `AMRunningMode=Normal`,
   antivirus enabled and real-time protection enabled. Every operating mode Defender documents -

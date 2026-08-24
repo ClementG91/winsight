@@ -6,7 +6,7 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="WindowTitle" xml:space="preserve"><value>WinSight, Windows security</value></data>
   <data name="AppTagline" xml:space="preserve"><value>Understand what is happening on your PC, without telemetry</value></data>
-  <data name="LocalAnalysis" xml:space="preserve"><value>● Local analysis</value></data>
+  <data name="LocalAnalysis" xml:space="preserve"><value>Local analysis</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Language</value></data>
   <data name="LanguagePickerAutomation" xml:space="preserve"><value>Interface language</value></data>
   <data name="SettingsButton" xml:space="preserve"><value>⚙ Settings</value></data>
@@ -25,8 +25,8 @@
   <data name="VtSave" xml:space="preserve"><value>Save securely</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="VtInvalidKey" xml:space="preserve"><value>Enter a valid VirusTotal API key (32 to 128 letters, digits, “-” or “_”).</value></data>
-  <data name="VtSaved" xml:space="preserve"><value>Enabled, the API key has been stored securely.</value></data>
-  <data name="VtSavedEnvironment" xml:space="preserve"><value>Encrypted key saved. WINSIGHT_VT_KEY remains active and takes precedence for this session.</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>VirusTotal key saved securely. Its format is recognized; access will be confirmed on the next lookup.</value></data>
+  <data name="VtSavedEnvironment" xml:space="preserve"><value>Encrypted key saved. WINSIGHT_VT_KEY remains active and takes precedence for this session; the saved key will apply when that override is removed.</value></data>
   <data name="VtDisabled" xml:space="preserve"><value>VirusTotal is disabled for WinSight.</value></data>
   <data name="VtDisabledEnvironment" xml:space="preserve"><value>Encrypted key removed. VirusTotal remains enabled by WINSIGHT_VT_KEY; remove that variable to disable it.</value></data>
   <data name="VtSettingsError" xml:space="preserve"><value>The setting could not be changed: {0}</value></data>
@@ -252,10 +252,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>A new startup item was added and is not trusted (unsigned, untrusted, or its file is missing). Review it.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>A new signed startup item was added.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Ransomware protection</value></data>
-  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Kernel protections</value></data>
-  <data name="ToolIntegrityShort" xml:space="preserve"><value>What this PC refuses to run</value></data>
-  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Asks the kernel itself what it currently enforces: driver signing, test signing, memory integrity, Secure Boot, and whether a kernel debugger is attached. This is what gives every other kernel finding its meaning.</value></data>
-  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Test signing turned on is the one to act on: it means this PC will load a driver signed by anyone, so an "unsigned driver" reported elsewhere is expected rather than surprising. Secure Boot and memory integrity being off are weaker settings, not evidence of anything — but if you did not turn them off, find out who did.</value></data>
+  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Windows security</value></data>
+  <data name="ToolIntegrityShort" xml:space="preserve"><value>Independent Windows protection states</value></data>
+  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Checks Windows security controls independently: driver signing, test signing, memory integrity, Secure Boot, kernel debugging, antivirus, and Defender Controlled Folder Access. One enabled control never implies another is enabled.</value></data>
+  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Review each line on its own. Core isolation and memory integrity protect the kernel; Controlled Folder Access protects selected folders from untrusted apps; Secure Boot protects the boot chain. Test signing enabled needs action. An off setting is a weaker posture, not evidence of compromise — but investigate an unexpected change.</value></data>
   <data name="ToolInputLabel" xml:space="preserve"><value>Keyboard interception</value></data>
   <data name="ToolInputShort" xml:space="preserve"><value>What can read your keystrokes</value></data>
   <data name="ToolInputDescription" xml:space="preserve"><value>Lists the kernel drivers sitting in the keyboard and mouse paths. A driver here sees every key you press, before any application does — which is exactly where a serious keylogger installs itself.</value></data>
@@ -294,7 +294,7 @@
   <data name="AntivirusStateExpired" xml:space="preserve"><value>Expired</value></data>
   <data name="AntivirusStateGroup" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="CfaTitle" xml:space="preserve"><value>Controlled Folder Access (ransomware shield)</value></data>
-  <data name="CfaOff" xml:space="preserve"><value>Disabled. Controlled Folder Access is not blocking untrusted programs from modifying protected folders.</value></data>
+  <data name="CfaOff" xml:space="preserve"><value>Disabled. Controlled Folder Access is separate from Core isolation and Memory integrity; it is not blocking untrusted programs from modifying protected folders.</value></data>
   <data name="CfaAuditOnly" xml:space="preserve"><value>Audit only. Windows records what it would block but does not block it.</value></data>
   <data name="CfaBlockDiskModificationOnly" xml:space="preserve"><value>Block disk modification only. This mode does not establish protection for folders such as Documents, Pictures and Desktop.</value></data>
   <data name="CfaAuditDiskModificationOnly" xml:space="preserve"><value>Audit disk modification only. This mode records disk changes but does not establish protected-folder enforcement.</value></data>

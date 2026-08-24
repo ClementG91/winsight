@@ -6,7 +6,7 @@
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="WindowTitle" xml:space="preserve"><value>WinSight, seguridad de Windows</value></data>
   <data name="AppTagline" xml:space="preserve"><value>Comprende lo que ocurre en tu PC, sin telemetría</value></data>
-  <data name="LocalAnalysis" xml:space="preserve"><value>● Análisis local</value></data>
+  <data name="LocalAnalysis" xml:space="preserve"><value>Análisis local</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Idioma</value></data>
   <data name="LanguagePickerAutomation" xml:space="preserve"><value>Idioma de la interfaz</value></data>
   <data name="SettingsButton" xml:space="preserve"><value>⚙ Ajustes</value></data>
@@ -25,8 +25,8 @@
   <data name="VtSave" xml:space="preserve"><value>Guardar de forma segura</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancelar</value></data>
   <data name="VtInvalidKey" xml:space="preserve"><value>Introduce una clave API de VirusTotal válida (32 a 128 letras, números, «-» o «_»).</value></data>
-  <data name="VtSaved" xml:space="preserve"><value>Activado: la clave API se ha guardado de forma segura.</value></data>
-  <data name="VtSavedEnvironment" xml:space="preserve"><value>Clave cifrada guardada. WINSIGHT_VT_KEY sigue activa y tiene prioridad en esta sesión.</value></data>
+  <data name="VtSaved" xml:space="preserve"><value>Clave de VirusTotal guardada de forma segura. Se reconoce su formato; el acceso se confirmará en la próxima consulta.</value></data>
+  <data name="VtSavedEnvironment" xml:space="preserve"><value>Clave cifrada guardada. WINSIGHT_VT_KEY sigue activa y tiene prioridad en esta sesión; la clave guardada se aplicará cuando se quite esa prioridad.</value></data>
   <data name="VtDisabled" xml:space="preserve"><value>VirusTotal está desactivado para WinSight.</value></data>
   <data name="VtDisabledEnvironment" xml:space="preserve"><value>Clave cifrada eliminada. VirusTotal sigue activado por WINSIGHT_VT_KEY; elimina esa variable para desactivarlo.</value></data>
   <data name="VtSettingsError" xml:space="preserve"><value>No se pudo cambiar el ajuste: {0}</value></data>
@@ -249,10 +249,10 @@
   <data name="GuardianDetectedNotable" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio que no es de confianza (sin firma, no confiable o con su archivo ausente). Revíselo.</value></data>
   <data name="GuardianDetectedSigned" xml:space="preserve"><value>Se agregó un nuevo elemento de inicio firmado.</value></data>
   <data name="RansomwareProtectionToggle" xml:space="preserve"><value>Protección contra ransomware</value></data>
-  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Protecciones del núcleo</value></data>
-  <data name="ToolIntegrityShort" xml:space="preserve"><value>Lo que este PC se niega a ejecutar</value></data>
-  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Pregunta al propio núcleo qué aplica realmente: firma de controladores, test signing, integridad de memoria, Arranque seguro y si hay un depurador de núcleo conectado. Es lo que da sentido a los demás hallazgos sobre el núcleo.</value></data>
-  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>El test signing activado es lo que exige actuar: este PC aceptará un controlador firmado por cualquiera, así que un «controlador sin firmar» detectado en otro sitio pasa a ser esperado. El Arranque seguro y la integridad de memoria desactivados son ajustes más débiles, no una prueba de nada, pero si no los desactivó usted, averigüe quién lo hizo.</value></data>
+  <data name="ToolIntegrityLabel" xml:space="preserve"><value>Seguridad de Windows</value></data>
+  <data name="ToolIntegrityShort" xml:space="preserve"><value>Estados independientes de las protecciones de Windows</value></data>
+  <data name="ToolIntegrityDescription" xml:space="preserve"><value>Comprueba por separado los controles de seguridad de Windows: firma de controladores, test signing, integridad de memoria, Arranque seguro, depuración del núcleo, antivirus y Acceso controlado a carpetas de Defender. Que un control esté activo nunca implica que los demás lo estén.</value></data>
+  <data name="ToolIntegrityGuidance" xml:space="preserve"><value>Revise cada línea por separado. El Aislamiento del núcleo y la Integridad de memoria protegen el núcleo; el Acceso controlado a carpetas protege determinadas carpetas frente a aplicaciones no confiables; el Arranque seguro protege la cadena de arranque. El test signing activado exige actuar. Un ajuste desactivado debilita la postura sin probar una vulneración, pero investigue cualquier cambio inesperado.</value></data>
   <data name="ToolInputLabel" xml:space="preserve"><value>Intercepción de teclado</value></data>
   <data name="ToolInputShort" xml:space="preserve"><value>Qué puede leer sus pulsaciones</value></data>
   <data name="ToolInputDescription" xml:space="preserve"><value>Enumera los controladores de núcleo situados en la ruta del teclado y del ratón. Un controlador aquí ve cada tecla que pulsa, antes que cualquier aplicación: es exactamente donde se instala un keylogger serio.</value></data>
@@ -291,7 +291,7 @@
   <data name="AntivirusStateExpired" xml:space="preserve"><value>Caducado</value></data>
   <data name="AntivirusStateGroup" xml:space="preserve"><value>{0}: {1}</value></data>
   <data name="CfaTitle" xml:space="preserve"><value>Acceso controlado a carpetas (escudo antirransomware)</value></data>
-  <data name="CfaOff" xml:space="preserve"><value>Desactivado. El Acceso controlado a carpetas no impide que programas no confiables modifiquen las carpetas protegidas.</value></data>
+  <data name="CfaOff" xml:space="preserve"><value>Desactivado. El Acceso controlado a carpetas es distinto del Aislamiento del núcleo y de la Integridad de memoria; no impide que programas no confiables modifiquen las carpetas protegidas.</value></data>
   <data name="CfaAuditOnly" xml:space="preserve"><value>Solo auditoría. Windows registra lo que bloquearía, pero no lo bloquea.</value></data>
   <data name="CfaBlockDiskModificationOnly" xml:space="preserve"><value>Solo bloqueo de modificaciones de disco. Este modo no establece la protección de carpetas como Documentos, Imágenes y Escritorio.</value></data>
   <data name="CfaAuditDiskModificationOnly" xml:space="preserve"><value>Solo auditoría de modificaciones de disco. Este modo registra cambios sin establecer la aplicación de la protección de carpetas.</value></data>

@@ -4,8 +4,9 @@
         xmlns:local="clr-namespace:WinSight.Dashboard"
         xmlns:automation="clr-namespace:System.Windows.Automation;assembly=PresentationCore"
         Title="{Binding [SettingsTitle], Source={x:Static local:LocalizationManager.Instance}}"
-        Icon="Assets/winsight-logo.png" Width="540" Height="450"
-        ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F8FAFC"
+        Icon="Assets/winsight-logo.png" Width="560" Height="490"
+        MinWidth="500" MinHeight="470" ResizeMode="CanResizeWithGrip"
+        WindowStartupLocation="CenterOwner" Background="#F8FAFC"
         ShowInTaskbar="False">
     <Grid Margin="24">
         <Grid.RowDefinitions>
@@ -41,27 +42,34 @@
                        Text="{Binding [VtApiKeyHint], Source={x:Static local:LocalizationManager.Instance}}" />
         </StackPanel>
 
-        <Grid Grid.Row="5" Margin="0,22,0,0">
+        <Grid Grid.Row="5" Margin="0,22,0,0" MaxWidth="520" HorizontalAlignment="Stretch">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="8" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="8" />
+                <ColumnDefinition Width="*" />
             </Grid.ColumnDefinitions>
-            <Button Grid.Column="0" Content="{Binding [VtGetKey], Source={x:Static local:LocalizationManager.Instance}}"
-                    Click="GetKeyButton_Click" />
             <!--
-                Confirming actions sit at the trailing edge, the destructive one furthest from them,
-                with the same gutter the rest of the app uses.
+                A balanced two-by-two action grid keeps both rows aligned. Equal columns give the
+                longest translated primary label enough room at the minimum window size; the cap
+                prevents excessively wide buttons when the resizable window is enlarged.
             -->
-            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="0,0,-8,0">
-                <Button Content="{Binding [VtDisable], Source={x:Static local:LocalizationManager.Instance}}"
-                        Margin="0,0,8,0" Click="DisableButton_Click" />
-                <Button Content="{Binding [Cancel], Source={x:Static local:LocalizationManager.Instance}}"
-                        Margin="0,0,8,0" IsCancel="True" />
-                <Button Content="{Binding [VtSave], Source={x:Static local:LocalizationManager.Instance}}"
-                        Style="{StaticResource PrimaryButton}" Margin="0,0,8,0"
-                        IsDefault="True" Click="SaveButton_Click" />
-            </StackPanel>
+            <Button x:Name="GetKeyButton"
+                    Content="{Binding [VtGetKey], Source={x:Static local:LocalizationManager.Instance}}"
+                    Click="GetKeyButton_Click" />
+            <Button x:Name="DisableButton" Grid.Column="2"
+                    Content="{Binding [VtDisable], Source={x:Static local:LocalizationManager.Instance}}"
+                    Click="DisableButton_Click" />
+            <Button x:Name="CancelSettingsButton" Grid.Row="2"
+                    Content="{Binding [Cancel], Source={x:Static local:LocalizationManager.Instance}}"
+                    IsCancel="True" />
+            <Button x:Name="SaveSettingsButton" Grid.Row="2" Grid.Column="2"
+                    Content="{Binding [VtSave], Source={x:Static local:LocalizationManager.Instance}}"
+                    Style="{StaticResource PrimaryButton}" IsDefault="True" Click="SaveButton_Click" />
         </Grid>
     </Grid>
 </Window>
