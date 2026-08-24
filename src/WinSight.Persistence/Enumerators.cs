@@ -270,7 +270,7 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
 
     private readonly IScheduledTaskSource _source = source ?? new ComScheduledTaskSource();
-    private bool _unreadable;
+    private int _unreadable;
 
     public string Surface => "Scheduled Tasks";
 
@@ -287,15 +287,20 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
     /// Reported as one unreadable location, not a count: when the service cannot be reached the
     /// number of tasks behind it is exactly what is unknown.
     /// </remarks>
-    public int UnreadableLocations => _unreadable ? 1 : 0;
+    public int UnreadableLocations => _unreadable;
 
     public IEnumerable<RawAutostart> Enumerate()
     {
         var tasks = _source.Enumerate().ToList();
-        _unreadable = _source.Unreadable;
+        _unreadable = _source.Unreadable ? 1 : 0;
         foreach (var task in tasks)
         {
-            foreach (var command in ParseTaskCommands(task.Xml))
+            if (!TryParseTaskCommands(task.Xml, out var commands))
+            {
+                _unreadable++;
+                continue;
+            }
+            foreach (var command in commands)
             {
                 yield return new RawAutostart(
                     AutostartVector.ScheduledTask,
@@ -331,7 +336,10 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
     /// prefix that exists on disk, so a spaced or quoted program path still resolves and the
     /// arguments become inert trailing text rather than a second parsing rule to keep correct.
     /// </remarks>
-    public static IReadOnlyList<string> ParseTaskCommands(string xml)
+    public static IReadOnlyList<string> ParseTaskCommands(string xml) =>
+        TryParseTaskCommands(xml, out var commands) ? commands : [];
+
+    internal static bool TryParseTaskCommands(string xml, out IReadOnlyList<string> commands)
     {
         XDocument doc;
         try
@@ -340,13 +348,15 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
         }
         catch (XmlException)
         {
-            return Array.Empty<string>();
+            commands = [];
+            return false;
         }
-        return doc.Descendants()
+        commands = doc.Descendants()
             .Where(e => e.Name.LocalName == "Command")
             .Select(e => Join(e.Value.Trim(), SiblingArguments(e)))
             .Where(c => c.Length > 0)
             .ToList();
+        return true;
     }
 
     /// <summary>The <c>Arguments</c> value beside a given <c>Command</c>, or null when it has none.</summary>

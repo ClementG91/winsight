@@ -18,8 +18,9 @@
 
     -NetworkLogon is a separate, fail-closed pass for a real network logon token. Run it remotely
     from a second isolated control machine through WinRM. It requires the Network SID, rejects the
-    Interactive SID, expects the pipe to be unavailable (exit 3), and proves the same service process
-    and command line stayed running before and after the denied attempt.
+    Interactive SID, and expects the pipe to be unavailable (exit 3). The elevated target-side
+    observer in the VM qualification kit proves the service PID and command line are unchanged;
+    hardened Windows correctly denies those SCM/WMI observations to this network-only account.
 
     The service must already be installed and running (its pipe must exist). Install it with the WFP
     kit's pre-arm step first; this gate does not install or arm anything.
@@ -147,28 +148,6 @@ if ($NetworkLogon) {
     Write-Check 'caller is a Network logon, not an Interactive logon' $isNetworkOnly `
         'S-1-5-2 present and S-1-5-4 absent' ($groupSids -join ',')
 
-    $before = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'" -ErrorAction Stop
-    $beforeRunning = $null -ne $before -and $before.State -eq 'Running' -and
-        [uint32]$before.ProcessId -gt 0
-    $beforeObserved = if ($null -eq $before) { '<service absent>' }
-        else { "State={0}; ProcessId={1}" -f $before.State, $before.ProcessId }
-    Write-Check 'service is running before the denied attempt' $beforeRunning `
-        'State=Running and ProcessId>0' $beforeObserved
-
-    $expectedCommand = '"{0}" run' -f $service
-    $beforePath = if ($null -eq $before) { '' } else { [string]$before.PathName }
-    $pathMatches = $null -ne $before -and [string]::Equals(
-        $beforePath,
-        $expectedCommand,
-        [StringComparison]::OrdinalIgnoreCase)
-    Write-Check 'SCM is bound to the protected service executable' $pathMatches `
-        $expectedCommand $beforePath
-
-    if ($script:Failures -gt 0) {
-        Write-Host ('Result: {0} checks, {1} failure(s).' -f $script:Checks, $script:Failures)
-        exit 1
-    }
-
     $networkRun = Invoke-Current $cli
     Write-Host ('  network:    {0}' -f $networkRun.Raw)
     Write-Check 'network logon receives the unavailable exit code' ($networkRun.ExitCode -eq 3) `
@@ -179,22 +158,6 @@ if ($NetworkLogon) {
         ($networkRun.Outcome -eq 'ServiceUnavailable') 'outcome=ServiceUnavailable' $networkRun.Outcome
     Write-Check 'network logon performs no mutation' ($networkRun.Mutation -eq 'none') `
         'mutation=none' $networkRun.Mutation
-
-    $after = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'" -ErrorAction Stop
-    $sameService = $null -ne $after -and $after.State -eq 'Running' -and
-        [uint32]$after.ProcessId -eq [uint32]$before.ProcessId -and
-        [string]::Equals(
-            [string]$after.PathName,
-            [string]$before.PathName,
-            [StringComparison]::OrdinalIgnoreCase)
-    $afterObserved = if ($null -eq $after) { '<service absent>' }
-        else {
-            "State={0}; ProcessId={1}; PathName={2}" -f
-                $after.State, $after.ProcessId, $after.PathName
-        }
-    Write-Check 'denial preserves the exact running service instance' $sameService `
-        ("State=Running; ProcessId={0}; PathName unchanged" -f $before.ProcessId) `
-        $afterObserved
 
     Write-Host ('Result: {0} checks, {1} failure(s).' -f $script:Checks, $script:Failures)
     if ($script:Failures -gt 0) { exit 1 }

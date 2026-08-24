@@ -1,4 +1,5 @@
 using System.Management;
+using WinSight.Core;
 
 namespace WinSight.Firewall;
 
@@ -14,15 +15,19 @@ public sealed class FirewallRuleReader
 {
     private const string Namespace = @"\\.\root\StandardCimv2";
 
-    public IReadOnlyList<FirewallRule> Read()
+    public IReadOnlyList<FirewallRule> Read() => ReadWithCoverage().Items;
+
+    public AcquisitionSnapshot<FirewallRule> ReadWithCoverage()
     {
         // Program/port live on separate filter objects keyed by the same InstanceID
         // as the rule; read them once and join in memory (avoids a query per rule).
-        var programs = FilterMap("MSFT_NetFirewallApplicationFilter", o => Str(o, "Program"));
-        var ports = FilterMap("MSFT_NetFirewallPortFilter",
+        var (programs, programsUnreadable) = FilterMap(
+            "MSFT_NetFirewallApplicationFilter", o => Str(o, "Program"));
+        var (ports, portsUnreadable) = FilterMap("MSFT_NetFirewallPortFilter",
             o => JoinPort(Str(o, "Protocol"), Str(o, "LocalPort")));
 
         var rules = new List<FirewallRule>();
+        var rulesUnreadable = false;
         try
         {
             var scope = new ManagementScope(Namespace);
@@ -50,12 +55,17 @@ public sealed class FirewallRuleReader
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Namespace/class unavailable, no rules surfaced.
+            rulesUnreadable = true;
         }
-        return rules;
+        return new AcquisitionSnapshot<FirewallRule>(
+            rules,
+            unreadableSources: (rulesUnreadable ? 1 : 0)
+                + (programsUnreadable ? 1 : 0)
+                + (portsUnreadable ? 1 : 0));
     }
 
-    private static Dictionary<string, string?> FilterMap(string className, Func<ManagementBaseObject, string?> valueOf)
+    private static (Dictionary<string, string?> Values, bool Unreadable) FilterMap(
+        string className, Func<ManagementBaseObject, string?> valueOf)
     {
         var map = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         try
@@ -77,9 +87,9 @@ public sealed class FirewallRuleReader
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Filter class unavailable, rules just won't be enriched.
+            return (map, true);
         }
-        return map;
+        return (map, false);
     }
 
     private static string? JoinPort(string? protocol, string? localPort)

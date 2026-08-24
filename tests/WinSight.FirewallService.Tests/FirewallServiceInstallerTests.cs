@@ -196,6 +196,19 @@ public sealed class FirewallServiceInstallerTests
         FirewallServiceInstaller.Install(@"C:\syntactic\..\service.exe", inspector, scm);
 
         Assert.Equal("\"C:\\canonical\\service.exe\" run", scm.BinaryPath);
+        Assert.Equal(1, scm.Registration.ConfigureSecurityProfileCalls);
+    }
+
+    [Fact]
+    public void RequiredPrivilegeProfile_IsMinimalAndDoubleNullTerminated()
+    {
+        var privileges = FirewallServiceInstaller.RequiredPrivilegesMultiString();
+
+        Assert.Equal(
+            "SeChangeNotifyPrivilege\0SeImpersonatePrivilege\0SeSystemProfilePrivilege\0\0",
+            privileges);
+        Assert.DoesNotContain("SeDebugPrivilege", privileges, StringComparison.Ordinal);
+        Assert.EndsWith("\0\0", privileges, StringComparison.Ordinal);
     }
 
     [Theory]
@@ -251,6 +264,58 @@ public sealed class FirewallServiceInstallerTests
         Assert.DoesNotContain(@"C:\input\service.exe", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public void Install_SecurityProfileFailure_RollsBackRegistration()
+    {
+        var inspector = new ScriptedInspector(@"C:\canonical\service.exe",
+            PathTrustDecision.Allow(), PathTrustDecision.Allow());
+        var scm = new RecordingScm(deleteResult: true, securityProfileThrows: true);
+
+        var exception = Assert.Throws<ServiceInstallTrustException>(() =>
+            FirewallServiceInstaller.Install(@"C:\input\service.exe", inspector, scm));
+
+        Assert.Equal(ServiceInstallTrustCode.PostCreateOperationRolledBack, exception.Code);
+        Assert.Equal(1, scm.Registration.ConfigureSecurityProfileCalls);
+        Assert.Equal(1, scm.Registration.DeleteCalls);
+    }
+
+    [Fact]
+    public void Uninstall_StopsThenCleansWfpBeforeDeletingRegistration()
+    {
+        var scm = new RecordingRemovalScm();
+
+        FirewallServiceInstaller.Uninstall(scm, () => scm.Events.Add("cleanup-wfp"));
+
+        Assert.Equal(["open", "stop", "cleanup-wfp", "delete", "dispose"], scm.Events);
+    }
+
+    [Fact]
+    public void Uninstall_WfpCleanupFailure_PreservesServiceRegistration()
+    {
+        var scm = new RecordingRemovalScm();
+
+        Assert.Throws<IOException>(() => FirewallServiceInstaller.Uninstall(
+            scm,
+            () =>
+            {
+                scm.Events.Add("cleanup-wfp");
+                throw new IOException("WFP unavailable");
+            }));
+
+        Assert.Equal(["open", "stop", "cleanup-wfp", "dispose"], scm.Events);
+    }
+
+    [Fact]
+    public void Uninstall_StopFailure_NeverTouchesWfpOrDeletesRegistration()
+    {
+        var scm = new RecordingRemovalScm { StopFailure = new TimeoutException() };
+
+        Assert.Throws<TimeoutException>(() => FirewallServiceInstaller.Uninstall(
+            scm, () => scm.Events.Add("cleanup-wfp")));
+
+        Assert.Equal(["open", "stop", "dispose"], scm.Events);
+    }
+
     private sealed class DenyingInspector(PathTrustCode code) : IServicePathTrustInspector
     {
         public PathTrustDecision InspectExecutable(string path) => PathTrustDecision.Deny(code);
@@ -281,27 +346,39 @@ public sealed class FirewallServiceInstallerTests
     private sealed class RecordingScm(
         bool deleteResult,
         bool descriptionThrows = false,
-        bool deleteThrows = false) : IServiceControlManager
+        bool deleteThrows = false,
+        bool securityProfileThrows = false) : IServiceControlManager
     {
         public string? BinaryPath { get; private set; }
         public int CreateCalls { get; private set; }
-        public RecordingRegistration Registration { get; } = new(deleteResult, descriptionThrows, deleteThrows);
+        public RecordingRegistration Registration { get; } =
+            new(deleteResult, descriptionThrows, deleteThrows, securityProfileThrows);
         public IServiceRegistration Create(string binaryPath)
         {
             CreateCalls++;
             BinaryPath = binaryPath;
             return Registration;
         }
+
+        public IServiceRegistration OpenForRemoval() => Registration;
     }
 
     private sealed class RecordingRegistration(
         bool deleteResult,
         bool descriptionThrows,
-        bool deleteThrows) : IServiceRegistration
+        bool deleteThrows,
+        bool securityProfileThrows) : IServiceRegistration
     {
         public int DeleteCalls { get; private set; }
+        public int ConfigureSecurityProfileCalls { get; private set; }
         public void SetDescription(string description)
         { if (descriptionThrows) throw new Win32Exception(5); }
+        public void ConfigureSecurityProfile()
+        {
+            ConfigureSecurityProfileCalls++;
+            if (securityProfileThrows) throw new Win32Exception(5);
+        }
+        public void StopAndWait(TimeSpan timeout) { }
         public bool Delete()
         {
             DeleteCalls++;
@@ -309,5 +386,42 @@ public sealed class FirewallServiceInstallerTests
             return deleteResult;
         }
         public void Dispose() { }
+    }
+
+    private sealed class RecordingRemovalScm : IServiceControlManager
+    {
+        public List<string> Events { get; } = [];
+        public Exception? StopFailure { get; init; }
+
+        public IServiceRegistration Create(string binaryPath) => throw new NotSupportedException();
+
+        public IServiceRegistration OpenForRemoval()
+        {
+            Events.Add("open");
+            return new RecordingRemovalRegistration(this);
+        }
+
+        private sealed class RecordingRemovalRegistration(RecordingRemovalScm owner) : IServiceRegistration
+        {
+            public void SetDescription(string description) => throw new NotSupportedException();
+            public void ConfigureSecurityProfile() => throw new NotSupportedException();
+
+            public void StopAndWait(TimeSpan timeout)
+            {
+                owner.Events.Add("stop");
+                if (owner.StopFailure is not null)
+                {
+                    throw owner.StopFailure;
+                }
+            }
+
+            public bool Delete()
+            {
+                owner.Events.Add("delete");
+                return true;
+            }
+
+            public void Dispose() => owner.Events.Add("dispose");
+        }
     }
 }

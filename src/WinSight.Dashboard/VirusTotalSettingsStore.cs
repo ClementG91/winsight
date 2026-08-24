@@ -2,6 +2,7 @@ using System.IO;
 using System.Security;
 using System.Security.Cryptography;
 using System.Text;
+using WinSight.Core;
 
 namespace WinSight.Dashboard;
 
@@ -12,7 +13,7 @@ namespace WinSight.Dashboard;
 public sealed class VirusTotalSettingsStore
 {
     private const int MaximumProtectedKeyBytes = 8 * 1024;
-    public const string EnvironmentVariable = "WINSIGHT_VT_KEY";
+    public const string EnvironmentVariable = VirusTotalConfiguration.EnvironmentVariable;
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("WinSight.VirusTotal.ApiKey.v1");
     private readonly string _path;
     private bool _environmentOverrideActive;
@@ -30,13 +31,12 @@ public sealed class VirusTotalSettingsStore
     public bool HasStoredKey => LoadStoredKey() is not null;
 
     public bool HasEnvironmentKey =>
-        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(EnvironmentVariable));
+        VirusTotalConfiguration.HasEnvironmentKey;
 
     public bool EnvironmentOverrideActive => _environmentOverrideActive;
 
     public static bool IsPlausibleApiKey(string? value) =>
-        value is { Length: >= 32 and <= 128 } &&
-        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_');
+        VirusTotalConfiguration.IsPlausibleApiKey(value);
 
     public string? LoadStoredKey()
     {
@@ -74,7 +74,7 @@ public sealed class VirusTotalSettingsStore
 
         var clearBytes = Encoding.UTF8.GetBytes(key);
         byte[]? protectedBytes = null;
-        var temporaryPath = _path + ".tmp";
+        var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             protectedBytes = ProtectedData.Protect(clearBytes, Entropy, DataProtectionScope.CurrentUser);
@@ -85,7 +85,7 @@ public sealed class VirusTotalSettingsStore
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             using (var stream = new FileStream(
                        temporaryPath,
-                       FileMode.Create,
+                       FileMode.CreateNew,
                        FileAccess.Write,
                        FileShare.None,
                        bufferSize: 4096,
@@ -127,6 +127,7 @@ public sealed class VirusTotalSettingsStore
         if (HasEnvironmentKey)
         {
             _environmentOverrideActive = true;
+            VirusTotalConfiguration.SetStoredProcessKey(null);
             return;
         }
         if (LoadStoredKey() is not { } key)
@@ -134,14 +135,14 @@ public sealed class VirusTotalSettingsStore
             return;
         }
 
-        Environment.SetEnvironmentVariable(EnvironmentVariable, key, EnvironmentVariableTarget.Process);
+        VirusTotalConfiguration.SetStoredProcessKey(key);
     }
 
     public void ApplySavedKeyToCurrentProcess(string key)
     {
         if (!_environmentOverrideActive)
         {
-            Environment.SetEnvironmentVariable(EnvironmentVariable, key, EnvironmentVariableTarget.Process);
+            VirusTotalConfiguration.SetStoredProcessKey(key);
         }
     }
 
@@ -149,7 +150,7 @@ public sealed class VirusTotalSettingsStore
     {
         if (!_environmentOverrideActive)
         {
-            Environment.SetEnvironmentVariable(EnvironmentVariable, null, EnvironmentVariableTarget.Process);
+            VirusTotalConfiguration.SetStoredProcessKey(null);
         }
     }
 }

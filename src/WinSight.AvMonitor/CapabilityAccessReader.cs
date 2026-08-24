@@ -1,4 +1,5 @@
 using Microsoft.Win32;
+using WinSight.Core;
 
 namespace WinSight.AvMonitor;
 
@@ -36,9 +37,14 @@ public sealed class CapabilityAccessReader : ICapabilityAccessReader
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";
 
     /// <summary>Reads recorded webcam + microphone usage across HKCU and HKLM.</summary>
-    public IReadOnlyList<DeviceUsage> Read()
+    public IReadOnlyList<DeviceUsage> Read() => ReadWithCoverage().Items;
+
+    /// <summary>Reads usage and reports every capability/hive surface that could not be read.</summary>
+    public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage()
     {
         var results = new List<DeviceUsage>();
+        var unreadableSources = 0;
+        var unreadableItems = 0;
         foreach (var (kind, capability) in new[]
                  {
                      (DeviceKind.Webcam, "webcam"),
@@ -47,61 +53,92 @@ public sealed class CapabilityAccessReader : ICapabilityAccessReader
         {
             foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
             {
-                ReadCapability(hive, capability, kind, results);
+                var (readable, itemGaps) = ReadCapability(hive, capability, kind, results);
+                if (!readable)
+                {
+                    unreadableSources++;
+                }
+                unreadableItems += itemGaps;
             }
         }
-        return results;
+        return new AcquisitionSnapshot<DeviceUsage>(results, unreadableSources, unreadableItems);
     }
 
-    private static void ReadCapability(
+    private static (bool SourceReadable, int UnreadableItems) ReadCapability(
         RegistryHive hive, string capability, DeviceKind kind, List<DeviceUsage> results)
     {
+        var unreadableItems = 0;
         try
         {
             using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
             using var capKey = baseKey.OpenSubKey($@"{Base}\{capability}");
             if (capKey is null)
             {
-                return;
+                return (true, 0);
             }
             foreach (var appName in capKey.GetSubKeyNames())
             {
                 if (appName.Equals("NonPackaged", StringComparison.OrdinalIgnoreCase))
                 {
                     using var nonPackaged = capKey.OpenSubKey(appName);
-                    foreach (var exeKey in nonPackaged?.GetSubKeyNames() ?? Array.Empty<string>())
+                    if (nonPackaged is null)
                     {
-                        using var appKey = nonPackaged!.OpenSubKey(exeKey);
-                        AddUsage(appKey, DecodeExePath(exeKey), packaged: false, kind, results);
+                        unreadableItems++;
+                        continue;
+                    }
+                    foreach (var exeKey in nonPackaged.GetSubKeyNames())
+                    {
+                        using var appKey = nonPackaged.OpenSubKey(exeKey);
+                        if (!TryAddUsage(appKey, DecodeExePath(exeKey), packaged: false, kind, results))
+                        {
+                            unreadableItems++;
+                        }
                     }
                 }
                 else
                 {
                     using var appKey = capKey.OpenSubKey(appName);
-                    AddUsage(appKey, appName, packaged: true, kind, results);
+                    if (!TryAddUsage(appKey, appName, packaged: true, kind, results))
+                    {
+                        unreadableItems++;
+                    }
                 }
             }
+            return (true, unreadableItems);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or IOException)
         {
-            // A hive/capability we cannot read is simply skipped.
+            return (false, unreadableItems);
         }
     }
 
-    private static void AddUsage(
+    private static bool TryAddUsage(
         RegistryKey? appKey, string app, bool packaged, DeviceKind kind, List<DeviceUsage> results)
     {
         if (appKey is null)
         {
-            return;
+            return false;
         }
-        var start = ReadFileTime(appKey, "LastUsedTimeStart");
-        var stop = ReadFileTime(appKey, "LastUsedTimeStop");
-        if (start is null && stop is null)
+        try
         {
-            return; // no recorded usage
+            var start = ReadFileTime(appKey, "LastUsedTimeStart");
+            var stop = ReadFileTime(appKey, "LastUsedTimeStop");
+            if (start is null && stop is null)
+            {
+                return true; // no recorded usage
+            }
+            results.Add(new DeviceUsage(kind, app, packaged, start, stop, IsActive(start, stop)));
+            return true;
         }
-        results.Add(new DeviceUsage(kind, app, packaged, start, stop, IsActive(start, stop)));
+        catch (Exception ex) when (ex is UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or IOException
+                                     or ArgumentOutOfRangeException)
+        {
+            return false;
+        }
     }
 
     private static DateTime? ReadFileTime(RegistryKey key, string valueName) =>

@@ -8,10 +8,8 @@ namespace WinSight.Core;
 /// Native Authenticode verification via WinVerifyTrust (wintrust.dll), the OS API,
 /// fast and no process spawn. It checks the EMBEDDED signature (PE hash + certificate
 /// chain + policy), so it detects tampering and trusts real embedded signatures
-/// directly. WinVerifyTrust does not resolve CATALOG signatures (most OS binaries), so
-/// a file with no embedded signature is deferred to the catalog-aware fallback
-/// (<see cref="AuthenticodeVerifier"/>). Any native failure also defers, a verdict is
-/// never worse than the fallback, and never fabricated.
+/// directly. A file with no embedded signature is deferred to the native, cache-only
+/// <see cref="CatalogSignatureVerifier"/>. No PowerShell process or network retrieval is used.
 ///
 /// The interop uses only the stable WINTRUST_DATA/WINTRUST_FILE_INFO layouts (all
 /// DWORD/pointer fields, one IN-only path string), no fragile out-struct marshalling.
@@ -21,7 +19,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     private readonly ISignatureVerifier _catalogFallback;
 
     public NativeSignatureVerifier(ISignatureVerifier? catalogFallback = null) =>
-        _catalogFallback = catalogFallback ?? new AuthenticodeVerifier();
+        _catalogFallback = catalogFallback ?? new CatalogSignatureVerifier();
 
     public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
         VerifyMany([path], cancellationToken).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
@@ -91,6 +89,10 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         0x800B0004 => SignatureState.SignedUntrusted,    // TRUST_E_SUBJECT_NOT_TRUSTED
         0x800B0111 => SignatureState.SignedUntrusted,    // TRUST_E_EXPLICIT_DISTRUST
         0x800B010C => SignatureState.SignedUntrusted,    // CERT_E_REVOKED
+        0x800B0101 => SignatureState.SignedUntrusted,    // CERT_E_EXPIRED
+        0x800B0109 => SignatureState.SignedUntrusted,    // CERT_E_UNTRUSTEDROOT
+        0x800B010A => SignatureState.SignedUntrusted,    // CERT_E_CHAINING
+        0x80096004 => SignatureState.SignedUntrusted,    // TRUST_E_CERT_SIGNATURE
         0x800B0100 => null,                              // TRUST_E_NOSIGNATURE -> try catalog
         _ => null,                                       // unknown -> try catalog
     };
@@ -121,7 +123,9 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     private const uint WtdChoiceFile = 1;
     private const uint WtdStateActionVerify = 1;
     private const uint WtdStateActionClose = 2;
-    private const uint WtdSaferFlag = 0x100;
+    private const uint WtdRevocationCheckNone = 0x10;
+    private const uint WtdCacheOnlyUrlRetrieval = 0x1000;
+    private const uint WtdDisableMd2Md4 = 0x2000;
 
     private static Guid _actionGenericVerifyV2 = new("00AAC56B-CD44-11d0-8CC2-00C04FC295EE");
 
@@ -176,7 +180,14 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                 dwUnionChoice = WtdChoiceFile,
                 pFile = pFile,
                 dwStateAction = WtdStateActionVerify,
-                dwProvFlags = WtdSaferFlag,
+                // WinSight promises no automatic outbound traffic. Microsoft documents that
+                // WTD_CACHE_ONLY_URL_RETRIEVAL is required to guarantee WinVerifyTrust does not
+                // fetch trust material. Revocation is therefore explicitly cache-only/offline,
+                // while obsolete MD2/MD4 signatures are rejected. WTD_SAFER_FLAG used here before
+                // this change is documented as unsupported and provided no hardening.
+                dwProvFlags = WtdRevocationCheckNone
+                    | WtdCacheOnlyUrlRetrieval
+                    | WtdDisableMd2Md4,
             };
             Marshal.StructureToPtr(data, pData, false);
 

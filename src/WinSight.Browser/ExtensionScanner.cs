@@ -1,4 +1,5 @@
 using System.Text.Json;
+using WinSight.Core;
 
 namespace WinSight.Browser;
 
@@ -15,13 +16,16 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
     /// <param name="ExtensionsDir">Path containing per-extension-id subdirectories.</param>
     public readonly record struct Root(string Browser, string ExtensionsDir);
 
-    private readonly IReadOnlyList<Root> _roots = roots ?? DefaultWindowsRoots();
+    private readonly IReadOnlyList<Root>? _roots = roots;
 
     /// <summary>
     /// The standard Chromium-family extension directories under the current user's
     /// LocalAppData: <c>&lt;vendor&gt;\&lt;product&gt;\User Data\&lt;profile&gt;\Extensions</c>.
     /// </summary>
-    public static IReadOnlyList<Root> DefaultWindowsRoots()
+    public static IReadOnlyList<Root> DefaultWindowsRoots() =>
+        DefaultWindowsRootsWithCoverage().Items;
+
+    private static AcquisitionSnapshot<Root> DefaultWindowsRootsWithCoverage()
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
@@ -35,38 +39,75 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         };
 
         var roots = new List<Root>();
+        var unreadableSources = 0;
         foreach (var (name, userData) in browsers)
         {
-            if (!Directory.Exists(userData))
+            if (!DirectoryPresent(userData, out var userDataUnreadable))
             {
+                if (userDataUnreadable)
+                {
+                    unreadableSources++;
+                }
                 continue;
             }
             // Each browser has one or more profile dirs (Default, Profile 1, …), each
             // with its own Extensions folder. Opera keeps Extensions at the top level.
-            foreach (var profile in Directory.EnumerateDirectories(userData).Append(userData))
+            var profiles = SafeEnumerate(userData, out var profilesUnreadable);
+            if (profilesUnreadable)
+            {
+                unreadableSources++;
+                continue;
+            }
+            foreach (var profile in profiles.Append(userData))
             {
                 var ext = System.IO.Path.Combine(profile, "Extensions");
-                if (Directory.Exists(ext))
+                if (DirectoryPresent(ext, out var extensionsUnreadable))
                 {
                     roots.Add(new Root(name, ext));
                 }
+                else if (extensionsUnreadable)
+                {
+                    unreadableSources++;
+                }
             }
         }
-        return roots;
+        return new AcquisitionSnapshot<Root>(roots, unreadableSources);
     }
 
-    public IReadOnlyList<BrowserExtension> Snapshot()
+    public IReadOnlyList<BrowserExtension> Snapshot() => SnapshotWithCoverage().Items;
+
+    public AcquisitionSnapshot<BrowserExtension> SnapshotWithCoverage()
     {
         var results = new List<BrowserExtension>();
-        foreach (var root in _roots)
+        var rootAcquisition = _roots is null
+            ? DefaultWindowsRootsWithCoverage()
+            : new AcquisitionSnapshot<Root>(_roots);
+        var unreadableSources = rootAcquisition.UnreadableSources;
+        var unreadableItems = 0;
+        foreach (var root in rootAcquisition.Items)
         {
-            if (!Directory.Exists(root.ExtensionsDir))
+            if (!DirectoryPresent(root.ExtensionsDir, out var rootPresenceUnreadable))
             {
+                if (rootPresenceUnreadable)
+                {
+                    unreadableSources++;
+                }
                 continue;
             }
-            foreach (var extDir in SafeEnumerate(root.ExtensionsDir))
+            var extensionDirectories = SafeEnumerate(root.ExtensionsDir, out var rootUnreadable);
+            if (rootUnreadable)
             {
-                var versionDir = LatestVersionDir(extDir);
+                unreadableSources++;
+                continue;
+            }
+            foreach (var extDir in extensionDirectories)
+            {
+                var versionDir = LatestVersionDir(extDir, out var extensionUnreadable);
+                if (extensionUnreadable)
+                {
+                    unreadableItems++;
+                    continue;
+                }
                 if (versionDir is null)
                 {
                     continue;
@@ -76,17 +117,37 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
                 {
                     results.Add(parsed);
                 }
+                else
+                {
+                    unreadableItems++;
+                }
             }
         }
-        return results;
+        return new AcquisitionSnapshot<BrowserExtension>(
+            results, unreadableSources, unreadableItems);
     }
 
     // Newest version subdirectory (extensions keep old versions around until GC'd).
-    private static string? LatestVersionDir(string extDir) =>
-        SafeEnumerate(extDir)
-            .Where(d => File.Exists(System.IO.Path.Combine(d, "manifest.json")))
-            .OrderByDescending(Directory.GetLastWriteTimeUtc)
-            .FirstOrDefault();
+    private static string? LatestVersionDir(string extDir, out bool unreadable)
+    {
+        var versions = SafeEnumerate(extDir, out unreadable);
+        if (unreadable)
+        {
+            return null;
+        }
+        try
+        {
+            return versions
+                .Where(d => File.Exists(System.IO.Path.Combine(d, "manifest.json")))
+                .OrderByDescending(Directory.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            unreadable = true;
+            return null;
+        }
+    }
 
     private static BrowserExtension? TryParse(string browser, string id, string versionDir)
     {
@@ -171,15 +232,39 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         return list;
     }
 
-    private static IEnumerable<string> SafeEnumerate(string dir)
+    private static string[] SafeEnumerate(string dir, out bool unreadable)
     {
         try
         {
-            return Directory.EnumerateDirectories(dir);
+            var result = Directory.GetDirectories(dir);
+            unreadable = false;
+            return result;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return Array.Empty<string>();
+            unreadable = true;
+            return [];
+        }
+    }
+
+    private static bool DirectoryPresent(string path, out bool unreadable)
+    {
+        try
+        {
+            unreadable = false;
+            return (File.GetAttributes(path) & FileAttributes.Directory) != 0;
+        }
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            unreadable = false;
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            unreadable = true;
+            return false;
         }
     }
 }

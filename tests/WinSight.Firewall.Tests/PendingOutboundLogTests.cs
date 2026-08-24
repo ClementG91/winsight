@@ -100,6 +100,21 @@ public sealed class PendingOutboundLogTests
         log.Observe(@"C:\apps\overflow2.exe", "1.2.3.4:443", T0);
 
         Assert.Equal(2, log.DroppedApps);
+        Assert.Equal(2, log.UnrecordedObservations);
+    }
+
+    [Fact]
+    public void ObservationGaps_CombineUnattributedTrafficAndTerminalObserverFailure()
+    {
+        var log = new PendingOutboundLog();
+
+        log.RecordUnattributed();
+        log.RecordUnattributed();
+        log.MarkObserverUnavailable();
+        log.MarkObserverUnavailable();
+
+        Assert.Equal(3, log.UnrecordedObservations);
+        Assert.Equal(0, log.DroppedApps);
     }
 
     // A full log must still count new connections from apps it already knows.

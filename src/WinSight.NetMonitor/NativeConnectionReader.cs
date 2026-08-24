@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Net;
 using System.Runtime.InteropServices;
 
@@ -127,15 +128,20 @@ public static class NativeConnectionReader
         for (var attempt = 0; attempt < 3; attempt++)
         {
             var size = 0;
-            api(IntPtr.Zero, ref size, false, addressFamily, tableClass, 0);
-            if (size <= 0)
+            var sizeResult = api(IntPtr.Zero, ref size, false, addressFamily, tableClass, 0);
+            if (sizeResult != ErrorInsufficientBuffer)
             {
-                yield break;
+                throw new Win32Exception(unchecked((int)sizeResult));
+            }
+            if (size < sizeof(int))
+            {
+                throw new InvalidDataException("Windows returned an invalid connection-table size.");
             }
 
             var rows = new List<T>();
             uint result;
-            var buffer = Marshal.AllocHGlobal(size);
+            var allocatedSize = size;
+            var buffer = Marshal.AllocHGlobal(allocatedSize);
             try
             {
                 result = api(buffer, ref size, false, addressFamily, tableClass, 0);
@@ -143,6 +149,11 @@ public static class NativeConnectionReader
                 {
                     var count = Marshal.ReadInt32(buffer);
                     var rowSize = Marshal.SizeOf<T>();
+                    if (count < 0 || count > (allocatedSize - sizeof(int)) / rowSize)
+                    {
+                        throw new InvalidDataException(
+                            "Windows returned a connection-table row count outside its buffer.");
+                    }
                     var rowPtr = IntPtr.Add(buffer, sizeof(int));
                     for (var i = 0; i < count; i++)
                     {
@@ -165,9 +176,13 @@ public static class NativeConnectionReader
             }
             if (result != ErrorInsufficientBuffer)
             {
-                yield break; // hard failure, the caller's netstat fallback covers it
+                throw new Win32Exception(unchecked((int)result));
             }
         }
+
+        throw new Win32Exception(
+            unchecked((int)ErrorInsufficientBuffer),
+            "The Windows connection table changed too quickly to snapshot safely.");
     }
 
     /// <summary>Formats a network-byte-order IPv4 address + port DWORD as "ip:port".</summary>

@@ -48,6 +48,7 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("$NativePowerShellExe", kit, StringComparison.Ordinal);
         Assert.DoesNotContain("$env:SystemRoot", kit, StringComparison.Ordinal);
         Assert.Contains("Test-IpcBoundary.ps1", kit, StringComparison.Ordinal);
+        Assert.Contains("Test-IpcNetworkObserver.ps1", kit, StringComparison.Ordinal);
         Assert.Contains("& $Service uninstall", kit, StringComparison.Ordinal);
         Assert.Contains("SCM 1060", kit, StringComparison.Ordinal);
         Assert.Contains("$installerArguments = @(", kit, StringComparison.Ordinal);
@@ -78,7 +79,9 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("$networkRun.Available -eq 'false'", script, StringComparison.Ordinal);
         Assert.Contains("$networkRun.Outcome -eq 'ServiceUnavailable'", script, StringComparison.Ordinal);
         Assert.Contains("$networkRun.Mutation -eq 'none'", script, StringComparison.Ordinal);
-        Assert.Contains("[uint32]$after.ProcessId -eq [uint32]$before.ProcessId", script, StringComparison.Ordinal);
+        Assert.Contains("Result: {0} checks, {1} failure(s).", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("Get-CimInstance Win32_Service", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("OpenServiceW", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -96,11 +99,30 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("-NetworkLogon", kit, StringComparison.Ordinal);
         Assert.Contains("S-1-5-2", kit, StringComparison.Ordinal);
         Assert.Contains("S-1-5-4", kit, StringComparison.Ordinal);
-        Assert.Contains("Result: 10 checks, 0 failure(s).", kit, StringComparison.Ordinal);
+        Assert.Contains("Result: 7 checks, 0 failure(s).", kit, StringComparison.Ordinal);
+        Assert.Contains("Result: 3 checks, 0 failure(s).", kit, StringComparison.Ordinal);
+        Assert.Contains("-UseSSL", kit, StringComparison.Ordinal);
+        Assert.Contains("-Authentication Basic", kit, StringComparison.Ordinal);
+        Assert.Contains("New-SelfSignedCertificate", kit, StringComparison.Ordinal);
+        Assert.Contains("Test-IpcNetworkObserver.ps1", kit, StringComparison.Ordinal);
         Assert.Contains(
             "-CliPath $Cli -ServicePath $Service",
             kit,
             StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NetworkObserverRequiresElevationAndBindsTheExactServiceInstance()
+    {
+        var script = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "scripts", "Test-IpcNetworkObserver.ps1"));
+
+        Assert.Contains("WindowsBuiltInRole]::Administrator", script, StringComparison.Ordinal);
+        Assert.Contains("Get-CimInstance Win32_Service", script, StringComparison.Ordinal);
+        Assert.Contains("$expectedCommand", script, StringComparison.Ordinal);
+        Assert.Contains("[uint32]$after.ProcessId -eq [uint32]$before.ProcessId", script,
+            StringComparison.Ordinal);
+        Assert.Contains("Result: 3 checks, 0 failure(s).", script, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -132,7 +154,7 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("function Initialize-WinSightS1QualificationContext", bootstrap, StringComparison.Ordinal);
         Assert.Contains("$ProtectedRoot", bootstrap, StringComparison.Ordinal);
         Assert.Contains("protected-candidate.sha256", bootstrap, StringComparison.Ordinal);
-        Assert.Contains("Count -ne 10", bootstrap, StringComparison.Ordinal);
+        Assert.Contains("Count -ne 11", bootstrap, StringComparison.Ordinal);
         Assert.Contains("Resolve-Path", bootstrap, StringComparison.Ordinal);
         Assert.Contains("Get-FileHash", bootstrap, StringComparison.Ordinal);
         Assert.Contains("rev-parse HEAD", bootstrap, StringComparison.Ordinal);

@@ -26,6 +26,9 @@ public sealed class DnsEtwWatcher
     /// </summary>
     public void Watch(Action<DnsQueryEvent> onEvent, CancellationToken token)
     {
+        ArgumentNullException.ThrowIfNull(onEvent);
+        token.ThrowIfCancellationRequested();
+
         using var session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Dns);
         using var stop = token.Register(() =>
         {
@@ -38,8 +41,10 @@ public sealed class DnsEtwWatcher
                 // Session already gone, nothing to do.
             }
         });
+        token.ThrowIfCancellationRequested();
 
         session.EnableProvider(DnsProvider);
+        token.ThrowIfCancellationRequested();
         session.Source.Dynamic.All += data =>
         {
             if (data.PayloadByName("QueryName") is string name && name.Length > 0)

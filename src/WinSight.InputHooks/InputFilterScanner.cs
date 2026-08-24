@@ -22,9 +22,14 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
 
     private readonly ISignatureVerifier _verifier = verifier ?? new CachingSignatureVerifier(new NativeSignatureVerifier());
 
-    public IReadOnlyList<InputFilter> Scan(CancellationToken cancellationToken = default)
+    public IReadOnlyList<InputFilter> Scan(CancellationToken cancellationToken = default) =>
+        ScanWithCoverage(cancellationToken).Items;
+
+    public AcquisitionSnapshot<InputFilter> ScanWithCoverage(
+        CancellationToken cancellationToken = default)
     {
         var found = new List<(InputStack Stack, FilterPosition Position, string Name)>();
+        var unreadableSurfaces = 0;
         foreach (var (stack, classGuid) in new[]
                  {
                      (InputStack.Keyboard, KeyboardClass),
@@ -38,27 +43,42 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
                          (FilterPosition.Lower, "LowerFilters"),
                      })
             {
-                foreach (var name in ReadFilterNames(classGuid, valueName))
+                var (names, unreadable) = ReadFilterNames(classGuid, valueName);
+                if (unreadable)
+                {
+                    unreadableSurfaces++;
+                }
+                foreach (var name in names)
                 {
                     found.Add((stack, position, name));
                 }
             }
         }
 
-        var paths = found
-            .Select(entry => ResolveDriverPath(entry.Name))
-            .Where(path => path is not null)
-            .Select(path => path!)
+        var resolved = new List<(InputStack Stack, FilterPosition Position, string Name, string? Path)>();
+        var unreadableItems = 0;
+        foreach (var (stack, position, name) in found)
+        {
+            var (path, unreadable) = ResolveDriverPath(name);
+            if (unreadable)
+            {
+                unreadableItems++;
+            }
+            resolved.Add((stack, position, name, path));
+        }
+
+        var paths = resolved
+            .Where(entry => entry.Path is not null)
+            .Select(entry => entry.Path!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var verdicts = paths.Length == 0
             ? new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase)
             : _verifier.VerifyMany(paths, cancellationToken);
 
-        var results = new List<InputFilter>(found.Count);
-        foreach (var (stack, position, name) in found)
+        var results = new List<InputFilter>(resolved.Count);
+        foreach (var (stack, position, name, path) in resolved)
         {
-            var path = ResolveDriverPath(name);
             var verdict = path is not null && verdicts.TryGetValue(path, out var known)
                 ? known
                 : new SignatureVerdict(SignatureState.Missing, null);
@@ -70,26 +90,26 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
                 verdict,
                 InputFilterTriage.IsWindowsClassDriver(stack, name)));
         }
-        return results;
+        return new AcquisitionSnapshot<InputFilter>(
+            results, unreadableSurfaces, unreadableItems);
     }
 
-    private static string[] ReadFilterNames(string classGuid, string valueName)
+    private static (string[] Names, bool Unreadable) ReadFilterNames(
+        string classGuid, string valueName)
     {
         try
         {
             using var key = Registry.LocalMachine.OpenSubKey($@"{ClassRoot}\{classGuid}");
             // REG_MULTI_SZ. Absent simply means no filters of that position, which is the common case.
-            return key?.GetValue(valueName) is string[] names
+            return (key?.GetValue(valueName) is string[] names
                 ? names.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()).ToArray()
-                : [];
+                : [], false);
         }
         catch (Exception ex) when (ex is System.Security.SecurityException
                                      or UnauthorizedAccessException
                                      or IOException)
         {
-            // Reading the class key is not something an unprivileged user is normally denied, but
-            // a locked-down machine must degrade to "nothing to report" rather than fail the scan.
-            return [];
+            return ([], true);
         }
     }
 
@@ -102,17 +122,97 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
     /// ImagePath would be more thorough; this covers the overwhelming majority and a filter whose
     /// file cannot be found is itself reported rather than quietly dropped.
     /// </remarks>
-    private static string? ResolveDriverPath(string name)
+    private static (string? Path, bool Unreadable) ResolveDriverPath(string name)
     {
         try
         {
-            var candidate = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", $"{name}.sys");
-            return File.Exists(candidate) ? candidate : null;
+            if (name.IndexOfAny(['\\', '/']) >= 0 || name is "." or "..")
+            {
+                return (null, true);
+            }
+
+            string? registered = null;
+            using (var service = Registry.LocalMachine.OpenSubKey(
+                       $@"SYSTEM\CurrentControlSet\Services\{name}"))
+            {
+                registered = service?.GetValue("ImagePath") as string;
+            }
+
+            var candidates = new List<string>();
+            if (NormalizeDriverPath(registered) is { } configured)
+            {
+                candidates.Add(configured);
+            }
+            candidates.Add(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", $"{name}.sys"));
+
+            foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                string full;
+                try
+                {
+                    full = Path.GetFullPath(candidate);
+                }
+                catch (Exception ex) when (ex is ArgumentException
+                                             or NotSupportedException
+                                             or PathTooLongException)
+                {
+                    continue;
+                }
+                if (File.Exists(full))
+                {
+                    return (full, false);
+                }
+            }
+            return (null, false);
         }
-        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is ArgumentException
+                                     or IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            return (null, true);
+        }
+    }
+
+    private static string? NormalizeDriverPath(string? registered)
+    {
+        if (string.IsNullOrWhiteSpace(registered))
         {
             return null;
         }
+
+        string value;
+        try
+        {
+            value = Environment.ExpandEnvironmentVariables(registered.Trim()).Trim('"').Trim();
+        }
+        catch (ArgumentException)
+        {
+            return null;
+        }
+        if (value.Length == 0)
+        {
+            return null;
+        }
+
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        const string systemRootPrefix = @"\SystemRoot\";
+        const string bareSystemRootPrefix = @"SystemRoot\";
+        const string devicePrefix = @"\??\";
+
+        if (value.StartsWith(systemRootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine(windows, value[systemRootPrefix.Length..]);
+        }
+        if (value.StartsWith(bareSystemRootPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine(windows, value[bareSystemRootPrefix.Length..]);
+        }
+        if (value.StartsWith(devicePrefix, StringComparison.Ordinal))
+        {
+            return value[devicePrefix.Length..];
+        }
+        return Path.IsPathRooted(value) ? value : Path.Combine(windows, value);
     }
 }

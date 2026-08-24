@@ -123,7 +123,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         foreach (var name in new[] { "c.exe", "a.exe", "b.exe" })
         {
             await dispatcher.DispatchAsync(
-                Request(FirewallCommand.UpsertPolicy, policy: new AppFirewallPolicy($@"C:\apps\{name}", OutboundAction.Ask)),
+                Request(FirewallCommand.UpsertPolicy, policy: new AppFirewallPolicy($@"C:\apps\{name}", OutboundAction.Allow)),
                 callerAuthorised: true);
         }
 
@@ -156,7 +156,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         {
             await dispatcher.DispatchAsync(
                 Request(FirewallCommand.UpsertPolicy,
-                    policy: new AppFirewallPolicy($@"C:\apps\{name}", OutboundAction.Ask)),
+                    policy: new AppFirewallPolicy($@"C:\apps\{name}", OutboundAction.Allow)),
                 callerAuthorised: true);
         }
         var first = await dispatcher.DispatchAsync(
@@ -239,7 +239,7 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         var store = new FirewallPolicyStore(PolicyPath);
         await store.SaveAsync(new OutboundFirewallConfiguration(
             OutboundFirewallMode.AuditOnly,
-            [new AppFirewallPolicy(path, OutboundAction.Ask)]));
+            [new AppFirewallPolicy(path, OutboundAction.Allow)]));
         var pending = new PendingOutboundLog();
         pending.Observe(path, "1.2.3.4:443", DateTimeOffset.UnixEpoch);
         var dispatcher = new FirewallRequestDispatcher(store, new RecordingAuthority(), pending);
@@ -274,8 +274,8 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         await store.SaveAsync(new OutboundFirewallConfiguration(
             OutboundFirewallMode.AuditOnly,
             [
-                new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Ask),
-                new AppFirewallPolicy(@"C:\apps\b.exe", OutboundAction.Ask),
+                new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Allow),
+                new AppFirewallPolicy(@"C:\apps\b.exe", OutboundAction.Allow),
             ]));
         var dispatcher = Dispatcher(store, new AuditOnlyFirewallEngine());
         var request = Request(FirewallCommand.ListPolicies, offset: 0, limit: 2) with
@@ -479,6 +479,25 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
     }
 
     [Fact]
+    public async Task DispatchAsync_AskRemovesTheRulingAndKeepsTheAppPending()
+    {
+        var pending = new PendingOutboundLog();
+        pending.Observe(@"C:\apps\a.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        var authority = new RecordingAuthority();
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(PolicyPath), authority, pending);
+
+        var response = await dispatcher.DispatchAsync(
+            Request(FirewallCommand.UpsertPolicy,
+                policy: new AppFirewallPolicy(@"c:\APPS\A.EXE", OutboundAction.Ask)),
+            FirewallCallerCapability.MutateMachinePolicy);
+
+        Assert.True(response.Success);
+        Assert.Equal(["remove"], authority.Calls);
+        Assert.Single(pending.Snapshot());
+    }
+
+    [Fact]
     public async Task DispatchAsync_ListPending_PagesLikeThePolicyList()
     {
         var pending = new PendingOutboundLog();
@@ -511,13 +530,15 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
         {
             pending.Observe($@"C:\apps\a{i}.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
         }
+        pending.RecordUnattributed();
+        pending.MarkObserverUnavailable();
         var dispatcher = new FirewallRequestDispatcher(
             new FirewallPolicyStore(PolicyPath), new RecordingAuthority(), pending);
 
         var response = await dispatcher.DispatchAsync(
             Request(FirewallCommand.GetStatus), FirewallCallerCapability.ReadStatus);
 
-        Assert.Equal(3, response.Status!.UnrecordedApps);
+        Assert.Equal(5, response.Status!.UnrecordedApps);
     }
 
     [Fact]

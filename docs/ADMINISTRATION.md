@@ -47,6 +47,14 @@ sc start WinSightFirewall
 
 It starts in **audit-only**. Nothing is filtered until someone arms it deliberately.
 
+Registration also applies a checked SCM profile: an unrestricted service SID, only
+`SeChangeNotifyPrivilege`, `SeImpersonatePrivilege` and `SeSystemProfilePrivilege`, and recovery
+actions of restart after 5 seconds, restart after 30 seconds, then no action, reset after 24 hours.
+Recovery applies to non-crash failures too. A configuration failure rolls registration back instead
+of leaving a partially hardened LocalSystem service. WinSight keeps the SCM's standard service DACL:
+ordinary authenticated users may query it but cannot start, stop, delete or reconfigure it. It does
+not claim protected-service status; that Windows model requires a compatible signed-service chain.
+
 ### Verify what it is actually doing
 
 ```powershell
@@ -90,12 +98,13 @@ Expect `provider: absent, sublayer: absent, permit-filter: absent`.
 ### Remove the service
 
 ```powershell
-sc stop WinSightFirewall
 & "C:\Program Files\WinSight\winsight-firewall-service.exe" uninstall
 sc query WinSightFirewall
 ```
 
-`sc query` must end with error **1060** (service does not exist). Uninstalling the *application*
+The elevated uninstall verb stops the service, removes current dynamic objects and any legacy static
+WinSight namespace, and only then deletes registration. `sc query` must end with error **1060**
+(service does not exist). Uninstalling the *application*
 does not remove the service - the service is a separate, deliberate registration.
 
 ## Where state lives
@@ -128,8 +137,11 @@ machine:
 
 ```powershell
 & "C:\Program Files\WinSight\Test-WfpValidation.ps1" -ContractSelfTest
-& "C:\Program Files\WinSight\Test-TrustBoundary.ps1"
-& "C:\Program Files\WinSight\Test-IpcBoundary.ps1"
+& "C:\Program Files\WinSight\Test-TrustBoundary.ps1" `
+    -ServicePath "C:\Program Files\WinSight\winsight-firewall-service.exe" `
+    -HostileAccount '<dedicated standard user>'
+& "C:\Program Files\WinSight\Test-IpcBoundary.ps1" `
+    -ServicePath "C:\Program Files\WinSight\winsight-firewall-service.exe"
 ```
 
 Full procedure and expected counts: [`validation/VM_QUALIFICATION_KIT.md`](validation/VM_QUALIFICATION_KIT.md).

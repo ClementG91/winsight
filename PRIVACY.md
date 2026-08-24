@@ -1,23 +1,24 @@
 # Privacy Policy
 
-**Last updated: 2026-07-27**
+**Last updated: 2026-08-20**
 
 WinSight is a security tool. A security tool that quietly reports on the machine it is supposed to be
 protecting is a contradiction, so this policy is short by design: there is very little to describe.
 
-## What WinSight collects
+## What stays local by default
 
-**Nothing.** WinSight has no telemetry, no analytics, no crash reporting service, no update check, no
-account and no server component. Nothing about you, your machine, or what WinSight finds on it is
-transmitted to the maintainer or to any third party as a consequence of installing or running it.
+WinSight has no telemetry, analytics, crash-reporting service, automatic update check, account or
+maintainer-operated server. Installing and running it with its default settings sends no scan result
+anywhere. The optional VirusTotal lookup described below is the sole exception and requires a key
+supplied by the user.
 
 Everything WinSight produces stays on your machine:
 
 | Data | Where it lives | Why |
 |---|---|---|
 | Scan findings | In memory, and in a file only when **you** export one | The report you asked for |
-| Alert journal | `%LocalAppData%\WinSight\alerts.log`, capped at 500 entries | So a detection survives a notification Windows suppressed |
-| Crash reports | `%LocalAppData%\WinSight\`, written locally, never sent | So a crash can be diagnosed by its owner |
+| Alert journal | `%LocalAppData%\WinSight\alerts.log`, capped at 500 entries and 16 MiB before an oversized file is preserved aside | So a detection survives a notification Windows suppressed |
+| Crash reports | `%LocalAppData%\WinSight\crashes`, at most 20 reports of 256 KiB | So a crash can be diagnosed by its owner |
 | Firewall policy | The service's own state, on this machine | So your rules survive a reboot |
 | UI language | Per-user Windows registry | So the app opens in your language |
 
@@ -46,11 +47,17 @@ Being precise about this, because "we send a hash" is easy to say loosely:
   feature is off until you switch it on.
 - **Your API key is stored encrypted** with Windows DPAPI, scoped to your Windows user account, so
   another user on the same machine cannot read it.
+- **The dashboard-stored key is not copied into the process environment.** An explicitly managed
+  `WINSIGHT_VT_KEY` remains supported, but WinSight strips it from child processes it launches.
 
 Once a hash reaches VirusTotal, VirusTotal's own privacy policy governs it, not this one:
 <https://docs.virustotal.com/docs/please-give-me-some-privacy>.
 
-Turn it off by clearing the API key in the dashboard's settings. No key, no lookups.
+Turn it off by clearing the API key in the dashboard's settings. If `WINSIGHT_VT_KEY` is set, remove
+that variable too; it deliberately takes precedence. No valid key, no lookups.
+
+Local crash reports can contain exception messages, stack traces and local paths. The VirusTotal key
+is redacted and reports are truncated, but review a report yourself before sharing it.
 
 ## Links you click
 

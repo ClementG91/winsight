@@ -11,16 +11,40 @@ $version = "6.7.3"
 $uri = "https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe"
 $expectedSha256 = "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732"
 $compiler = Join-Path $InstallDirectory "ISCC.exe"
+$uninstaller = Join-Path $InstallDirectory "unins000.exe"
 
-if ((Test-Path -LiteralPath $compiler) -and -not $Force)
+function Test-ExpectedPublisher([string]$Path)
 {
-    Write-Output $compiler
-    return
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    return $signature.Status -eq [System.Management.Automation.SignatureStatus]::Valid -and
+        $null -ne $signature.SignerCertificate -and
+        $signature.SignerCertificate.GetNameInfo(
+            [System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName,
+            $false) -ceq 'Pyrsys B.V.'
 }
 
-$downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) "winsight-inno-$version"
+function Test-InstalledCompiler
+{
+    if (-not (Test-ExpectedPublisher $compiler) -or
+        -not (Test-ExpectedPublisher $uninstaller)) { return $false }
+    return (Get-Item -LiteralPath $uninstaller).VersionInfo.ProductVersion.Trim() -ceq $version
+}
+
+if (-not $Force -and (Test-InstalledCompiler))
+{
+    Write-Output (Resolve-Path -LiteralPath $compiler).Path
+    return
+}
+if (Test-Path -LiteralPath $compiler)
+{
+    Write-Warning "Existing Inno Setup installation is stale or cannot prove the pinned publisher/version; reinstalling it."
+}
+
+$downloadDirectory = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "winsight-inno-$version-" + [guid]::NewGuid().ToString('N'))
 $installer = Join-Path $downloadDirectory "innosetup-$version.exe"
-New-Item -ItemType Directory -Path $downloadDirectory -Force | Out-Null
+New-Item -ItemType Directory -Path $downloadDirectory -ErrorAction Stop | Out-Null
 
 try
 {
@@ -57,9 +81,9 @@ finally
     }
 }
 
-if (-not (Test-Path -LiteralPath $compiler))
+if (-not (Test-InstalledCompiler))
 {
-    throw "Inno Setup completed but ISCC.exe was not found at $compiler."
+    throw "Inno Setup completed but the pinned compiler publisher/version could not be verified."
 }
 
-Write-Output $compiler
+Write-Output (Resolve-Path -LiteralPath $compiler).Path

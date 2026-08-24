@@ -111,8 +111,9 @@ foreach ($architecture in $Architectures)
     # cover -- and a clean VM, which is exactly where this belongs, has neither git nor gh.
     Copy-Item -LiteralPath (Join-Path $repoRoot "docs\ARM64_VALIDATION.md") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-WfpValidation.ps1") -Destination $packageRoot
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-TrustBoundary.ps1") -Destination $packageRoot
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-TrustBoundary.ps1") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destination $packageRoot
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcNetworkObserver.ps1") -Destination $packageRoot
     Copy-Item -LiteralPath (Join-Path $repoRoot "assets\branding") `
         -Destination (Join-Path $packageRoot "assets\branding") -Recurse
 
@@ -215,6 +216,7 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot "Test-IpcBoundary.ps1") -Destina
             "Test-WfpValidation.ps1",
             "Test-TrustBoundary.ps1",
             "Test-IpcBoundary.ps1",
+            "Test-IpcNetworkObserver.ps1",
             "assets/branding/winsight-logo.png",
             "assets/branding/winsight-logo-256.png",
             "assets/branding/winsight.ico",

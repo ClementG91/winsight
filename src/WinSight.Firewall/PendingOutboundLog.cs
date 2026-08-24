@@ -30,10 +30,10 @@ public sealed record PendingOutboundApp(
 /// evicting existing ones — evicting would let a flood of noise push the one interesting app out of
 /// the list, which is precisely what an attacker would want.
 ///
-/// <b>It never drops silently.</b> A refused observation increments <see cref="DroppedApps"/>, so a
-/// caller can say "and more were not recorded" instead of quietly showing a truncated list that
-/// looks complete. A security tool that hides its own blind spot is worse than one without the
-/// feature.
+/// <b>It never drops silently.</b> Capacity drops, connections without a safe executable identity,
+/// and a terminal observer failure all contribute to <see cref="UnrecordedObservations"/>, so a
+/// caller never presents a quiet or truncated list as complete. <see cref="DroppedApps"/> remains
+/// available separately for capacity diagnostics.
 /// </remarks>
 public sealed class PendingOutboundLog
 {
@@ -47,11 +47,58 @@ public sealed class PendingOutboundLog
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _gate = new();
     private int _dropped;
+    private int _unattributed;
+    private bool _observerUnavailable;
 
     /// <summary>How many distinct apps could not be recorded because the log was full.</summary>
     public int DroppedApps
     {
         get { lock (_gate) { return _dropped; } }
+    }
+
+    /// <summary>Connections observed without an absolute executable identity safe for policy.</summary>
+    public int UnattributedObservations
+    {
+        get { lock (_gate) { return _unattributed; } }
+    }
+
+    /// <summary>
+    /// A conservative lower bound on outbound observations that the rulable pending list does not
+    /// represent. The terminal-health marker contributes one because the number of events missed
+    /// after observation stops is unknowable; zero must remain reserved for a healthy, complete
+    /// observation path.
+    /// </summary>
+    public int UnrecordedObservations
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var total = (long)_dropped + _unattributed + (_observerUnavailable ? 1 : 0);
+                return total >= int.MaxValue ? int.MaxValue : (int)total;
+            }
+        }
+    }
+
+    /// <summary>Records a connection that had no absolute executable identity safe for policy.</summary>
+    public void RecordUnattributed()
+    {
+        lock (_gate)
+        {
+            if (_unattributed < int.MaxValue)
+            {
+                _unattributed++;
+            }
+        }
+    }
+
+    /// <summary>Marks the observation pump terminally unavailable for this service lifetime.</summary>
+    public void MarkObserverUnavailable()
+    {
+        lock (_gate)
+        {
+            _observerUnavailable = true;
+        }
     }
 
     /// <summary>

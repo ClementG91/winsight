@@ -28,8 +28,11 @@ public static class FirewallServiceAdapter
         ArgumentNullException.ThrowIfNull(view);
         var builder = new ToolReport.Builder(ReportTool);
 
+        var statusNotable = !view.ServiceAvailable
+            || view.EffectiveState == FirewallEnforcementState.Degraded
+            || view.UnrecordedApps > 0;
         builder.Add(
-            Severity.Info,
+            statusNotable ? Severity.Notable : Severity.Info,
             "service",
             view.ServiceAvailable ? view.EffectiveState.ToString() : "Unavailable",
             new Dictionary<string, string?>

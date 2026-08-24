@@ -17,7 +17,7 @@ promotes none of these gates.
 
 ## What CI already covers, and what it cannot
 
-CI runs a native `windows-11-arm` runner, so this is **already automated** - please don't spend
+CI runs a native `windows-11-vs2026-arm` runner, so this is **already automated** - please don't spend
 time re-doing it:
 
 - native Arm64 build of every project,
@@ -118,18 +118,20 @@ privileged is the point: the service refuses to install from anywhere an unprivi
 and step 1 of the protocol exercises that refusal deliberately.
 
 ```powershell
-Expand-Archive "C:\winsight-dl\$name" -DestinationPath C:\winsight-stage -Force
-New-Item -ItemType Directory -Force -Path 'C:\Program Files\WinSight-VM' | Out-Null
-Copy-Item C:\winsight-stage\* 'C:\Program Files\WinSight-VM\' -Recurse -Force
-$svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
-$protocol = 'C:\Program Files\WinSight-VM\Test-WfpValidation.ps1'
+$candidateRoot = 'C:\Program Files\WinSight'
+if (Test-Path -LiteralPath $candidateRoot) { throw 'Candidate root must not already exist.' }
+Expand-Archive "C:\winsight-dl\$name" -DestinationPath C:\winsight-stage
+New-Item -ItemType Directory -Path $candidateRoot | Out-Null
+Copy-Item C:\winsight-stage\* $candidateRoot -Recurse
+$svc = Join-Path $candidateRoot 'winsight-firewall-service.exe'
+$protocol = Join-Path $candidateRoot 'Test-WfpValidation.ps1'
 ```
 
 The strict run executes that deployed `$protocol` from the same protected candidate directory as
 `$svc`; a download/staging copy elsewhere is not the evidence producer.
 
-Building from source instead is fine and covered in step 0 below; the published artifact is preferred
-because it is what a user actually runs.
+Use the native Arm64 artifact produced by CI or the release workflow. A local x64 cross-publish is
+not qualification evidence and is intentionally outside this procedure.
 
 ## Run it as a script, not by hand
 
@@ -139,8 +141,9 @@ from one that was never run, and a transcript with `[PASS]`/`[FAIL]` lines is re
 recollection is not.
 
 ```powershell
-$svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
-$protocol = 'C:\Program Files\WinSight-VM\Test-WfpValidation.ps1'
+$candidateRoot = 'C:\Program Files\WinSight'
+$svc = Join-Path $candidateRoot 'winsight-firewall-service.exe'
+$protocol = Join-Path $candidateRoot 'Test-WfpValidation.ps1'
 
 # VM-only pre-arm qualification. It does not arm WFP, but it installs, starts, stops and
 # uninstalls the candidate service and verifies SCM absence before success.
@@ -162,11 +165,14 @@ and must complete its SCM cleanup. The full path cannot reach its manual arming 
 failed pre-arm check or failed connectivity baseline.
 
 Run `& $protocol -ContractSelfTest` without `-ServicePath` for the final normal non-privileged
-**24/24** contract check. Then run
+**26/26** contract check. Then run
 `& $protocol -ContractSelfTest -ContractNegativeControl`; that deliberate lifecycle-order negative
 control must exit **1**. The former 14/14 and the first local report based on it are invalid,
 non-qualifying evidence. The intermediate 15/15 was a transient development count and is not proof.
-The VM skip/full paths retain exactly **16**/**25** mandatory checks.
+The VM skip/full paths retain exactly **17**/**35** mandatory checks. Both query the exact SCM
+security/recovery profile through the native service API. The nine dynamic-lifecycle full-path
+checks stop the service while enforcement is active, prove the dynamic WFP namespace disappears and
+connectivity returns, then restart and prove the persisted scoped block is reconstructed.
 
 One `New-ValidationAdapter` owns native command construction, staging, workflow operations and the
 Running, Stopped and SCM-absent polls. Real and scripted modes inject only elementary host effects;
@@ -200,11 +206,13 @@ candidate-bound script transcript or turn a partial run into qualification evide
 ### 0. Deploy
 
 ```powershell
-$proj = ".\src\WinSight.FirewallService\WinSight.FirewallService.csproj"
-dotnet publish $proj -c Release -r win-arm64 --self-contained true -o C:\winsight-stage
-New-Item -ItemType Directory -Force -Path 'C:\Program Files\WinSight-VM' | Out-Null
-Copy-Item C:\winsight-stage\* 'C:\Program Files\WinSight-VM\' -Recurse -Force
-$svc = 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+# Reuse the verified native Arm64 CI/release archive from the download section.
+$candidateRoot = 'C:\Program Files\WinSight'
+if (Test-Path -LiteralPath $candidateRoot) { throw 'Candidate root must not already exist.' }
+Expand-Archive "C:\winsight-dl\$name" -DestinationPath C:\winsight-stage
+New-Item -ItemType Directory -Path $candidateRoot | Out-Null
+Copy-Item C:\winsight-stage\* $candidateRoot -Recurse
+$svc = Join-Path $candidateRoot 'winsight-firewall-service.exe'
 $windows = [Environment]::GetFolderPath([Environment+SpecialFolder]::Windows)
 $sc = Join-Path $windows 'System32\sc.exe'
 $target = Join-Path $windows 'System32\curl.exe'

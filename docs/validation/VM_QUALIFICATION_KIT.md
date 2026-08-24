@@ -436,7 +436,8 @@ $ValidationFiles = @(
     (Join-Path $ProtectedSourceRoot 'scripts\WinSightEtwValidation.psm1'),
     (Join-Path $PackageRoot 'Test-WfpValidation.ps1'),
     (Join-Path $PackageRoot 'Test-TrustBoundary.ps1'),
-    (Join-Path $PackageRoot 'Test-IpcBoundary.ps1')
+    (Join-Path $PackageRoot 'Test-IpcBoundary.ps1'),
+    (Join-Path $PackageRoot 'Test-IpcNetworkObserver.ps1')
 )
 $CandidateHash = @{}
 foreach ($path in $CandidateExecutables + $ValidationFiles) {
@@ -700,13 +701,14 @@ function Initialize-WinSightS1QualificationContext {
         (Join-Path $ProtectedSourceRoot 'scripts\WinSightEtwValidation.psm1'),
         (Join-Path $PackageRoot 'Test-WfpValidation.ps1'),
         (Join-Path $PackageRoot 'Test-TrustBoundary.ps1'),
-        (Join-Path $PackageRoot 'Test-IpcBoundary.ps1')
+        (Join-Path $PackageRoot 'Test-IpcBoundary.ps1'),
+        (Join-Path $PackageRoot 'Test-IpcNetworkObserver.ps1')
     )
     $ExpectedCandidatePaths = @(
         $CandidateExecutables + $ValidationFiles |
             ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).Path })
-    if ($ExpectedCandidatePaths.Count -ne 10) {
-        throw "Le set candidat S1 doit contenir 10 fichiers, pas $($ExpectedCandidatePaths.Count)."
+    if ($ExpectedCandidatePaths.Count -ne 11) {
+        throw "Le set candidat S1 doit contenir 11 fichiers, pas $($ExpectedCandidatePaths.Count)."
     }
 
     $resolvedProtectedRoot = (Resolve-Path -LiteralPath $ProtectedRoot).Path.TrimEnd('\')
@@ -731,8 +733,8 @@ function Initialize-WinSightS1QualificationContext {
     $manifestLines = @(
         Get-Content -LiteralPath $manifestPath -ErrorAction Stop |
             Where-Object { $_.Length -gt 0 })
-    if ($manifestLines.Count -ne 10) {
-        throw "Le manifest S1 doit contenir 10 entrées, pas $($manifestLines.Count)."
+    if ($manifestLines.Count -ne 11) {
+        throw "Le manifest S1 doit contenir 11 entrées, pas $($manifestLines.Count)."
     }
 
     $CandidateHash = @{}
@@ -754,7 +756,7 @@ function Initialize-WinSightS1QualificationContext {
         }
         $CandidateHash[$manifestPathValue] = $Matches.hash
     }
-    if ($CandidateHash.Count -ne 10 -or
+    if ($CandidateHash.Count -ne 11 -or
         @($ExpectedCandidatePaths | Where-Object {
             -not $CandidateHash.ContainsKey($_)
         }).Count -ne 0) {
@@ -821,8 +823,11 @@ Après chaque restore `S1`, conserver le transcript de ce bootstrap sous un nom 
 
 ## 6. Inventaire et récupération ETW native
 
-Le module du clone exact fait échouer `logman` non nul. Il accepte les sorties tabulaires,
-multi-colonnes ou localisées de l’outil, mais ne retourne que les tokens canoniques fermés legacy/v2 :
+Le module du clone exact ne reprend que l'erreur transitoire Windows `0x800705AA`
+(`-2147020696`) : au plus huit tentatives, espacées de 250 ms. Tout autre code non nul échoue dès
+la première tentative, et l'épuisement des huit tentatives échoue également. Il accepte les sorties
+tabulaires, multi-colonnes ou localisées de l'outil, mais ne retourne que les tokens canoniques
+fermés legacy/v2 :
 
 ```powershell
 Assert-CandidateFiles
@@ -1080,25 +1085,27 @@ Assert-CandidateFiles
 & $wfpScript -ContractSelfTest -ContractNegativeControl # attendu 26/1, exit 1
 if ($LASTEXITCODE -ne 1) { throw 'NegativeControl non rouge exact.' }
 Assert-CandidateFiles
-& $wfpScript -ServicePath $Service -SkipEnforcement     # attendu 16/16
-if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 16/16 échoué.' }
+& $wfpScript -ServicePath $Service -SkipEnforcement     # attendu 17/17
+if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 17/17 échoué.' }
 ```
 
 Éteindre la VM et faire créer `S2-before-WFP` par l’hôte avec sa preuve `take` scellée. Redémarrer
-seulement après export de cette preuve hote, puis exécuter le full WFP : attendu 25/25, curl cible
-200→000, contrôle 200, rollback AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Toute
+seulement après export de cette preuve hote, puis exécuter le full WFP : attendu 35/35, profil SCM
+exact (SID de service, trois privilèges requis et actions de reprise), curl cible
+200→000, contrôle 200, arrêt armé avec disparition dynamique et retour 200, restart avec retour du
+blocage 000 et contrôle 200, rollback AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Toute
 restauration S2 après échec est également une opération hôte qui exige sa propre preuve
-`operation=restore`. Ensuite trust : attendu 12/12 sans skip, avec un vrai compte standard pour
+`operation=restore`. Ensuite trust : attendu 13/13 sans skip, avec un vrai compte standard pour
 `-HostileAccount`.
 
 ```powershell
 Assert-CandidateFiles
 & $wfpScript -ServicePath $Service
-if ($LASTEXITCODE -ne 0) { throw 'Full WFP 25/25 échoué; restaurer S2.' }
+if ($LASTEXITCODE -ne 0) { throw 'Full WFP 35/35 échoué; restaurer S2.' }
 Assert-CandidateFiles
 & (Join-Path $PackageRoot 'Test-TrustBoundary.ps1') -ServicePath $Service `
     -HostileAccount '<compte standard dédié>'
-if ($LASTEXITCODE -ne 0) { throw 'Trust 12/12 échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Trust 13/13 échoué.' }
 ```
 
 Le gate IPC final part d’un restore `S1` et fournit sa propre séquence complète :
@@ -1137,82 +1144,176 @@ if ($LASTEXITCODE -ne 0) { throw 'IPC 7/7 échoué.' }
 
 ### Network Logon - seconde machine de controle obligatoire
 
-Un processus local fabriqué avec `LOGON32_LOGON_NETWORK` n’est pas un substitut fiable : il peut
-mourir avant PowerShell faute de bureau interactif. La preuve littérale doit venir d’une vraie
-seconde machine de controle, sur le même réseau privé isolé, par WinRM. Une boucle WinRM vers la
-même VM n’est pas acceptée. En l’absence de seconde machine, classer ce gate `NOT_RUN`.
+Un processus local fabriqué avec `LOGON32_LOGON_NETWORK` n’est pas un substitut fiable. La preuve
+littérale doit venir d’une vraie seconde machine de controle, sur le même réseau privé isolé, par
+WinRM. Une boucle WinRM vers la même VM n’est pas acceptée. En l’absence de seconde machine, classer
+ce gate `NOT_RUN`.
 
-Dans l’invité cible, toujours sur S1 jetable, créer un compte local standard dédié et activer WinRM.
-Ne lui donner ni le groupe Administrateurs ni un droit de connexion interactive :
+En workgroup, `Negotiate` n’autorise par défaut que le compte Administrateur intégré. Il ne peut donc
+pas qualifier ce scénario avec un compte local standard. Utiliser un listener HTTPS éphémère et
+`Basic` **uniquement sur TLS**, avec un certificat serveur éphémère explicitement approuvé par la
+machine de controle. Ne jamais activer `AllowUnencrypted`, ne jamais désactiver
+`LocalAccountTokenFilterPolicy`, ne jamais employer `TrustedHosts` pour contourner cette limite.
+
+Dans l’invité cible S1 jetable, depuis Windows PowerShell élevé, affecter des adresses statiques au
+réseau host-only, vérifier que son profil est `Private`, puis créer le compte standard. Le compte ne
+doit appartenir qu’à `Users` et `Remote Management Users` (SID localisé `S-1-5-32-580`) :
 
 ```powershell
+$TargetAddress = '<IPv4 host-only exacte de la cible>'
+$ControlAddress = '<IPv4 host-only exacte du contrôle>'
 $NetworkProbeUser = 'WinSightNetworkProbe'
-$NetworkProbePassword = Read-Host 'Mot de passe temporaire du compte Network' -AsSecureString
+$ControlEvidenceRoot = '<stockage de preuves hors snapshot, visible par les deux VM>'
+$CertificatePath = Join-Path $ControlEvidenceRoot 'winrm-network-probe.cer'
+$NetworkProbePassword = Read-Host 'Mot de passe jetable et aléatoire' -AsSecureString
+$RemoteManagementGroup = Get-LocalGroup -SID 'S-1-5-32-580'
+
+$TargetInterface = Get-NetIPAddress -AddressFamily IPv4 -IPAddress $TargetAddress -ErrorAction Stop
+$OriginalNetworkCategory = (Get-NetConnectionProfile `
+    -InterfaceIndex $TargetInterface.InterfaceIndex).NetworkCategory
+Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex -NetworkCategory Private
+
 New-LocalUser -Name $NetworkProbeUser -Password $NetworkProbePassword `
     -Description 'Compte jetable pour qualification Network Logon' | Out-Null
-Add-LocalGroupMember -Group 'Remote Management Users' -Member $NetworkProbeUser
+Add-LocalGroupMember -Group $RemoteManagementGroup.Name -Member $NetworkProbeUser
 Enable-PSRemoting -SkipNetworkProfileCheck -Force
+
+$RootSddlPath = 'WSMan:\localhost\Service\RootSDDL'
+$OriginalRootSddl = [string](Get-Item -LiteralPath $RootSddlPath).Value
+if ($OriginalRootSddl -notmatch [regex]::Escape('(A;;GR;;;RM)')) {
+    if ($OriginalRootSddl -notmatch 'S:') { throw 'RootSDDL inattendu : SACL absente.' }
+    $NetworkRootSddl = $OriginalRootSddl -replace 'S:', '(A;;GR;;;RM)S:'
+    Set-Item -LiteralPath $RootSddlPath -Value $NetworkRootSddl -Force
+}
+
+$OriginalServiceBasic = [bool](Get-Item 'WSMan:\localhost\Service\Auth\Basic').Value
+$Certificate = New-SelfSignedCertificate -Type SSLServerAuthentication `
+    -Subject "CN=$env:COMPUTERNAME" `
+    -TextExtension @("2.5.29.17={text}IPAddress=$TargetAddress&DNS=$env:COMPUTERNAME") `
+    -CertStoreLocation 'Cert:\LocalMachine\My' -KeyAlgorithm RSA -KeyLength 2048 `
+    -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(1)
+Export-Certificate -Cert $Certificate -FilePath $CertificatePath -Force | Out-Null
+New-WSManInstance -ResourceURI 'winrm/config/Listener' `
+    -SelectorSet @{ Address = '*'; Transport = 'HTTPS' } `
+    -ValueSet @{ Hostname = $env:COMPUTERNAME; CertificateThumbprint = $Certificate.Thumbprint } |
+    Out-Null
+Set-Item 'WSMan:\localhost\Service\Auth\Basic' -Value $true -Force
+$WinRmFirewallRule = 'WinSight qualification WinRM HTTPS'
+New-NetFirewallRule -DisplayName $WinRmFirewallRule -Direction Inbound -Action Allow `
+    -Protocol TCP -LocalPort 5986 -LocalAddress $TargetAddress `
+    -RemoteAddress $ControlAddress -Profile Any | Out-Null
+Restart-Service WinRM -Force
 ```
 
-Sur la seconde machine, ouvrir Windows PowerShell élevé avec `-NoProfile`. Le compte fourni à
-`Get-Credential` doit être le compte local de l’invité (`NOMINVITE\WinSightNetworkProbe`). Si les
-machines sont hors domaine, `TrustedHosts` est limité à l’adresse exacte de la VM et restauré dans
-le `finally` :
+SCM et WMI refusent normalement leurs informations au compte Network standard. La preuve est donc
+scindée sans affaiblir les ACL : la sonde distante fait 7 contrôles sur son propre jeton et le
+contrat IPC; l’observateur élevé fourni fait 3 contrôles indépendants sur le service cible. Toujours
+dans la console élevée de la cible, armer l’observateur avant la connexion distante :
 
 ```powershell
-$GuestAddress = '<IPv4 exacte de la VM>'
-$GuestComputerName = '<nom NetBIOS exact de la VM>'
+$ObserverReady = Join-Path $ControlEvidenceRoot 'network-observer-ready.json'
+$CompletionSignal = Join-Path $ControlEvidenceRoot 'network-probe-complete.signal'
+$ObserverResult = Join-Path $ControlEvidenceRoot 'network-observer-result.json'
+Remove-Item $ObserverReady,$CompletionSignal,$ObserverResult -Force -ErrorAction SilentlyContinue
+$ObserverJob = Start-Job -ScriptBlock {
+    param($Script, $Service, $Ready, $Complete, $Result)
+    & $Script -ServicePath $Service -ReadyPath $Ready `
+        -CompletionSignalPath $Complete -ResultPath $Result
+} -ArgumentList (Join-Path $PackageRoot 'Test-IpcNetworkObserver.ps1'), `
+    $Service, $ObserverReady, $CompletionSignal, $ObserverResult
+$deadline = (Get-Date).AddSeconds(30)
+while (-not (Test-Path $ObserverReady) -and (Get-Date) -lt $deadline) {
+    Start-Sleep -Milliseconds 250
+}
+if (-not (Test-Path $ObserverReady)) { throw 'Observateur Network non armé.' }
+```
+
+Sur la seconde machine, ouvrir Windows PowerShell élevé avec `-NoProfile`. Importer seulement le
+certificat public éphémère, employer le nom SAM local simple avec `Basic`, exécuter le script avec
+Windows PowerShell natif et `ExecutionPolicy Bypass`, puis restaurer la configuration cliente dans
+un `finally` :
+
+```powershell
+$GuestAddress = '<IPv4 host-only exacte de la cible>'
 $GuestPackageRoot = 'C:\Program Files\WinSight-Qualification\payload'
-$ControlEvidenceRoot = '<stockage de preuves hors snapshot, côté contrôle>'
-$credential = Get-Credential "$GuestComputerName\WinSightNetworkProbe"
-$trustedHostsPath = 'WSMan:\localhost\Client\TrustedHosts'
-$previousTrustedHosts = (Get-Item -LiteralPath $trustedHostsPath).Value
+$ControlEvidenceRoot = '<même stockage de preuves hors snapshot>'
+$CertificatePath = Join-Path $ControlEvidenceRoot 'winrm-network-probe.cer'
+$CompletionSignal = Join-Path $ControlEvidenceRoot 'network-probe-complete.signal'
+$credential = Get-Credential 'WinSightNetworkProbe'
+Set-Service WinRM -StartupType Manual
+Start-Service WinRM
+Import-Module Microsoft.WSMan.Management
+$importedCertificate = Import-Certificate -FilePath $CertificatePath `
+    -CertStoreLocation 'Cert:\LocalMachine\Root'
+$clientBasicPath = 'WSMan:\localhost\Client\Auth\Basic'
+$previousClientBasic = [bool](Get-Item -LiteralPath $clientBasicPath).Value
+$networkResult = $null
 
 try {
-    Set-Item -LiteralPath $trustedHostsPath -Value $GuestAddress -Force
+    Set-Item -LiteralPath $clientBasicPath -Value $true -Force
     $networkResult = Invoke-Command -ComputerName $GuestAddress -Credential $credential `
-        -Authentication Negotiate -ScriptBlock {
+        -UseSSL -Authentication Basic -ScriptBlock {
             param($RemotePackageRoot)
             $scriptPath = Join-Path $RemotePackageRoot 'Test-IpcBoundary.ps1'
             $cliPath = Join-Path $RemotePackageRoot 'winsight.exe'
             $servicePath = Join-Path $RemotePackageRoot 'winsight-firewall-service.exe'
-            $output = @(
-                & $scriptPath -CliPath $cliPath -ServicePath $servicePath -NetworkLogon *>&1 |
-                    ForEach-Object { $_.ToString() })
-            [pscustomobject]@{
-                ExitCode = $LASTEXITCODE
-                Output = $output
-            }
+            $nativePowerShell = Join-Path ([Environment]::SystemDirectory) `
+                'WindowsPowerShell\v1.0\powershell.exe'
+            $output = @(& $nativePowerShell -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+                -File $scriptPath -CliPath $cliPath -ServicePath $servicePath -NetworkLogon *>&1 |
+                ForEach-Object { $_.ToString() })
+            [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
         } -ArgumentList $GuestPackageRoot
 }
 finally {
-    Set-Item -LiteralPath $trustedHostsPath -Value $previousTrustedHosts -Force
+    [DateTime]::UtcNow.ToString('O') | Set-Content -LiteralPath $CompletionSignal
+    Set-Item -LiteralPath $clientBasicPath -Value $previousClientBasic -Force
+    Remove-Item -LiteralPath ("Cert:\LocalMachine\Root\{0}" -f `
+        $importedCertificate.Thumbprint) -Force
 }
 
 $networkText = @($networkResult.Output) -join [Environment]::NewLine
-$networkText
+$networkText | Set-Content (Join-Path $ControlEvidenceRoot 'ipc-network-logon.txt')
 if ($networkResult.ExitCode -ne 0 -or
-    $networkText -notmatch [regex]::Escape('Result: 10 checks, 0 failure(s).')) {
-    throw 'Network Logon 10/10 échoué.'
+    $networkText -notmatch [regex]::Escape('Result: 7 checks, 0 failure(s).')) {
+    throw 'Network Logon 7/7 échoué.'
 }
-foreach ($required in @(
-        'S-1-5-2=true',
-        'S-1-5-4=false',
-        'serviceAvailable=false',
-        'outcome=ServiceUnavailable',
-        'mutation=none')) {
+foreach ($required in @('S-1-5-2=true', 'S-1-5-4=false', 'serviceAvailable=false',
+        'outcome=ServiceUnavailable', 'mutation=none')) {
     if ($networkText -notmatch [regex]::Escape($required)) {
         throw "Preuve Network Logon absente : $required"
     }
 }
-New-Item -ItemType Directory -Force $ControlEvidenceRoot | Out-Null
-$networkText | Set-Content (Join-Path $ControlEvidenceRoot 'ipc-network-logon.txt')
 ```
 
-Le script refuse de passer sauf si le jeton contient le SID Network `S-1-5-2`, ne contient pas le
-SID Interactive `S-1-5-4`, reçoit exactement exit 3 / `ServiceUnavailable` / `mutation=none`, et
-retrouve le même PID et la même commande SCM avant/après. Copier et hasher la preuve dans
-`$EvidenceRoot` avant le nettoyage invité.
+Revenir sur la cible, attendre l’observateur et exiger son résultat 3/3. Le gate combiné est 10/10,
+mais les deux preuves restent distinctes et attribuées à leurs jetons respectifs :
+
+```powershell
+$ObserverJob | Wait-Job -Timeout 330 | Receive-Job
+if ($ObserverJob.State -ne 'Completed') { throw 'Observateur Network non terminé.' }
+$ObserverEvidence = Get-Content -LiteralPath $ObserverResult -Raw | ConvertFrom-Json
+if ($ObserverEvidence.Result -ne 'PASS' -or $ObserverEvidence.Checks -ne '3/3') {
+    throw 'Observateur cible 3/3 échoué.'
+}
+Write-Host 'Result: 3 checks, 0 failure(s).'
+```
+
+Après export des preuves, supprimer le listener, le certificat, la règle, le compte et restaurer les
+valeurs mémorisées. La restauration S1 finale reste la preuve autoritaire qu’aucun état ne persiste :
+
+```powershell
+Remove-WSManInstance -ResourceURI 'winrm/config/Listener' `
+    -SelectorSet @{ Address = '*'; Transport = 'HTTPS' }
+Set-Item 'WSMan:\localhost\Service\Auth\Basic' -Value $OriginalServiceBasic -Force
+Set-Item -LiteralPath $RootSddlPath -Value $OriginalRootSddl -Force
+Remove-NetFirewallRule -DisplayName $WinRmFirewallRule
+Remove-Item -LiteralPath ("Cert:\LocalMachine\My\{0}" -f $Certificate.Thumbprint) -Force
+Remove-LocalUser -Name $NetworkProbeUser
+Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex `
+    -NetworkCategory $OriginalNetworkCategory
+Restart-Service WinRM -Force
+```
 
 Revenir ensuite dans la console élevée de l’invité :
 

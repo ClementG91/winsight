@@ -31,7 +31,7 @@ public sealed class VirusTotalEnricherTests
 
     // Deliberately not a real key shape: were any of this to ever reach the network, the request
     // would fail rather than authenticate as somebody.
-    private const string UnusableKey = "key-that-must-never-be-used";
+    private static readonly string UnusableKey = new('a', 64);
 
     private static readonly string[] SamplePath = [@"C:\Windows\System32\notepad.exe"];
 

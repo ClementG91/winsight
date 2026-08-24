@@ -39,7 +39,7 @@ public sealed class ProcessInfoTests
     /// </summary>
     /// <remarks>
     /// Protected and system processes routinely expose no ExecutablePath. Their verdict defaults to
-    /// <see cref="SignatureState.Missing"/>, and "the file is missing" would read as "the binary was
+    /// <see cref="SignatureState.Unknown"/>, and "the file is missing" would read as "the binary was
     /// deleted" rather than "we were not allowed to look" — naming a path WinSight never saw.
     /// </remarks>
     [Theory]
@@ -58,26 +58,27 @@ public sealed class ProcessListerNumericTests
     [Fact]
     public void ReadsEveryCimNumericTypeAProviderMayBox()
     {
-        Assert.Equal(4321u, ProcessLister.ToUint(4321u));
-        Assert.Equal(4321u, ProcessLister.ToUint(4321));
-        Assert.Equal(4321u, ProcessLister.ToUint((ushort)4321));
-        Assert.Equal(4321u, ProcessLister.ToUint(4321L));
+        Assert.True(ProcessLister.TryToUint(4321u, out var fromUint));
+        Assert.True(ProcessLister.TryToUint(4321, out var fromInt));
+        Assert.True(ProcessLister.TryToUint((ushort)4321, out var fromUshort));
+        Assert.True(ProcessLister.TryToUint(4321L, out var fromLong));
+        Assert.All([fromUint, fromInt, fromUshort, fromLong], value => Assert.Equal(4321u, value));
     }
 
     /// <summary>
-    /// An unreadable id becomes 0 — the System Idle Process — rather than failing the snapshot.
+    /// An unreadable id is rejected rather than being fabricated as the System Idle Process.
     /// </summary>
     /// <remarks>
-    /// Pinned because it is a real mislabel, not because it is desirable: a row WinSight cannot read
-    /// an id for is attributed to pid 0. It is kept only because losing every process in the
-    /// snapshot over one malformed row is worse, and Win32_Process declares these as uint32 so the
-    /// arm should never fire in practice. If this ever starts firing, the answer is to drop the row,
-    /// not to keep renaming it.
+    /// Win32_Process declares these fields as uint32. A provider returning something else is a
+    /// coverage gap; the scanner drops only that row and keeps the rest of the snapshot.
     /// </remarks>
     [Fact]
-    public void AnUnreadableIdFallsBackToZeroRatherThanFailingTheSnapshot()
+    public void AnUnreadableIdIsRejectedRatherThanRelabelledAsPidZero()
     {
-        Assert.Equal(0u, ProcessLister.ToUint(null));
-        Assert.Equal(0u, ProcessLister.ToUint("not a number"));
+        Assert.False(ProcessLister.TryToUint(null, out _));
+        Assert.False(ProcessLister.TryToUint("not a number", out _));
+        Assert.False(ProcessLister.TryToUint(-1, out _));
+        Assert.True(ProcessLister.TryToUint(4321u, out var pid));
+        Assert.Equal(4321u, pid);
     }
 }

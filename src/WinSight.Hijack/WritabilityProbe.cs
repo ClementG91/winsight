@@ -10,6 +10,12 @@ public interface IWritabilityProbe
     bool CanCreate(string path);
 }
 
+/// <summary>Optional coverage exposed by probes that can distinguish denial from I/O failure.</summary>
+public interface IWritabilityProbeCoverage
+{
+    int UnreadableAttempts { get; }
+}
+
 /// <summary>
 /// Answers the writability question by asking the filesystem, not by reasoning about ACLs.
 /// </summary>
@@ -26,8 +32,12 @@ public interface IWritabilityProbe
 /// That is the honest answer too: if <c>C:\Program.exe</c> already exists, the interesting finding
 /// is that it exists at all, which the caller reports separately.
 /// </remarks>
-public sealed class WritabilityProbe : IWritabilityProbe
+public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCoverage
 {
+    private int _unreadableAttempts;
+
+    public int UnreadableAttempts => Volatile.Read(ref _unreadableAttempts);
+
     public bool CanCreate(string path)
     {
         if (string.IsNullOrWhiteSpace(path))
@@ -55,10 +65,15 @@ public sealed class WritabilityProbe : IWritabilityProbe
             return true;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or IOException
-                                     or NotSupportedException
                                      or System.Security.SecurityException)
         {
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or NotSupportedException)
+        {
+            // This is not proof of non-writability (the volume may be unavailable or the path
+            // syntax unsupported). Keep the conservative false answer, but expose the blind spot.
+            Interlocked.Increment(ref _unreadableAttempts);
             return false;
         }
         finally

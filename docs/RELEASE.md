@@ -25,19 +25,19 @@ Plus GitHub **build provenance** and **SBOM attestations**, signed by GitHub's O
 3. Tag and push:
 
 ```bash
-git tag v0.11.0 && git push origin v0.11.0
+git tag vX.Y.Z && git push origin vX.Y.Z
 ```
 
 `release.yml` then builds both architectures - x64 on the pinned `windows-2025` image, Arm64 on the
-**native** `windows-11-arm` runner - runs the full installer lifecycle on each, signs, checksums,
-attests and publishes.
+**native** `windows-11-vs2026-arm` runner - runs the full installer lifecycle on each, signs,
+checksums, attests and publishes.
 
 Runner images are pinned rather than following `windows-latest`. The label resolves to `windows-2025`
 today, so the pin changes nothing now - that is the point. It moves on GitHub's schedule, and this
 workflow produces the binaries someone downloads and runs; a release built on an image no CI leg ever
 exercised is an unreviewed change to the artifact arriving without a commit. `ci.yml` pins the same
-image and covers `windows-2022` and native `windows-11-arm` beside it. Moving to a newer image is a
-deliberate one-line commit.
+image and covers `windows-2022` and native `windows-11-vs2026-arm` beside it. Moving to a newer image
+is a deliberate one-line commit.
 
 **Pinning the label is not the same as pinning the image**, and this document should not pretend
 otherwise. GitHub migrated both `windows-latest` and `windows-2025` to a Visual Studio 2026 image in
@@ -53,7 +53,7 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-Every public release to date, through v0.10.7, is unsigned and not production-ready. The signed
+Every public release to date, through v0.11.5, is unsigned. The signed
 Authenticode production chain has never been exercised end to end. SignPath Foundation declined the
 free-program application on 2026-07-29 because the project does not yet have sufficient public
 adoption and independent visibility.
@@ -115,7 +115,7 @@ The build still succeeds, and says so loudly:
 
 ```
 [SIGNING] SKIPPED - no certificate configured.
-[SIGNING] 12 file(s) will ship UNSIGNED. Windows will warn users on first run.
+[SIGNING] 3 file(s) will ship UNSIGNED. Windows will warn users on first run.
 ```
 
 It is never silent. `REQUIRE_SIGNED_RELEASE=false` is the current explicit policy, and the workflow
@@ -145,14 +145,14 @@ the `sign` exit code alone would have shipped that.
 **1. Checksum.**
 
 ```powershell
-Get-FileHash winsight-v0.11.0-win-x64.zip -Algorithm SHA256
-Get-Content winsight-v0.11.0-win-x64.zip.sha256
+Get-FileHash winsight-vX.Y.Z-win-x64.zip -Algorithm SHA256
+Get-Content winsight-vX.Y.Z-win-x64.zip.sha256
 ```
 
 **2. Provenance** - proves GitHub Actions built this exact file from this repository:
 
 ```bash
-gh attestation verify winsight-v0.11.0-win-x64.zip --repo ClementG91/winsight
+gh attestation verify winsight-vX.Y.Z-win-x64.zip --repo ClementG91/winsight
 ```
 
 **3. Authenticode**, when the release is signed:
@@ -186,11 +186,13 @@ What this does **not** defend against: a compromise of the GitHub account or of 
 certificate itself. Provenance proves *which workflow built it*, not that the workflow was
 trustworthy at the time.
 
-None of the historical release evidence qualifies the current source candidate. Before another
-release, exact-candidate CI, CodeQL, package/installer lifecycle, current x64 WFP/SCM qualification,
-privileged Arm64 and remaining session checks must be evaluated. The Authenticode result must match
-the explicit repository policy; under the current unsigned policy it must be `NotSigned` and visibly
-reported. Historical validation records remain bound to their original commits.
+The current native-x64 runtime candidate has a candidate-bound VM record covering installer,
+WFP/SCM, trust, local/Network IPC and ETW/session recovery. Successor CI `32664937545` and CodeQL
+`32664935397` passed, including native Arm64 build/test/package/installer. Independent EN/FR/ES
+review remains required before another release. Privileged Arm64 and x64-on-Arm64 identity remain
+hardware-bound gates for Arm64 production claims. The Authenticode result must match the explicit
+repository policy; under the current unsigned policy it must be `NotSigned` and visibly reported.
+Historical validation records remain bound to their original commits.
 
 ## Release checklist
 

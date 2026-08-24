@@ -238,4 +238,6 @@ boundary with the same honesty:
   posts several toasts quickly - both indistinguishable from "nothing was detected". Every
   detection is therefore also appended to a local, bounded alert journal
   (`%LocalAppData%\WinSight\alerts.log`, see `AlertJournal`) *before* the balloon is raised, so a
-  missed or suppressed alert still leaves a trace to come back to.
+  missed or suppressed alert still leaves a trace to come back to. Fields, entries and file size
+  are bounded; malformed/unreadable input is reported, and an oversized journal is preserved aside
+  before a fresh one is created.

@@ -2,4 +2,7 @@
   <PropertyGroup>
     <RootNamespace>WinSight.Certificates</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+  </ItemGroup>
 </Project>

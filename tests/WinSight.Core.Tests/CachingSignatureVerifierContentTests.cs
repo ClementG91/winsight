@@ -46,6 +46,32 @@ public sealed class CachingSignatureVerifierContentTests : IDisposable
         }
     }
 
+    private sealed class SwapDuringFirstVerification(Action<string> swap) : ISignatureVerifier
+    {
+        public int Calls { get; private set; }
+
+        public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default)
+            => VerifyMany([path], cancellationToken)[path];
+
+        public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+            IReadOnlyCollection<string> paths,
+            CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            if (Calls == 1)
+            {
+                foreach (var path in paths)
+                {
+                    swap(path);
+                }
+            }
+            return paths.ToDictionary(
+                path => path,
+                _ => Calls == 1 ? Trusted : SignatureVerdict.Unsigned,
+                StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
     /// <summary>Overwrites content while restoring every timestamp and keeping the length.</summary>
     private static void SwapPreservingMetadata(string path, string replacement)
     {
@@ -67,14 +93,14 @@ public sealed class CachingSignatureVerifierContentTests : IDisposable
         return path;
     }
 
-    // The window, demonstrated rather than described. This is the documented default behaviour;
-    // if it ever changes, the remarks on CachingSignatureVerifier are wrong and must change too.
+    // The window, demonstrated rather than described. Metadata mode is an explicit performance
+    // opt-out; callers must knowingly accept this weaker identity.
     [Fact]
     public void MetadataMode_ServesTheOldVerdictAfterATimestompedSwap()
     {
         var path = WriteFile("metadata.bin", "SIGNED-ORIGINAL");
         var inner = new CountingVerifier(Trusted);
-        var cache = new CachingSignatureVerifier(inner);
+        var cache = new CachingSignatureVerifier(inner, verifyContent: false);
 
         Assert.Equal(Trusted, cache.Verify(path));
 
@@ -103,6 +129,39 @@ public sealed class CachingSignatureVerifierContentTests : IDisposable
         Assert.Equal(2, inner.Calls);
     }
 
+    [Fact]
+    public void DefaultMode_BindsVerdictsToContent()
+    {
+        var path = WriteFile("default.bin", "SIGNED-ORIGINAL");
+        var inner = new CountingVerifier(Trusted);
+        var cache = new CachingSignatureVerifier(inner);
+
+        Assert.Equal(Trusted, cache.Verify(path));
+        SwapPreservingMetadata(path, "UNSIGNED-EVIL!!");
+        inner.Current = SignatureVerdict.Unsigned;
+
+        Assert.Equal(SignatureVerdict.Unsigned, cache.Verify(path));
+        Assert.Equal(2, inner.Calls);
+    }
+
+    [Fact]
+    public void ContentMode_DoesNotCacheVerdictAcrossMutationDuringVerification()
+    {
+        var path = WriteFile("verification-race.bin", "SIGNED-ORIGINAL");
+        var inner = new SwapDuringFirstVerification(
+            candidate => SwapPreservingMetadata(candidate, "UNSIGNED-EVIL!!"));
+        var cache = new CachingSignatureVerifier(inner, verifyContent: true);
+
+        // The first answer describes the content the fake verifier just inspected. The mutation
+        // happens before the cache can take its post-verification fingerprint, so that answer must
+        // not become a cache entry for the replacement now present at the same path.
+        Assert.Equal(Trusted, cache.Verify(path));
+        Assert.Equal("UNSIGNED-EVIL!!", File.ReadAllText(path));
+
+        Assert.Equal(SignatureVerdict.Unsigned, cache.Verify(path));
+        Assert.Equal(2, inner.Calls);
+    }
+
     // Content mode must still be a cache, or it would have traded a real cost for nothing.
     [Fact]
     public void ContentMode_StillServesAnUnchangedFileFromCache()
@@ -123,7 +182,7 @@ public sealed class CachingSignatureVerifierContentTests : IDisposable
     {
         var path = WriteFile("grow.bin", "SHORT");
         var inner = new CountingVerifier(Trusted);
-        var cache = new CachingSignatureVerifier(inner);
+        var cache = new CachingSignatureVerifier(inner, verifyContent: false);
 
         Assert.Equal(Trusted, cache.Verify(path));
 

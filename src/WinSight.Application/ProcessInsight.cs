@@ -45,6 +45,32 @@ public sealed record ProcessInsight(
         && connection.State.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase);
 }
 
+/// <summary>Coverage gaps encountered while gathering a per-process drill-down.</summary>
+public sealed record ProcessInsightCoverage(
+    int UnreadableProcessSources,
+    int UnreadableProcessItems,
+    int UnreadableModuleSources,
+    int UnreadableModuleItems)
+{
+    public bool IsComplete =>
+        UnreadableProcessSources == 0 &&
+        UnreadableProcessItems == 0 &&
+        UnreadableModuleSources == 0 &&
+        UnreadableModuleItems == 0;
+
+    public static ProcessInsightCoverage From(
+        AcquisitionSnapshot<ProcessInfo> processes,
+        AcquisitionSnapshot<LoadedModule>? modules = null)
+    {
+        ArgumentNullException.ThrowIfNull(processes);
+        return new ProcessInsightCoverage(
+            processes.UnreadableSources,
+            processes.UnreadableItems,
+            modules?.UnreadableSources ?? 0,
+            modules?.UnreadableItems ?? 0);
+    }
+}
+
 /// <summary>
 /// Joins the process, module and connection snapshots into a single per-process view.
 /// </summary>

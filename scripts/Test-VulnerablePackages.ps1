@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$json = & dotnet list $Solution package --vulnerable --include-transitive --format json
+$json = & dotnet package list --project $Solution --vulnerable --include-transitive --format json
 if ($LASTEXITCODE -ne 0) {
     throw "NuGet vulnerability audit failed to execute."
 }

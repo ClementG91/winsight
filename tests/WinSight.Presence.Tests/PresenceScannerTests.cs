@@ -11,10 +11,15 @@ public sealed class PresenceScannerTests
 {
     private static readonly DateTimeOffset Night = new(2026, 7, 22, 3, 14, 0, TimeSpan.Zero);
 
-    private sealed class ScriptedSource(IReadOnlyList<WakeRecord> wakes, bool unreadable = false)
+    private sealed class ScriptedSource(
+        IReadOnlyList<WakeRecord> wakes,
+        bool unreadable = false,
+        int unreadableItems = 0)
         : IWakeEventSource
     {
         public bool Unreadable => unreadable;
+
+        public int UnreadableItems => unreadableItems;
 
         public int LastMax { get; private set; }
 
@@ -54,6 +59,15 @@ public sealed class PresenceScannerTests
 
         Assert.Empty(report.Wakes);
         Assert.False(report.Unreadable);
+    }
+
+    [Fact]
+    public void MalformedRecordsMakeTheTimelineExplicitlyIncomplete()
+    {
+        var report = new PresenceScanner(new ScriptedSource([], unreadableItems: 2)).Scan();
+
+        Assert.False(report.Unreadable);
+        Assert.Equal(2, report.UnreadableItems);
     }
 
     // ---- What is counted as presence ----------------------------------------------------------

@@ -25,7 +25,10 @@ public static class ProcessInsightReport
 {
     public const string ToolName = "process";
 
-    public static ToolReport Render(int pid, ProcessInsight? insight)
+    public static ToolReport Render(
+        int pid,
+        ProcessInsight? insight,
+        ProcessInsightCoverage? coverage = null)
     {
         var builder = new ToolReport.Builder(ToolName);
         if (insight is null)
@@ -33,15 +36,20 @@ public static class ProcessInsightReport
             // No items at all: an empty list is the honest rendering of "there is nothing to
             // describe", where a single "looks fine" line would be a claim about a process that is
             // not there.
-            return builder.Build($"pid {pid} is not running, or is not visible to this session");
+            AddCoverage(builder, coverage);
+            return builder.Build(coverage is { IsComplete: false }
+                ? $"pid {pid} was not observed; process enumeration was incomplete"
+                : $"pid {pid} is not running, or is not visible to this session");
         }
 
         AddProcess(builder, insight);
         AddLineage(builder, insight);
         AddUnsignedModules(builder, insight);
         AddExternalConnections(builder, insight);
+        AddCoverage(builder, coverage);
+        AddSignatureCoverage(builder, insight);
 
-        return builder.Build(Summarise(insight));
+        return builder.Build(Summarise(insight, coverage));
     }
 
     private static void AddProcess(ToolReport.Builder builder, ProcessInsight insight)
@@ -132,10 +140,51 @@ public static class ProcessInsightReport
         }
     }
 
+    private static void AddCoverage(ToolReport.Builder builder, ProcessInsightCoverage? coverage)
+    {
+        if (coverage is null || coverage.IsComplete)
+        {
+            return;
+        }
+        builder.Add(
+            Severity.Notable,
+            "acquisition coverage incomplete",
+            $"process sources/items unreadable: {coverage.UnreadableProcessSources}/{coverage.UnreadableProcessItems}; " +
+            $"module sources/items unreadable: {coverage.UnreadableModuleSources}/{coverage.UnreadableModuleItems}",
+            new Dictionary<string, string?>
+            {
+                ["kind"] = "acquisitionCoverage",
+                ["processUnreadableSources"] = coverage.UnreadableProcessSources.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["processUnreadableItems"] = coverage.UnreadableProcessItems.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["moduleUnreadableSources"] = coverage.UnreadableModuleSources.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                ["moduleUnreadableItems"] = coverage.UnreadableModuleItems.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+    }
+
+    private static void AddSignatureCoverage(ToolReport.Builder builder, ProcessInsight insight)
+    {
+        var unknown = (insight.Process.Signature.State == WinSight.Core.SignatureState.Unknown ? 1 : 0)
+            + insight.Modules.Count(module => module.Signature.State == WinSight.Core.SignatureState.Unknown)
+            + insight.Connections.Count(connection => connection.Signature.State == WinSight.Core.SignatureState.Unknown);
+        if (unknown == 0)
+        {
+            return;
+        }
+        builder.Add(
+            Severity.Notable,
+            "signature coverage incomplete",
+            $"{unknown} executable or module signature(s) could not be verified",
+            new Dictionary<string, string?>
+            {
+                ["kind"] = "signatureCoverage",
+                ["unknownSignatures"] = unknown.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            });
+    }
+
     /// <summary>
     /// One line stating what was looked at and what stood out — never silence on a clean process.
     /// </summary>
-    private static string Summarise(ProcessInsight insight)
+    private static string Summarise(ProcessInsight insight, ProcessInsightCoverage? coverage)
     {
         var parts = new List<string>
         {
@@ -151,7 +200,11 @@ public static class ProcessInsightReport
             parts.Add($"{insight.EstablishedExternalCount} established external");
         }
         var head = $"{insight.Process.Name} (pid {insight.Process.Pid}): {string.Join(", ", parts)}";
-        return insight.IsNotable ? head : $"{head}, nothing notable";
+        var incomplete = coverage is { IsComplete: false }
+            || insight.Process.Signature.State == WinSight.Core.SignatureState.Unknown
+            || insight.Modules.Any(module => module.Signature.State == WinSight.Core.SignatureState.Unknown)
+            || insight.Connections.Any(connection => connection.Signature.State == WinSight.Core.SignatureState.Unknown);
+        return insight.IsNotable || incomplete ? head : $"{head}, nothing notable";
     }
 
     private static string Describe(ProcessInfo process) => Describe(process.Signature);

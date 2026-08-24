@@ -2,6 +2,9 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+
+using Microsoft.Win32.SafeHandles;
+
 using WinSight.Firewall;
 
 namespace WinSight.FirewallService;
@@ -12,10 +15,11 @@ namespace WinSight.FirewallService;
 /// traffic by themselves, so provisioning them cannot block or affect any connection.
 /// They are the ownership scope under which WinSight audit and enforcement filters live.
 ///
-/// Everything runs inside a WFP transaction so it is all-or-nothing, and both objects
-/// are non-persistent (flags = 0): a reboot removes them automatically, which is the
-/// safest default while the enforcement work is still being validated. All mutation is
-/// idempotent (already-exists / not-found are treated as success).
+/// Everything runs inside a WFP transaction so it is all-or-nothing. Production enforcement
+/// creates these non-persistent objects through one service-owned dynamic session: BFE therefore
+/// removes them when the service closes its session or dies, including an ungraceful crash. The
+/// short-lived static entry points remain for read-only diagnostics and isolated native probes.
+/// All mutation is idempotent (already-exists / not-found are treated as success).
 /// </summary>
 public static partial class WfpProvisioning
 {
@@ -54,6 +58,8 @@ public static partial class WfpProvisioning
         "Blocks outbound connections for one application (per-app, IPv4 and IPv6).";
 
     private const uint RpcCAuthnWinNt = 10;
+    private const uint FwpmSessionFlagDynamic = 0x00000001;
+    private const uint DynamicSessionTransactionWaitMilliseconds = 5_000;
     private const uint FwpEFilterNotFound = 0x80320003;
     private const uint FwpEProviderNotFound = 0x80320005;
     private const uint FwpESublayerNotFound = 0x80320007;
@@ -84,21 +90,58 @@ public static partial class WfpProvisioning
     private const uint InventoryBatchSize = 256;
     private const int MaxInventoryFilters = 65_536;
 
+    internal static uint ProductionSessionFlags => FwpmSessionFlagDynamic;
+    internal static uint ProductionTransactionWaitMilliseconds => DynamicSessionTransactionWaitMilliseconds;
+
     /// <summary>Creates the provider and sublayer (idempotent). Installs no filter.</summary>
     public static void Provision()
     {
         var engine = OpenEngine();
         try
         {
-            InTransaction(engine, () =>
-            {
-                AddProvider(engine);
-                AddSublayer(engine);
-            });
+            Provision(engine);
         }
         finally
         {
             _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    internal static void Provision(IntPtr engine) =>
+        InTransaction(engine, () =>
+        {
+            AddProvider(engine);
+            AddSublayer(engine);
+        });
+
+    /// <summary>
+    /// Opens the one session that owns production WFP policy. Objects created with this handle are
+    /// tied to it by BFE and disappear on close or RPC rundown, so a dead service cannot leave a
+    /// live block behind. A bounded transaction wait turns WFP contention into a visible degraded
+    /// state instead of hanging the SYSTEM service indefinitely.
+    /// </summary>
+    internal static SafeWfpEngineSession OpenDynamicSession()
+    {
+        var session = new FwpmSession0
+        {
+            Flags = FwpmSessionFlagDynamic,
+            TransactionWaitTimeoutMilliseconds = DynamicSessionTransactionWaitMilliseconds,
+        };
+        var sessionPointer = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmSession0>());
+        try
+        {
+            Marshal.StructureToPtr(session, sessionPointer, false);
+            var result = NativeMethods.FwpmEngineOpen0(
+                null, RpcCAuthnWinNt, IntPtr.Zero, sessionPointer, out var engine);
+            if (result != 0)
+            {
+                throw new Win32Exception((int)result);
+            }
+            return new SafeWfpEngineSession(engine);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(sessionPointer);
         }
     }
 
@@ -182,27 +225,31 @@ public static partial class WfpProvisioning
     /// </summary>
     public static void AddBlockFilter(string executablePath)
     {
-        // Canonicalize once so the app id and the derived filter keys are computed from the
-        // exact same path the store persists — otherwise a filter can be installed under a
-        // key the next boot's re-apply cannot reproduce, orphaning it.
-        var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
-        var (keyV4, keyV6) = BlockFilterKeys(path);
-
         var engine = OpenEngine();
         try
         {
-            InTransaction(engine, () =>
-            {
-                // Replace only THIS app's filters, leaving other blocked apps intact.
-                DeleteFilter(engine, keyV4);
-                DeleteFilter(engine, keyV6);
-                AddBlockFilters(engine, path, keyV4, keyV6);
-            });
+            AddBlockFilter(engine, executablePath);
         }
         finally
         {
             _ = NativeMethods.FwpmEngineClose0(engine);
         }
+    }
+
+    internal static void AddBlockFilter(IntPtr engine, string executablePath)
+    {
+        // Canonicalize once so the app id and the derived filter keys are computed from the
+        // exact same path the store persists — otherwise a filter can be installed under a
+        // key the next boot's re-apply cannot reproduce, orphaning it.
+        var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
+        var (keyV4, keyV6) = BlockFilterKeys(path);
+        InTransaction(engine, () =>
+        {
+            // Replace only THIS app's filters, leaving other blocked apps intact.
+            DeleteFilter(engine, keyV4);
+            DeleteFilter(engine, keyV6);
+            AddBlockFilters(engine, path, keyV4, keyV6);
+        });
     }
 
     /// <summary>
@@ -214,27 +261,36 @@ public static partial class WfpProvisioning
     public static void ReconcileExact(IReadOnlyList<AppFirewallPolicy> policies)
     {
         ArgumentNullException.ThrowIfNull(policies);
-        var desired = DesiredBlocks(policies);
         var engine = OpenEngine();
         try
         {
-            InTransaction(engine, () =>
-            {
-                DeleteAllOwnedFilters(engine);
-                DeleteSublayer(engine);
-                DeleteProvider(engine);
-                AddProvider(engine);
-                AddSublayer(engine);
-                foreach (var block in desired)
-                {
-                    AddBlockFilters(engine, block.Path, block.KeyV4, block.KeyV6);
-                }
-            });
+            ReconcileExact(engine, policies);
         }
         finally
         {
             _ = NativeMethods.FwpmEngineClose0(engine);
         }
+    }
+
+    internal static void ReconcileExact(IntPtr engine, IReadOnlyList<AppFirewallPolicy> policies)
+    {
+        ArgumentNullException.ThrowIfNull(policies);
+        var desired = DesiredBlocks(policies);
+        InTransaction(engine, () =>
+        {
+            // This also migrates objects left by pre-dynamic WinSight versions: static objects are
+            // removed before the replacement provider, sublayer and filters are created in this
+            // dynamic session, all in one atomic transaction.
+            DeleteAllOwnedFilters(engine);
+            DeleteSublayer(engine);
+            DeleteProvider(engine);
+            AddProvider(engine);
+            AddSublayer(engine);
+            foreach (var block in desired)
+            {
+                AddBlockFilters(engine, block.Path, block.KeyV4, block.KeyV6);
+            }
+        });
     }
 
     /// <summary>
@@ -292,12 +348,7 @@ public static partial class WfpProvisioning
         var engine = OpenEngine();
         try
         {
-            InTransaction(engine, () =>
-            {
-                DeleteAllOwnedFilters(engine);
-                DeleteSublayer(engine);
-                DeleteProvider(engine);
-            });
+            CleanupAll(engine);
         }
         finally
         {
@@ -305,8 +356,42 @@ public static partial class WfpProvisioning
         }
     }
 
+    internal static void CleanupAll(IntPtr engine) =>
+        InTransaction(engine, () =>
+        {
+            DeleteAllOwnedFilters(engine);
+            DeleteSublayer(engine);
+            DeleteProvider(engine);
+        });
+
     /// <summary>Removes one application's BLOCK filters from both IP layers (idempotent).</summary>
     public static void RemoveBlockFilter(string executablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        var engine = OpenEngine();
+        try
+        {
+            RemoveBlockFilter(engine, executablePath);
+        }
+        finally
+        {
+            _ = NativeMethods.FwpmEngineClose0(engine);
+        }
+    }
+
+    internal static void RemoveBlockFilter(IntPtr engine, string executablePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
+        var (keyV4, keyV6) = BlockFilterKeys(executablePath);
+        InTransaction(engine, () =>
+        {
+            DeleteFilter(engine, keyV4);
+            DeleteFilter(engine, keyV6);
+        });
+    }
+
+    /// <summary>True when the given application currently has a WinSight block filter.</summary>
+    public static bool IsBlocked(string executablePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
         var (keyV4, keyV6) = BlockFilterKeys(executablePath);
@@ -314,25 +399,10 @@ public static partial class WfpProvisioning
         var engine = OpenEngine();
         try
         {
-            DeleteFilter(engine, keyV4);
-            DeleteFilter(engine, keyV6);
-        }
-        finally
-        {
-            _ = NativeMethods.FwpmEngineClose0(engine);
-        }
-    }
-
-    /// <summary>True when the given application currently has a WinSight block filter.</summary>
-    public static bool IsBlocked(string executablePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(executablePath);
-        var (keyV4, _) = BlockFilterKeys(executablePath);
-
-        var engine = OpenEngine();
-        try
-        {
-            return FilterExists(engine, keyV4);
+            return RequireConsistentIpPair(
+                FilterExists(engine, keyV4),
+                FilterExists(engine, keyV6),
+                "application block");
         }
         finally
         {
@@ -712,22 +782,45 @@ public static partial class WfpProvisioning
         try
         {
             var providerKey = ProviderKey;
-            var providerExists = NativeMethods.FwpmProviderGetByKey0(engine, ref providerKey, out var provider) == 0;
-            if (provider != IntPtr.Zero)
+            var providerResult = NativeMethods.FwpmProviderGetByKey0(
+                engine, ref providerKey, out var provider);
+            bool providerExists;
+            try
             {
-                NativeMethods.FwpmFreeMemory0(ref provider);
+                providerExists = InterpretLookupResult(providerResult, FwpEProviderNotFound);
+            }
+            finally
+            {
+                if (provider != IntPtr.Zero)
+                {
+                    NativeMethods.FwpmFreeMemory0(ref provider);
+                }
             }
 
             var sublayerKey = SublayerKey;
-            var sublayerExists = NativeMethods.FwpmSubLayerGetByKey0(engine, ref sublayerKey, out var sublayer) == 0;
-            if (sublayer != IntPtr.Zero)
+            var sublayerResult = NativeMethods.FwpmSubLayerGetByKey0(
+                engine, ref sublayerKey, out var sublayer);
+            bool sublayerExists;
+            try
             {
-                NativeMethods.FwpmFreeMemory0(ref sublayer);
+                sublayerExists = InterpretLookupResult(sublayerResult, FwpESublayerNotFound);
+            }
+            finally
+            {
+                if (sublayer != IntPtr.Zero)
+                {
+                    NativeMethods.FwpmFreeMemory0(ref sublayer);
+                }
             }
 
-            // The PERMIT filter is "present" when its IPv4 half exists; the V6 half is added
-            // and removed in the same transaction, so the two are always in step.
-            return (providerExists, sublayerExists, FilterExists(engine, PermitFilterKeyV4));
+            // Transactions normally keep the pair in step, but diagnostics must report the
+            // observed state rather than assuming it. A split pair is corruption, not "present"
+            // or "absent", and must therefore fail the status command visibly.
+            var permitExists = RequireConsistentIpPair(
+                FilterExists(engine, PermitFilterKeyV4),
+                FilterExists(engine, PermitFilterKeyV6),
+                "audit permit filter");
+            return (providerExists, sublayerExists, permitExists);
         }
         finally
         {
@@ -737,12 +830,42 @@ public static partial class WfpProvisioning
 
     private static bool FilterExists(IntPtr engine, Guid key)
     {
-        var exists = NativeMethods.FwpmFilterGetByKey0(engine, ref key, out var filter) == 0;
-        if (filter != IntPtr.Zero)
+        var result = NativeMethods.FwpmFilterGetByKey0(engine, ref key, out var filter);
+        try
         {
-            NativeMethods.FwpmFreeMemory0(ref filter);
+            return InterpretLookupResult(result, FwpEFilterNotFound);
         }
-        return exists;
+        finally
+        {
+            if (filter != IntPtr.Zero)
+            {
+                NativeMethods.FwpmFreeMemory0(ref filter);
+            }
+        }
+    }
+
+    internal static bool InterpretLookupResult(uint result, uint notFoundResult)
+    {
+        if (result == 0)
+        {
+            return true;
+        }
+        if (result == notFoundResult)
+        {
+            return false;
+        }
+        throw new Win32Exception(unchecked((int)result));
+    }
+
+    internal static bool RequireConsistentIpPair(bool ipv4, bool ipv6, string objectName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(objectName);
+        if (ipv4 != ipv6)
+        {
+            throw new InvalidDataException(
+                $"The WinSight WFP {objectName} has inconsistent IPv4/IPv6 state.");
+        }
+        return ipv4;
     }
 
     private static IntPtr OpenEngine()
@@ -846,6 +969,22 @@ public static partial class WfpProvisioning
         public IntPtr Description;
     }
 
+    // FWPM_SESSION0 contains output-only identity fields after the caller-controlled flags and
+    // transaction timeout. They still belong in the managed layout: omitting them shortens the
+    // buffer BFE receives and makes the interop architecture-dependent.
+    [StructLayout(LayoutKind.Sequential)]
+    private struct FwpmSession0
+    {
+        public Guid SessionKey;
+        public FwpmDisplayData0 DisplayData;
+        public uint Flags;
+        public uint TransactionWaitTimeoutMilliseconds;
+        public uint ProcessId;
+        public IntPtr Sid;
+        public IntPtr Username;
+        public int KernelMode;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct FwpByteBlob
     {
@@ -928,6 +1067,35 @@ public static partial class WfpProvisioning
         public IntPtr Reserved;
         public ulong FilterId;
         public FwpValue0 EffectiveWeight;
+    }
+
+    /// <summary>
+    /// Owns a dynamic BFE session. SafeHandle supplies a finalizer as a last-resort RPC rundown if
+    /// managed teardown is skipped; normal service disposal still closes it deterministically.
+    /// </summary>
+    internal sealed class SafeWfpEngineSession : SafeHandleZeroOrMinusOneIsInvalid
+    {
+        internal SafeWfpEngineSession(IntPtr engine) : base(ownsHandle: true) => SetHandle(engine);
+
+        internal void Invoke(Action<IntPtr> operation)
+        {
+            ArgumentNullException.ThrowIfNull(operation);
+            var retained = false;
+            try
+            {
+                DangerousAddRef(ref retained);
+                operation(DangerousGetHandle());
+            }
+            finally
+            {
+                if (retained)
+                {
+                    DangerousRelease();
+                }
+            }
+        }
+
+        protected override bool ReleaseHandle() => NativeMethods.FwpmEngineClose0(handle) == 0;
     }
 
     private static partial class NativeMethods

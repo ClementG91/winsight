@@ -9,6 +9,7 @@ using Microsoft.Win32;
 using WinSight.Application;
 using WinSight.Attribution;
 using WinSight.AvMonitor;
+using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.Persistence;
 using WinSight.Ransomware;
@@ -59,7 +60,7 @@ public partial class MainWindow : Window, IDisposable
     /// <summary>The catalog command whose report renders <see cref="AlertJournal"/>.</summary>
     private const string AlertsCommand = "alerts";
 
-    public MainWindow()
+    public MainWindow(bool startMonitors = true)
     {
         InitializeComponent();
         DashboardTools.Reload();
@@ -94,7 +95,10 @@ public partial class MainWindow : Window, IDisposable
         LanguagePicker.SelectedValue = Text.CurrentCode;
         _initializing = false;
 
-        Loaded += (_, _) => StartGuardian();
+        if (startMonitors)
+        {
+            Loaded += (_, _) => StartGuardian();
+        }
     }
 
     /// <summary>
@@ -658,6 +662,7 @@ public partial class MainWindow : Window, IDisposable
 
         var explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
         var startInfo = new ProcessStartInfo(explorer) { UseShellExecute = false };
+        VirusTotalConfiguration.RemoveFromChildEnvironment(startInfo);
         startInfo.ArgumentList.Add(Directory.Exists(path) ? path : $"/select,{path}");
         TryUserAction(() => _ = Process.Start(startInfo), Text["LocationOpened"]);
     }

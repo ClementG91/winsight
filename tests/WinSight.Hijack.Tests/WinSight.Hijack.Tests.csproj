@@ -10,5 +10,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinSight.Hijack\WinSight.Hijack.csproj" />
+    <ProjectReference Include="..\..\src\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
 </Project>

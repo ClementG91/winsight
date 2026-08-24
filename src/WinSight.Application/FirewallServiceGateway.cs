@@ -13,8 +13,8 @@ namespace WinSight.Application;
 /// Applications seen reaching the network that have never been ruled on, newest first.
 /// </param>
 /// <param name="UnrecordedApps">
-/// How many further apps the service could not record. Surfaced rather than dropped so the list is
-/// never presented as complete when it is not.
+/// Conservative lower bound on observations not represented by the pending list. Surfaced rather
+/// than dropped so the list is never presented as complete when attribution or observation failed.
 /// </param>
 public sealed record FirewallServiceView(
     bool ServiceAvailable,
@@ -109,7 +109,11 @@ public sealed class FirewallServiceGateway
                 finalStatus.Status.UnrecordedApps,
                 finalStatus.Status.EffectiveState);
         }
-        catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
+        catch (Exception ex) when (ex is TimeoutException
+            or FirewallProtocolException
+            or IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
         {
             return FirewallServiceView.Unavailable;
         }
@@ -174,7 +178,11 @@ public sealed class FirewallServiceGateway
                 _ => FirewallMutationResult.Rejected,
             };
         }
-        catch (Exception ex) when (ex is TimeoutException or FirewallProtocolException or IOException)
+        catch (Exception ex) when (ex is TimeoutException
+            or FirewallProtocolException
+            or IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException)
         {
             return FirewallMutationResult.ServiceUnavailable;
         }

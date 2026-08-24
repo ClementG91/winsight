@@ -3,6 +3,9 @@ Set-StrictMode -Version Latest
 $script:WinSightEtwSessionPattern = [regex]::new(
     '(?<!\S)WinSight-(?:Attribution|Outbound|DNS)-(?:[1-9][0-9]*|v2-[1-9][0-9]*-[0-9A-F]{16})(?=\s|$)',
     [System.Text.RegularExpressions.RegexOptions]::CultureInvariant)
+$script:WinSightLogmanTransientExitCode = -2147020696 # 0x800705AA: ERROR_NO_SYSTEM_RESOURCES
+$script:WinSightLogmanMaximumAttempts = 8
+$script:WinSightLogmanRetryDelayMilliseconds = 250
 
 function Get-WinSightSystemLogmanPath
 {
@@ -23,6 +26,65 @@ function Get-WinSightSystemLogmanPath
     return $logmanPath
 }
 
+function Invoke-WinSightLogmanEtwQuery
+{
+    [CmdletBinding()]
+    param(
+        [scriptblock]$Query,
+
+        [scriptblock]$Delay
+    )
+
+    $logmanPath = Get-WinSightSystemLogmanPath
+    if ($null -eq $Query)
+    {
+        $Query = {
+            param([string]$ResolvedLogmanPath)
+
+            $output = @(& $ResolvedLogmanPath query -ets 2>&1 |
+                ForEach-Object { $_.ToString() })
+            [pscustomobject]@{
+                Lines = $output
+                ExitCode = $LASTEXITCODE
+            }
+        }
+    }
+    if ($null -eq $Delay)
+    {
+        $Delay = {
+            param([int]$Milliseconds)
+            Start-Sleep -Milliseconds $Milliseconds
+        }
+    }
+
+    for ($attempt = 1; $attempt -le $script:WinSightLogmanMaximumAttempts; $attempt++)
+    {
+        $result = & $Query $logmanPath
+        if ($null -eq $result -or $null -eq $result.PSObject.Properties['Lines'] -or
+            $null -eq $result.PSObject.Properties['ExitCode'])
+        {
+            throw 'logman query oracle returned an invalid result.'
+        }
+
+        $exitCode = [int]$result.ExitCode
+        if ($exitCode -eq 0)
+        {
+            return [pscustomobject]@{
+                Lines = @($result.Lines)
+                ExitCode = 0
+                Attempts = $attempt
+            }
+        }
+        if ($exitCode -ne $script:WinSightLogmanTransientExitCode -or
+            $attempt -eq $script:WinSightLogmanMaximumAttempts)
+        {
+            throw "logman query -ets failed with exit code $exitCode after $attempt attempt(s)."
+        }
+
+        & $Delay $script:WinSightLogmanRetryDelayMilliseconds
+    }
+}
+
 function Get-WinSightEtwSessionNames
 {
     [CmdletBinding()]
@@ -34,9 +96,9 @@ function Get-WinSightEtwSessionNames
 
     if (-not $PSBoundParameters.ContainsKey('Lines'))
     {
-        $logmanPath = Get-WinSightSystemLogmanPath
-        $Lines = @(& $logmanPath query -ets 2>&1 | ForEach-Object { $_.ToString() })
-        $ExitCode = $LASTEXITCODE
+        $queryResult = Invoke-WinSightLogmanEtwQuery
+        $Lines = @($queryResult.Lines)
+        $ExitCode = $queryResult.ExitCode
     }
     if ($ExitCode -ne 0)
     {

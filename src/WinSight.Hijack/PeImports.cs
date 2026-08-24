@@ -16,6 +16,11 @@ public sealed record PeImportSet(IReadOnlyList<string> Imports, IReadOnlyList<st
 {
     public static readonly PeImportSet Empty = new([], []);
 
+    public static readonly PeImportSet Unreadable = new([], []) { IsReadable = false };
+
+    /// <summary>False when the file could not be read or its PE structure was invalid.</summary>
+    public bool IsReadable { get; init; } = true;
+
     public bool IsEmpty => Imports.Count == 0 && DelayImports.Count == 0;
 }
 
@@ -71,7 +76,7 @@ public static class PeImports
             var file = new FileInfo(path);
             if (!file.Exists || file.Length is 0 or > MaxImageBytes)
             {
-                return PeImportSet.Empty;
+                return PeImportSet.Unreadable;
             }
             return Read(File.ReadAllBytes(path));
         }
@@ -80,7 +85,7 @@ public static class PeImports
                                      or NotSupportedException
                                      or System.Security.SecurityException)
         {
-            return PeImportSet.Empty;
+            return PeImportSet.Unreadable;
         }
     }
 
@@ -90,7 +95,7 @@ public static class PeImports
             || !TryU32(image, 0x3C, out var peOffset)
             || !TryU32(image, peOffset, out var pe) || pe != PeSignature)
         {
-            return PeImportSet.Empty;
+            return PeImportSet.Unreadable;
         }
 
         var coff = peOffset + 4;
@@ -98,13 +103,13 @@ public static class PeImports
             || !TryU16(image, coff + 16, out var optionalSize)
             || sectionCount is 0 or > MaxSections)
         {
-            return PeImportSet.Empty;
+            return PeImportSet.Unreadable;
         }
 
         var optional = coff + 20;
         if (!TryU16(image, optional, out var magic))
         {
-            return PeImportSet.Empty;
+            return PeImportSet.Unreadable;
         }
 
         // The data directory sits at a different offset in the two optional-header shapes, and
@@ -117,13 +122,13 @@ public static class PeImports
         };
         if (directoryBase == 0 || !TryU32(image, countOffset, out var directoryCount))
         {
-            return PeImportSet.Empty;
+            return PeImportSet.Unreadable;
         }
 
         var sections = ReadSections(image, optional + optionalSize, sectionCount);
         if (sections.Count == 0)
         {
-            return PeImportSet.Empty;
+            return PeImportSet.Unreadable;
         }
 
         var imports = ReadDescriptorNames(

@@ -167,6 +167,7 @@
   <data name="OutboundFirewallPending" xml:space="preserve"><value>Contactó {0}, {1} conexión(es). Nunca ha permitido ni bloqueado esta aplicación.</value></data>
   <data name="OutboundFirewallEnforcing" xml:space="preserve"><value>Punto de servicio accesible; el filtrado por aplicación está activo.</value></data>
   <data name="OutboundFirewallDegraded" xml:space="preserve"><value>Servicio accesible, pero filtrado degradado. Los bloqueos guardados no se informan como activos.</value></data>
+  <data name="OutboundFirewallObservationGaps" xml:space="preserve"><value>Al menos {0} observación(es) saliente(s) no pudieron representarse; esta lista está incompleta.</value></data>
   <data name="OutboundActionAllow" xml:space="preserve"><value>Permitir</value></data>
   <data name="OutboundActionBlock" xml:space="preserve"><value>Bloquear</value></data>
   <data name="OutboundActionAsk" xml:space="preserve"><value>Preguntar</value></data>

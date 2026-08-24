@@ -1,4 +1,5 @@
 using WinSight.Firewall;
+using WinSight.Reporting;
 using Xunit;
 
 namespace WinSight.Application.Tests;
@@ -14,7 +15,7 @@ public sealed class FirewallServiceAdapterTests
         var item = Assert.Single(report.Items);
         Assert.Equal("status", item.Fields["kind"]);
         Assert.Equal("False", item.Fields["available"]);
-        Assert.Equal(0, report.NotableCount);
+        Assert.Equal(1, report.NotableCount);
     }
 
     [Fact]
@@ -89,6 +90,7 @@ public sealed class FirewallServiceAdapterTests
         var status = FirewallServiceAdapter.BuildReport(view).Items[0];
 
         Assert.Equal("5", status.Fields["unrecorded"]);
+        Assert.Equal(Severity.Notable, status.Severity);
     }
 
     [Fact]
@@ -109,6 +111,7 @@ public sealed class FirewallServiceAdapterTests
         Assert.Equal("False", status.Fields["enforcement"]);
         Assert.Equal("Degraded", status.Fields["effectiveState"]);
         Assert.Equal("Degraded", report.Summary);
+        Assert.Equal(Severity.Notable, status.Severity);
     }
 
     [Fact]

@@ -26,6 +26,20 @@ public sealed class HostsReaderTests
     }
 
     [Fact]
+    public void MalformedActiveLinesAreCountedAndNeverBecomeFalseRedirects()
+    {
+        var parsed = HostsReader.ParseWithCoverage([
+            "this-is-not-an-ip update.example",
+            "127.0.0.1",
+            "127.0.0.1 localhost",
+        ]);
+
+        Assert.Equal(2, parsed.MalformedLines);
+        Assert.Single(parsed.Entries);
+        Assert.Equal("localhost", parsed.Entries[0].Hostname);
+    }
+
+    [Fact]
     public void BenignAdblockSink_IsNotFlagged()
     {
         var e = new HostEntry("0.0.0.0", "ads.tracker.example");

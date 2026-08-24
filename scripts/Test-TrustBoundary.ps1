@@ -23,7 +23,7 @@
     killed the WFP protocol on a real VM while every local gate was green.
 
 .EXAMPLE
-    ./Test-TrustBoundary.ps1 -ServicePath 'C:\Program Files\WinSight-VM\winsight-firewall-service.exe'
+    ./Test-TrustBoundary.ps1 -ServicePath 'C:\Program Files\WinSight\winsight-firewall-service.exe'
 #>
 [CmdletBinding()]
 param(
@@ -108,7 +108,10 @@ function Test-AnyDenial([string]$name, [string]$candidate, [string]$target) {
 }
 
 function New-TrackedDirectory([string]$path) {
-    New-Item -ItemType Directory -Force $path | Out-Null
+    if (Test-Path -LiteralPath $path) {
+        throw "Refusing to reuse a cleanup-owned directory that already exists: $path"
+    }
+    New-Item -ItemType Directory -Path $path -ErrorAction Stop | Out-Null
     [void]$script:Created.Add($path)
 }
 
@@ -116,9 +119,19 @@ function Remove-Tracked {
     for ($i = $script:Created.Count - 1; $i -ge 0; $i--) {
         $p = $script:Created[$i]
         if (Test-Path -LiteralPath $p) {
-            # rmdir handles junctions without following them into the target.
-            cmd /c ('rmdir /s /q "{0}" 2>nul' -f $p) | Out-Null
-            if (Test-Path -LiteralPath $p) { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue }
+            try {
+                $item = Get-Item -LiteralPath $p -Force -ErrorAction Stop
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    # Directory.Delete removes the junction itself and never recursively walks its
+                    # target. Avoid cmd.exe entirely: ScratchRoot is an operator parameter, so
+                    # interpolating it into an elevated command line would be command injection.
+                    [IO.Directory]::Delete($item.FullName, $false)
+                }
+                else {
+                    Remove-Item -LiteralPath $item.FullName -Recurse -Force -ErrorAction Stop
+                }
+            }
+            catch { Write-Warning ('Cleanup failed for tracked path: {0}' -f $p) }
         }
     }
 }
@@ -136,7 +149,14 @@ if (-not $elevated) {
 }
 
 $candidate = [IO.Path]::GetFullPath($ServicePath)
+$scratch = [IO.Path]::GetFullPath($ScratchRoot).TrimEnd([IO.Path]::DirectorySeparatorChar)
+$scratchRootPath = [IO.Path]::GetPathRoot($scratch).TrimEnd([IO.Path]::DirectorySeparatorChar)
 Write-Check 'candidate exists' (Test-Path -LiteralPath $candidate) 'an existing protected candidate' $candidate
+Write-Check 'scratch root is new and narrowly scoped' (
+    $scratch -cne $scratchRootPath -and
+    -not (Test-Path -LiteralPath $scratch) -and
+    -not $candidate.StartsWith($scratch + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)
+) 'a nonexistent non-root directory that does not contain the candidate' $scratch
 if ($script:Failures -gt 0) {
     Write-Host ('Result: {0} checks, {1} failure(s).' -f $script:Checks, $script:Failures)
     exit 1
@@ -165,8 +185,8 @@ try {
         (Join-Path $env:SystemRoot 'System32\curl.exe') '[FW_INSTALL_PATH_UNTRUSTED_OWNER]' 1 | Out-Null
 
     # 5. A protected root, so the remaining hostile states are not masked by writability.
-    New-TrackedDirectory $ScratchRoot
-    $protectedLeaf = Join-Path $ScratchRoot 'candidate-copy.exe'
+    New-TrackedDirectory $scratch
+    $protectedLeaf = Join-Path $scratch 'candidate-copy.exe'
     Copy-Item -LiteralPath $candidate -Destination $protectedLeaf -Force
     Test-ExactCode 'a copy in a protected root is trusted' $candidate $protectedLeaf $TrustedCode 0 | Out-Null
 
@@ -174,8 +194,8 @@ try {
     #    real VM as REPARSE_POINT, so it is now asserted exactly. On a machine whose %TEMP% is itself
     #    inside a user-writable tree, the junction leaf can instead resolve to WRITABLE_BY_UNPRIVILEGED
     #    before reparse detection fires; both are refusals, but the VM measurement was REPARSE_POINT.
-    $junction = Join-Path $ScratchRoot 'junction'
-    cmd /c ('mklink /J "{0}" "{1}"' -f $junction, $userRoot) | Out-Null
+    $junction = Join-Path $scratch 'junction'
+    New-Item -ItemType Junction -Path $junction -Target $userRoot -ErrorAction Stop | Out-Null
     [void]$script:Created.Add($junction)
     Test-ExactCode 'a reparse point in a protected root is refused' $candidate `
         (Join-Path $junction 'planted.exe') '[FW_INSTALL_PATH_REPARSE_POINT]' 1 | Out-Null
@@ -185,7 +205,7 @@ try {
         Write-Host '  [SKIP] a foreign-owned leaf is refused: pass -HostileAccount <standard user> to run it'
     }
     else {
-        $foreign = Join-Path $ScratchRoot 'foreign-owned.exe'
+        $foreign = Join-Path $scratch 'foreign-owned.exe'
         Copy-Item -LiteralPath $candidate -Destination $foreign -Force
         & (Join-Path $env:SystemRoot 'System32\icacls.exe') $foreign /setowner $HostileAccount | Out-Null
         Test-AnyDenial 'a foreign-owned leaf in a protected root is refused' $candidate $foreign | Out-Null
@@ -202,7 +222,7 @@ try {
     #    locale-independent. icacls resolves absolutely from System32.
     $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
     $usersSid = '*S-1-5-32-545'
-    $racePath = Join-Path $ScratchRoot 'race-target.exe'
+    $racePath = Join-Path $scratch 'race-target.exe'
     Copy-Item -LiteralPath $candidate -Destination $racePath -Force
     $writableTrusted = 0
     $protectedTrusted = 0

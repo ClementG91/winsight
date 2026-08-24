@@ -6,8 +6,8 @@ namespace WinSight.FirewallService;
 
 /// <summary>
 /// At service start, re-applies the stored Block policies to WFP. WinSight's WFP filters
-/// are non-persistent (removed on reboot), so the service reinstalls them on every boot
-/// at service startup. Enforcement rebuilds and verifies the exact enabled-block set;
+/// are owned by one dynamic session (removed when the service exits, including a crash), so the
+/// service reinstalls them on every boot. Enforcement rebuilds and verifies the exact enabled-block set;
 /// AuditOnly removes all WinSight-owned WFP objects. The host registers it only after trusted
 /// Enforcement mode is observed; the coordinator revalidates storage before use. A failure is logged and never
 /// crashes the service, so the pipe endpoint still comes up.
@@ -37,7 +37,14 @@ public sealed partial class EnforcementStartupService : IHostedService
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Hosted services stop in reverse registration order, so the pipe and observer are already
+        // down when this first-registered service runs. Dispose the authority before SCM can report
+        // the service stopped: closing its dynamic WFP session is the graceful-stop cleanup. Host
+        // disposal calls it again later; EnforcementCoordinator disposal is deliberately idempotent.
+        await _coordinator.DisposeAsync().AsTask().WaitAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     [LoggerMessage(Level = LogLevel.Information, Message = "[FW_STARTUP_APPLY_BEGIN] Applying stored block policies.")]
     private partial void LogApplying();

@@ -109,6 +109,15 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
     public async Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(policy);
+        // Ask is the absence of a durable ruling: user-mode WFP cannot suspend a connection while
+        // waiting for UI, and retaining an Ask row made the observer classify the app as already
+        // ruled forever. Treating Ask as removal restores observation and makes the next outbound
+        // connection appear in the pending list instead of silently allowing it indefinitely.
+        if (policy.Action == OutboundAction.Ask)
+        {
+            await RemovePolicyAsync(policy.ExecutablePath, cancellationToken).ConfigureAwait(false);
+            return;
+        }
         var path = OutboundPolicyEvaluator.CanonicalPath(policy.ExecutablePath);
         await LockedTransitionAsync(async () =>
         {
@@ -320,7 +329,16 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         var result = OutboundFirewallConfiguration.Empty;
         await LockedTransitionAsync(async () =>
         {
-            var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
+            // Emergency disable is the one transition allowed to recover corrupt trusted content:
+            // it deletes the owned WFP namespace and atomically replaces the unreadable intent with
+            // an explicit empty AuditOnly document. Every other operation rejects that content.
+            var emergencyLoad = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
+            if (!emergencyLoad.StorageTrusted)
+            {
+                throw new FirewallStorageTrustException(
+                    emergencyLoad.Diagnostic ?? "StorageInspectionFailed");
+            }
+            var configuration = emergencyLoad.Configuration;
             var reconciler = GetReconcilerAfterTrust();
             try
             {
@@ -524,6 +542,10 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         if (!load.StorageTrusted)
         {
             throw new FirewallStorageTrustException(load.Diagnostic ?? "StorageInspectionFailed");
+        }
+        if (load.RecoveredToAuditOnly)
+        {
+            throw new InvalidDataException("The firewall policy content is invalid.");
         }
         return load;
     }

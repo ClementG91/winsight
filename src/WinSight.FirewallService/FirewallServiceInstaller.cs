@@ -59,6 +59,7 @@ public static partial class FirewallServiceInstaller
         try
         {
             registration.SetDescription(Description);
+            registration.ConfigureSecurityProfile();
         }
         catch (Exception postCreateFailure)
         {
@@ -120,39 +121,26 @@ public static partial class FirewallServiceInstaller
         throw new ServiceInstallTrustException(successCode, message, cause);
     }
 
-    /// <summary>Deletes the service. Throws if it is not installed.</summary>
-    public static void Uninstall()
+    /// <summary>
+    /// Stops the service, proves the WinSight WFP namespace empty, then deletes registration.
+    /// A failure leaves the stopped service registered so the operator still has a recovery path;
+    /// it never deletes the control plane while filtering residue is unaccounted for.
+    /// </summary>
+    public static void Uninstall() =>
+        Uninstall(new WindowsServiceControlManager(), WfpProvisioning.CleanupAll);
+
+    internal static void Uninstall(
+        IServiceControlManager serviceControlManager,
+        Action cleanupWfp)
     {
-        var manager = NativeMethods.OpenSCManagerW(null, null, ScManagerConnect);
-        if (manager == IntPtr.Zero)
+        ArgumentNullException.ThrowIfNull(serviceControlManager);
+        ArgumentNullException.ThrowIfNull(cleanupWfp);
+        using var registration = serviceControlManager.OpenForRemoval();
+        registration.StopAndWait(TimeSpan.FromSeconds(30));
+        cleanupWfp();
+        if (!registration.Delete())
         {
             throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-        try
-        {
-            var service = NativeMethods.OpenServiceW(manager, ServiceName, ServiceDelete);
-            if (service == IntPtr.Zero)
-            {
-                var error = Marshal.GetLastWin32Error();
-                throw error == ErrorServiceDoesNotExist
-                    ? new InvalidOperationException("The WinSight firewall service is not installed.")
-                    : new Win32Exception(error);
-            }
-            try
-            {
-                if (!NativeMethods.DeleteService(service))
-                {
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-                }
-            }
-            finally
-            {
-                NativeMethods.CloseServiceHandle(service);
-            }
-        }
-        finally
-        {
-            NativeMethods.CloseServiceHandle(manager);
         }
     }
 
@@ -259,23 +247,163 @@ public static partial class FirewallServiceInstaller
 
     private const uint ScManagerConnect = 0x0001;
     private const uint ScManagerCreateService = 0x0002;
-    private const uint ServiceAllAccess = 0xF01FF;
     private const uint ServiceQueryConfig = 0x0001;
-    private const uint ServiceChangeConfig = 0x0002;
-    private const uint ServiceDelete = 0x00010000;
+    internal const uint ServiceChangeConfig = 0x0002;
+    internal const uint ServiceQueryStatus = 0x0004;
+    internal const uint ServiceStop = 0x0020;
+    internal const uint ServiceStart = 0x0010;
+    internal const uint ServiceDelete = 0x00010000;
     private const uint ServiceWin32OwnProcess = 0x00000010;
     private const uint ServiceAutoStart = 0x00000002;
     private const uint ServiceDemandStart = 0x00000003;
     private const uint ServiceErrorNormal = 0x00000001;
     private const uint ServiceConfigDescription = 1;
+    private const uint ServiceConfigFailureActions = 2;
+    private const uint ServiceConfigFailureActionsFlag = 4;
+    private const uint ServiceConfigServiceSidInfo = 5;
+    private const uint ServiceConfigRequiredPrivilegesInfo = 6;
+    private const uint ServiceSidTypeUnrestricted = 1;
+    private const int ScActionNone = 0;
+    private const int ScActionRestart = 1;
     private const uint ServiceNoChange = 0xFFFFFFFF;
+    internal const uint ServiceControlStop = 0x00000001;
+    internal const uint ServiceStopped = 0x00000001;
+    internal const uint ServiceStopPending = 0x00000003;
     private const int ErrorServiceExists = 1073;
-    private const int ErrorServiceDoesNotExist = 1060;
+    internal const int ErrorServiceDoesNotExist = 1060;
+    internal const int ErrorServiceNotActive = 1062;
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct ServiceDescription
     {
         public IntPtr Description;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ServiceSidInfo
+    {
+        public uint ServiceSidType;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ServiceRequiredPrivilegesInfo
+    {
+        public IntPtr RequiredPrivileges;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ServiceFailureActionsFlag
+    {
+        public int FailureActionsOnNonCrashFailures;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ScAction
+    {
+        public int Type;
+        public uint DelayMilliseconds;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ServiceFailureActions
+    {
+        public uint ResetPeriodSeconds;
+        public IntPtr RebootMessage;
+        public IntPtr Command;
+        public uint ActionCount;
+        public IntPtr Actions;
+    }
+
+    internal static string RequiredPrivilegesMultiString() =>
+        "SeChangeNotifyPrivilege\0SeImpersonatePrivilege\0SeSystemProfilePrivilege\0\0";
+
+    internal static void ConfigureSecurityProfile(IntPtr service)
+    {
+        var sid = new ServiceSidInfo { ServiceSidType = ServiceSidTypeUnrestricted };
+        if (!NativeMethods.ChangeServiceSidInfo(service, ServiceConfigServiceSidInfo, ref sid))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+
+        var privilegesPtr = Marshal.StringToHGlobalUni(RequiredPrivilegesMultiString());
+        try
+        {
+            var privileges = new ServiceRequiredPrivilegesInfo { RequiredPrivileges = privilegesPtr };
+            if (!NativeMethods.ChangeServiceRequiredPrivileges(
+                    service, ServiceConfigRequiredPrivilegesInfo, ref privileges))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(privilegesPtr);
+        }
+
+        var actionSize = Marshal.SizeOf<ScAction>();
+        var actionsPtr = Marshal.AllocHGlobal(actionSize * 3);
+        try
+        {
+            var actions = new[]
+            {
+                new ScAction { Type = ScActionRestart, DelayMilliseconds = 5_000 },
+                new ScAction { Type = ScActionRestart, DelayMilliseconds = 30_000 },
+                new ScAction { Type = ScActionNone, DelayMilliseconds = 0 },
+            };
+            for (var index = 0; index < actions.Length; index++)
+            {
+                Marshal.StructureToPtr(
+                    actions[index], IntPtr.Add(actionsPtr, index * actionSize), false);
+            }
+            var failureActions = new ServiceFailureActions
+            {
+                ResetPeriodSeconds = 86_400,
+                ActionCount = (uint)actions.Length,
+                Actions = actionsPtr,
+            };
+            if (!NativeMethods.ChangeServiceFailureActions(
+                    service, ServiceConfigFailureActions, ref failureActions))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(actionsPtr);
+        }
+
+        var failureFlag = new ServiceFailureActionsFlag { FailureActionsOnNonCrashFailures = 1 };
+        if (!NativeMethods.ChangeServiceFailureActionsFlag(
+                service, ServiceConfigFailureActionsFlag, ref failureFlag))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ServiceStatus
+    {
+        public uint ServiceType;
+        public uint CurrentState;
+        public uint ControlsAccepted;
+        public uint Win32ExitCode;
+        public uint ServiceSpecificExitCode;
+        public uint CheckPoint;
+        public uint WaitHint;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ServiceStatusProcess
+    {
+        public uint ServiceType;
+        public uint CurrentState;
+        public uint ControlsAccepted;
+        public uint Win32ExitCode;
+        public uint ServiceSpecificExitCode;
+        public uint CheckPoint;
+        public uint WaitHint;
+        public uint ProcessId;
+        public uint ServiceFlags;
     }
 
     internal static partial class NativeMethods
@@ -299,11 +427,45 @@ public static partial class FirewallServiceInstaller
 
         [LibraryImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ControlService(
+            IntPtr service, uint control, out ServiceStatus serviceStatus);
+
+        [LibraryImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool QueryServiceStatusEx(
+            IntPtr service,
+            int infoLevel,
+            out ServiceStatusProcess serviceStatus,
+            int bufferSize,
+            out int bytesNeeded);
+
+        [LibraryImport("advapi32.dll", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
         internal static partial bool CloseServiceHandle(IntPtr handle);
 
         [LibraryImport("advapi32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         internal static partial bool ChangeServiceConfig2W(IntPtr service, uint infoLevel, ref ServiceDescription info);
+
+        [LibraryImport("advapi32.dll", EntryPoint = "ChangeServiceConfig2W", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ChangeServiceSidInfo(
+            IntPtr service, uint infoLevel, ref ServiceSidInfo info);
+
+        [LibraryImport("advapi32.dll", EntryPoint = "ChangeServiceConfig2W", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ChangeServiceRequiredPrivileges(
+            IntPtr service, uint infoLevel, ref ServiceRequiredPrivilegesInfo info);
+
+        [LibraryImport("advapi32.dll", EntryPoint = "ChangeServiceConfig2W", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ChangeServiceFailureActions(
+            IntPtr service, uint infoLevel, ref ServiceFailureActions info);
+
+        [LibraryImport("advapi32.dll", EntryPoint = "ChangeServiceConfig2W", SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        internal static partial bool ChangeServiceFailureActionsFlag(
+            IntPtr service, uint infoLevel, ref ServiceFailureActionsFlag info);
 
         [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
@@ -383,12 +545,15 @@ public static class ServicePathTrustDiagnosticCodes
 public interface IServiceRegistration : IDisposable
 {
     void SetDescription(string description);
+    void ConfigureSecurityProfile();
+    void StopAndWait(TimeSpan timeout);
     bool Delete();
 }
 
 public interface IServiceControlManager
 {
     IServiceRegistration Create(string binaryPath);
+    IServiceRegistration OpenForRemoval();
 }
 
 internal sealed class WindowsServiceControlManager : IServiceControlManager
@@ -400,7 +565,10 @@ internal sealed class WindowsServiceControlManager : IServiceControlManager
         try
         {
             var service = FirewallServiceInstaller.NativeMethods.CreateServiceW(
-                manager, FirewallServiceInstaller.ServiceName, FirewallServiceInstaller.DisplayName, 0xF01FF,
+                manager, FirewallServiceInstaller.ServiceName, FirewallServiceInstaller.DisplayName,
+                FirewallServiceInstaller.ServiceChangeConfig
+                    | FirewallServiceInstaller.ServiceDelete
+                    | FirewallServiceInstaller.ServiceStart,
                 0x10, 0x3, 0x1, binaryPath, null, IntPtr.Zero, null, null, null);
             if (service == IntPtr.Zero)
             {
@@ -413,10 +581,88 @@ internal sealed class WindowsServiceControlManager : IServiceControlManager
         finally { FirewallServiceInstaller.NativeMethods.CloseServiceHandle(manager); }
     }
 
+    public IServiceRegistration OpenForRemoval()
+    {
+        var manager = FirewallServiceInstaller.NativeMethods.OpenSCManagerW(null, null, 0x0001);
+        if (manager == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());
+        try
+        {
+            const uint removalAccess = FirewallServiceInstaller.ServiceDelete |
+                                       FirewallServiceInstaller.ServiceStop |
+                                       FirewallServiceInstaller.ServiceQueryStatus;
+            var service = FirewallServiceInstaller.NativeMethods.OpenServiceW(
+                manager, FirewallServiceInstaller.ServiceName, removalAccess);
+            if (service == IntPtr.Zero)
+            {
+                var error = Marshal.GetLastWin32Error();
+                throw error == FirewallServiceInstaller.ErrorServiceDoesNotExist
+                    ? new InvalidOperationException("The WinSight firewall service is not installed.")
+                    : new Win32Exception(error);
+            }
+            return new WindowsServiceRegistration(service);
+        }
+        finally
+        {
+            FirewallServiceInstaller.NativeMethods.CloseServiceHandle(manager);
+        }
+    }
+
     private sealed class WindowsServiceRegistration(IntPtr handle) : IServiceRegistration
     {
         public void SetDescription(string description) => FirewallServiceInstaller.SetDescription(handle, description);
+        public void ConfigureSecurityProfile() => FirewallServiceInstaller.ConfigureSecurityProfile(handle);
+
+        public void StopAndWait(TimeSpan timeout)
+        {
+            if (timeout <= TimeSpan.Zero || timeout > TimeSpan.FromMinutes(2))
+            {
+                throw new ArgumentOutOfRangeException(nameof(timeout));
+            }
+
+            var status = QueryStatus();
+            if (status.CurrentState == FirewallServiceInstaller.ServiceStopped)
+            {
+                return;
+            }
+            if (status.CurrentState != FirewallServiceInstaller.ServiceStopPending &&
+                !FirewallServiceInstaller.NativeMethods.ControlService(
+                    handle, FirewallServiceInstaller.ServiceControlStop, out _))
+            {
+                var error = Marshal.GetLastWin32Error();
+                if (error != FirewallServiceInstaller.ErrorServiceNotActive)
+                {
+                    throw new Win32Exception(error);
+                }
+            }
+
+            var deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+            while (Environment.TickCount64 < deadline)
+            {
+                status = QueryStatus();
+                if (status.CurrentState == FirewallServiceInstaller.ServiceStopped)
+                {
+                    return;
+                }
+                Thread.Sleep(100);
+            }
+            throw new TimeoutException("The WinSight firewall service did not stop before the removal deadline.");
+        }
+
         public bool Delete() => FirewallServiceInstaller.NativeMethods.DeleteService(handle);
         public void Dispose() => FirewallServiceInstaller.NativeMethods.CloseServiceHandle(handle);
+
+        private FirewallServiceInstaller.ServiceStatusProcess QueryStatus()
+        {
+            if (!FirewallServiceInstaller.NativeMethods.QueryServiceStatusEx(
+                    handle,
+                    0,
+                    out var status,
+                    Marshal.SizeOf<FirewallServiceInstaller.ServiceStatusProcess>(),
+                    out _))
+            {
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+            }
+            return status;
+        }
     }
 }

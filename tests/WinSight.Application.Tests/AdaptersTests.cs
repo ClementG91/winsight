@@ -1,9 +1,41 @@
+using WinSight.Core;
+using WinSight.Reporting;
 using Xunit;
 
 namespace WinSight.Application.Tests;
 
 public sealed class AdaptersTests
 {
+    [Fact]
+    public void UnknownSignaturesBecomeOneCoverageFindingWithoutCallingFilesUntrusted()
+    {
+        var builder = new ToolReport.Builder("test");
+
+        var count = Adapters.AddSignatureCoverageFinding(
+            builder,
+            [SignatureVerdict.Unknown, SignatureVerdict.Unsigned, SignatureVerdict.Unknown]);
+        var report = builder.Build("done");
+
+        Assert.Equal(2, count);
+        var finding = Assert.Single(report.Items);
+        Assert.Equal(Severity.Notable, finding.Severity);
+        Assert.Equal("signatureCoverage", finding.Fields["kind"]);
+        Assert.Equal("2", finding.Fields["unknownSignatures"]);
+    }
+
+    [Fact]
+    public void CompleteSignatureCoverageAddsNoFinding()
+    {
+        var builder = new ToolReport.Builder("test");
+
+        var count = Adapters.AddSignatureCoverageFinding(
+            builder,
+            [SignatureVerdict.Unsigned, new SignatureVerdict(SignatureState.SignedTrusted, "CN=Publisher")]);
+
+        Assert.Equal(0, count);
+        Assert.Empty(builder.Build("done").Items);
+    }
+
     [Fact]
     public void SnapshotCommands_AreUniqueAndComplete()
     {

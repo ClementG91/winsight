@@ -2,4 +2,7 @@
   <PropertyGroup>
     <RootNamespace>WinSight.Hosts</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Hosts.Tests" />
+  </ItemGroup>
 </Project>

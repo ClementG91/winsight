@@ -51,7 +51,9 @@ jobs:
   # fail-fast is off on purpose: when one Windows breaks, the interesting question is immediately
   # whether the other one did too, and cancelling the sibling throws that away.
   #
-  # `windows-11-arm` runs the suite on **native Arm64**, and it earned its place the hard way. Until
+  # `windows-11-vs2026-arm` runs the suite on **native Arm64**, and it earned its place the hard way.
+  # The explicit VS2026 label also avoids GitHub's announced September 2026 migration of the moving
+  # `windows-11-arm` label changing the toolchain without a repository diff. Until
   # it existed, CI tested only x64: `package` built an Arm64 installer without ever running a test on
   # that architecture, so the only Arm64 test run in the whole project happened inside `release.yml`,
   # after a tag. On 2026-07-27 that is exactly where a thread-pool starvation defect surfaced — a
@@ -66,7 +68,7 @@ jobs:
             architecture: x64
           - os: windows-2022
             architecture: x64
-          - os: windows-11-arm
+          - os: windows-11-vs2026-arm
             architecture: arm64
     runs-on: ${{ matrix.os }}
     # Arm64 runners are slower than the x64 images and this job builds, runs the whole suite and
@@ -74,9 +76,11 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.301"
+          dotnet-version: "10.0.303"
           # Matrix-driven rather than hardcoded x64: installing an x64 SDK on the Arm64 runner would
           # silently test the emulated target and prove nothing about native Arm64.
           architecture: ${{ matrix.architecture }}
@@ -174,15 +178,17 @@ jobs:
             runner: windows-2025
             installer_language: french
           - architecture: arm64
-            runner: windows-11-arm
+            runner: windows-11-vs2026-arm
             installer_language: spanish
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.301"
+          dotnet-version: "10.0.303"
           architecture: ${{ matrix.architecture }}
           cache: true
           cache-dependency-path: Directory.Packages.props

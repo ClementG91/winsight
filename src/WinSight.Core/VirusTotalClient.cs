@@ -19,7 +19,16 @@ public sealed record VtVerdict(int Malicious, int Suspicious, int Total, string 
 /// </summary>
 public sealed class VirusTotalClient
 {
-    private static readonly HttpClient Shared = new() { Timeout = TimeSpan.FromSeconds(20) };
+    private const int MaximumResponseCharacters = 1024 * 1024;
+    private static readonly HttpClient Shared = new(new HttpClientHandler
+    {
+        // A custom x-apikey header is not guaranteed to be stripped on a cross-origin redirect.
+        // The endpoint is fixed; any redirect is therefore refused instead of forwarding a secret.
+        AllowAutoRedirect = false,
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(20),
+    };
     private readonly HttpClient _http;
     private readonly string _apiKey;
 
@@ -27,6 +36,10 @@ public sealed class VirusTotalClient
     /// <param name="http">Optional HttpClient (tests / custom pipeline); defaults to a shared instance.</param>
     public VirusTotalClient(string apiKey, HttpClient? http = null)
     {
+        if (!VirusTotalConfiguration.IsPlausibleApiKey(apiKey))
+        {
+            throw new ArgumentException("The VirusTotal API key format is invalid.", nameof(apiKey));
+        }
         _apiKey = apiKey;
         _http = http ?? Shared;
     }
@@ -54,8 +67,12 @@ public sealed class VirusTotalClient
             {
                 return null;
             }
+            if (response.Content.Headers.ContentLength is > MaximumResponseCharacters)
+            {
+                return null;
+            }
             using var reader = new StreamReader(response.Content.ReadAsStream(cancellationToken));
-            return ParseStats(reader.ReadToEnd(), sha256);
+            return ReadLimited(reader) is { } json ? ParseStats(json, sha256) : null;
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException ||
                                      ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
@@ -77,18 +94,46 @@ public sealed class VirusTotalClient
                 .GetProperty("data").GetProperty("attributes").GetProperty("last_analysis_stats");
             var malicious = stats.GetProperty("malicious").GetInt32();
             var suspicious = stats.GetProperty("suspicious").GetInt32();
+            if (malicious < 0 || suspicious < 0)
+            {
+                return null;
+            }
             var total = 0;
             foreach (var entry in stats.EnumerateObject())
             {
-                total += entry.Value.GetInt32();
+                var value = entry.Value.GetInt32();
+                if (value < 0)
+                {
+                    return null;
+                }
+                total = checked(total + value);
             }
             return new VtVerdict(malicious, suspicious, total,
                 $"https://www.virustotal.com/gui/file/{sha256}");
         }
         catch (Exception ex) when (ex is JsonException or KeyNotFoundException
-                                     or InvalidOperationException or FormatException)
+                                     or InvalidOperationException or FormatException or OverflowException)
         {
             return null;
+        }
+    }
+
+    private static string? ReadLimited(StreamReader reader)
+    {
+        var buffer = new char[8192];
+        var result = new System.Text.StringBuilder();
+        while (true)
+        {
+            var read = reader.Read(buffer, 0, buffer.Length);
+            if (read == 0)
+            {
+                return result.ToString();
+            }
+            if (result.Length + read > MaximumResponseCharacters)
+            {
+                return null;
+            }
+            result.Append(buffer, 0, read);
         }
     }
 }

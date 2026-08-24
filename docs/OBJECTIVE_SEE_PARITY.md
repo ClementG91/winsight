@@ -43,7 +43,7 @@ behaviour, the foreign-owner-SID trust case, dedicated unelevated-administrator 
 sessions and external release/deployment remain open. Authenticode is an explicitly accepted unsigned
 distribution limitation until a certificate becomes available.
 
-The current local protocol's 24/24 contract self-test and deliberate exit-1 negative control preserve
+The current local protocol's 26/26 contract self-test and deliberate exit-1 negative control preserve
 portable regression evidence but cannot promote candidate CI, CodeQL, package, signing,
 privileged-runtime, release qualification or any other separate technical gate.
 
@@ -290,14 +290,14 @@ Beating Objective-See on Windows is not a checklist race. WinSight has feature c
 ahead on the eight tools that matter most - persistence × 2, firewall, ransomware, camera/mic,
 keyboard interception, kernel drivers and hijack analysis - while being one app instead of eight,
 with an MCP server, an alert journal and four scanners Objective-See has no equivalent for. That is
-a product-capability comparison, not a product-readiness verdict: historical x64 evidence remains
-candidate-bound, current WFP/SCM requalification is open, and native Arm64, exact-candidate
-automation, remaining sessions and signing are still open.
+a product-capability comparison, not a product-readiness verdict: current native-x64 WFP/SCM,
+trust, IPC and session qualification is candidate-bound, while native Arm64 privileged runtime,
+independent presentation review and signing remain separate gates.
 
 **Every tool on the list above now has parity-or-better feature coverage**, in one app instead of
 eight, with an MCP server, an alert journal, four scanners Objective-See has no equivalent for, and
-three languages. The wording does not convert feature parity or the three real x64 records into a
-product-wide production-readiness claim.
+three languages. The wording does not convert feature parity or the candidate-bound native-x64
+record into a product-wide production-readiness claim.
 
 What is left is not parity work. It is depth: the elevated resident-driver pass, boot-configuration
 context for the driver findings, per-device-instance input filters, and runtime observation for the

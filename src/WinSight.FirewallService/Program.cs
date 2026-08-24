@@ -73,7 +73,7 @@ static int Uninstall()
         Console.WriteLine($"Removed '{FirewallServiceInstaller.DisplayName}'.");
         return 0;
     }
-    catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
+    catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or TimeoutException)
     {
         Console.Error.WriteLine("[FW_UNINSTALL_FAILED]");
         return 1;
@@ -133,7 +133,7 @@ static int WfpStatusVerb()
 
         static string Present(bool value) => value ? "present" : "absent";
     }
-    catch (Win32Exception)
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException)
     {
         Console.Error.WriteLine("[FW_WFP_READ_FAILED]");
         return 1;
@@ -159,7 +159,7 @@ static int WfpBlockStatus(string[] arguments)
         Console.WriteLine(blocked ? "[FW_APP_BLOCKED]" : "[FW_APP_NOT_BLOCKED]");
         return 0;
     }
-    catch (Win32Exception)
+    catch (Exception ex) when (ex is Win32Exception or InvalidDataException)
     {
         Console.Error.WriteLine("[FW_WFP_READ_FAILED]");
         return 1;
@@ -300,6 +300,15 @@ static async Task<int> RunHostAsync()
     {
         startupLog.StorageUntrusted();
         Console.Error.WriteLine("[FW_STORAGE_UNTRUSTED]");
+        return 1;
+    }
+    if (loaded.RecoveredToAuditOnly)
+    {
+        // Invalid trusted content is not an AuditOnly decision. Dynamic WFP ownership guarantees
+        // connectivity is restored when the previous service process exits; refusing startup and
+        // emitting a stable event prevents lost enforcement intent from looking healthy.
+        startupLog.PolicyContentInvalid();
+        Console.Error.WriteLine("[FW_POLICY_CONTENT_INVALID]");
         return 1;
     }
     startupLog.HostReady(loaded.Configuration.Mode);

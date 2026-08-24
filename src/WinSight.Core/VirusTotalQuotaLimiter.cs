@@ -155,7 +155,7 @@ public sealed class VirusTotalQuotaLimiter
     private void Save(QuotaState state)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temporaryPath = _path + ".tmp";
+        var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             var payload = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
@@ -165,7 +165,7 @@ public sealed class VirusTotalQuotaLimiter
             }
             using (var stream = new FileStream(
                        temporaryPath,
-                       FileMode.Create,
+                       FileMode.CreateNew,
                        FileAccess.Write,
                        FileShare.None,
                        bufferSize: 4096,

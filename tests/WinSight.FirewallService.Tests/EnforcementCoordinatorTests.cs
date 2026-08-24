@@ -44,6 +44,21 @@ public sealed class EnforcementCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task SetPolicy_Ask_RemovesTheDurableRuling()
+    {
+        var store = Store();
+        await store.SaveAsync(OutboundFirewallConfiguration.Empty with
+        {
+            Policies = [new AppFirewallPolicy(@"C:\apps\a.exe", OutboundAction.Allow)],
+        });
+        var coordinator = TestEnforcementCoordinator.Create(store, new RecordingEngine());
+
+        await coordinator.SetPolicyAsync(@"C:\apps\a.exe", OutboundAction.Ask);
+
+        Assert.Empty((await store.LoadAsync()).Policies);
+    }
+
+    [Fact]
     public async Task Enable_PersistsEnforcement_AndAppliesOnlyBlockPolicies()
     {
         var store = Store();
@@ -156,6 +171,44 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         await Assert.ThrowsAsync<FirewallStorageTrustException>(() => coordinator.EnableAsync());
 
         Assert.Equal(0, constructions);
+    }
+
+    [Fact]
+    public async Task CorruptTrustedPolicy_IsRejectedInsteadOfBecomingHealthyAuditOnly()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = Store();
+        await File.WriteAllTextAsync(Path.Combine(_directory, "policies.json"), "{ malformed");
+        var reconciler = new CountingReconciler();
+        await using var coordinator = new EnforcementCoordinator(
+            store, reconciler, new RecordingStartModeController());
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => coordinator.ApplyBlocksAsync());
+
+        Assert.Equal(0, reconciler.CleanupCalls);
+        Assert.Equal(0, reconciler.ReconcileCalls);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
+    }
+
+    [Fact]
+    public async Task EmergencyDisable_RepairsCorruptTrustedPolicyAfterCleaningWfp()
+    {
+        Directory.CreateDirectory(_directory);
+        var store = Store();
+        await File.WriteAllTextAsync(Path.Combine(_directory, "policies.json"), "{ malformed");
+        var reconciler = new CountingReconciler();
+        var startMode = new RecordingStartModeController();
+        await using var coordinator = new EnforcementCoordinator(store, reconciler, startMode);
+
+        var repaired = await coordinator.EmergencyDisableAsync();
+
+        Assert.Equal(OutboundFirewallConfiguration.Empty, repaired);
+        Assert.Equal(1, reconciler.CleanupCalls);
+        Assert.Equal(["demand"], startMode.Events);
+        var persisted = await store.LoadAsync();
+        Assert.Equal(OutboundFirewallMode.AuditOnly, persisted.Mode);
+        Assert.Empty(persisted.Policies);
+        Assert.Equal(FirewallEnforcementState.AuditOnly, coordinator.EffectiveState);
     }
 
     [Fact]
@@ -662,5 +715,36 @@ public sealed class EnforcementCoordinatorTests : IDisposable
         { Events.Add($"apply:{Path.GetFileName(policy.ExecutablePath)}"); return restoreFails ? throw new Win32Exception(5) : Task.CompletedTask; }
         public Task RemoveAsync(string executablePath, CancellationToken cancellationToken = default) =>
             throw new Xunit.Sdk.XunitException("Generic cleanup must not run.");
+    }
+
+    private sealed class CountingReconciler : IWinSightWfpReconciler
+    {
+        public bool IsSupported => true;
+        public int ReconcileCalls { get; private set; }
+        public int CleanupCalls { get; private set; }
+
+        public Task ReconcileExactAsync(
+            IReadOnlyList<AppFirewallPolicy> policies,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ReconcileCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> VerifyExactAsync(
+            IReadOnlyList<AppFirewallPolicy> policies,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(true);
+        }
+
+        public Task CleanupAllAsync(CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CleanupCalls++;
+            return Task.CompletedTask;
+        }
     }
 }

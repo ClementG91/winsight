@@ -36,13 +36,13 @@ Deliberate constraints, chosen to avoid building an EDR nobody asked for:
 Persistence scanner, camera and mic monitor, connection and DNS monitors, unified dashboard, shared
 signature and reputation helper.
 
-### Phase 2 - outbound firewall *(shipped; current-candidate x64 requalification open)*
+### Phase 2 - outbound firewall *(shipped; current native-x64 candidate qualified)*
 
 Per-application outbound control on WFP: an unprivileged dashboard driving a privileged LocalSystem
 service over authenticated local IPC. Opt-in enforcement that persists and survives reboot.
-Historically qualified end to end on a clean x64 VM. Later WFP/SCM runtime changes invalidate that
-part of the evidence for the current candidate, so it must be rerun; see
-[`validation/`](validation/README.md).
+The current runtime candidate passed dynamic WFP/SCM, trust, local and Network Logon IPC, service
+recovery and cleanup on isolated native-x64 VMs; see [`validation/`](validation/README.md). Native
+Arm64 privileged behavior remains a separate hardware-bound gate.
 
 ### Phase 3 - real-time persistence *(shipped, detect-and-alert)*
 

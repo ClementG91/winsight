@@ -220,9 +220,9 @@ public sealed class ScheduledTaskTests
     }
 }
 
-// Integration tests, run the real pipeline on the Windows CI runner (registry,
-// PowerShell signature batch). They are the first proof the blind-authored code
-// actually FUNCTIONS on Windows, not just compiles.
+// Integration tests run the real pipeline on the Windows CI runner (registry and
+// native WinTrust/catalog verification). They prove the Windows-specific code executes,
+// not merely that its interop declarations compile.
 internal static class AuthenticodeTestFixture
 {
     // This proves only that the repository PE has no embedded Authenticode
@@ -247,7 +247,7 @@ public sealed class AuthenticodeVerifierIntegrationTests
     public void Verify_CatalogSignedOsBinary_IsTrusted()
     {
         // kernel32.dll is catalog-signed, the managed check would miss it; this proves
-        // the catalog-aware PowerShell path works end-to-end.
+        // the native catalog path works end-to-end.
         Assert.Equal(SignatureState.SignedTrusted, new AuthenticodeVerifier().Verify(OsBinary).State);
     }
 
@@ -640,7 +640,7 @@ public sealed class VirusTotalParseTests
     {
         // No HttpClient interaction can happen for an invalid hash, the guard
         // returns null before any request is built.
-        var client = new VirusTotalClient("dummy-key");
+        var client = new VirusTotalClient(new string('a', 64));
         Assert.Null(client.Lookup("not-a-hash"));
     }
 
@@ -648,7 +648,7 @@ public sealed class VirusTotalParseTests
     public void Lookup_PropagatesCallerCancellation()
     {
         using var http = new HttpClient(new CancellationHandler());
-        var client = new VirusTotalClient("dummy-key", http);
+        var client = new VirusTotalClient(new string('a', 64), http);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
