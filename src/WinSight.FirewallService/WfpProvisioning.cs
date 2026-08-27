@@ -243,12 +243,20 @@ public static partial class WfpProvisioning
         // key the next boot's re-apply cannot reproduce, orphaning it.
         var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
         var (keyV4, keyV6) = BlockFilterKeys(path);
+        // Adding one application's block on request is the only place where an unusable path is a
+        // caller error rather than a fact about a stored policy: the operator asked for this
+        // specific application, so refusing loudly beats silently installing nothing.
+        if (!TryGetAppIdBytes(path, out var appId))
+        {
+            throw new InvalidDataException(
+                "The application path cannot be expressed as a Windows Filtering Platform application identifier.");
+        }
         InTransaction(engine, () =>
         {
             // Replace only THIS app's filters, leaving other blocked apps intact.
             DeleteFilter(engine, keyV4);
             DeleteFilter(engine, keyV6);
-            AddBlockFilters(engine, path, keyV4, keyV6);
+            AddBlockFilters(engine, appId, keyV4, keyV6);
         });
     }
 
@@ -288,7 +296,14 @@ public static partial class WfpProvisioning
             AddSublayer(engine);
             foreach (var block in desired)
             {
-                AddBlockFilters(engine, block.Path, block.KeyV4, block.KeyV6);
+                // A block whose path cannot be expressed as an application id is skipped, not
+                // fatal. Failing the transaction here is what turned one unresolvable entry into a
+                // rollback of the entire policy; VerifyExact applies the identical rule, so the
+                // installed set and the expected set stay in exact agreement.
+                if (TryGetAppIdBytes(block.Path, out var appId))
+                {
+                    AddBlockFilters(engine, appId, block.KeyV4, block.KeyV6);
+                }
             }
         });
     }
@@ -305,7 +320,13 @@ public static partial class WfpProvisioning
         var expected = new Dictionary<Guid, ExpectedFilter>();
         foreach (var block in desired)
         {
-            var appId = GetAppIdBytes(block.Path);
+            // Same rule as ReconcileExact, so "exact" keeps meaning exactly what was installable.
+            // An inapplicable block expects no filter; if one is nevertheless present it becomes an
+            // unexpected key below and verification fails closed, as it should.
+            if (!TryGetAppIdBytes(block.Path, out var appId))
+            {
+                continue;
+            }
             if (!expected.TryAdd(block.KeyV4, new ExpectedFilter(AleAuthConnectV4, appId))
                 || !expected.TryAdd(block.KeyV6, new ExpectedFilter(AleAuthConnectV6, appId)))
             {
@@ -430,6 +451,24 @@ public static partial class WfpProvisioning
         return new Guid(hash.AsSpan(0, 16));
     }
 
+    /// <summary>
+    /// How many enabled blocks currently have no expressible application id, so an operator can be
+    /// told what enforcement does not cover instead of it being silently absent.
+    /// </summary>
+    public static int InapplicableBlockCount(IReadOnlyList<AppFirewallPolicy> policies)
+    {
+        ArgumentNullException.ThrowIfNull(policies);
+        var count = 0;
+        foreach (var block in DesiredBlocks(policies))
+        {
+            if (!TryGetAppIdBytes(block.Path, out _))
+            {
+                count++;
+            }
+        }
+        return count;
+    }
+
     internal static List<DesiredBlock> DesiredBlocks(IReadOnlyList<AppFirewallPolicy> policies)
     {
         var result = new List<DesiredBlock>();
@@ -452,56 +491,88 @@ public static partial class WfpProvisioning
         return result;
     }
 
-    private static void AddBlockFilters(IntPtr engine, string path, Guid keyV4, Guid keyV6)
+    /// <summary>
+    /// Installs one application's BLOCK filters from an already-resolved application id.
+    /// </summary>
+    /// <remarks>
+    /// The blob is built here from bytes rather than passing WFP's own allocation straight through,
+    /// so the add path and <see cref="VerifyExact"/> consume one identical value. They used to call
+    /// <c>FwpmGetAppIdFromFileName0</c> separately, which meant a file that vanished between the two
+    /// produced a mismatch instead of a decision.
+    /// </remarks>
+    private static void AddBlockFilters(IntPtr engine, byte[] appId, Guid keyV4, Guid keyV6)
     {
-        var appId = GetAppId(path);
+        var dataPtr = Marshal.AllocHGlobal(appId.Length);
+        var blobPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpByteBlob>());
+        var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
         try
         {
-            var conditionPtr = Marshal.AllocHGlobal(Marshal.SizeOf<FwpmFilterCondition0>());
-            try
+            Marshal.Copy(appId, 0, dataPtr, appId.Length);
+            Marshal.StructureToPtr(
+                new FwpByteBlob { Size = (uint)appId.Length, Data = dataPtr }, blobPtr, false);
+            var condition = new FwpmFilterCondition0
             {
-                var condition = new FwpmFilterCondition0
-                {
-                    FieldKey = AleAppIdCondition,
-                    MatchType = FwpMatchEqual,
-                    ConditionValue = new FwpConditionValue0 { Type = FwpByteBlobType, Value = appId },
-                };
-                Marshal.StructureToPtr(condition, conditionPtr, false);
-                AddFilter(engine, keyV4, AleAuthConnectV4, FwpActionBlock,
-                    conditionPtr, 1, BlockFilterName, BlockFilterDescription);
-                AddFilter(engine, keyV6, AleAuthConnectV6, FwpActionBlock,
-                    conditionPtr, 1, BlockFilterName, BlockFilterDescription);
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(conditionPtr);
-            }
+                FieldKey = AleAppIdCondition,
+                MatchType = FwpMatchEqual,
+                ConditionValue = new FwpConditionValue0 { Type = FwpByteBlobType, Value = blobPtr },
+            };
+            Marshal.StructureToPtr(condition, conditionPtr, false);
+            AddFilter(engine, keyV4, AleAuthConnectV4, FwpActionBlock,
+                conditionPtr, 1, BlockFilterName, BlockFilterDescription);
+            AddFilter(engine, keyV6, AleAuthConnectV6, FwpActionBlock,
+                conditionPtr, 1, BlockFilterName, BlockFilterDescription);
         }
         finally
         {
-            NativeMethods.FwpmFreeMemory0(ref appId);
+            Marshal.FreeHGlobal(conditionPtr);
+            Marshal.FreeHGlobal(blobPtr);
+            Marshal.FreeHGlobal(dataPtr);
         }
     }
 
-    private static byte[] GetAppIdBytes(string path)
+    /// <summary>
+    /// The application id for a blocked path, or <see langword="false"/> when the path cannot be
+    /// expressed as one at all.
+    /// </summary>
+    /// <remarks>
+    /// <b>This used to throw, and the throw was the whole defect.</b>
+    /// <c>FwpmGetAppIdFromFileName0</c> opens the target to learn its volume, so it fails whenever
+    /// the binary is absent — deleted, on an unplugged volume, on an offline share. The resulting
+    /// <see cref="Win32Exception"/> is classified by the coordinator as a failed transition, which
+    /// rolls the entire policy back to audit-only, deletes every filter and returns the service to
+    /// demand-start. One unresolvable entry disarmed the machine's whole outbound policy,
+    /// persistently, and an attacker could cause it by deleting their own blocked binary.
+    ///
+    /// The id is a path, not a handle, so <see cref="WfpApplicationId"/> rebuilds the same bytes
+    /// from the volume mapping and the filter outlives the file. Only a path with no volume at all
+    /// — a UNC share, a mapped drive that is gone — yields false, and that entry is reported as
+    /// inapplicable rather than taking the policy down with it.
+    /// </remarks>
+    internal static bool TryGetAppIdBytes(string path, out byte[] appId)
     {
-        var appId = GetAppId(path);
-        try
+        appId = [];
+        var result = NativeMethods.FwpmGetAppIdFromFileName0(path, out var native);
+        if (result == 0)
         {
-            var blob = Marshal.PtrToStructure<FwpByteBlob>(appId);
-            if (blob.Size == 0 || blob.Data == IntPtr.Zero
-                || blob.Size > FirewallProtocolCodec.MaxPathUtf8BytesPerMessage)
+            try
             {
-                throw new InvalidDataException("WFP returned an invalid application identifier.");
+                var blob = Marshal.PtrToStructure<FwpByteBlob>(native);
+                if (blob.Size != 0 && blob.Data != IntPtr.Zero
+                    && blob.Size <= WfpApplicationId.MaxAppIdBytes)
+                {
+                    var bytes = new byte[checked((int)blob.Size)];
+                    Marshal.Copy(blob.Data, bytes, 0, bytes.Length);
+                    appId = bytes;
+                    return true;
+                }
             }
-            var bytes = new byte[checked((int)blob.Size)];
-            Marshal.Copy(blob.Data, bytes, 0, bytes.Length);
-            return bytes;
+            finally
+            {
+                NativeMethods.FwpmFreeMemory0(ref native);
+            }
         }
-        finally
-        {
-            NativeMethods.FwpmFreeMemory0(ref appId);
-        }
+
+        return WfpApplicationId.TryDerive(path, out appId);
     }
 
     private static bool ProviderHasExactShape(IntPtr engine)
@@ -759,16 +830,6 @@ public static partial class WfpProvisioning
         {
             throw new Win32Exception((int)result);
         }
-    }
-
-    private static IntPtr GetAppId(string executablePath)
-    {
-        var result = NativeMethods.FwpmGetAppIdFromFileName0(executablePath, out var appId);
-        if (result != 0)
-        {
-            throw new Win32Exception((int)result);
-        }
-        return appId;
     }
 
     /// <summary>
