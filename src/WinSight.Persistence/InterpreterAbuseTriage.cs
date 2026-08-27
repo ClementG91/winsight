@@ -214,13 +214,20 @@ public static class InterpreterAbuseTriage
     /// still classified. The fallback is a plain split rather than
     /// <see cref="CommandLine.ExtractExecutable"/>, which probes the filesystem: this method is on
     /// the <see cref="AutostartEntry.IsSuspicious"/> path and must not perform I/O.
+    ///
+    /// <b>The extension is supplied when the command line omits it.</b> <c>CreateProcess</c>
+    /// appends <c>.exe</c> to an extension-less token, so <c>powershell -enc …</c> runs exactly
+    /// what <c>powershell.exe -enc …</c> runs. The table below is keyed by file name including the
+    /// extension — the form the loader ends up with — so a raw token had to be normalised the same
+    /// way or the rule missed every entry that simply left <c>.exe</c> off. That was a four-
+    /// character bypass of this whole check.
     /// </remarks>
     private static string? ImageName(AutostartEntry entry)
     {
         var path = entry.ImagePath ?? entry.ExpectedImagePath;
         if (!string.IsNullOrWhiteSpace(path))
         {
-            return SafeFileName(path);
+            return NormalizeExtension(SafeFileName(path));
         }
         var command = entry.Command?.Trim();
         if (string.IsNullOrEmpty(command))
@@ -230,7 +237,28 @@ public static class InterpreterAbuseTriage
         var token = command.StartsWith('"')
             ? command[1..(command.IndexOf('"', 1) is var end && end > 0 ? end : command.Length)]
             : command.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? command;
-        return SafeFileName(token);
+        return NormalizeExtension(SafeFileName(token));
+    }
+
+    /// <summary>
+    /// Appends the extension <c>CreateProcess</c> would, so an extension-less token is matched
+    /// against the interpreter table in the form the loader actually resolves.
+    /// </summary>
+    /// <remarks>
+    /// Only a name carrying no extension at all is touched. A name that already ends in something
+    /// — <c>msv1_0.dll</c>, <c>x.sys</c> — is left exactly as written, so a module that is not an
+    /// executable is never renamed into one.
+    /// </remarks>
+    internal static string? NormalizeExtension(string? name)
+    {
+        if (string.IsNullOrEmpty(name))
+        {
+            return name;
+        }
+        // A trailing dot is a legal-but-degenerate spelling; treat it as no extension rather than
+        // producing "name..exe".
+        var trimmed = name.TrimEnd('.');
+        return trimmed.Length != 0 && trimmed.LastIndexOf('.') < 0 ? trimmed + ".exe" : name;
     }
 
     /// <summary>

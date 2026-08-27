@@ -100,10 +100,26 @@ public sealed record AutostartEntry(
     /// unsigned / signed-but-untrusted, or a command line handing a signed interpreter a payload
     /// its signature does not cover. This is a triage hint, not a verdict.
     /// </summary>
+    /// <remarks>
+    /// <b><see cref="ImageResolutionStatus.Unresolved"/> is tested directly, not through
+    /// <see cref="Status"/>.</b> Both an unresolvable command and a transient I/O failure while
+    /// probing collapse into <see cref="PersistenceStatus.VerificationError"/>, and only the first
+    /// is a finding: "this autostart entry names something Windows can locate and WinSight cannot"
+    /// is a real gap in the file-based verdict, whereas a sharing violation on one probe is a
+    /// coverage problem the report accounts for separately. Reading the coarse status here would
+    /// have conflated them, so the condition this documentation had always claimed was never
+    /// actually implemented.
+    ///
+    /// <b>What it costs.</b> Measured on the development desktop after the resolution fix:
+    /// 1 entry out of 4 350 (an <c>ActiveSetup</c> StubPath whose whole value is the single
+    /// character <c>U</c>). An unresolvable autostart command is rare, and each one is exactly the
+    /// case where no signature verdict exists to speak for the entry.
+    /// </remarks>
     public bool IsSuspicious =>
         Status is PersistenceStatus.FileMissing
             or PersistenceStatus.Unsigned
             or PersistenceStatus.InvalidSignature
             or PersistenceStatus.AccessDenied
+        || ImageStatus is ImageResolutionStatus.Unresolved
         || Abuse != InterpreterAbuse.None;
 }

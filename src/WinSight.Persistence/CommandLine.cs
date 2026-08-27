@@ -87,13 +87,7 @@ public static class CommandLine
         // extension. Without %windir% the legitimate default shell reads as "no image".
         if (!exe.Contains('\\') && !exe.Contains('/'))
         {
-            var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
-            var windir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-            foreach (var candidate in new[]
-                     {
-                         Path.Combine(system32, exe), Path.Combine(system32, exe + ".dll"),
-                         Path.Combine(windir, exe), Path.Combine(windir, exe + ".exe"),
-                     })
+            foreach (var candidate in BareModuleCandidates(exe))
             {
                 var probe = Probe(candidate);
                 if (probe.Status == ImageResolutionStatus.Present)
@@ -117,6 +111,96 @@ public static class CommandLine
             : expected is not null
                 ? new(null, expected, ImageResolutionStatus.FileMissing)
                 : new(null, null, ImageResolutionStatus.Unresolved);
+    }
+
+    /// <summary>
+    /// The on-disk locations Windows would actually try for a bare module name, in probe order.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the <c>.exe</c> suffix and the search path matter.</b> <c>CreateProcess</c> with a
+    /// null application name appends <c>.exe</c> to an extension-less token and then searches
+    /// System32, the Windows directory and <c>%PATH%</c>. Before this existed, the probe list held
+    /// <c>System32\&lt;name&gt;</c>, <c>System32\&lt;name&gt;.dll</c>, <c>%windir%\&lt;name&gt;</c>
+    /// and <c>%windir%\&lt;name&gt;.exe</c> — which resolves <c>explorer</c> but not
+    /// <c>cmd</c>, <c>wscript</c>, <c>regsvr32</c> or <c>powershell</c>, because those live in
+    /// <c>System32</c> (or, for PowerShell, in <c>System32\WindowsPowerShell\v1.0</c>, reachable
+    /// only through <c>%PATH%</c>). A Run value of <c>powershell -enc &lt;base64&gt;</c> therefore
+    /// resolved to nothing at all and was reported as a verification error rather than as a signed
+    /// interpreter carrying an encoded payload — while <c>powershell.exe -enc</c>, four characters
+    /// longer, was caught. Dropping the extension was a complete bypass of the command-line triage.
+    ///
+    /// <b>The existing candidates keep their order.</b> The new ones are appended, so every name
+    /// that resolved before resolves to the same file: LSA and print-monitor module names still
+    /// reach their <c>.dll</c> before any <c>.exe</c> is considered.
+    ///
+    /// <b>%PATH% is read once.</b> A report holds thousands of entries; re-splitting the variable
+    /// per entry would be pure waste, and the search path does not change during a scan.
+    /// </remarks>
+    internal static IEnumerable<string> BareModuleCandidates(string exe)
+    {
+        var system32 = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var windir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+
+        yield return Path.Combine(system32, exe);
+        yield return Path.Combine(system32, exe + ".dll");
+        yield return Path.Combine(windir, exe);
+        yield return Path.Combine(windir, exe + ".exe");
+
+        // CreateProcess appends .exe (only .exe — PATHEXT is a shell convention, not a loader one)
+        // when the token carries no extension, and searches System32 before %PATH%.
+        var hasExtension = Path.GetExtension(exe).Length > 0;
+        if (!hasExtension)
+        {
+            yield return Path.Combine(system32, exe + ".exe");
+        }
+
+        foreach (var directory in SearchPathDirectories.Value)
+        {
+            yield return Path.Combine(directory, exe);
+            if (!hasExtension)
+            {
+                yield return Path.Combine(directory, exe + ".exe");
+            }
+        }
+    }
+
+    private static readonly Lazy<string[]> SearchPathDirectories = new(LoadSearchPathDirectories);
+
+    private static string[] LoadSearchPathDirectories()
+    {
+        string? path;
+        try
+        {
+            path = Environment.GetEnvironmentVariable("PATH");
+        }
+        catch (System.Security.SecurityException)
+        {
+            return [];
+        }
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return [];
+        }
+
+        // Bounded: a pathologically long %PATH% must not turn one unresolved token into thousands
+        // of filesystem probes on every one of a report's entries.
+        const int MaxSearchDirectories = 64;
+        var directories = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var directory = entry.Trim('"');
+            if (directory.Length == 0 || !seen.Add(directory))
+            {
+                continue;
+            }
+            directories.Add(directory);
+            if (directories.Count == MaxSearchDirectories)
+            {
+                break;
+            }
+        }
+        return [.. directories];
     }
 
     private static ExecutableResolution Probe(string candidate)
