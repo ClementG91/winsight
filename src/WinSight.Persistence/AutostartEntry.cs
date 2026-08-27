@@ -121,5 +121,10 @@ public sealed record AutostartEntry(
             or PersistenceStatus.InvalidSignature
             or PersistenceStatus.AccessDenied
         || ImageStatus is ImageResolutionStatus.Unresolved
+        // "Signed and trusted" is worth no more than the root it chains to, and WinVerifyTrust
+        // consults CurrentUser\Root - a store any account writes with no elevation. An implant
+        // signed beneath a root imported that way read SignatureValid here, which defeated the
+        // central claim of the whole scanner for the price of one unprivileged store write.
+        || Signature.RestsOnUserInstalledTrust
         || Abuse != InterpreterAbuse.None;
 }

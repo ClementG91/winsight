@@ -192,7 +192,7 @@ public static class Adapters
             var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? e.Command;
             var verdict = report is not null
                 ? $"VT {report.Malicious}/{report.Total}"
-                : PersistenceStatusLabel(e.Status);
+                : PersistenceStatusLabel(e.Status, e.Signature.Anchor);
             // The command-line reason has to ride beside the signature verdict rather than replace
             // it, because the pair is the finding: "signature valid" alone reads as an all-clear on
             // exactly the entries this rule exists to catch. The raw command line stays in the
@@ -261,15 +261,25 @@ public static class Adapters
             : $"{line}, surface(s) not readable without elevation ({surfaces})";
     }
 
-    private static string PersistenceStatusLabel(PersistenceStatus status) => status switch
-    {
-        PersistenceStatus.FileMissing => "file missing, signature not checked",
-        PersistenceStatus.SignatureValid => "signature valid",
-        PersistenceStatus.Unsigned => "unsigned",
-        PersistenceStatus.InvalidSignature => "invalid signature",
-        PersistenceStatus.AccessDenied => "access denied, signature not checked",
-        _ => "verification error",
-    };
+    /// <remarks>
+    /// A trusted signature is qualified by the root it rests on. Rendering "signature valid" for a
+    /// chain anchored in a root any account can install reads as an all-clear on exactly the entry
+    /// that deserves the opposite, so the anchor rides in the label rather than being left for a
+    /// field nobody reads.
+    /// </remarks>
+    private static string PersistenceStatusLabel(
+        PersistenceStatus status,
+        SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified) => status switch
+        {
+            PersistenceStatus.FileMissing => "file missing, signature not checked",
+            PersistenceStatus.SignatureValid when anchor == SignatureTrustAnchor.UserInstalledRoot =>
+                "signature valid ONLY through a user-installed root",
+            PersistenceStatus.SignatureValid => "signature valid",
+            PersistenceStatus.Unsigned => "unsigned",
+            PersistenceStatus.InvalidSignature => "invalid signature",
+            PersistenceStatus.AccessDenied => "access denied, signature not checked",
+            _ => "verification error",
+        };
 
     /// <summary>Runs the live camera/mic monitor, printing transitions until Ctrl+C.</summary>
     public static int WatchCameraMic()

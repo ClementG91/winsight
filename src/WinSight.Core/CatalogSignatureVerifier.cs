@@ -189,12 +189,14 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
             {
                 cbStruct = (uint)Marshal.SizeOf<WinTrustData>(),
                 dwUIChoice = WtdUiNone,
-                fdwRevocationChecks = WtdRevokeNone,
+                fdwRevocationChecks = WtdRevokeWholeChain,
                 dwUnionChoice = WtdChoiceCatalog,
                 pInfo = catalogInfoPointer,
                 dwStateAction = WtdStateActionVerify,
-                dwProvFlags = WtdRevocationCheckNone
-                    | WtdCacheOnlyUrlRetrieval
+                // Same policy as the embedded verifier: revocation is checked against the local
+                // cache only, so a revoked signing certificate is seen while no request leaves the
+                // machine. See NativeSignatureVerifier for why WTD_REVOKE_NONE was wrong.
+                dwProvFlags = WtdCacheOnlyUrlRetrieval
                     | WtdDisableMd2Md4,
             };
             Marshal.StructureToPtr(trustData, trustDataPointer, false);
@@ -218,11 +220,10 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
     }
 
     private const uint WtdUiNone = 2;
-    private const uint WtdRevokeNone = 0;
+    private const uint WtdRevokeWholeChain = 0x00000001;
     private const uint WtdChoiceCatalog = 2;
     private const uint WtdStateActionVerify = 1;
     private const uint WtdStateActionClose = 2;
-    private const uint WtdRevocationCheckNone = 0x10;
     private const uint WtdCacheOnlyUrlRetrieval = 0x1000;
     private const uint WtdDisableMd2Md4 = 0x2000;
 

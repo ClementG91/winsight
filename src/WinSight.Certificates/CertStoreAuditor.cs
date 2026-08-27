@@ -24,6 +24,11 @@ public sealed class CertStoreAuditor
         var results = new List<TrustedCertificate>();
         var unreadableStores = 0;
         var unreadableCertificates = 0;
+        // Computed before the walk so each CurrentUser entry can be told apart from the machine
+        // roots Windows merges into that same view. An empty set means the machine store could not
+        // be read, and the audit then makes no user-installed claim at all rather than declaring
+        // every public root user-installed.
+        var userInstalled = UserInstalledRoots.Thumbprints;
         foreach (var (name, location, label) in Stores)
         {
             using var store = new X509Store(name, location);
@@ -45,7 +50,11 @@ public sealed class CertStoreAuditor
                 {
                     try
                     {
-                        results.Add(Describe(cert, label));
+                        results.Add(Describe(
+                            cert,
+                            label,
+                            cert.Thumbprint is { Length: > 0 } thumbprint
+                                && userInstalled.Contains(thumbprint)));
                     }
                     catch (Exception ex) when (ex is CryptographicException
                                                  or NotSupportedException)
@@ -59,7 +68,7 @@ public sealed class CertStoreAuditor
             results, unreadableStores, unreadableCertificates);
     }
 
-    private static TrustedCertificate Describe(X509Certificate2 cert, string store)
+    private static TrustedCertificate Describe(X509Certificate2 cert, string store, bool userInstalled)
     {
         var (keyBits, isRsa) = KeyInfo(cert);
         return new TrustedCertificate(
@@ -72,7 +81,8 @@ public sealed class CertStoreAuditor
             isRsa,
             cert.HasPrivateKey,
             string.Equals(cert.Subject, cert.Issuer, StringComparison.Ordinal),
-            cert.NotAfter);
+            cert.NotAfter,
+            userInstalled);
     }
 
     private static (int Bits, bool IsRsa) KeyInfo(X509Certificate2 cert)
