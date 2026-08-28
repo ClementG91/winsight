@@ -93,7 +93,7 @@ public sealed class McpResultProjectorTests
 
         var finding = Assert.Single(result.Reports).Items[0];
         Assert.True(result.SensitiveFieldsIncluded);
-        Assert.Equal("secret-value", finding.Fields["commandLine"]);
+        Assert.Equal("withheld-value", finding.Fields["commandLine"]);
         Assert.Contains(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), finding.Detail);
     }
 
@@ -121,8 +121,12 @@ public sealed class McpResultProjectorTests
                 new Dictionary<string, string?>
                 {
                     ["image"] = Path.Combine(profile, "payload.exe"),
-                    ["command"] = "payload.exe --token secret",
-                    ["commandLine"] = "secret-value",
+                    // Not credential-shaped on purpose. These assert that the fields are withheld,
+                    // so their values prove nothing - while a secret scanner reads a fixture and a
+                    // real leak exactly alike, and a red secret check a reviewer learns to ignore is
+                    // worth less than nothing in a security project.
+                    ["command"] = @"payload.exe --config C:\Users\me\AppData\Roaming\payload.dat",
+                    ["commandLine"] = "withheld-value",
                     ["signature"] = "Unsigned",
                     ["signer"] = null,
                 })
