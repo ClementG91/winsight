@@ -11,10 +11,24 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+
     public string Surface => "WMI subscriptions";
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <b>This was the one enumerator that could not say it had been refused.</b> Every query was
+    /// wrapped in a catch that swallowed ManagementException and UnauthorizedAccessException alike,
+    /// so an unelevated scan - where root\subscription is frequently denied - reported "no
+    /// subscriptions" with IsPartial false. WMI persistence is fileless and among the stealthiest
+    /// techniques there is; reporting a clean surface because Windows refused to answer is the worst
+    /// possible outcome on exactly the surface where it matters most.
+    /// </remarks>
+    public int UnreadableLocations => Volatile.Read(ref _unreadable);
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        Volatile.Write(ref _unreadable, 0);
         // CommandLineEventConsumer runs a command; ActiveScriptEventConsumer runs an
         // inline/one-file script.
         foreach (var e in Query(
@@ -29,9 +43,19 @@ public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
         {
             yield return e;
         }
+
+        // __EventFilter and __FilterToConsumerBinding are deliberately NOT emitted as entries.
+        //
+        // They complete the picture of a subscription and an operator investigating a consumer
+        // wants them - but neither names an image, and every entry in this report is graded by the
+        // image model. A WQL query has no file to resolve, so each stock Windows filter (the SCM
+        // Event Log filter ships with the OS) would arrive with "no resolvable image" and be flagged
+        // on every machine in the world. Trading a real blind spot for a guaranteed false positive
+        // is not an improvement; the honest form of this is an image-free presentation, recorded in
+        // docs/DETECTIONS.md as a known gap rather than shipped as noise.
     }
 
-    private static List<RawAutostart> Query(string wql, Func<ManagementBaseObject, string?> commandOf)
+    private List<RawAutostart> Query(string wql, Func<ManagementBaseObject, string?> commandOf)
     {
         var rows = new List<RawAutostart>();
         try
@@ -52,7 +76,9 @@ public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
         }
         catch (Exception ex) when (ex is ManagementException or UnauthorizedAccessException)
         {
-            // Namespace unavailable / access denied, no subscriptions surfaced.
+            // Namespace unavailable or access denied. Counted, because "WMI would not answer" and
+            // "there are no subscriptions" are different statements and only one is reassuring.
+            Interlocked.Increment(ref _unreadable);
         }
         return rows;
     }

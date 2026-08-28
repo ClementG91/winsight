@@ -301,11 +301,14 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
         _unreadable = _source.Unreadable ? 1 : 0;
         foreach (var task in tasks)
         {
-            if (!TryParseTaskCommands(task.Xml, out var commands))
+            if (!TryParseTaskCommands(task.Xml, out var commands, out var unresolvedComHandlers))
             {
                 _unreadable++;
                 continue;
             }
+            // A COM handler this scan could not resolve to a file is a task whose code it never
+            // looked at. Counted rather than guessed at.
+            _unreadable += unresolvedComHandlers;
             foreach (var command in commands)
             {
                 yield return new RawAutostart(
@@ -345,8 +348,13 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
     public static IReadOnlyList<string> ParseTaskCommands(string xml) =>
         TryParseTaskCommands(xml, out var commands) ? commands : [];
 
-    internal static bool TryParseTaskCommands(string xml, out IReadOnlyList<string> commands)
+    internal static bool TryParseTaskCommands(string xml, out IReadOnlyList<string> commands) =>
+        TryParseTaskCommands(xml, out commands, out _);
+
+    internal static bool TryParseTaskCommands(
+        string xml, out IReadOnlyList<string> commands, out int unresolvedComHandlers)
     {
+        unresolvedComHandlers = 0;
         XDocument doc;
         try
         {
@@ -357,12 +365,56 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
             commands = [];
             return false;
         }
-        commands = doc.Descendants()
+        var found = doc.Descendants()
             .Where(e => e.Name.LocalName == "Command")
             .Select(e => Join(e.Value.Trim(), SiblingArguments(e)))
             .Where(c => c.Length > 0)
             .ToList();
+
+        // A ComHandler action runs code just as an Exec action does - it instantiates a CLSID and
+        // calls into it - and reading only Exec meant such a task left the report entirely, without
+        // even incrementing the unreadable count.
+        //
+        // Only a handler whose CLSID resolves to a file is emitted, because every entry in this
+        // report is graded by the image model and a bare GUID has nothing to resolve. Windows ships
+        // ComHandler tasks whose classes are not registered where a CLSID lookup can reach them, so
+        // reporting the GUID itself would flag eight stock tasks as "no resolvable image" on every
+        // machine. The unresolvable ones are counted instead - which is exactly the gap: they used
+        // to vanish from the report without incrementing anything.
+        unresolvedComHandlers = 0;
+        foreach (var handler in doc.Descendants().Where(e => e.Name.LocalName == "ComHandler"))
+        {
+            var target = ComHandlerTarget(handler);
+            if (target.Length > 0)
+            {
+                found.Add(target);
+            }
+            else
+            {
+                unresolvedComHandlers++;
+            }
+        }
+
+        commands = found;
         return true;
+    }
+
+    /// <summary>
+    /// The binary a <c>ComHandler</c> action loads, or empty when its CLSID names no file.
+    /// </summary>
+    private static string ComHandlerTarget(XElement handler)
+    {
+        var clsid = handler.Elements()
+            .FirstOrDefault(child => child.Name.LocalName == "ClassId")?
+            .Value
+            .Trim();
+        if (string.IsNullOrEmpty(clsid))
+        {
+            return string.Empty;
+        }
+        return ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry64)
+            ?? ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry32)
+            ?? string.Empty;
     }
 
     /// <summary>The <c>Arguments</c> value beside a given <c>Command</c>, or null when it has none.</summary>
