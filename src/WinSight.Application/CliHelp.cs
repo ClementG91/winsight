@@ -46,6 +46,17 @@ public static partial class CliHelp
           --json        machine-readable output
           --version     print version
           --help, -h    show this help
+
+        Exit codes:
+          0   nothing notable found
+          1   something notable was found (the scan succeeded)
+          2   usage error: unknown command, argument or option
+          10  an observation could not be made (live ETW unavailable)
+          11  the privileged firewall service could not be reached
+          12  the scan failed unexpectedly
+
+        Findings are 0 and 1; failures are 10 and above, so a scheduled task can tell
+        "could not look" from "looked and found something".
         """;
 
     /// <summary>

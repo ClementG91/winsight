@@ -23,9 +23,28 @@ if (args.Contains("--help") || args.Contains("-h"))
     return 0;
 }
 
+// An option WinSight does not know is a usage error, not something to ignore. `--jsonn` used to
+// produce human output silently, which in a pipeline is an empty parse rather than a failure.
+if (CliContract.FirstUnknownOption(args) is { } unknownOption)
+{
+    Console.Error.WriteLine(
+        $"unknown option '{unknownOption}' — run `winsight --help` for the full list");
+    return CliContract.UsageError;
+}
+
 var json = args.Contains("--json");
 var flaggedOnly = args.Contains("--flagged");
 var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?? "all";
+
+// A second verb was silently dropped: `winsight persistence extensions` ran a persistence scan and
+// said nothing about the word the operator also typed, so they got a report for a tool they had not
+// asked about. `process <pid>` legitimately takes an argument and is validated on its own below.
+if (command != "process" && CliContract.ExtraVerbs(args, command) is { Count: > 0 } extraVerbs)
+{
+    Console.Error.WriteLine(
+        $"unexpected argument '{extraVerbs[0]}' after '{command}' — run one command at a time");
+    return CliContract.UsageError;
+}
 
 // MCP owns stdout completely: no banner or CLI renderer may run in this mode.
 if (command == "mcp")
@@ -67,7 +86,7 @@ if (command == "process")
     if (!int.TryParse(pidArgument, System.Globalization.CultureInfo.InvariantCulture, out var pid) || pid < 0)
     {
         Console.Error.WriteLine("usage: winsight process <pid>");
-        return 2;
+        return CliContract.UsageError;
     }
     var drillDown = Adapters.ProcessDrillDown(pid);
     if (json)
@@ -78,7 +97,7 @@ if (command == "process")
     {
         ReportRenderer.RenderText(drillDown, Console.Out);
     }
-    return drillDown.NotableCount > 0 ? 1 : 0;
+    return drillDown.NotableCount > 0 ? CliContract.Notable : CliContract.Clean;
 }
 
 IReadOnlyList<ToolReport> reports;
@@ -92,7 +111,16 @@ catch (ArgumentOutOfRangeException)
 {
     Console.Error.WriteLine(
         $"unknown command '{command}' — run `winsight --help` for the full list");
-    return 2;
+    return CliContract.UsageError;
+}
+catch (Exception ex) when (ex is not OperationCanceledException)
+{
+    // An unhandled exception used to leave the runtime to print a stack trace and choose its own
+    // exit code - and under --json it produced an empty stdout, which is indistinguishable from a
+    // clean machine to anything parsing the output. A scan that failed now says so, on stderr, with
+    // a code that means failure rather than a finding.
+    Console.Error.WriteLine($"the scan failed unexpectedly: {ex.GetType().Name}");
+    return CliContract.UnexpectedFailure;
 }
 
 if (json)
@@ -111,5 +139,6 @@ else
     }
 }
 
-// Non-zero exit when anything is noteworthy, tray/CI/automation friendly.
-return reports.Sum(r => r.NotableCount) > 0 ? 1 : 0;
+// Non-zero exit when anything is noteworthy, tray/CI/automation friendly. Findings stay in 0/1 so
+// every existing caller keeps working; failures are 10 and above (see CliContract).
+return reports.Sum(r => r.NotableCount) > 0 ? CliContract.Notable : CliContract.Clean;

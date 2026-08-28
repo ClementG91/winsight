@@ -189,7 +189,14 @@ public static class Adapters
                      .OrderByDescending(e => e.IsSuspicious).ThenBy(e => e.Vector))
         {
             var report = e.ImagePath is not null && vt.TryGetValue(e.ImagePath, out var v) ? v : null;
-            var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? e.Command;
+            // The whole command line must not become the detail. The MCP projector withholds
+            // fields named "command"/"commandLine" and only substitutes environment variables in
+            // Detail, so falling back to the raw command sent the payload - base64 and all - to the
+            // model without WINSIGHT_MCP_ALLOW_SENSITIVE=1 or includeSensitive=true. That happened
+            // exactly when the image could not be resolved, which is the encoded-LOLBin case the
+            // gate exists for. The leading token is enough to name the entry; the arguments are the
+            // payload and stay in the governed field.
+            var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? CommandHead(e.Command);
             var verdict = report is not null
                 ? $"VT {report.Malicious}/{report.Total}"
                 : PersistenceStatusLabel(e.Status, e.Signature.Anchor);
@@ -267,6 +274,36 @@ public static class Adapters
     /// that deserves the opposite, so the anchor rides in the label rather than being left for a
     /// field nobody reads.
     /// </remarks>
+    /// <summary>
+    /// The executable token of a command line, without its arguments.
+    /// </summary>
+    /// <remarks>
+    /// Names the entry for a human without carrying the part that is the payload. Quoted paths keep
+    /// their spaces; everything after the executable is dropped, and a token long enough to be a
+    /// payload in itself is truncated rather than trusted.
+    /// </remarks>
+    internal static string CommandHead(string? command)
+    {
+        var trimmed = command?.Trim();
+        if (string.IsNullOrEmpty(trimmed))
+        {
+            return string.Empty;
+        }
+        string head;
+        if (trimmed.StartsWith('"'))
+        {
+            var end = trimmed.IndexOf('"', 1);
+            head = end > 0 ? trimmed[1..end] : trimmed[1..];
+        }
+        else
+        {
+            var space = trimmed.IndexOf(' ');
+            head = space > 0 ? trimmed[..space] : trimmed;
+        }
+        const int MaxHeadLength = 160;
+        return head.Length <= MaxHeadLength ? head : head[..MaxHeadLength] + "…";
+    }
+
     private static string PersistenceStatusLabel(
         PersistenceStatus status,
         SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified) => status switch
@@ -405,7 +442,9 @@ public static class Adapters
             // return means observation ended unexpectedly and must not be reported as success.
             error.WriteLine(
                 $"[{EtwFailure.Token(EtwFailureCode.Unexpected)}] Live ETW observation is unavailable.");
-            return 1;
+            // Not 1: that means "something notable was found". An observation that could not be made
+            // is a failure, and a scheduled task had no way to tell the two apart.
+            return CliContract.ObservationFailed;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -415,7 +454,7 @@ public static class Adapters
         {
             var failure = EtwFailure.Classify(ex);
             error.WriteLine($"[{EtwFailure.Token(failure)}] Live ETW observation is unavailable.");
-            return 1;
+            return CliContract.ObservationFailed;
         }
     }
 
@@ -423,7 +462,7 @@ public static class Adapters
     /// Diagnostic: reports what the authenticated firewall pipe grants the caller's Windows identity,
     /// without changing machine state. Prints one stable token line for scripted VM checks. Exit code
     /// 0 when the service is reachable (any of read-only, can-mutate, or read-only-because-armed),
-    /// 3 when it is not - so a multi-user gate can drive this exe under different tokens and assert
+    /// 11 when it is not - so a multi-user gate can drive this exe under different tokens and assert
     /// that an unprivileged caller reads <c>outcome=CanReadOnly</c> while an elevated one may read
     /// <c>outcome=CanMutate</c>.
     /// </summary>
@@ -440,7 +479,12 @@ public static class Adapters
             result.EffectiveState,
             result.MutationProbe?.ToString() ?? "none");
 
-        return result.Outcome == IpcSelfTestOutcome.ServiceUnavailable ? 3 : 0;
+        // One exit-code table for the whole CLI, so a caller never has to know which verb it ran to
+        // read the result. The VM qualification kit only tests for non-zero, so the move from the
+        // former bespoke 3 changes nothing it asserts.
+        return result.Outcome == IpcSelfTestOutcome.ServiceUnavailable
+            ? CliContract.ServiceUnavailable
+            : CliContract.Clean;
     }
 
     public static ToolReport CameraMic(bool flaggedOnly)

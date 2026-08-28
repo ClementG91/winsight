@@ -29,8 +29,132 @@ public static class DashboardFindingPresenter
             "outbound-firewall" => OutboundFirewall(item, text),
             "connections" => Connection(item, text),
             "integrity" => Integrity(item, text),
+            // Six tools rendered raw English into the French and Spanish dashboards because they had
+            // no presenter and fell back to item.Detail - among them the strongest sentence the whole
+            // product produces, about a driver that is unsigned and can see every keystroke.
+            "input" => InputHook(item, text),
+            "drivers" => Driver(item, text),
+            "hijack" => Hijack(item, text),
+            "presence" => Presence(item, text),
+            "dns" => Dns(item, text),
+            "alerts" => Alert(item, text),
             _ => new FindingPresentation(item.Title, item.Detail),
         };
+
+    /// <summary>
+    /// A driver on the keyboard or mouse path: what it is, and whether its signature vouches for it.
+    /// </summary>
+    private static FindingPresentation InputHook(ReportItem item, LocalizationManager text)
+    {
+        var name = Field(item, "name") ?? item.Title;
+        var signature = SignatureLabel(item, text);
+        var concern = Field(item, "concern");
+        var detail = string.IsNullOrWhiteSpace(concern)
+            ? signature
+            : $"{signature}; {text.GetOrFallback($"InputConcern{concern}", concern)}";
+        var image = Field(item, "image");
+        return new FindingPresentation(
+            name,
+            string.IsNullOrWhiteSpace(image) ? detail : $"{image}  [{detail}]");
+    }
+
+    private static FindingPresentation Driver(ReportItem item, LocalizationManager text)
+    {
+        var name = Field(item, "name") ?? item.Title;
+        var signature = SignatureLabel(item, text);
+        var concern = Field(item, "concern");
+        var detail = string.IsNullOrWhiteSpace(concern)
+            ? signature
+            : $"{signature}; {text.GetOrFallback($"DriverConcern{concern}", concern)}";
+        var image = FirstNonEmpty(item, "image", "expectedImage");
+        return new FindingPresentation(
+            name,
+            string.IsNullOrWhiteSpace(image) ? detail : $"{image}  [{detail}]");
+    }
+
+    /// <summary>
+    /// A hijackable configuration, graded by whether it is exploitable on this machine rather than
+    /// merely present - the distinction the whole scanner is built around, so it must survive
+    /// translation.
+    /// </summary>
+    private static FindingPresentation Hijack(ReportItem item, LocalizationManager text)
+    {
+        var kind = Field(item, "kind");
+        var subject = Field(item, "subject") ?? item.Title;
+        var exposure = Field(item, "exposure");
+        var title = string.IsNullOrWhiteSpace(kind)
+            ? subject
+            : $"{text.GetOrFallback($"HijackKind{kind}", kind)}/{subject}";
+        var label = string.IsNullOrWhiteSpace(exposure)
+            ? item.Detail
+            : text.GetOrFallback($"HijackExposure{exposure}", exposure);
+        var path = FirstNonEmpty(item, "actionablePath", "context");
+        return new FindingPresentation(
+            title,
+            string.IsNullOrWhiteSpace(path) ? label : $"{path}  [{label}]");
+    }
+
+    /// <summary>
+    /// Why the machine woke, and whether that means somebody was at it. Localised carefully: the
+    /// cause is a code, never the device name Windows rendered.
+    /// </summary>
+    private static FindingPresentation Presence(ReportItem item, LocalizationManager text)
+    {
+        var cause = Field(item, "cause");
+        var label = string.IsNullOrWhiteSpace(cause)
+            ? item.Detail
+            : text.GetOrFallback($"PresenceCause{cause}", cause);
+        var woke = Field(item, "wokeUtc");
+        var title = DateTimeOffset.TryParse(
+            woke, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var when)
+            ? when.ToLocalTime().ToString("g", text.Culture)
+            : item.Title;
+        var source = Field(item, "source");
+        return new FindingPresentation(
+            title,
+            string.IsNullOrWhiteSpace(source) ? label : $"{label} - {source}");
+    }
+
+    private static FindingPresentation Dns(ReportItem item, LocalizationManager text)
+    {
+        var name = Field(item, "name") ?? item.Title;
+        var type = Field(item, "type");
+        var data = Field(item, "data");
+        var origin = BoolField(item, "local") ? text["DnsFromCache"] : text["DnsFromNetwork"];
+        var detail = string.IsNullOrWhiteSpace(data) ? origin : $"{data}  [{origin}]";
+        return new FindingPresentation(
+            string.IsNullOrWhiteSpace(type) ? name : $"{name} ({type})", detail);
+    }
+
+    private static FindingPresentation Alert(ReportItem item, LocalizationManager text)
+    {
+        var source = Field(item, "source") ?? item.Title;
+        var kind = Field(item, "kind");
+        var title = string.IsNullOrWhiteSpace(kind)
+            ? source
+            : $"{source}/{text.GetOrFallback($"AlertKind{kind}", kind)}";
+        var when = Field(item, "time");
+        var detail = Field(item, "detail") ?? item.Detail;
+        return new FindingPresentation(
+            title,
+            DateTimeOffset.TryParse(
+                when, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var moment)
+                ? $"{moment.ToLocalTime().ToString("g", text.Culture)} - {detail}"
+                : detail);
+    }
+
+    /// <summary>
+    /// The signature verdict shared by the driver-shaped tools, so one translation serves both.
+    /// </summary>
+    private static string SignatureLabel(ReportItem item, LocalizationManager text)
+    {
+        var signature = Field(item, "signature");
+        var label = string.IsNullOrWhiteSpace(signature)
+            ? text["UnknownValue"]
+            : text.GetOrFallback($"SignatureState{signature}", signature);
+        var signer = Field(item, "signer");
+        return string.IsNullOrWhiteSpace(signer) ? label : $"{label} - {signer}";
+    }
 
     public static string Detail(string tool, ReportItem item, LocalizationManager text) =>
         Present(tool, item, text).Detail;

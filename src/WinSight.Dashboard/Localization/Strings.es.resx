@@ -308,4 +308,36 @@
   <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender indica que no se está ejecutando y el Centro de seguridad de Windows no indica ningún antivirus activo. La protección del Acceso controlado a carpetas no está establecida.</value></data>
   <data name="ProtectionHealthSummary" xml:space="preserve"><value>Tiempo real {0}/{1}</value></data>
   <data name="ProtectionHealthAutomation" xml:space="preserve"><value>Estado de la protección en tiempo real</value></data>
+  <data name="SignatureStateSignedTrusted" xml:space="preserve"><value>Firmado y de confianza</value></data>
+  <data name="SignatureStateSignedUntrusted" xml:space="preserve"><value>Firmado, cadena no confiable</value></data>
+  <data name="SignatureStateUnsigned" xml:space="preserve"><value>SIN FIRMAR</value></data>
+  <data name="SignatureStateMissing" xml:space="preserve"><value>Archivo ausente</value></data>
+  <data name="SignatureStateUnknown" xml:space="preserve"><value>No se pudo verificar la firma</value></data>
+  <data name="InputConcernExpected" xml:space="preserve"><value>controlador de clase de Windows, esperado</value></data>
+  <data name="InputConcernThirdParty" xml:space="preserve"><value>controlador de terceros en la ruta de entrada</value></data>
+  <data name="InputConcernUntrusted" xml:space="preserve"><value>SIN FIRMAR o no confiable, y ve cada pulsación de tecla</value></data>
+  <data name="InputConcernMissing" xml:space="preserve"><value>filtro registrado cuyo archivo de controlador falta</value></data>
+  <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>suministrado por Windows</value></data>
+  <data name="DriverConcernThirdParty" xml:space="preserve"><value>firmado por un tercero</value></data>
+  <data name="DriverConcernUntrusted" xml:space="preserve"><value>código de núcleo SIN FIRMAR o no confiable</value></data>
+  <data name="DriverConcernUnverified" xml:space="preserve"><value>no se pudo verificar la firma</value></data>
+  <data name="DriverConcernMissing" xml:space="preserve"><value>controlador registrado cuyo archivo de imagen falta</value></data>
+  <data name="HijackKindUnquotedServicePath" xml:space="preserve"><value>Ruta de servicio sin comillas</value></data>
+  <data name="HijackKindWritableServiceDirectory" xml:space="preserve"><value>Directorio de servicio escribible</value></data>
+  <data name="HijackKindWritablePathEntry" xml:space="preserve"><value>Entrada de PATH escribible</value></data>
+  <data name="HijackKindPhantomImport" xml:space="preserve"><value>Importación de DLL fantasma</value></data>
+  <data name="HijackExposureLatent" xml:space="preserve"><value>anticipable, pero no por un usuario sin privilegios</value></data>
+  <data name="HijackExposureExploitable" xml:space="preserve"><value>EXPLOTABLE: un usuario sin privilegios podría colocar el archivo ahora</value></data>
+  <data name="HijackExposureOccupied" xml:space="preserve"><value>el archivo que se anticipa ya existe</value></data>
+  <data name="PresenceCauseUnknown" xml:space="preserve"><value>Windows no registró ninguna causa</value></data>
+  <data name="PresenceCausePhysicalInput" xml:space="preserve"><value>entrada física: alguien estaba ante la máquina</value></data>
+  <data name="PresenceCauseNetwork" xml:space="preserve"><value>un adaptador de red: un paquete, no una persona</value></data>
+  <data name="PresenceCauseTimer" xml:space="preserve"><value>una reactivación programada</value></data>
+  <data name="PresenceCauseDevice" xml:space="preserve"><value>un dispositivo que Windows nombró sin explicar</value></data>
+  <data name="DnsFromCache" xml:space="preserve"><value>respondido desde la caché local</value></data>
+  <data name="DnsFromNetwork" xml:space="preserve"><value>resuelto por la red</value></data>
+  <data name="AlertKindCanaryTouched" xml:space="preserve"><value>archivo señuelo modificado</value></data>
+  <data name="AlertKindHighEntropyWrite" xml:space="preserve"><value>escritura de alta entropía</value></data>
+  <data name="AlertKindRename" xml:space="preserve"><value>ráfaga de renombrados</value></data>
+  <data name="AlertKindDelete" xml:space="preserve"><value>ráfaga de eliminaciones</value></data>
 </root>

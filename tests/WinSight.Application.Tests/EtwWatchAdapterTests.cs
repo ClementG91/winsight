@@ -6,6 +6,14 @@ namespace WinSight.Application.Tests;
 /// Pins the CLI boundary around the live ETW commands without opening an ETW session. Native error
 /// text can include paths or localized diagnostics, so only a stable token may cross this boundary.
 /// </summary>
+/// <remarks>
+/// <b>The exit code changed deliberately, from 1 to ObservationFailed.</b> These three assertions
+/// used to require 1, which is also what a scan returns when it <i>finds</i> something. A live ETW
+/// pump that never came up and a scan that found a rogue Run key were therefore indistinguishable to
+/// anything automating WinSight - which the README recommends doing from a scheduled task. Findings
+/// stay in 0/1 and failures moved to 10 and above, so a caller testing only for non-zero is
+/// unaffected while one that wants the distinction can now have it.
+/// </remarks>
 public sealed class EtwWatchAdapterTests
 {
     [Fact]
@@ -18,7 +26,7 @@ public sealed class EtwWatchAdapterTests
             error,
             CancellationToken.None);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(CliContract.ObservationFailed, exitCode);
         Assert.Equal(
             $"[ETW_RESOURCE_EXHAUSTED] Live ETW observation is unavailable.{Environment.NewLine}",
             error.ToString());
@@ -35,7 +43,7 @@ public sealed class EtwWatchAdapterTests
             error,
             CancellationToken.None);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(CliContract.ObservationFailed, exitCode);
         Assert.Equal(
             $"[ETW_UNEXPECTED_FAILURE] Live ETW observation is unavailable.{Environment.NewLine}",
             error.ToString());
@@ -68,7 +76,7 @@ public sealed class EtwWatchAdapterTests
             error,
             CancellationToken.None);
 
-        Assert.Equal(1, exitCode);
+        Assert.Equal(CliContract.ObservationFailed, exitCode);
         Assert.Equal(
             $"[ETW_UNEXPECTED_FAILURE] Live ETW observation is unavailable.{Environment.NewLine}",
             error.ToString());
