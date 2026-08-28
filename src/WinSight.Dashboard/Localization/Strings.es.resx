@@ -306,4 +306,6 @@
   <data name="CfaDefenderNotRunningSignaturesOutOfDate" xml:space="preserve"><value>Microsoft Defender indica que no se está ejecutando. {0} figura como activo con firmas desactualizadas. Actualice ese producto; la protección del Acceso controlado a carpetas no está establecida.</value></data>
   <data name="CfaDefenderNotRunningInconsistent" xml:space="preserve"><value>Las pruebas de ejecución de Microsoft Defender y del Centro de seguridad de Windows son incoherentes. No se deduce ninguna causa; la protección del Acceso controlado a carpetas no está establecida.</value></data>
   <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender indica que no se está ejecutando y el Centro de seguridad de Windows no indica ningún antivirus activo. La protección del Acceso controlado a carpetas no está establecida.</value></data>
+  <data name="ProtectionHealthSummary" xml:space="preserve"><value>Tiempo real {0}/{1}</value></data>
+  <data name="ProtectionHealthAutomation" xml:space="preserve"><value>Estado de la protección en tiempo real</value></data>
 </root>

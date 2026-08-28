@@ -309,4 +309,6 @@
   <data name="CfaDefenderNotRunningSignaturesOutOfDate" xml:space="preserve"><value>Microsoft Defender reports that it is not running. {0} reports On with out-of-date signatures. Update that product; Controlled Folder Access protection is not established.</value></data>
   <data name="CfaDefenderNotRunningInconsistent" xml:space="preserve"><value>Microsoft Defender runtime and Windows Security Center returned inconsistent Defender evidence. No cause is inferred; Controlled Folder Access protection is not established.</value></data>
   <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender reports that it is not running, and Windows Security Center reports no antivirus On. Controlled Folder Access protection is not established.</value></data>
+  <data name="ProtectionHealthSummary" xml:space="preserve"><value>Real-time {0}/{1}</value></data>
+  <data name="ProtectionHealthAutomation" xml:space="preserve"><value>Real-time protection status</value></data>
 </root>

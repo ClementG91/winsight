@@ -61,6 +61,26 @@ public sealed class PersistenceMonitor : IDisposable
     /// <summary>The pure core; exposes the change log for the presenter/UI.</summary>
     public PersistenceMonitorCore Core => _core;
 
+    /// <summary>
+    /// What real-time monitoring was asked to watch, and what it actually armed.
+    /// </summary>
+    /// <remarks>
+    /// The dashboard used to show Guardian as simply on, because nothing ever asked. A registry key
+    /// that will not open or a startup folder that is not there leaves the monitor running and blind
+    /// in that one place; the operator deserves to see the difference between watching everything
+    /// and watching most of it.
+    /// </remarks>
+    public (int Requested, int Armed) WatchCoverage =>
+        _source is IPersistenceWatchCoverage coverage
+            ? (coverage.RequestedLocations, coverage.ArmedLocations)
+            : (0, 0);
+
+    /// <summary>True once <see cref="Start"/> has completed its seed and attached the source.</summary>
+    public bool IsStarted
+    {
+        get { lock (_gate) { return _started && !_disposed; } }
+    }
+
     /// <summary>Seeds the baseline from an initial full scan, then starts listening. Idempotent.</summary>
     public void Start(CancellationToken cancellationToken = default)
     {

@@ -306,4 +306,6 @@
   <data name="CfaDefenderNotRunningSignaturesOutOfDate" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas. {0} est indiqué actif avec des signatures obsolètes. Mettez ce produit à jour ; la protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
   <data name="CfaDefenderNotRunningInconsistent" xml:space="preserve"><value>Les preuves d'exécution de Microsoft Defender et du Centre de sécurité Windows sont incohérentes. Aucune cause n'est déduite ; la protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
   <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas et le Centre de sécurité Windows n'indique aucun antivirus actif. La protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
+  <data name="ProtectionHealthSummary" xml:space="preserve"><value>Temps réel {0}/{1}</value></data>
+  <data name="ProtectionHealthAutomation" xml:space="preserve"><value>État de la protection en temps réel</value></data>
 </root>
