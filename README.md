@@ -171,10 +171,9 @@ Every release carries SHA-256 checksums plus GitHub **build provenance** and **S
 which bind the bytes to this repository's release workflow at a named commit. They do not provide a
 Windows publisher identity; verify them before running anything.
 
-**The two attestations cover different files.** Build provenance covers both the portable `.zip` and
-the `-setup.exe`; the SBOM attestation currently covers the `.zip` only. If you download the
-installer - which the table above recommends - verify its provenance and its SHA-256, and use the
-`.zip` if you also want an attested SBOM.
+Both attestations cover both artifacts - the portable `.zip` and the `-setup.exe`. The SBOM is
+generated from the package directory that Inno Setup is then handed as its source, so it is the same
+component inventory either way. Releases published before this covered the `.zip` alone.
 
 Who may authorise a signature, what one would and would not prove, and how to check a release
 yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).

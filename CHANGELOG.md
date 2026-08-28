@@ -95,12 +95,29 @@ went from 63 s to 22 s with identical output, and the Application test suite fro
   was already re-hardened deliberately; what was missing was the privilege to reclaim it, which is
   why the fix moved to install time rather than widening the service token.
 
+**Continuous integration.** `Test-WinSightEtwValidation.ps1` - the contract test for the ETW helpers
+the VM protocol depends on - was invoked by no workflow at all, which is the same defect the coverage
+gate already carries a note about: a gate that exists, is maintained, and cannot fail a build. It now
+runs in `verify`. A new test fails the build when the autostart surface count in the README, the
+parity table or `DETECTIONS.md` stops matching the enum - "22 autostart surfaces" was hand-maintained
+in three places and correct only because nobody had added a surface since it was written.
+
+The SBOM attestation covered the `.zip` alone while the README points a reader at the `-setup.exe`.
+Fixed rather than documented: the SBOM is generated from the directory Inno Setup is handed as its
+source, so it always described the installer's contents and only the attestation subject was
+narrower.
+
+CodeQL still runs through GitHub's default setup, which is verified as configured for this
+repository. An advanced workflow cannot coexist with it, so making the analysis auditable from the
+repository - and making it run on forks - is a repository-settings decision rather than a commit.
+The README says so plainly instead.
+
 **Documentation.** "Ransomware protection is the one feature that writes anything" was false - the
 hijack scan writes, and it is in the default overview. Also corrected: the UI language is a file and
 not a registry value, the platform floor is Windows 10 22H2, there is no CsWin32, the MCP SDK is
-2.2.0, SBOM attestation covers only the `.zip`, CodeQL is not configured in this repository, and
-`-Scanner` is not validated. `--no-network` was added because an inherited `WINSIGHT_VT_KEY` made an
-otherwise local scan reach out, which nothing documented.
+2.2.0, CodeQL is not configured in this repository, and `-Scanner` is not validated. `--no-network`
+was added because an inherited `WINSIGHT_VT_KEY` made an otherwise local scan reach out, which
+nothing documented.
 
 ## v0.11.6, 2026-08-25
 
