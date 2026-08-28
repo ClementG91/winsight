@@ -78,7 +78,12 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                         ? SignatureTrustAnchor.UserInstalledRoot
                         : SignatureTrustAnchor.MachineRoot),
                 SignatureState.SignedUntrusted => new SignatureVerdict(SignatureState.SignedUntrusted, SignerOf(path)),
-                _ => null, // NOSIGNATURE / unknown -> catalog fallback
+                // No embedded signature. Before the catalog, ask whether this file belongs to an
+                // installed MSIX package: those are signed once as a package, so their executables
+                // carry no embedded signature and appear in no catalog. Without this the chain ran
+                // out of options and concluded "unsigned" for every Store application on the
+                // machine, Microsoft's own included.
+                _ => MsixPackageSignature.Verify(path), // null here still falls through to the catalog
             };
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)

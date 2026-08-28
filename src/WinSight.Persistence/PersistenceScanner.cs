@@ -25,6 +25,7 @@ public sealed class PersistenceScanner
         new IAutostartEnumerator[]
         {
             new RunKeyEnumerator(),
+            new UserHiveEnumerator(),
             new ServiceEnumerator(),
             new WinlogonEnumerator(),
             new ScheduledTaskEnumerator(),
