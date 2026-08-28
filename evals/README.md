@@ -32,8 +32,11 @@ $env:WINSIGHT_JUDGE_CMD = 'my-model-cli --model some-judge-model'
 ./evals/Invoke-LlmJudge.ps1 -Scanner all
 ```
 
-`-Scanner` accepts any CLI subcommand (`all`, `persistence`, `net`, `dns`, `certs`,
-`hosts`, `processes`, `modules`, `extensions`, `firewall`).
+`-Scanner` takes any CLI subcommand. The list here is not validated by the script and is
+not the authority - `winsight --help` is. At the time of writing that is `all`,
+`persistence`, `av`, `net`, `dns`, `firewall`, `processes`, `modules`, `extensions`,
+`certs`, `hosts`, `input`, `integrity`, `drivers`, `hijack` and `presence`; an unknown
+name is refused by the CLI with exit code 2 rather than by this script.
 
 ## Rubric
 

@@ -77,11 +77,25 @@ public sealed class FirewallRequestDispatcher
         {
             throw;
         }
-        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException
-                                     or InvalidOperationException or ArgumentException)
+        catch (Exception)
         {
             // No exception detail crosses the wire: the caller learns only that the
             // command could not be completed.
+            //
+            // The filter is deliberately every type but cancellation, rather than a list.
+            // It used to name six exception types, and Win32Exception was not among them —
+            // yet Win32Exception is what the entire WFP path raises: FwpmGetAppIdFromFileName0
+            // fails as soon as a blocked application's binary is gone, and that call sits under
+            // a plain GetStatus, reachable by any interactive caller the pipe ACL admits for
+            // reading. The escape reached the listener, which classified it as terminal, stopped
+            // the host, and closed the dynamic WFP session — so BFE destroyed every filter it
+            // owned. Deleting one's own blocked binary and opening the dashboard disabled
+            // enforcement for every application on the machine, with no privilege at all.
+            // JsonException escaped identically.
+            //
+            // A dispatch failure is a fact about one command. Whether the endpoint itself is
+            // still sound is a separate question, decided by the transport, and no enumeration
+            // of exception types written in advance can be trusted to keep the two apart.
             return Failure(request, FirewallProtocolError.InternalFailure);
         }
     }

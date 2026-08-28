@@ -3,24 +3,80 @@ namespace WinSight.Ransomware;
 /// <summary>
 /// Plants and tracks decoy ("canary") files in the directories ransomware sweeps. A decoy has no
 /// legitimate reason to be modified, renamed, or deleted, so a single touch is a high-confidence
-/// signal. Planting and watching the user's own Documents/Desktop/Pictures needs no elevation.
+/// signal. Planting and watching the user's own folders needs no elevation.
 /// </summary>
+/// <remarks>
+/// <b>Four properties a decoy needs, none of which the first version had.</b>
+/// <list type="bullet">
+/// <item>It must not be recognisable. Names came from the constant <c>WinSightGuard_</c> in a public
+/// repository, so skipping every decoy was one <c>StartsWith</c> in the attacker's walk. Names now
+/// derive from a machine-local seed — see <see cref="CanaryIdentity"/>.</item>
+/// <item>It must be the format it claims. A <c>.xlsx</c> holding one line of ASCII beginning
+/// "WinSight ransomware canary" is identifiable from its first four bytes, and several families
+/// check a magic number before encrypting. See <see cref="CanaryDocument"/>.</item>
+/// <item>It must be visible. Decoys were marked <see cref="FileAttributes.Hidden"/>, which removes
+/// them from exactly the enumeration they exist to be caught by, because a good many families skip
+/// hidden files deliberately. They are ordinary files now; the UI and the documentation say so,
+/// because a security tool putting unexplained files in someone's Documents folder must admit it.</item>
+/// <item>There must be more than one, and not all at the end. A single decoy per directory, planted
+/// under a name that sorts late, is reached only after the files it was protecting have already been
+/// encrypted. Three per directory now span an alphabetical walk.</item>
+/// </list>
+/// </remarks>
 public sealed class CanaryManager
 {
-    private const string CanaryContent =
-        "WinSight ransomware canary. This hidden decoy exists to detect ransomware; do not modify or delete it.\n";
-
     private readonly List<string> _canaries = [];
     private readonly HashSet<string> _canarySet = new(StringComparer.OrdinalIgnoreCase);
     private readonly Lock _gate = new();
+    private readonly byte[] _seed;
+    private readonly string _manifestPath;
 
-    /// <summary>The default directories to protect: the current user's Documents, Desktop, Pictures.</summary>
-    public static IReadOnlyList<string> DefaultDirectories() =>
-    [
-        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-        Environment.GetFolderPath(Environment.SpecialFolder.Desktop),
-        Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
-    ];
+    public CanaryManager(byte[]? seed = null, string? manifestPath = null)
+    {
+        _seed = seed ?? CanaryIdentity.LoadOrCreateSeed();
+        _manifestPath = manifestPath ?? CanaryIdentity.ManifestPath;
+    }
+
+    /// <summary>
+    /// The default directories to protect: the user's own document-bearing folders.
+    /// </summary>
+    /// <remarks>
+    /// Three (Documents, Desktop, Pictures) covered a minority of what ransomware sweeps. Downloads,
+    /// Videos and Music are equally targeted and equally writable without elevation. These resolve
+    /// through <see cref="Environment.GetFolderPath(Environment.SpecialFolder)"/>, so a profile
+    /// redirected into OneDrive is followed rather than missed.
+    /// </remarks>
+    public static IReadOnlyList<string> DefaultDirectories()
+    {
+        var folders = new[]
+        {
+            Environment.SpecialFolder.MyDocuments,
+            Environment.SpecialFolder.Desktop,
+            Environment.SpecialFolder.MyPictures,
+            Environment.SpecialFolder.MyVideos,
+            Environment.SpecialFolder.MyMusic,
+        };
+        var directories = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var folder in folders)
+        {
+            var path = Environment.GetFolderPath(folder);
+            if (!string.IsNullOrWhiteSpace(path) && seen.Add(path))
+            {
+                directories.Add(path);
+            }
+        }
+
+        // Downloads has no SpecialFolder member. It is one of the most consistently targeted
+        // directories, so it is worth resolving by convention rather than being skipped.
+        var downloads = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        if (Directory.Exists(downloads) && seen.Add(downloads))
+        {
+            directories.Add(downloads);
+        }
+        return directories;
+    }
 
     /// <summary>The decoy files currently planted.</summary>
     public IReadOnlyList<string> Planted
@@ -51,8 +107,10 @@ public sealed class CanaryManager
     }
 
     /// <summary>
-    /// Plants one hidden decoy in each existing directory (best-effort — a directory that does not
-    /// exist or cannot be written is skipped, not fatal). Returns all planted decoys.
+    /// Plants <see cref="CanaryIdentity.PerDirectory"/> decoys in each existing directory
+    /// (best-effort — a directory that does not exist or cannot be written is skipped, not fatal)
+    /// and records them so a run that ends abruptly can still be cleaned up. Returns all planted
+    /// decoys.
     /// </summary>
     public IReadOnlyList<string> Plant(IReadOnlyList<string> directories)
     {
@@ -65,23 +123,38 @@ public sealed class CanaryManager
                 {
                     continue;
                 }
-                var path = Path.Combine(directory, CanaryFileName());
-                try
+                for (var index = 0; index < CanaryIdentity.PerDirectory; index++)
                 {
-                    File.WriteAllText(path, CanaryContent);
-                    File.SetAttributes(path, FileAttributes.Hidden);
-                    var full = Path.GetFullPath(path);
-                    _canaries.Add(full);
-                    _canarySet.Add(full);
-                }
-                catch (Exception ex) when (ex is IOException
-                                             or UnauthorizedAccessException
-                                             or System.Security.SecurityException)
-                {
-                    // Best-effort: a directory we cannot write is an honest gap, not a crash.
+                    PlantOne(directory, index);
                 }
             }
+            WriteManifest();
             return _canaries.ToArray();
+        }
+    }
+
+    private void PlantOne(string directory, int index)
+    {
+        var path = Path.Combine(directory, CanaryIdentity.FileName(_seed, directory, index));
+        try
+        {
+            // CreateNew, so a real file that happens to collide is never overwritten. A security
+            // tool that destroys one of the documents it is protecting has failed completely.
+            using (var stream = new FileStream(
+                       path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                var content = CanaryDocument.Workbook();
+                stream.Write(content, 0, content.Length);
+            }
+            var full = Path.GetFullPath(path);
+            _canaries.Add(full);
+            _canarySet.Add(full);
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // Best-effort: a directory we cannot write is an honest gap, not a crash.
         }
     }
 
@@ -92,45 +165,84 @@ public sealed class CanaryManager
         {
             foreach (var path in _canaries)
             {
-                try
-                {
-                    if (File.Exists(path))
-                    {
-                        File.SetAttributes(path, FileAttributes.Normal);
-                        File.Delete(path);
-                    }
-                }
-                catch (Exception ex) when (ex is IOException
-                                             or UnauthorizedAccessException
-                                             or System.Security.SecurityException)
-                {
-                    // A decoy we cannot delete (already gone, locked) is not fatal.
-                }
+                TryDelete(path);
             }
             _canaries.Clear();
             _canarySet.Clear();
+            TryDelete(_manifestPath);
         }
     }
 
-    private const string CanaryPrefix = "WinSightGuard_";
-    private const string CanaryExtension = ".xlsx";
+    private void WriteManifest()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(_manifestPath)!);
+            File.WriteAllLines(_manifestPath, _canaries);
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // Without the manifest only cross-run orphan recovery is lost; detection is unaffected.
+        }
+    }
 
-    /// <summary>The pattern that identifies a WinSight decoy, used to sweep up orphans.</summary>
-    internal const string CanaryGlob = $"{CanaryPrefix}*{CanaryExtension}";
-
-    // A plausible-looking document name so ransomware treats it as a real target, made unique so two
-    // runs never collide.
-    internal static string CanaryFileName() => $"{CanaryPrefix}{Guid.NewGuid():N}{CanaryExtension}";
+    private static void TryDelete(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.SetAttributes(path, FileAttributes.Normal);
+                File.Delete(path);
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // A decoy we cannot delete (already gone, locked) is not fatal.
+        }
+    }
 
     /// <summary>
-    /// Deletes decoys left behind by a run that ended without disposing (a crash, a kill). Without
-    /// this, a hard stop would litter the user's own folders with hidden files that nothing ever
-    /// cleans up. Best-effort; returns how many were removed.
+    /// Deletes decoys left behind by a run that ended without disposing (a crash, a kill, a reboot).
+    /// Best-effort; returns how many were removed.
     /// </summary>
-    public static int RemoveOrphans(IReadOnlyList<string> directories)
+    /// <remarks>
+    /// Reads the manifest rather than matching a name pattern, because the names deliberately carry
+    /// no pattern any more. The legacy <c>WinSightGuard_*.xlsx</c> glob is still swept so decoys
+    /// planted by an earlier version are not stranded in the operator's folders forever.
+    /// </remarks>
+    public static int RemoveOrphans(IReadOnlyList<string> directories, string? manifestPath = null)
     {
         ArgumentNullException.ThrowIfNull(directories);
         var removed = 0;
+        var manifest = manifestPath ?? CanaryIdentity.ManifestPath;
+
+        try
+        {
+            if (File.Exists(manifest))
+            {
+                foreach (var path in File.ReadAllLines(manifest))
+                {
+                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    {
+                        TryDelete(path);
+                        removed++;
+                    }
+                }
+                TryDelete(manifest);
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // Fall through to the legacy sweep; a manifest we cannot read is not a reason to stop.
+        }
+
         foreach (var directory in directories)
         {
             if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
@@ -138,10 +250,10 @@ public sealed class CanaryManager
                 continue;
             }
 
-            string[] orphans;
+            string[] legacy;
             try
             {
-                orphans = Directory.GetFiles(directory, CanaryGlob);
+                legacy = Directory.GetFiles(directory, CanaryIdentity.LegacyGlob);
             }
             catch (Exception ex) when (ex is IOException
                                          or UnauthorizedAccessException
@@ -150,20 +262,10 @@ public sealed class CanaryManager
                 continue;
             }
 
-            foreach (var orphan in orphans)
+            foreach (var orphan in legacy)
             {
-                try
-                {
-                    File.SetAttributes(orphan, FileAttributes.Normal);
-                    File.Delete(orphan);
-                    removed++;
-                }
-                catch (Exception ex) when (ex is IOException
-                                             or UnauthorizedAccessException
-                                             or System.Security.SecurityException)
-                {
-                    // Leave it; the next run tries again.
-                }
+                TryDelete(orphan);
+                removed++;
             }
         }
         return removed;

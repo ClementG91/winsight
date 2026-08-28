@@ -116,6 +116,12 @@ selected by the user at the moment they ask and puts the rule in the same turn a
 and command/command-line fields are omitted. Only one scan runs at a time and a scan
 has a 90-second safety limit.
 
+The gate withholds fields by name, so a finding's human-readable *detail* has to be built so it
+never carries a command line. Persistence details previously fell back to the raw command whenever
+the image could not be resolved - which is exactly the encoded-interpreter case the gate exists for,
+so the payload crossed with neither choice below made. The detail now names the executable only; the
+arguments stay in the withheld field.
+
 Raw sensitive fields require two independent choices:
 
 1. The user starts the MCP server with `WINSIGHT_MCP_ALLOW_SENSITIVE=1`.
@@ -129,7 +135,7 @@ trusted to receive local paths and command lines.
 
 As verified on **2026-07-30**, WinSight speaks the current MCP revision,
 [`2026-07-28`](https://modelcontextprotocol.io/specification/2026-07-28), through
-version **2.0.0** of the
+version **2.2.0** of the
 [official C# MCP SDK](https://github.com/modelcontextprotocol/csharp-sdk).
 
 The server deliberately does not pin a single revision. `2026-07-28` removed the

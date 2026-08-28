@@ -114,7 +114,13 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
 
         using (key)
         {
-            var location = $"{HiveName(hive)}\\{sub} [{view}]";
+            // The path as it is actually spelled in this view, not the unredirected one. A finding
+            // reported under HKLM\SOFTWARE\... for a value that lives in
+            // HKLM\SOFTWARE\WOW6432Node\... sends the operator to a key that does not contain it -
+            // and, because write attribution matches an observed kernel write against this string
+            // as a prefix, it also made every 32-bit persistence write unattributable by
+            // construction: the kernel reports the WOW6432Node path and nothing here ever said it.
+            var location = $"{HiveName(hive)}\\{RegistryViews.Describe(sub, view)} [{view}]";
             foreach (var name in key.GetValueNames())
             {
                 if (key.GetValue(name) is string command && command.Length > 0)
@@ -295,11 +301,14 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
         _unreadable = _source.Unreadable ? 1 : 0;
         foreach (var task in tasks)
         {
-            if (!TryParseTaskCommands(task.Xml, out var commands))
+            if (!TryParseTaskCommands(task.Xml, out var commands, out var unresolvedComHandlers))
             {
                 _unreadable++;
                 continue;
             }
+            // A COM handler this scan could not resolve to a file is a task whose code it never
+            // looked at. Counted rather than guessed at.
+            _unreadable += unresolvedComHandlers;
             foreach (var command in commands)
             {
                 yield return new RawAutostart(
@@ -339,8 +348,13 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
     public static IReadOnlyList<string> ParseTaskCommands(string xml) =>
         TryParseTaskCommands(xml, out var commands) ? commands : [];
 
-    internal static bool TryParseTaskCommands(string xml, out IReadOnlyList<string> commands)
+    internal static bool TryParseTaskCommands(string xml, out IReadOnlyList<string> commands) =>
+        TryParseTaskCommands(xml, out commands, out _);
+
+    internal static bool TryParseTaskCommands(
+        string xml, out IReadOnlyList<string> commands, out int unresolvedComHandlers)
     {
+        unresolvedComHandlers = 0;
         XDocument doc;
         try
         {
@@ -351,12 +365,56 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
             commands = [];
             return false;
         }
-        commands = doc.Descendants()
+        var found = doc.Descendants()
             .Where(e => e.Name.LocalName == "Command")
             .Select(e => Join(e.Value.Trim(), SiblingArguments(e)))
             .Where(c => c.Length > 0)
             .ToList();
+
+        // A ComHandler action runs code just as an Exec action does - it instantiates a CLSID and
+        // calls into it - and reading only Exec meant such a task left the report entirely, without
+        // even incrementing the unreadable count.
+        //
+        // Only a handler whose CLSID resolves to a file is emitted, because every entry in this
+        // report is graded by the image model and a bare GUID has nothing to resolve. Windows ships
+        // ComHandler tasks whose classes are not registered where a CLSID lookup can reach them, so
+        // reporting the GUID itself would flag eight stock tasks as "no resolvable image" on every
+        // machine. The unresolvable ones are counted instead - which is exactly the gap: they used
+        // to vanish from the report without incrementing anything.
+        unresolvedComHandlers = 0;
+        foreach (var handler in doc.Descendants().Where(e => e.Name.LocalName == "ComHandler"))
+        {
+            var target = ComHandlerTarget(handler);
+            if (target.Length > 0)
+            {
+                found.Add(target);
+            }
+            else
+            {
+                unresolvedComHandlers++;
+            }
+        }
+
+        commands = found;
         return true;
+    }
+
+    /// <summary>
+    /// The binary a <c>ComHandler</c> action loads, or empty when its CLSID names no file.
+    /// </summary>
+    private static string ComHandlerTarget(XElement handler)
+    {
+        var clsid = handler.Elements()
+            .FirstOrDefault(child => child.Name.LocalName == "ClassId")?
+            .Value
+            .Trim();
+        if (string.IsNullOrEmpty(clsid))
+        {
+            return string.Empty;
+        }
+        return ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry64)
+            ?? ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry32)
+            ?? string.Empty;
     }
 
     /// <summary>The <c>Arguments</c> value beside a given <c>Command</c>, or null when it has none.</summary>
@@ -483,9 +541,31 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
             if (command.Trim().Length > 0)
             {
                 yield return new RawAutostart(
-                    AutostartVector.BootExecute, "BootExecute", $"HKLM\\{Path} [BootExecute]", command);
+                    AutostartVector.BootExecute, "BootExecute", $"HKLM\\{Path} [BootExecute]",
+                    StripSessionManagerVerb(command));
             }
         }
+    }
+
+    /// <summary>
+    /// Drops the Session Manager <c>autocheck</c> verb so the entry names the image smss.exe
+    /// actually runs.
+    /// </summary>
+    /// <remarks>
+    /// The stock Windows value is <c>autocheck autochk *</c>: <c>autocheck</c> is smss's verb, and
+    /// <c>autochk.exe</c> is the native binary. Reading the raw value leading-token-first resolved
+    /// <c>autocheck</c> to nothing, so the operating system's own default BootExecute entry was
+    /// reported with no resolvable image on every machine — a permanent false positive on one of
+    /// the highest-value persistence surfaces. Anything an attacker appends here keeps its own
+    /// image name and is judged on it.
+    /// </remarks>
+    internal static string StripSessionManagerVerb(string command)
+    {
+        const string Verb = "autocheck ";
+        var trimmed = command.TrimStart();
+        return trimmed.StartsWith(Verb, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[Verb.Length..].TrimStart()
+            : command;
     }
 }
 
@@ -603,36 +683,76 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
 
     public string Surface => "COM (HKCU CLSID)";
 
+    /// <summary>
+    /// The server keys a CLSID registration can name, in the order COM consults them.
+    /// </summary>
+    /// <remarks>
+    /// Only <c>InprocServer32</c> was read, which is three of the four ways a CLSID can point at
+    /// code and none of the fifth. <c>LocalServer32</c> names an executable rather than a DLL, and
+    /// <c>TreatAs</c> is the sharpest of the lot: it redirects the class to a completely different
+    /// CLSID, so a hijack written that way left no trace anywhere in the report - the entry
+    /// WinSight showed was the legitimate server of a class that COM no longer instantiates.
+    /// </remarks>
+    private static readonly (string Key, string? Value)[] ServerKeys =
+    [
+        ("InprocServer32", null),
+        ("InprocServer", null),
+        ("InprocHandler32", null),
+        ("LocalServer32", null),
+        ("TreatAs", null),
+    ];
+
     public IEnumerable<RawAutostart> Enumerate()
     {
-        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, RegistryView.Registry64);
-        using var root = baseKey.OpenSubKey(Path);
-        if (root is null)
+        // Both views: a 32-bit COM server registered under the WOW6432Node twin is loaded into
+        // every 32-bit host that instantiates the class, and was previously invisible.
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
-            yield break;
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view);
+            using var root = baseKey.OpenSubKey(Path);
+            if (root is null)
+            {
+                continue;
+            }
+            foreach (var clsid in root.GetSubKeyNames())
+            {
+                foreach (var entry in ServerEntries(root, clsid, view))
+                {
+                    yield return entry;
+                }
+            }
         }
-        foreach (var clsid in root.GetSubKeyNames())
+    }
+
+    private static List<RawAutostart> ServerEntries(RegistryKey root, string clsid, RegistryView view)
+    {
+        var entries = new List<RawAutostart>();
+        foreach (var (key, _) in ServerKeys)
         {
-            RawAutostart? entry = null;
             try
             {
-                using var server = root.OpenSubKey($@"{clsid}\InprocServer32");
-                if (server?.GetValue(null) is string dll && dll.Trim().Length > 0)
+                using var server = root.OpenSubKey($@"{clsid}\{key}");
+                if (server?.GetValue(null) is string target && target.Trim().Length > 0)
                 {
-                    entry = new RawAutostart(
-                        AutostartVector.ComHijack, clsid,
-                        $"HKCU\\{Path}\\{clsid}\\InprocServer32", dll);
+                    // A TreatAs value is a CLSID, not a path: report the binary the redirection
+                    // ends at, so the signature model sees a file. Reporting the raw GUID made the
+                    // legitimate OLE mapping Windows ships read as "no resolvable image" on every
+                    // machine, while saying nothing about the code the class actually loads - which
+                    // is the entire point of following a TreatAs.
+                    var command = key == "TreatAs"
+                        ? ClsidResolver.ResolveInprocServer(target.Trim(), view) ?? target
+                        : target;
+                    entries.Add(new RawAutostart(
+                        AutostartVector.ComHijack, $"{clsid} [{key}]",
+                        $"HKCU\\{RegistryViews.Describe(Path, view)}\\{clsid}\\{key}", command));
                 }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
                 // Unreadable CLSID key, skip.
             }
-            if (entry is { } e)
-            {
-                yield return e;
-            }
         }
+        return entries;
     }
 }
 
@@ -771,36 +891,44 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
     public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
     {
         PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry32, Path, watchSubtree: true),
     };
 
+    /// <summary>
+    /// Both views: SilentProcessExit sits in the same redirected part of the registry as IFEO, and
+    /// a monitor registered for a 32-bit target lives in the WOW6432Node twin.
+    /// </summary>
     public IEnumerable<RawAutostart> Enumerate()
     {
-        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-        using var root = baseKey.OpenSubKey(Path);
-        if (root is null)
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
-            yield break;
-        }
-        foreach (var target in root.GetSubKeyNames())
-        {
-            RawAutostart? entry = null;
-            try
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            using var root = baseKey.OpenSubKey(Path);
+            if (root is null)
             {
-                using var sub = root.OpenSubKey(target);
-                if (sub?.GetValue("MonitorProcess") is string monitor && monitor.Trim().Length > 0)
+                continue;
+            }
+            foreach (var target in root.GetSubKeyNames())
+            {
+                RawAutostart? entry = null;
+                try
                 {
-                    entry = new RawAutostart(
-                        AutostartVector.SilentProcessExit, target,
-                        $"HKLM\\{Path}\\{target} [MonitorProcess]", monitor);
+                    using var sub = root.OpenSubKey(target);
+                    if (sub?.GetValue("MonitorProcess") is string monitor && monitor.Trim().Length > 0)
+                    {
+                        entry = new RawAutostart(
+                            AutostartVector.SilentProcessExit, target,
+                            $"HKLM\\{RegistryViews.Describe(Path, view)}\\{target} [MonitorProcess]", monitor);
+                    }
                 }
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
-            {
-                // Unreadable target key, skip.
-            }
-            if (entry is { } e)
-            {
-                yield return e;
+                catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    // Unreadable target key, skip.
+                }
+                if (entry is { } e)
+                {
+                    yield return e;
+                }
             }
         }
     }
@@ -819,26 +947,41 @@ public sealed class ImageHijackEnumerator : IAutostartEnumerator
     public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
     {
         PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry64, Path, watchSubtree: true),
+        PersistenceWatchTarget.Registry(RegistryHive.LocalMachine, RegistryView.Registry32, Path, watchSubtree: true),
     };
 
     public string Surface => "IFEO debuggers";
 
+    /// <summary>
+    /// Both registry views, because IFEO is redirected and the two halves govern different
+    /// processes.
+    /// </summary>
+    /// <remarks>
+    /// A WOW64 process reads its execution options through the 32-bit ntdll, which is redirected to
+    /// <c>SOFTWARE\WOW6432Node\...\Image File Execution Options</c> - the same reason Microsoft's
+    /// own guidance for attaching a debugger to a 32-bit application says to write there. Reading
+    /// only the 64-bit view left a Debugger value that hijacks every 32-bit process on the machine
+    /// completely invisible, on the surface whose whole purpose is to catch that.
+    /// </remarks>
     public IEnumerable<RawAutostart> Enumerate()
     {
-        using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
-        using var root = baseKey.OpenSubKey(Path);
-        if (root is null)
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
-            yield break;
-        }
-        foreach (var target in root.GetSubKeyNames())
-        {
-            using var sub = root.OpenSubKey(target);
-            if (sub?.GetValue("Debugger") is string debugger && debugger.Trim().Length > 0)
+            using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
+            using var root = baseKey.OpenSubKey(Path);
+            if (root is null)
             {
-                yield return new RawAutostart(
-                    AutostartVector.ImageHijack, target,
-                    $"HKLM\\{Path}\\{target} [Debugger]", debugger);
+                continue;
+            }
+            foreach (var target in root.GetSubKeyNames())
+            {
+                using var sub = root.OpenSubKey(target);
+                if (sub?.GetValue("Debugger") is string debugger && debugger.Trim().Length > 0)
+                {
+                    yield return new RawAutostart(
+                        AutostartVector.ImageHijack, target,
+                        $"HKLM\\{RegistryViews.Describe(Path, view)}\\{target} [Debugger]", debugger);
+                }
             }
         }
     }

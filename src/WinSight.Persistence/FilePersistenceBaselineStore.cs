@@ -13,7 +13,10 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     // A machine's autostart surfaces total a few hundred entries; the cap only guards against a
     // pathological or tampered file being read whole into memory.
     private const int MaxBaselineEntries = 20_000;
-    private const string Header = "#winsight-guardian-baseline v1";
+    // v2 adds the argument component of an identity. The header is versioned precisely so a v1
+    // file is treated as a first run rather than silently compared against identities of a
+    // different shape - which would report every entry on the machine as new.
+    private const string Header = "#winsight-guardian-baseline v2";
 
     private readonly string _path;
 
@@ -48,11 +51,11 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
             while ((line = reader.ReadLine()) is not null && result.Count < MaxBaselineEntries)
             {
                 var parts = line.Split('\t');
-                if (parts.Length != 3 || !Enum.TryParse<AutostartVector>(parts[0], out var vector))
+                if (parts.Length != 4 || !Enum.TryParse<AutostartVector>(parts[0], out var vector))
                 {
                     continue; // skip a malformed line rather than discarding the whole baseline
                 }
-                result.Add(new PersistenceIdentity(vector, parts[1], parts[2]));
+                result.Add(new PersistenceIdentity(vector, parts[1], parts[2], parts[3]));
             }
 
             return result.Count > 0 ? result : null;
@@ -88,11 +91,13 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
                 // A tab or newline in a name/target would break the line format; such an identity
                 // simply is not persisted (vanishingly rare for real registry names / paths).
                 if (id.Name.IndexOfAny(['\t', '\n', '\r']) >= 0 ||
-                    id.Target.IndexOfAny(['\t', '\n', '\r']) >= 0)
+                    id.Target.IndexOfAny(['\t', '\n', '\r']) >= 0 ||
+                    id.Arguments.IndexOfAny(['\t', '\n', '\r']) >= 0)
                 {
                     continue;
                 }
-                builder.Append(id.Vector).Append('\t').Append(id.Name).Append('\t').Append(id.Target).Append('\n');
+                builder.Append(id.Vector).Append('\t').Append(id.Name).Append('\t')
+                    .Append(id.Target).Append('\t').Append(id.Arguments).Append('\n');
                 written++;
             }
 

@@ -25,6 +25,7 @@ public sealed class PersistenceScanner
         new IAutostartEnumerator[]
         {
             new RunKeyEnumerator(),
+            new UserHiveEnumerator(),
             new ServiceEnumerator(),
             new WinlogonEnumerator(),
             new ScheduledTaskEnumerator(),
@@ -46,6 +47,10 @@ public sealed class PersistenceScanner
             new BrowserHelperObjectEnumerator(),
             new WindowsLoadRunEnumerator(),
             new PrintProviderEnumerator(),
+            new RunOnceExEnumerator(),
+            new SecurityProvidersEnumerator(),
+            new JustInTimeDebuggerEnumerator(),
+            new PowerShellProfileEnumerator(),
         };
 
     /// <summary>
@@ -108,7 +113,10 @@ public sealed class PersistenceScanner
                 .Select(x => x.Resolution.ImagePath!).ToList(),
             cancellationToken);
 
-        // 3. Assemble.
+        // 3. Assemble. Version resources are read once per distinct image: a report holds thousands
+        //    of entries and a few hundred distinct files, so caching turns a per-entry Win32 call
+        //    into a per-file one.
+        var originalNames = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var results = new List<AutostartEntry>(resolved.Count);
         foreach (var (raw, resolution) in resolved)
         {
@@ -124,11 +132,52 @@ public sealed class PersistenceScanner
                 image,
                 resolution.ExpectedPath,
                 resolution.Status,
-                verdict));
+                verdict,
+                OriginalFileNameOf(image, originalNames)));
         }
         return new PersistenceScanResult(
             results,
             new PersistenceCoverage(unreadableLocations, unreadableSurfaces));
+    }
+
+    /// <summary>
+    /// The name the vendor compiled into an image, or null when there is none to read.
+    /// </summary>
+    /// <remarks>
+    /// Read here rather than in the triage rule, because this is already the step that touches
+    /// every resolved file and the rule itself runs repeatedly while a report is assembled and must
+    /// perform no I/O. Any failure yields null: an unreadable version resource is not evidence of
+    /// anything, and the file-name path still applies.
+    /// </remarks>
+    private static string? OriginalFileNameOf(string? image, Dictionary<string, string?> cache)
+    {
+        if (string.IsNullOrWhiteSpace(image))
+        {
+            return null;
+        }
+        if (cache.TryGetValue(image, out var cached))
+        {
+            return cached;
+        }
+        var name = ReadOriginalFileName(image);
+        cache[image] = name;
+        return name;
+    }
+
+    private static string? ReadOriginalFileName(string image)
+    {
+        try
+        {
+            var name = System.Diagnostics.FileVersionInfo.GetVersionInfo(image).OriginalFilename;
+            return string.IsNullOrWhiteSpace(name) ? null : name;
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or ArgumentException)
+        {
+            return null;
+        }
     }
 }
 

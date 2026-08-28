@@ -369,5 +369,9 @@ static async Task<int> RunHostAsync()
                 break;
         }
     }
-    return 0;
+
+    // Non-zero when the endpoint was lost, so the Service Control Manager runs the failure actions
+    // the installer configured. Exiting 0 told it the stop was intentional and nothing ever
+    // restarted a service whose pipe had been squatted or had faulted.
+    return host.Services.GetRequiredService<FirewallServiceExitSignal>().ExitCode;
 }

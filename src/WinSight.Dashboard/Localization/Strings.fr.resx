@@ -306,4 +306,44 @@
   <data name="CfaDefenderNotRunningSignaturesOutOfDate" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas. {0} est indiqué actif avec des signatures obsolètes. Mettez ce produit à jour ; la protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
   <data name="CfaDefenderNotRunningInconsistent" xml:space="preserve"><value>Les preuves d'exécution de Microsoft Defender et du Centre de sécurité Windows sont incohérentes. Aucune cause n'est déduite ; la protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
   <data name="CfaDefenderNotRunningNoOnAntivirus" xml:space="preserve"><value>Microsoft Defender indique qu'il ne fonctionne pas et le Centre de sécurité Windows n'indique aucun antivirus actif. La protection par l'Accès contrôlé aux dossiers n'est pas établie.</value></data>
+  <data name="ProtectionHealthSummary" xml:space="preserve"><value>Temps réel {0}/{1}</value></data>
+  <data name="ProtectionHealthAutomation" xml:space="preserve"><value>État de la protection en temps réel</value></data>
+  <data name="SignatureStateSignedTrusted" xml:space="preserve"><value>Signé et approuvé</value></data>
+  <data name="SignatureStateSignedUntrusted" xml:space="preserve"><value>Signé, chaîne non approuvée</value></data>
+  <data name="SignatureStateUnsigned" xml:space="preserve"><value>NON SIGNÉ</value></data>
+  <data name="SignatureStateMissing" xml:space="preserve"><value>Fichier absent</value></data>
+  <data name="SignatureStateUnknown" xml:space="preserve"><value>Signature non vérifiable</value></data>
+  <data name="InputConcernExpected" xml:space="preserve"><value>pilote de classe Windows, attendu</value></data>
+  <data name="InputConcernThirdParty" xml:space="preserve"><value>pilote tiers sur le chemin des entrées</value></data>
+  <data name="InputConcernUntrusted" xml:space="preserve"><value>NON SIGNÉ ou non approuvé, et voit chaque frappe au clavier</value></data>
+  <data name="InputConcernMissing" xml:space="preserve"><value>filtre déclaré dont le fichier pilote est absent</value></data>
+  <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>fourni par Windows</value></data>
+  <data name="DriverConcernThirdParty" xml:space="preserve"><value>signé par un tiers</value></data>
+  <data name="DriverConcernUntrusted" xml:space="preserve"><value>code noyau NON SIGNÉ ou non approuvé</value></data>
+  <data name="DriverConcernUnverified" xml:space="preserve"><value>signature non vérifiable</value></data>
+  <data name="DriverConcernMissing" xml:space="preserve"><value>pilote déclaré dont le fichier image est absent</value></data>
+  <data name="HijackKindUnquotedServicePath" xml:space="preserve"><value>Chemin de service non entre guillemets</value></data>
+  <data name="HijackKindWritableServiceDirectory" xml:space="preserve"><value>Répertoire de service inscriptible</value></data>
+  <data name="HijackKindWritablePathEntry" xml:space="preserve"><value>Entrée PATH inscriptible</value></data>
+  <data name="HijackKindPhantomImport" xml:space="preserve"><value>Import de DLL fantôme</value></data>
+  <data name="HijackExposureLatent" xml:space="preserve"><value>préemptable, mais pas par un utilisateur non privilégié</value></data>
+  <data name="HijackExposureExploitable" xml:space="preserve"><value>EXPLOITABLE : un utilisateur non privilégié peut y déposer un fichier maintenant</value></data>
+  <data name="HijackExposureOccupied" xml:space="preserve"><value>le fichier préemptant existe déjà</value></data>
+  <data name="PresenceCauseUnknown" xml:space="preserve"><value>Windows n’a enregistré aucune cause</value></data>
+  <data name="PresenceCausePhysicalInput" xml:space="preserve"><value>entrée physique : quelqu’un était devant la machine</value></data>
+  <data name="PresenceCauseNetwork" xml:space="preserve"><value>une carte réseau : un paquet, pas une personne</value></data>
+  <data name="PresenceCauseTimer" xml:space="preserve"><value>un réveil planifié</value></data>
+  <data name="PresenceCauseDevice" xml:space="preserve"><value>un périphérique nommé par Windows, sans explication</value></data>
+  <data name="DnsFromCache" xml:space="preserve"><value>réponse du cache local</value></data>
+  <data name="DnsFromNetwork" xml:space="preserve"><value>résolu sur le réseau</value></data>
+  <data name="AlertKindCanaryTouched" xml:space="preserve"><value>fichier leurre modifié</value></data>
+  <data name="AlertKindHighEntropyWrite" xml:space="preserve"><value>écriture à forte entropie</value></data>
+  <data name="AlertKindRename" xml:space="preserve"><value>rafale de renommages</value></data>
+  <data name="AlertKindDelete" xml:space="preserve"><value>rafale de suppressions</value></data>
+  <data name="PersistenceVectorRunOnceEx" xml:space="preserve"><value>Clé RunOnceEx</value></data>
+  <data name="PersistenceVectorSecurityProvider" xml:space="preserve"><value>Fournisseur de sécurité (LSASS)</value></data>
+  <data name="PersistenceVectorJustInTimeDebugger" xml:space="preserve"><value>Débogueur juste-à-temps</value></data>
+  <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>Profil PowerShell</value></data>
+  <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} nouveaux éléments de démarrage, dont {1} à examiner</value></data>
+  <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} nouveaux éléments de démarrage, tous signés et fiables</value></data>
 </root>

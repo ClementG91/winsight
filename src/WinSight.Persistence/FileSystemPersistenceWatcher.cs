@@ -6,7 +6,7 @@ namespace WinSight.Persistence;
 /// folders and <c>\System32\Tasks</c>). Like the registry watcher it is a dumb trigger — the
 /// enumerators re-read the truth. Thin I/O layer; the pure core holds all decisions.
 /// </summary>
-public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
+public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPersistenceWatchCoverage
 {
     private readonly IReadOnlyList<PersistenceWatchTarget> _targets;
     private readonly List<FileSystemWatcher> _watchers = [];
@@ -43,6 +43,12 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource
     {
         get { lock (_gate) { return _watchers.Count; } }
     }
+
+    /// <inheritdoc />
+    public int RequestedLocations => _targets.Count;
+
+    /// <inheritdoc />
+    public int ArmedLocations => WatchedDirectoryCount;
 
     public void Start()
     {

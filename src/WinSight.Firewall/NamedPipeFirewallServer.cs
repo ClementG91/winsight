@@ -43,6 +43,7 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
     private readonly Action? _beforeAdmittedConnectionDispose;
     private readonly TaskCompletionSource _ready =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _connectionFailures;
 
     /// <param name="handler">The exchange handler wrapping the dispatcher.</param>
     /// <param name="pipeName">Pipe name; defaults to the WinSight firewall pipe.</param>
@@ -116,6 +117,12 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
     }
 
     public Task Ready => _ready.Task;
+
+    /// <summary>
+    /// Exchanges that failed after the caller was authenticated and admitted. Contained rather
+    /// than terminal, and counted so the difference is observable instead of silent.
+    /// </summary>
+    public int ConnectionFailures => Volatile.Read(ref _connectionFailures);
 
     /// <summary>
     /// Accepts until cancelled. Startup, successor creation and unexpected connection
@@ -337,9 +344,18 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
         {
             // Listener shutdown cancels in-flight I/O and transitions.
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            fatalConnectionFailure.TrySetResult(ex);
+            // Serving one authenticated exchange is not infrastructure. A failure here says the
+            // command could not be completed, never that the endpoint is unsound, so it closes
+            // this connection and the accept loop keeps running.
+            //
+            // This used to be terminal, and that made a single unhandled exception anywhere
+            // below the dispatcher into a remote stop of the whole service — which, because the
+            // WFP session is dynamic, also destroyed every filter BFE held for it. Authentication,
+            // server creation and admission failures remain terminal below and above this method:
+            // those genuinely are the endpoint's own machinery, and failing closed is right there.
+            Interlocked.Increment(ref _connectionFailures);
         }
         finally
         {

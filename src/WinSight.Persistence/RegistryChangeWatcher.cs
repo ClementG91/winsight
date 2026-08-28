@@ -20,7 +20,7 @@ namespace WinSight.Persistence;
 /// <c>WaitAny</c> accepts at most 64 handles, the watcher caps the number of watched keys at 63 and
 /// exposes the count it actually armed; the default autostart set is well under that.
 /// </remarks>
-public sealed class RegistryChangeWatcher : IPersistenceChangeSource
+public sealed class RegistryChangeWatcher : IPersistenceChangeSource, IPersistenceWatchCoverage
 {
     private const int MaxWatchedKeys = 63; // WaitAny caps at 64 handles; one slot is the cancel event.
 
@@ -89,6 +89,13 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource
     {
         get { lock (_gate) { return _watches.Count; } }
     }
+
+    /// <inheritdoc />
+    /// <remarks>Capped at the same bound Start applies, so the two numbers are comparable.</remarks>
+    public int RequestedLocations => Math.Min(_targets.Count, MaxWatchedKeys);
+
+    /// <inheritdoc />
+    public int ArmedLocations => ArmedKeyCount;
 
     public void Start()
     {

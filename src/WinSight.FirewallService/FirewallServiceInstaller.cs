@@ -47,13 +47,19 @@ public static partial class FirewallServiceInstaller
     public static void Install(string executablePath, IServicePathTrustInspector trustInspector)
         => Install(executablePath, trustInspector, new WindowsServiceControlManager());
 
+    /// <param name="provisionStorage">
+    /// Creates and hardens the policy directory. Injected so the SCM-facing tests do not have to
+    /// touch <c>C:\ProgramData</c>, and so a caller that has already provisioned can say so.
+    /// </param>
     public static void Install(
         string executablePath,
         IServicePathTrustInspector trustInspector,
-        IServiceControlManager serviceControlManager)
+        IServiceControlManager serviceControlManager,
+        Action? provisionStorage = null)
     {
         ArgumentNullException.ThrowIfNull(serviceControlManager);
         var evidence = InspectAndRevalidateExecutable(executablePath, trustInspector);
+        ProvisionPolicyStorage(provisionStorage ?? FirewallServicePaths.ProvisionDefaultDirectoryAction);
         var binaryPath = BuildBinaryPath(evidence.CanonicalPath);
         using var registration = serviceControlManager.Create(binaryPath);
         try
@@ -79,6 +85,54 @@ public static partial class FirewallServiceInstaller
                 registration,
                 ServiceInstallTrustCode.PathChangedRolledBack,
                 $"Service path rejected [{postUse.Code}] and registration was rolled back.");
+        }
+    }
+
+    /// <summary>
+    /// Creates and hardens the policy directory while the caller still holds an administrator token.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why install time and not first start.</b> The default ACL on <c>C:\ProgramData</c> lets
+    /// <c>BUILTIN\Users</c> create subdirectories and materialises CREATOR OWNER as a FullControl
+    /// entry for whoever created one. A standard user can therefore create
+    /// <c>C:\ProgramData\WinSight</c> first, become its owner, and remove SYSTEM and Administrators.
+    /// The service cannot take it back: its token is deliberately restricted to
+    /// SeChangeNotify / SeImpersonate / SeSystemProfile, so it holds neither SeTakeOwnership nor
+    /// SeRestore, and startup fails with <c>[FW_STORAGE_PROVISIONING_FAILED]</c> on every boot -
+    /// persistently, and looking to the operator exactly like a machine where the service was never
+    /// installed.
+    ///
+    /// Doing it here closes the window for the ordinary flow, because <c>install</c> runs elevated
+    /// and an administrator token <i>can</i> reclaim the directory. It also surfaces the problem
+    /// while an operator is watching, rather than leaving a service that registers cleanly and then
+    /// never starts.
+    ///
+    /// Restoring those privileges to the service token was the other option and is worse: it would
+    /// give a LocalSystem service the ability to take ownership of anything on the machine, to
+    /// handle a case an elevated install already handles.
+    /// </remarks>
+    private static void ProvisionPolicyStorage(Action provision)
+    {
+        try
+        {
+            provision();
+        }
+        catch (PolicyStorageTrustException refusal)
+        {
+            throw new ServiceInstallTrustException(
+                ServiceInstallTrustCode.PolicyStorageRefused,
+                $"Policy storage was refused by the trust inspection [{refusal.Code}]; "
+                + "another principal owns it and the service would never start.",
+                refusal);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException
+                                     or IOException
+                                     or InvalidOperationException)
+        {
+            throw new ServiceInstallTrustException(
+                ServiceInstallTrustCode.PolicyStorageRefused,
+                "Policy storage could not be provisioned; the service would never start.",
+                ex);
         }
     }
 
@@ -495,6 +549,13 @@ public enum ServiceInstallTrustCode
     PathChangedRolledBack,
     PostCreateOperationRolledBack,
     RollbackFailed,
+
+    /// <summary>
+    /// The policy directory could not be created or reclaimed. Reported before anything is
+    /// registered, because a service that installs and then never starts is worse than one that
+    /// refuses with a reason.
+    /// </summary>
+    PolicyStorageRefused,
 }
 
 public sealed class ServiceInstallTrustException : InvalidOperationException

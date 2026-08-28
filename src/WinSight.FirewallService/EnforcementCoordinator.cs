@@ -426,6 +426,14 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         {
             failures.Add(rollbackFailure);
         }
+        // An involuntary fall back to audit-only is not the same fact as an operator choosing it,
+        // and reporting them identically is what made this dangerous. The stored mode is genuinely
+        // AuditOnly — nothing is filtered and saying otherwise would overstate protection — but the
+        // effective state says the machine arrived here through a failure. Without this the status
+        // read exactly like a deliberately unarmed machine, so an attacker who provoked the
+        // rollback left no trace an operator could see.
+        SetEffectiveState(FirewallEnforcementState.Degraded);
+
         if (failures.Count != 0)
         {
             throw RollbackFailed(rollbackCode, cause, new AggregateException(failures));

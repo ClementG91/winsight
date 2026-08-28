@@ -111,7 +111,9 @@ stay descriptive.
 
 ## Stack
 
-- **Application and user-mode tools:** C# on .NET 10 LTS, `CsWin32` for P/Invoke, `TraceEvent` for
+- **Application and user-mode tools:** C# on .NET 10 LTS, hand-written `LibraryImport`/`DllImport` declarations for P/Invoke (CsWin32 was
+  considered and not adopted: the interop surface is small, and a hand-written declaration is the
+  thing that gets reviewed), `TraceEvent` for
   ETW, WPF for the dashboard and tray.
 - **Performance-critical core, if ever needed:** Rust or C++.
 - **Kernel driver, if the deferred phases are ever taken up:** C/C++ KMDF minifilter, or Rust

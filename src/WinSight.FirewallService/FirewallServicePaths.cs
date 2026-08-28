@@ -100,6 +100,13 @@ public static class FirewallServicePaths
 
     private static bool IsUnder(string root, string path) =>
         path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// <see cref="ProvisionDefaultDirectory"/> as an action, so installation can inject a
+    /// substitute without every caller having to discard a return value.
+    /// </summary>
+    internal static Action ProvisionDefaultDirectoryAction { get; } =
+        static () => _ = ProvisionDefaultDirectory();
+
 
     public static string ProvisionDefaultDirectory()
     {

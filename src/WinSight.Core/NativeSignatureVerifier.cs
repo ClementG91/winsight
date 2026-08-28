@@ -30,11 +30,31 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var deferToCatalog = new List<string>();
 
+        // Verified in parallel. Each file is an independent WinVerifyTrust call - the API is
+        // thread-safe and the work is dominated by reading the image off disk - so the batch was
+        // spending nearly all of its time waiting, one file at a time. This is what VerifyMany
+        // existed for and it was looping serially: 4 300 autostart entries at ~19 ms each is over a
+        // minute of a scan the operator is watching.
+        //
+        // Bounded rather than unbounded: the point is to keep several reads in flight, not to hand
+        // every core to a security scan running beside the operator's own work.
+        var options = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+        };
+        var verified = new System.Collections.Concurrent.ConcurrentBag<(string Path, SignatureVerdict? Verdict)>();
+        Parallel.ForEach(paths, options, path => verified.Add((path, VerifyEmbedded(path))));
+
+        // Reassembled in the caller's order so a scan's output does not vary run to run.
+        var byPath = new Dictionary<string, SignatureVerdict?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, verdict) in verified)
+        {
+            byPath[path] = verdict;
+        }
         foreach (var path in paths)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var verdict = VerifyEmbedded(path);
-            if (verdict is { } v)
+            if (byPath.TryGetValue(path, out var verdict) && verdict is { } v)
             {
                 results[path] = v;
             }
@@ -67,9 +87,23 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             var state = MapResult((uint)WinVerifyTrustFile(path));
             return state switch
             {
-                SignatureState.SignedTrusted => new SignatureVerdict(SignatureState.SignedTrusted, SignerOf(path)),
+                SignatureState.SignedTrusted => new SignatureVerdict(
+                    SignatureState.SignedTrusted,
+                    SignerOf(path),
+                    // Asked only when the machine actually has a user-installed root, so a healthy
+                    // machine pays nothing for it. WinVerifyTrust consults CurrentUser\Root, which
+                    // any account writes without elevation; the verdict has to say when that is
+                    // where its trust came from.
+                    UserInstalledRoots.TrustsAUserInstalledRoot(path)
+                        ? SignatureTrustAnchor.UserInstalledRoot
+                        : SignatureTrustAnchor.MachineRoot),
                 SignatureState.SignedUntrusted => new SignatureVerdict(SignatureState.SignedUntrusted, SignerOf(path)),
-                _ => null, // NOSIGNATURE / unknown -> catalog fallback
+                // No embedded signature. Before the catalog, ask whether this file belongs to an
+                // installed MSIX package: those are signed once as a package, so their executables
+                // carry no embedded signature and appear in no catalog. Without this the chain ran
+                // out of options and concluded "unsigned" for every Store application on the
+                // machine, Microsoft's own included.
+                _ => MsixPackageSignature.Verify(path), // null here still falls through to the catalog
             };
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)
@@ -82,6 +116,15 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     /// Maps a WinVerifyTrust result to a verdict state, or null when the result means
     /// "no embedded signature / unknown" (the caller then tries the catalog).
     /// </summary>
+    /// <remarks>
+    /// <b>The three "revocation could not be checked" codes are not failures.</b> Revocation runs
+    /// cache-only (see the provider flags below), so on a machine with no cached CRL or OCSP
+    /// response WinVerifyTrust reports the check as undetermined rather than as a bad chain. They
+    /// must map to <see cref="SignatureState.SignedTrusted"/>: falling through to
+    /// <see langword="null"/> would defer a genuinely embedded-signed file to the catalog verifier,
+    /// which has no entry for it, and the file would be reported <i>unsigned</i>. That would have
+    /// been a false accusation against ordinary signed software on every offline machine.
+    /// </remarks>
     public static SignatureState? MapResult(uint result) => result switch
     {
         0x00000000 => SignatureState.SignedTrusted,      // ERROR_SUCCESS
@@ -93,6 +136,9 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         0x800B0109 => SignatureState.SignedUntrusted,    // CERT_E_UNTRUSTEDROOT
         0x800B010A => SignatureState.SignedUntrusted,    // CERT_E_CHAINING
         0x80096004 => SignatureState.SignedUntrusted,    // TRUST_E_CERT_SIGNATURE
+        0x800B010E => SignatureState.SignedTrusted,      // CERT_E_REVOCATION_FAILURE (offline)
+        0x80092012 => SignatureState.SignedTrusted,      // CRYPT_E_NO_REVOCATION_CHECK
+        0x80092013 => SignatureState.SignedTrusted,      // CRYPT_E_REVOCATION_OFFLINE
         0x800B0100 => null,                              // TRUST_E_NOSIGNATURE -> try catalog
         _ => null,                                       // unknown -> try catalog
     };
@@ -119,11 +165,10 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     // ---- WinVerifyTrust interop (stable structs only) ----
 
     private const uint WtdUiNone = 2;
-    private const uint WtdRevokeNone = 0;
+    private const uint WtdRevokeWholeChain = 0x00000001;
     private const uint WtdChoiceFile = 1;
     private const uint WtdStateActionVerify = 1;
     private const uint WtdStateActionClose = 2;
-    private const uint WtdRevocationCheckNone = 0x10;
     private const uint WtdCacheOnlyUrlRetrieval = 0x1000;
     private const uint WtdDisableMd2Md4 = 0x2000;
 
@@ -176,17 +221,24 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             {
                 cbStruct = (uint)Marshal.SizeOf<WinTrustData>(),
                 dwUIChoice = WtdUiNone,
-                fdwRevocationChecks = WtdRevokeNone,
+                fdwRevocationChecks = WtdRevokeWholeChain,
                 dwUnionChoice = WtdChoiceFile,
                 pFile = pFile,
                 dwStateAction = WtdStateActionVerify,
                 // WinSight promises no automatic outbound traffic. Microsoft documents that
                 // WTD_CACHE_ONLY_URL_RETRIEVAL is required to guarantee WinVerifyTrust does not
-                // fetch trust material. Revocation is therefore explicitly cache-only/offline,
-                // while obsolete MD2/MD4 signatures are rejected. WTD_SAFER_FLAG used here before
-                // this change is documented as unsupported and provided no hardening.
-                dwProvFlags = WtdRevocationCheckNone
-                    | WtdCacheOnlyUrlRetrieval
+                // fetch trust material, so revocation runs against what Windows has already
+                // cached and never reaches the network. Obsolete MD2/MD4 signatures are rejected.
+                // WTD_SAFER_FLAG used here before is documented as unsupported and hardened nothing.
+                //
+                // WTD_REVOKE_WHOLECHAIN replaces WTD_REVOKE_NONE, which had been paired with
+                // WTD_REVOCATION_CHECK_NONE: revocation was switched off twice over, so the
+                // CERT_E_REVOKED branch in MapResult was unreachable code and a stolen signing
+                // certificate kept verifying long after it was revoked - the ordinary outcome, since
+                // campaigns using stolen certificates run for months past revocation. Cache-only was
+                // always enough to honour the no-network promise on its own; disabling the check as
+                // well went beyond it and cost the product a real detection.
+                dwProvFlags = WtdCacheOnlyUrlRetrieval
                     | WtdDisableMd2Md4,
             };
             Marshal.StructureToPtr(data, pData, false);

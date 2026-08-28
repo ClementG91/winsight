@@ -24,7 +24,10 @@ public sealed class DnsCacheReader
             var scope = new ManagementScope(@"\\.\root\StandardCimv2");
             using var searcher = new ManagementObjectSearcher(
                 scope, new ObjectQuery("SELECT Name, Type, Data, TimeToLive FROM MSFT_DNSClientCache"));
-            foreach (ManagementBaseObject o in searcher.Get())
+            // The collection owns an unmanaged enumerator and a COM reference; a bare
+            // foreach over searcher.Get() left both to the finaliser.
+            using var results = searcher.Get();
+            foreach (ManagementBaseObject o in results)
             {
                 using (o)
                 {

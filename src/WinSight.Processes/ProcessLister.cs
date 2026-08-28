@@ -27,7 +27,10 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
             var scope = new ManagementScope(@"\\.\root\cimv2");
             using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery(
                 "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine FROM Win32_Process"));
-            foreach (ManagementBaseObject o in searcher.Get())
+            // The collection owns an unmanaged enumerator and a COM reference; a bare
+            // foreach over searcher.Get() left both to the finaliser.
+            using var results = searcher.Get();
+            foreach (ManagementBaseObject o in results)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 using (o)

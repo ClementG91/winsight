@@ -99,6 +99,17 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-VulnerablePackages.ps1
 
+      # The VM qualification protocol's ETW helpers have their own contract test, and until now
+      # nothing ran it: not this workflow, not release.yml, not Build-Release.ps1. That is the same
+      # defect the coverage step below already carries a note about - a gate that exists, is
+      # maintained, and cannot fail a build. It matters more here than most, because the module it
+      # covers is what a validator trusts on a clean VM where nothing else is watching: it proves
+      # the logman resolver ignores a poisoned SystemRoot and PATH, and that the signed-binding
+      # switch is honoured. Seconds to run, and it needs no elevation.
+      - name: Verify ETW validation module contract
+        shell: pwsh
+        run: ./scripts/Test-WinSightEtwValidation.ps1
+
       - name: Build
         run: dotnet build winsight.sln -c Release --no-restore
 

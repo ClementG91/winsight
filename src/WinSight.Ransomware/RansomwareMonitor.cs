@@ -32,6 +32,15 @@ public sealed class RansomwareMonitor : IDisposable
     /// <summary>The burst detector, for acknowledging (Reset) after the operator responds.</summary>
     public RansomwareBurstDetector Detector => _watcher.Detector;
 
+    /// <summary>Directories actually being watched. Zero after a start that could not open any.</summary>
+    public int WatchedDirectoryCount => _watcher.WatchedDirectoryCount;
+
+    /// <summary>
+    /// True when observations were lost - a kernel buffer overrun or a full queue. Surfaced so the
+    /// operator sees a gap in coverage instead of a reassuring zero in the count.
+    /// </summary>
+    public bool CoverageIsIncomplete => _watcher.CoverageIsIncomplete;
+
     /// <summary>Plants the decoys, then starts watching. Idempotent.</summary>
     public void Start()
     {

@@ -29,6 +29,12 @@ public static class RansomwareEntropySampler
         ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".tiff",
         ".mp3", ".mp4", ".m4a", ".mkv", ".avi", ".mov", ".webm", ".flac",
         ".pdf", ".docx", ".xlsx", ".pptx", ".odt", ".ods", ".odp", ".epub",
+        // The macro-enabled and newer Office members are ZIP containers exactly like their plain
+        // counterparts, and leaving them out flagged an ordinary autosave of a macro workbook as
+        // ransomware. .one and .vsdx are compressed by design too.
+        ".xlsm", ".docm", ".pptm", ".xltx", ".dotx", ".potx", ".vsdx", ".vssx", ".one", ".onepkg",
+        // Modern archive and media containers that behave the same way.
+        ".zst", ".lz4", ".br", ".opus", ".aac", ".wma", ".avif", ".jxl",
         ".exe", ".dll", ".sys", ".apk", ".jar", ".nupkg", ".whl",
     };
 

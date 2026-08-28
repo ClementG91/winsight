@@ -20,10 +20,25 @@ Everything WinSight produces stays on your machine:
 | Alert journal | `%LocalAppData%\WinSight\alerts.log`, capped at 500 entries and 16 MiB before an oversized file is preserved aside | So a detection survives a notification Windows suppressed |
 | Crash reports | `%LocalAppData%\WinSight\crashes`, at most 20 reports of 256 KiB | So a crash can be diagnosed by its owner |
 | Firewall policy | The service's own state, on this machine | So your rules survive a reboot |
-| UI language | Per-user Windows registry | So the app opens in your language |
+| Ransomware protection state | `%LocalAppData%\WinSight\protection.txt` and `canary-manifest.txt` | So the choice survives a restart, and decoys left by a crash can be removed |
+| Decoy naming seed | `%LocalAppData%\WinSight\canary-seed.bin`, 32 random bytes, never transmitted | So decoy names cannot be recognised from this repository's source |
+| UI language | `%LocalAppData%\WinSight\ui-language.txt` | So the app opens in your language |
 
 You can delete any of it at any time. Uninstalling removes the application; the folders above are
 yours to keep or delete.
+
+### What ransomware protection reads while it is on
+
+This is not a scan result and leaves no record, but it is file access on your personal documents and
+you should know it happens. While the protection is enabled, WinSight watches Documents, Desktop,
+Pictures, Downloads, Videos and Music, including their subfolders. For each file created or modified
+there it reads **the first 4 KiB** to score how random the content looks - which is how encryption in
+progress is distinguished from ordinary saving. Formats that are compressed by design (Office
+documents, archives, photos, video) are skipped without being opened at all.
+
+Nothing read this way is stored, logged, or transmitted. The score is a number, it is used
+immediately, and it is discarded. Turning the protection off stops the reading and removes the
+decoys.
 
 ## The one thing that leaves your machine
 

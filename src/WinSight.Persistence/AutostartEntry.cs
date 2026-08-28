@@ -27,7 +27,14 @@ public enum AutostartVector
     BrowserHelperObject,
     WindowsLoadRun,
     PrintProvider,
-    // Phase 1.2+: Winsock LSP, shell extensions, ...
+    RunOnceEx,
+    SecurityProvider,
+    JustInTimeDebugger,
+    PowerShellProfile,
+    // Still not enumerated, named here rather than left implicit: Winsock LSP catalog entries
+    // (their DLL path lives inside a packed binary blob), shell extension handlers,
+    // Winlogon\Notify (which modern Windows no longer executes), Group Policy scripts and Office
+    // add-ins.
     // Note: installed shim databases (.sdb) are intentionally NOT enumerated here: a .sdb is
     // never Authenticode-signed, so the signature model would flag every legitimate shim as
     // "unsigned/suspicious" (a guaranteed false positive). Revisit only with an info-only,
@@ -59,6 +66,17 @@ public enum PersistenceStatus
 /// <param name="ExpectedImagePath">Normalized target Windows would load, even when absent.</param>
 /// <param name="ImageStatus">Whether that target is present, absent, inaccessible or unresolved.</param>
 /// <param name="Signature">The executable's Authenticode verdict.</param>
+/// <param name="OriginalFileName">
+/// The name the vendor compiled into the image (VS_VERSIONINFO), when it could be read.
+/// </param>
+/// <remarks>
+/// <b>Why the original file name is carried.</b> The command-line triage matches the resolved file
+/// name against a table of interpreters, so copying <c>powershell.exe</c> to <c>updater.exe</c>
+/// (MITRE T1036.003, masquerading) took the entry out of the table entirely and the rule never
+/// fired. The name a vendor compiles into the image survives a copy, and it is read once during the
+/// scan - beside the signature check, which is already doing I/O - so
+/// <see cref="IsSuspicious"/> stays a pure function that cannot block or throw into a scan.
+/// </remarks>
 public sealed record AutostartEntry(
     AutostartVector Vector,
     string Name,
@@ -67,7 +85,8 @@ public sealed record AutostartEntry(
     string? ImagePath,
     string? ExpectedImagePath,
     ImageResolutionStatus ImageStatus,
-    SignatureVerdict Signature)
+    SignatureVerdict Signature,
+    string? OriginalFileName = null)
 {
     public PersistenceStatus Status => ImageStatus switch
     {
@@ -100,10 +119,31 @@ public sealed record AutostartEntry(
     /// unsigned / signed-but-untrusted, or a command line handing a signed interpreter a payload
     /// its signature does not cover. This is a triage hint, not a verdict.
     /// </summary>
+    /// <remarks>
+    /// <b><see cref="ImageResolutionStatus.Unresolved"/> is tested directly, not through
+    /// <see cref="Status"/>.</b> Both an unresolvable command and a transient I/O failure while
+    /// probing collapse into <see cref="PersistenceStatus.VerificationError"/>, and only the first
+    /// is a finding: "this autostart entry names something Windows can locate and WinSight cannot"
+    /// is a real gap in the file-based verdict, whereas a sharing violation on one probe is a
+    /// coverage problem the report accounts for separately. Reading the coarse status here would
+    /// have conflated them, so the condition this documentation had always claimed was never
+    /// actually implemented.
+    ///
+    /// <b>What it costs.</b> Measured on the development desktop after the resolution fix:
+    /// 1 entry out of 4 350 (an <c>ActiveSetup</c> StubPath whose whole value is the single
+    /// character <c>U</c>). An unresolvable autostart command is rare, and each one is exactly the
+    /// case where no signature verdict exists to speak for the entry.
+    /// </remarks>
     public bool IsSuspicious =>
         Status is PersistenceStatus.FileMissing
             or PersistenceStatus.Unsigned
             or PersistenceStatus.InvalidSignature
             or PersistenceStatus.AccessDenied
+        || ImageStatus is ImageResolutionStatus.Unresolved
+        // "Signed and trusted" is worth no more than the root it chains to, and WinVerifyTrust
+        // consults CurrentUser\Root - a store any account writes with no elevation. An implant
+        // signed beneath a root imported that way read SignatureValid here, which defeated the
+        // central claim of the whole scanner for the price of one unprivileged store write.
+        || Signature.RestsOnUserInstalledTrust
         || Abuse != InterpreterAbuse.None;
 }

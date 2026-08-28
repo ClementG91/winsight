@@ -5,7 +5,7 @@ namespace WinSight.Persistence;
 /// <see cref="PersistenceMonitor"/> can watch the registry and the filesystem together. It forwards
 /// every child's <see cref="SurfaceChanged"/>, starts and disposes them all, and owns nothing else.
 /// </summary>
-public sealed class CompositePersistenceChangeSource : IPersistenceChangeSource
+public sealed class CompositePersistenceChangeSource : IPersistenceChangeSource, IPersistenceWatchCoverage
 {
     private readonly IReadOnlyList<IPersistenceChangeSource> _sources;
     private readonly Lock _gate = new();
@@ -13,6 +13,19 @@ public sealed class CompositePersistenceChangeSource : IPersistenceChangeSource
     private bool _disposed;
 
     public event EventHandler<PersistenceSurfaceChangedEventArgs>? SurfaceChanged;
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// The sum over the sources that can report it. A source that cannot say how much it watches
+    /// contributes nothing to either number rather than a zero to one of them, which would read as
+    /// a gap it has no evidence for.
+    /// </remarks>
+    public int RequestedLocations =>
+        _sources.OfType<IPersistenceWatchCoverage>().Sum(source => source.RequestedLocations);
+
+    /// <inheritdoc />
+    public int ArmedLocations =>
+        _sources.OfType<IPersistenceWatchCoverage>().Sum(source => source.ArmedLocations);
 
     public CompositePersistenceChangeSource(params IPersistenceChangeSource[] sources)
         : this((IEnumerable<IPersistenceChangeSource>)sources)

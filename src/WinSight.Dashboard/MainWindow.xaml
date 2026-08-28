@@ -78,6 +78,24 @@
                               ToolTip="{Binding [RansomwareProtectionTooltip], Source={x:Static local:LocalizationManager.Instance}}"
                               automation:AutomationProperties.Name="{Binding [RansomwareProtectionToggle], Source={x:Static local:LocalizationManager.Instance}}"
                               Checked="RansomwareProtection_Checked" Unchecked="RansomwareProtection_Unchecked" />
+                    <!--
+                        What the real-time protections are actually doing, as opposed to which
+                        checkbox is ticked. Guardian, the camera/mic watch and the ransomware watcher
+                        all start best-effort and swallow their failures, so a protection that never
+                        came up used to render identically to a working one. The dot carries the
+                        weakest state among the running monitors and the tooltip names each one.
+                    -->
+                    <Border x:Name="ProtectionHealthBadge" Height="34" Background="#1E293B" CornerRadius="17"
+                            Padding="12,0" Margin="0,0,10,0"
+                            VerticalAlignment="Center" SnapsToDevicePixels="True">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Ellipse x:Name="ProtectionHealthDot" Width="6" Height="6" Margin="0,0,6,0"
+                                     VerticalAlignment="Center" Fill="#94A3B8" SnapsToDevicePixels="True" />
+                            <TextBlock x:Name="ProtectionHealthText" Foreground="#CBD5E1"
+                                       FontWeight="SemiBold" VerticalAlignment="Center"
+                                       automation:AutomationProperties.Name="{Binding [ProtectionHealthAutomation], Source={x:Static local:LocalizationManager.Instance}}" />
+                        </StackPanel>
+                    </Border>
                     <Border Height="34" Background="#163A2D" CornerRadius="17" Padding="12,0"
                             VerticalAlignment="Center" SnapsToDevicePixels="True">
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">

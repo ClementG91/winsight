@@ -1475,8 +1475,26 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         Assert.IsType<NotSupportedException>(error.InnerException);
     }
 
+    /// <summary>
+    /// An unexpected failure while serving one authenticated request must be answered, contained,
+    /// and survived - never converted into a stop of the endpoint.
+    /// </summary>
+    /// <remarks>
+    /// <b>This assertion is the inverse of the one it replaces.</b> The previous test named the old
+    /// behaviour <c>UnexpectedDispatcherFailure_IsTerminal</c> and pinned it, which is why the
+    /// defect survived review: every fake engine in this suite throws <see cref="IOException"/>,
+    /// which the dispatcher's former type list caught, while the real WFP engine throws
+    /// <see cref="System.ComponentModel.Win32Exception"/>, which it did not. That escape reached
+    /// the listener, was classified terminal, stopped the host and closed the dynamic WFP session,
+    /// so BFE destroyed every filter WinSight owned. A standard user could trigger it by deleting
+    /// their own blocked binary and asking for status.
+    ///
+    /// Terminal behaviour is retained where it belongs and is still covered by
+    /// <c>AuthorisationFailure_IsTerminal</c>: authentication, server creation and admission are
+    /// the endpoint's own machinery, and failing closed there is correct.
+    /// </remarks>
     [Fact]
-    public async Task UnexpectedDispatcherFailure_IsTerminal()
+    public async Task UnexpectedDispatcherFailure_IsContainedToItsOwnConnection()
     {
         var pipeName = UniquePipeName();
         var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
@@ -1489,6 +1507,45 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
 
         var runTask = server.RunAsync(cts.Token);
         await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await using var client = new NamedPipeClientStream(
+                ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
+            await client.ConnectAsync(TimeSpan.FromSeconds(5), cts.Token);
+            await FirewallProtocolCodec.WriteRequestAsync(client, new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus), cts.Token);
+            await client.FlushAsync(cts.Token);
+
+            var response = await FirewallProtocolCodec.ReadResponseAsync(client, cts.Token);
+
+            Assert.False(response.Success);
+            Assert.Equal(FirewallProtocolError.InternalFailure, response.Error);
+        }
+
+        Assert.False(runTask.IsCompleted, "a per-request failure must not stop the accept loop");
+        Assert.Equal(0, server.ConnectionFailures);
+    }
+
+    /// <summary>
+    /// The native exception type the real WFP engine actually raises, driven all the way from the
+    /// engine to the wire. No test injected one before, which is precisely why the escape existed.
+    /// </summary>
+    [Fact]
+    public async Task ANativeEngineFailure_IsAnsweredRatherThanStoppingTheService()
+    {
+        var pipeName = UniquePipeName();
+        var handler = new FirewallConnectionHandler(new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "native-failure-policies.json")),
+            new NativeFailureAuthority()));
+        var server = new NamedPipeFirewallServer(
+            handler, pipeName, authorise: null, securityFactory: CurrentUserSecurity,
+            capabilityAuthorise: _ => FirewallCallerCapability.ReadStatus);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+        var runTask = server.RunAsync(cts.Token);
+        await server.Ready.WaitAsync(TimeSpan.FromSeconds(5), cts.Token);
+
         await using (var client = new NamedPipeClientStream(
             ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous))
         {
@@ -1496,10 +1553,14 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
             await FirewallProtocolCodec.WriteRequestAsync(client, new FirewallCommandRequest(
                 FirewallProtocolCodec.CurrentVersion, Guid.NewGuid(), FirewallCommand.GetStatus), cts.Token);
             await client.FlushAsync(cts.Token);
+
+            var response = await FirewallProtocolCodec.ReadResponseAsync(client, cts.Token);
+
+            Assert.False(response.Success);
+            Assert.Equal(FirewallProtocolError.InternalFailure, response.Error);
         }
 
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => runTask);
-        Assert.IsType<NotSupportedException>(error.InnerException);
+        Assert.False(runTask.IsCompleted, "a native engine failure must not stop the accept loop");
     }
 
     [Fact]
@@ -1826,6 +1887,27 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
         public bool EngineSupported => true;
         public Task<FirewallRuntimeStatus> GetRuntimeStatusAsync(CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("test dispatcher failure");
+        public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+        public Task<OutboundFirewallConfiguration> EnableEnforcementAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+        public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(OutboundFirewallConfiguration.Empty);
+    }
+
+    /// <summary>
+    /// Raises what the WFP path raises. <c>FwpmGetAppIdFromFileName0</c> fails as soon as a blocked
+    /// application's binary is gone, and <c>WfpProvisioning.GetAppId</c> turns that into a
+    /// <see cref="System.ComponentModel.Win32Exception"/> - a type no fake engine in this suite
+    /// produced, and the one the dispatcher's former catch list omitted.
+    /// </summary>
+    private sealed class NativeFailureAuthority : IFirewallMutationAuthority
+    {
+        public bool EngineSupported => true;
+        public Task<FirewallRuntimeStatus> GetRuntimeStatusAsync(CancellationToken cancellationToken = default) =>
+            throw new System.ComponentModel.Win32Exception(2); // ERROR_FILE_NOT_FOUND
         public Task UpsertPolicyAsync(AppFirewallPolicy policy, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
         public Task RemovePolicyAsync(string executablePath, CancellationToken cancellationToken = default) =>

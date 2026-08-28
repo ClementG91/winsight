@@ -57,7 +57,8 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
         token.ThrowIfCancellationRequested();
 
         var processes = new ProcessPathIndex();
-        var normalizer = new KernelPathNormalizer(VolumeMap.Current(), CurrentUserSid());
+        var normalizer = new KernelPathNormalizer(
+            VolumeMap.Current(), CurrentUserSid(), CurrentControlSet());
 
         // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
         // silently replaces another live WinSight owner.
@@ -202,6 +203,29 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
     /// The SID whose hive should read as <c>HKCU</c>. Null when it cannot be determined, which
     /// leaves user hives as <c>HKU\{sid}</c> — correct, just less recognisable.
     /// </summary>
+    /// <summary>
+    /// The active control set number, so a kernel write to <c>SYSTEM\ControlSet001\Services</c>
+    /// can be matched against the <c>CurrentControlSet</c> path every enumerator reports.
+    /// </summary>
+    /// <remarks>
+    /// World-readable, and null when it is not: an unknown control set leaves service and driver
+    /// writes unattributed rather than folding a set that may not be the running one.
+    /// </remarks>
+    private static int? CurrentControlSet()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"SYSTEM\Select");
+            return key?.GetValue("Current") is int current and > 0 ? current : null;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException
+                                     or UnauthorizedAccessException
+                                     or IOException)
+        {
+            return null;
+        }
+    }
+
     private static string? CurrentUserSid()
     {
         try

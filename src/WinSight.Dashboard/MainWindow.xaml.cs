@@ -45,6 +45,22 @@ public partial class MainWindow : Window, IDisposable
     // Which file writes attribution is allowed to remember. Long-lived and shared: the trace thread
     // reads it on every file event while the UI thread updates it as protection is toggled.
     private readonly AttributionScope _attributionScope = new();
+    private readonly ProtectionSettingsStore _protectionSettings = ProtectionSettingsStore.Default;
+
+    // What each real-time monitor actually managed to do, as opposed to what was switched on. These
+    // are read by RefreshProtectionHealth and are the difference between a green badge that means
+    // something and one that only means a checkbox is ticked.
+    private bool _guardianStarted;
+    private bool _cameraMicStarted;
+
+    // Guardian detections waiting to be announced together, and the timer that decides when
+    // "together" has ended. Both are touched only on the UI thread.
+    private readonly List<PersistenceEvent> _pendingDetections = [];
+    private readonly System.Windows.Threading.DispatcherTimer _guardianBalloonTimer = new()
+    {
+        Interval = GuardianAlertBatcher.DefaultWindow,
+    };
+    private SecurityAlert? _pendingAlert;
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -91,6 +107,8 @@ public partial class MainWindow : Window, IDisposable
             }
         };
 
+        _guardianBalloonTimer.Tick += FlushGuardianBalloon;
+
         LanguagePicker.ItemsSource = Text.SupportedLanguages;
         LanguagePicker.SelectedValue = Text.CurrentCode;
         _initializing = false;
@@ -110,21 +128,71 @@ public partial class MainWindow : Window, IDisposable
     {
         StartCameraMicWatch();
         StartAttribution();
+        SweepOrphanedDecoys();
         _guardian.Detected += OnGuardianDetected;
         Task.Run(() =>
         {
             try
             {
                 _guardian.Start();
+                _guardianStarted = true;
             }
             catch (Exception ex) when (ex is IOException
                                          or UnauthorizedAccessException
                                          or System.Security.SecurityException)
             {
                 // Monitoring is best-effort: if the initial scan cannot run, the dashboard still
-                // works and the on-demand persistence scan is unaffected.
+                // works and the on-demand persistence scan is unaffected. It is no longer silent,
+                // though: the protection badge reports the monitor as failed rather than leaving it
+                // indistinguishable from a healthy one.
             }
+            Dispatcher.BeginInvoke(RestoreRansomwareProtection);
         });
+    }
+
+    /// <summary>
+    /// Removes decoys a previous run left behind, before anything else touches them.
+    /// </summary>
+    /// <remarks>
+    /// This used to run only from <c>RansomwareMonitor.Start</c>, i.e. only when protection was
+    /// switched on. Since the switch was never remembered either, rebooting Windows with protection
+    /// on left hidden decoys in the operator's folders that nothing would ever clean up: the next
+    /// launch came back off, so the sweep never ran. Doing it at application start closes that,
+    /// whatever the operator chooses next.
+    /// </remarks>
+    private void SweepOrphanedDecoys() => Task.Run(() =>
+    {
+        try
+        {
+            CanaryManager.RemoveOrphans(CanaryManager.DefaultDirectories());
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // A decoy that cannot be deleted is retried on the next launch.
+        }
+    });
+
+    /// <summary>
+    /// Puts the toggle back where the operator left it, and turns protection back on if it was on.
+    /// </summary>
+    /// <remarks>
+    /// Setting IsChecked raises Checked, which is what actually restarts protection; the guard on
+    /// _ransomware keeps that idempotent. Restoring silently would be wrong for the one feature that
+    /// writes to the operator's folders, so the protection badge reflects the result either way.
+    /// </remarks>
+    private void RestoreRansomwareProtection()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        if (_protectionSettings.RansomwareProtectionEnabled)
+        {
+            RansomwareProtection.IsChecked = true;
+        }
+        RefreshProtectionHealth();
     }
 
     /// <summary>
@@ -164,6 +232,7 @@ public partial class MainWindow : Window, IDisposable
     {
         _avWatch.Detected += OnCameraMicDetected;
         _avWatch.Start();
+        _cameraMicStarted = true;
     }
 
     private void OnCameraMicDetected(object? sender, DeviceEvent e)
@@ -216,6 +285,7 @@ public partial class MainWindow : Window, IDisposable
         var monitor = RansomwareHost.CreateDefault();
         monitor.Detected += OnRansomwareDetected;
         _ransomware = monitor;
+        _protectionSettings.SetRansomwareProtectionEnabled(true);
         Task.Run(() =>
         {
             try
@@ -230,12 +300,82 @@ public partial class MainWindow : Window, IDisposable
                                          or UnauthorizedAccessException
                                          or System.Security.SecurityException)
             {
-                // Best-effort: a folder we cannot write leaves protection partial, not broken.
+                // Best-effort: a folder we cannot write leaves protection partial, not broken - and
+                // "partial" is now something the operator can see rather than a green tick.
             }
+            Dispatcher.BeginInvoke(RefreshProtectionHealth);
         });
     }
 
-    private void RansomwareProtection_Unchecked(object sender, RoutedEventArgs e) => StopRansomwareProtection();
+    /// <remarks>
+    /// The choice is persisted here and not in <see cref="StopRansomwareProtection"/>, which
+    /// <see cref="Dispose"/> also calls: closing the dashboard removes the decoys but must not be
+    /// read as the operator turning protection off.
+    /// </remarks>
+    private void RansomwareProtection_Unchecked(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing)
+        {
+            _protectionSettings.SetRansomwareProtectionEnabled(false);
+        }
+        StopRansomwareProtection();
+        RefreshProtectionHealth();
+    }
+
+    /// <summary>
+    /// Recomputes what the real-time protections are actually doing and renders it.
+    /// </summary>
+    /// <remarks>
+    /// Guardian's armed-location count, the ransomware watcher's directory count and its dropped-event
+    /// counters all existed before this and were read nowhere, so a monitor that started and saw
+    /// nothing rendered exactly like one that was working. This is the one place that difference
+    /// becomes visible.
+    /// </remarks>
+    private void RefreshProtectionHealth()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        var guardianCoverage = _guardian.WatchCoverage;
+        var ransomware = _ransomware;
+        var monitors = new List<MonitorHealth>
+        {
+            MonitorHealth.For(
+                "Guardian",
+                enabled: _guardianStarted,
+                armed: guardianCoverage.Armed,
+                requested: guardianCoverage.Requested),
+            MonitorHealth.For(
+                "Camera/Mic",
+                enabled: _cameraMicStarted,
+                armed: _cameraMicStarted ? 1 : 0,
+                requested: 1),
+            MonitorHealth.For(
+                "Ransomware",
+                enabled: ransomware is not null,
+                armed: ransomware?.WatchedDirectoryCount ?? 0,
+                requested: CanaryManager.DefaultDirectories().Count,
+                lostObservations: ransomware?.CoverageIsIncomplete ?? false),
+        };
+
+        var health = new RealTimeProtectionHealth(monitors);
+        ProtectionHealthDot.Fill = new System.Windows.Media.SolidColorBrush(
+            health.Overall switch
+            {
+                ProtectionState.Active => System.Windows.Media.Color.FromRgb(0x4A, 0xDE, 0x80),
+                ProtectionState.Partial => System.Windows.Media.Color.FromRgb(0xFB, 0xBF, 0x24),
+                ProtectionState.Failed => System.Windows.Media.Color.FromRgb(0xF8, 0x71, 0x71),
+                _ => System.Windows.Media.Color.FromRgb(0x94, 0xA3, 0xB8),
+            });
+        ProtectionHealthText.Text = string.Format(
+            System.Globalization.CultureInfo.CurrentCulture,
+            Text["ProtectionHealthSummary"],
+            health.HealthyCount,
+            health.RunningCount);
+        ProtectionHealthBadge.ToolTip = string.Join(Environment.NewLine, health.Lines());
+    }
 
     /// <summary>Stops protection and removes every planted decoy. Safe to call when already off.</summary>
     private void StopRansomwareProtection()
@@ -308,13 +448,52 @@ public partial class MainWindow : Window, IDisposable
             {
                 return;
             }
-            _balloonAlert = alert;
-            _trayIcon.ShowBalloonTip(
-                5000,
-                Text["GuardianBalloonTitle"],
-                $"{detection.Entry.Vector}/{detection.Entry.Name} — {Text[PersistenceMonitorPresenter.BalloonMessageKey(detection)]}",
-                detection.IsNotable ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
+            _pendingDetections.Add(detection);
+            _pendingAlert = alert;
+            // Restarting the timer coalesces a burst: the balloon is raised once arrivals stop.
+            _guardianBalloonTimer.Stop();
+            _guardianBalloonTimer.Start();
         });
+    }
+
+    /// <summary>
+    /// Announces the detections that arrived together as one balloon.
+    /// </summary>
+    /// <remarks>
+    /// Guardian raised one balloon per new autostart entry, and an ordinary software installation
+    /// writes several at once - a service, a scheduled task, a Run key, a COM registration. Six
+    /// balloons in a few seconds for one act by the operator is not six times the information; it is
+    /// the mechanism by which somebody learns to dismiss this product's alerts without reading them,
+    /// and the alert that matters then arrives in the same shape as the five that did not.
+    ///
+    /// Nothing is dropped: every detection was already journalled before this ran, and every one
+    /// still appears in the alerts view. Only the number of balloons changes.
+    /// </remarks>
+    private void FlushGuardianBalloon(object? sender, EventArgs e)
+    {
+        _guardianBalloonTimer.Stop();
+        if (_disposed || _pendingDetections.Count == 0)
+        {
+            return;
+        }
+
+        var batch = GuardianAlertBatcher.Describe(_pendingDetections);
+        var body = batch.IsSingle
+            ? $"{batch.Single!.Entry.Vector}/{batch.Single.Entry.Name} — "
+                + Text[GuardianAlertBatcher.BalloonMessageKey(batch)]
+            : string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                Text[GuardianAlertBatcher.BalloonMessageKey(batch)],
+                batch.Count,
+                batch.NotableCount);
+
+        _balloonAlert = _pendingAlert;
+        _pendingDetections.Clear();
+        _trayIcon.ShowBalloonTip(
+            5000,
+            Text["GuardianBalloonTitle"],
+            body,
+            batch.IsNotable ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
     }
 
     private static LocalizationManager Text => LocalizationManager.Instance;
@@ -424,7 +603,12 @@ public partial class MainWindow : Window, IDisposable
         LanguagePicker.IsEnabled = !scanning;
         SettingsButton.IsEnabled = !scanning;
         ProgressPanel.Visibility = scanning || _reports.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        CancelButton.Visibility = scanning && tool.Command == "all" ? Visibility.Visible : Visibility.Collapsed;
+        // Cancel is offered for every scan, not only the overview. The single longest scan in the
+        // product is `modules` - measured at 9 991 modules across 155 processes - and it was the one
+        // an operator could not stop, while the business layer had accepted a cancellation token all
+        // along. Every tool below the UI either honours the token or completes in well under a
+        // second, so the button is never a promise the scan cannot keep.
+        CancelButton.Visibility = scanning ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.IsEnabled = scanning;
 
         if (scanning)
@@ -987,6 +1171,8 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _scanCancellation?.Dispose();
+        _guardianBalloonTimer.Stop();
+        _guardianBalloonTimer.Tick -= FlushGuardianBalloon;
         StopRansomwareProtection(); // removes any planted decoys before we go
         _guardian.Detected -= OnGuardianDetected;
         _guardian.Dispose();

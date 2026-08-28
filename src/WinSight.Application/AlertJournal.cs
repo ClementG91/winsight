@@ -38,6 +38,14 @@ public sealed record AlertJournalSnapshot(
 public static class AlertJournal
 {
     /// <summary>Kept small; a journal is for recent history, not an archive.</summary>
+    /// <summary>
+    /// Lines currently in each journal, tracked so the bound can be enforced without reading the
+    /// file on every append. Guarded by <c>Gate</c>, and bounded because a process writes to one
+    /// journal (tests add one entry per temporary path).
+    /// </summary>
+    private static readonly Dictionary<string, int> LineCounts =
+        new(StringComparer.OrdinalIgnoreCase);
+
     internal const int MaxEntries = 500;
 
     internal const int MaxFieldCharacters = 4096;
@@ -84,6 +92,10 @@ public static class AlertJournal
                 {
                     stream.Write(payload);
                     stream.Flush(flushToDisk: true);
+                }
+                if (LineCounts.TryGetValue(path, out var known))
+                {
+                    LineCounts[path] = known + 1;
                 }
                 Trim(path);
             }
@@ -196,9 +208,30 @@ public static class AlertJournal
     }
 
     /// <summary>Keeps only the newest <see cref="MaxEntries"/> lines, so the journal stays bounded.</summary>
+    /// <remarks>
+    /// <b>The file is not re-read on every append.</b> This runs on the detection path - an
+    /// application flickering on the microphone produces an alert a second - and reading every line
+    /// of the journal to discover that it is not yet full is work done thousands of times to answer
+    /// "no". The line count is tracked in memory instead: read once for a given path, then
+    /// incremented per append, so the check is O(1) and the bound is still exact.
+    ///
+    /// The count is re-derived after every trim and whenever it is not known, so an externally
+    /// modified journal self-corrects on the next trim rather than drifting.
+    /// </remarks>
     private static void Trim(string path)
     {
+        if (!LineCounts.TryGetValue(path, out var count))
+        {
+            count = CountLines(path);
+        }
+        LineCounts[path] = count;
+        if (count <= MaxEntries)
+        {
+            return;
+        }
+
         var lines = File.ReadAllLines(path);
+        LineCounts[path] = lines.Length;
         if (lines.Length <= MaxEntries)
         {
             return;
@@ -223,11 +256,34 @@ public static class AlertJournal
                 stream.Flush(flushToDisk: true);
             }
             File.Move(temporaryPath, path, overwrite: true);
+            LineCounts[path] = MaxEntries;
         }
         finally
         {
             try { File.Delete(temporaryPath); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+    }
+
+    private static int CountLines(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return 0;
+            }
+            var lines = 0;
+            using var reader = new StreamReader(path, System.Text.Encoding.UTF8);
+            while (reader.ReadLine() is not null)
+            {
+                lines++;
+            }
+            return lines;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return 0;
         }
     }
 
@@ -237,8 +293,48 @@ public static class AlertJournal
         {
             return;
         }
+        // The journal is about to be moved aside, so whatever was counted no longer describes it.
+        LineCounts.Remove(path);
         var preserved = path + ".oversized-" + DateTime.UtcNow.ToString(
             "yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
         File.Move(path, preserved);
+        PurgeOldPreservedJournals(path);
+    }
+
+    /// <summary>
+    /// Keeps the most recent preserved journals and deletes the rest.
+    /// </summary>
+    /// <remarks>
+    /// A journal was set aside whenever it passed 16 MiB and nothing ever removed the copy, so a
+    /// machine producing alerts steadily accumulated 16 MiB files in the operator's own profile
+    /// indefinitely. Keeping a few is the point - they are evidence - but keeping all of them is a
+    /// disk-consumption bug in a tool whose whole promise is that it does not act on its own.
+    /// </remarks>
+    private static void PurgeOldPreservedJournals(string path)
+    {
+        const int KeepPreserved = 3;
+        try
+        {
+            var directory = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(directory))
+            {
+                return;
+            }
+            var preserved = Directory
+                .GetFiles(directory, Path.GetFileName(path) + ".oversized-*")
+                .OrderByDescending(file => file, StringComparer.Ordinal)
+                .Skip(KeepPreserved);
+            foreach (var stale in preserved)
+            {
+                try { File.Delete(stale); }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // Housekeeping only; a failure here must never affect recording an alert.
+        }
     }
 }

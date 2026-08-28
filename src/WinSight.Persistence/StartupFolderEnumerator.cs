@@ -52,11 +52,47 @@ public sealed class StartupFolderEnumerator(
         }
     }
 
-    private static IReadOnlyList<(string Dir, string Label)> DefaultFolders() =>
-    [
-        (Environment.GetFolderPath(Environment.SpecialFolder.Startup), "User startup"),
-        (Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "Common startup"),
-    ];
+    /// <summary>
+    /// This account's Startup folder, the all-users one, and every other profile's.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the other profiles matter.</b> <c>SpecialFolder.Startup</c> resolves for the account
+    /// running the scan and nobody else, so on a multi-account machine a shortcut dropped in another
+    /// user's Startup folder ran at their logon and appeared in no report - and, because the folder
+    /// was never opened, nothing counted it as unread either. Elevation made it worse rather than
+    /// better: as administrator, the special folder points at the administrator's own profile.
+    ///
+    /// Reading another profile normally requires elevation. A folder that exists and will not open
+    /// is counted as unreadable by <see cref="UnreadableLocations"/>, which is what turns this from
+    /// a silent gap into a stated one.
+    /// </remarks>
+    private static List<(string Dir, string Label)> DefaultFolders()
+    {
+        var folders = new List<(string Dir, string Label)>
+        {
+            (Environment.GetFolderPath(Environment.SpecialFolder.Startup), "User startup"),
+            (Environment.GetFolderPath(Environment.SpecialFolder.CommonStartup), "Common startup"),
+        };
+        var seen = new HashSet<string>(
+            folders.Select(folder => folder.Dir), StringComparer.OrdinalIgnoreCase);
+
+        const string StartupUnderProfile =
+            @"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup";
+        foreach (var sid in UserHiveEnumerator.ProfileSids())
+        {
+            if (UserHiveEnumerator.ProfileDirectory(sid) is not { Length: > 0 } profile)
+            {
+                continue;
+            }
+            var startup = Path.Combine(profile, StartupUnderProfile);
+            if (seen.Add(startup))
+            {
+                var owner = Path.GetFileName(Path.TrimEndingDirectorySeparator(profile));
+                folders.Add((startup, $"Startup ({owner})"));
+            }
+        }
+        return folders;
+    }
 
     private static string ResolveCommand(string file)
     {

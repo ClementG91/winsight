@@ -15,6 +15,11 @@ namespace WinSight.Certificates;
 /// <param name="HasPrivateKey">Whether the machine holds the root's private key.</param>
 /// <param name="IsSelfSigned">Whether the certificate is self-signed (Subject == Issuer).</param>
 /// <param name="NotAfter">Expiry.</param>
+/// <param name="IsUserInstalled">
+/// Trusted for this user only, i.e. present in <c>CurrentUser\Root</c> and absent from
+/// <c>LocalMachine\Root</c>. Windows' own root program updates land machine-wide, so a root that
+/// exists only in the user view is one somebody put there - which needs no elevation at all.
+/// </param>
 public sealed record TrustedCertificate(
     string Store,
     string Subject,
@@ -25,7 +30,8 @@ public sealed record TrustedCertificate(
     bool IsRsa,
     bool HasPrivateKey,
     bool IsSelfSigned,
-    DateTime NotAfter)
+    DateTime NotAfter,
+    bool IsUserInstalled = false)
 {
     /// <summary>
     /// Concrete reasons this trusted root warrants review, empty for a clean root.
@@ -35,6 +41,21 @@ public sealed record TrustedCertificate(
         get
         {
             var risks = new List<string>();
+            if (IsUserInstalled)
+            {
+                // The signal the three checks below all miss. This type's own summary claims to
+                // catch Superfish / eDellRoot-class rogue roots, and a freshly generated
+                // RSA-4096 / SHA-256 self-signed root has no private key on the machine, no weak
+                // signature and no undersized key - so it passed every existing test while doing
+                // exactly what those incidents did. It is also the cheapest step of the whole
+                // attack: CurrentUser\Root is writable by any account, with no prompt, and one
+                // import makes every certificate issued beneath it verify as trusted - to Windows,
+                // to browsers, and to WinSight's own Authenticode verdicts.
+                //
+                // Deliberately worded as a fact rather than an accusation: enterprise deployment
+                // and local development tools legitimately install roots this way.
+                risks.Add("trusted for this user only - a root an unprivileged program can install");
+            }
             if (HasPrivateKey)
             {
                 // A legitimate public root never ships its private key to your machine.

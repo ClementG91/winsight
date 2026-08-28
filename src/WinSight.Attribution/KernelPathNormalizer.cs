@@ -28,8 +28,14 @@ public sealed class KernelPathNormalizer
     private const string ContainerHive = "WC";
     private const string UserSiloSuffix = "user_sid";
 
+    // "SYSTEM\ControlSet001" and friends: the kernel reports the control set by number, while every
+    // enumerator - and every operator - names it CurrentControlSet.
+    private const string ControlSetRoot = @"SYSTEM\ControlSet";
+    private const string CurrentControlSet = @"SYSTEM\CurrentControlSet";
+
     private readonly Dictionary<string, string> _deviceToDrive;
     private readonly string? _currentUserSid;
+    private readonly int? _currentControlSet;
 
     /// <param name="deviceToDrive">
     /// NT device name to drive letter, e.g. <c>\Device\HarddiskVolume3</c> to <c>C:</c>. Supplied by
@@ -39,10 +45,17 @@ public sealed class KernelPathNormalizer
     /// The SID whose registry hive should read as <c>HKCU</c>. Null leaves every user hive as
     /// <c>HKU\{sid}</c>, which is correct but less recognisable.
     /// </param>
+    /// <param name="currentControlSet">
+    /// The number in <c>HKLM\SYSTEM\Select\Current</c>, so <c>ControlSet001</c> can be recognised
+    /// as <c>CurrentControlSet</c>. Null means no control set is folded, which leaves service and
+    /// driver writes unattributed rather than risking a wrong name.
+    /// </param>
     public KernelPathNormalizer(
         IReadOnlyDictionary<string, string>? deviceToDrive = null,
-        string? currentUserSid = null)
+        string? currentUserSid = null,
+        int? currentControlSet = null)
     {
+        _currentControlSet = currentControlSet is > 0 ? currentControlSet : null;
         _deviceToDrive = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in deviceToDrive ?? new Dictionary<string, string>())
         {
@@ -118,7 +131,7 @@ public sealed class KernelPathNormalizer
 
         if (hive.Equals(MachineHive, StringComparison.OrdinalIgnoreCase))
         {
-            return Join("HKLM", rest);
+            return Join("HKLM", FoldCurrentControlSet(rest));
         }
         if (hive.Equals(ContainerHive, StringComparison.OrdinalIgnoreCase))
         {
@@ -145,6 +158,45 @@ public sealed class KernelPathNormalizer
             return Join("HKCU", underSid);
         }
         return Join($"HKU\\{sid}", underSid);
+    }
+
+    /// <summary>
+    /// Rewrites the active <c>ControlSetNNN</c> as <c>CurrentControlSet</c>, so a service or driver
+    /// write can be matched against the key an enumerator reported.
+    /// </summary>
+    /// <remarks>
+    /// <b>What this was costing.</b> <c>ServiceEnumerator</c> emits
+    /// <c>HKLM\SYSTEM\CurrentControlSet\Services\&lt;name&gt;</c>; the kernel reports
+    /// <c>\REGISTRY\MACHINE\SYSTEM\ControlSet001\Services\&lt;name&gt;</c>. The two never
+    /// matched, so <i>no service and no driver installation was ever attributable</i> - two of the
+    /// most interesting targets of the whole feature, silently out of reach while the plumbing
+    /// appeared to work.
+    ///
+    /// <b>Only the active set is folded.</b> A write to a non-active control set is a different key
+    /// with different consequences, and naming a program the author of a change it did not make to
+    /// the running configuration would be exactly the wrong kind of confident. When the current set
+    /// is unknown, nothing is folded and the write stays unattributed - the same answer as before,
+    /// which is honest rather than merely unhelpful.
+    /// </remarks>
+    private string FoldCurrentControlSet(string rest)
+    {
+        if (_currentControlSet is not { } current
+            || !rest.StartsWith(ControlSetRoot, StringComparison.OrdinalIgnoreCase))
+        {
+            return rest;
+        }
+
+        var afterRoot = rest[ControlSetRoot.Length..];
+        var end = afterRoot.IndexOf('\\');
+        var number = end < 0 ? afterRoot : afterRoot[..end];
+        if (number.Length == 0
+            || !int.TryParse(number, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed)
+            || parsed != current)
+        {
+            return rest;
+        }
+        return end < 0 ? CurrentControlSet : CurrentControlSet + afterRoot[end..];
     }
 
     /// <summary>

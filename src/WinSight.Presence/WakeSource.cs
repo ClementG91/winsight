@@ -38,6 +38,16 @@ public enum WakeCause
 /// locale — this machine renders the label in French — and would invent a cause when Windows
 /// declined to give one. The device name is consulted only to tell one kind of device from another,
 /// never to overrule the code.
+///
+/// <b>And the fragments it is told apart with had to be localised too.</b> The comment above was
+/// right about the principle and the code did not follow it: <c>ClassifyDevice</c> matched
+/// <c>"keyboard"</c>, <c>"mouse"</c> and <c>"touchpad"</c> against a name Windows renders in the
+/// system language, so on the French and Spanish builds this product ships in, a keyboard wake fell
+/// through to <c>WakeCause.Device</c>, <c>IndicatesPresence</c> was false, and
+/// <c>winsight presence --flagged</c> could never return anything at all. Fragments for the three
+/// shipped languages are matched, and matching is diacritic-insensitive so "pavé tactile" and
+/// "pave tactile" are one rule rather than two. A locale WinSight does not ship in still degrades
+/// to "a device Windows named", which is the honest answer rather than a wrong one.
 /// </remarks>
 public static class WakeSource
 {
@@ -55,11 +65,25 @@ public static class WakeSource
     /// cannot plausibly appear in anything else.
     /// </remarks>
     private static readonly string[] InputDeviceNames =
-        ["keyboard", "mouse", "hid ", "input device", "touchpad", "trackpad"];
+    [
+        // English
+        "keyboard", "mouse", "hid ", "input device", "touchpad", "trackpad",
+        // French
+        "clavier", "souris", "pave tactile", "peripherique d'entree", "peripherique de saisie",
+        // Spanish
+        "teclado", "raton", "panel tactil", "dispositivo de entrada",
+    ];
 
     /// <summary>Fragments that mean a network adapter — the common real cause of a device wake.</summary>
     private static readonly string[] NetworkDeviceNames =
-        ["ethernet", "wi-fi", "wifi", "wireless", "network", "802.11", "gbe"];
+    [
+        // English
+        "ethernet", "wi-fi", "wifi", "wireless", "network", "802.11", "gbe",
+        // French
+        "reseau", "sans fil", "carte reseau",
+        // Spanish
+        "red ", "inalambric", "adaptador de red",
+    ];
 
     /// <summary>
     /// The cause behind a resume. <paramref name="sourceType"/> is Windows' own code;
@@ -98,6 +122,56 @@ public static class WakeSource
         return Matches(sourceText, NetworkDeviceNames) ? WakeCause.Network : WakeCause.Device;
     }
 
-    private static bool Matches(string source, string[] fragments) =>
-        fragments.Any(fragment => source.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+    /// <summary>
+    /// Fragment matching that ignores accents, so one rule covers every spelling Windows and its
+    /// drivers use for the same word.
+    /// </summary>
+    private static bool Matches(string source, string[] fragments)
+    {
+        var folded = Fold(source);
+        return fragments.Any(fragment => folded.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Strips diacritics: "Périphérique d'entrée" becomes "Peripherique d'entree".
+    /// </summary>
+    /// <remarks>
+    /// <b>Explicitly mapped rather than normalised.</b> The obvious implementation — decompose with
+    /// <c>NormalizationForm.FormD</c> and drop the combining marks — is silently a no-op in this
+    /// product: every assembly is built with <c>InvariantGlobalization=true</c>, so there is no ICU
+    /// to decompose with. It compiles, runs, returns the string unchanged, and the rule it exists to
+    /// support quietly never fires — which is the same class of failure as the localisation bug this
+    /// method was written to fix. A table cannot fail that way, needs no globalisation data, and
+    /// covers exactly the Latin-1 range the three shipped languages use.
+    ///
+    /// The typographic apostrophe is folded here too: Windows renders U+2019, and a fragment should
+    /// not have to be written twice to match both spellings.
+    /// </remarks>
+    internal static string Fold(string value)
+    {
+        var builder = new System.Text.StringBuilder(value.Length);
+        foreach (var character in value)
+        {
+            builder.Append(character switch
+            {
+                'á' or 'à' or 'â' or 'ä' or 'ã' or 'å' => 'a',
+                'Á' or 'À' or 'Â' or 'Ä' or 'Ã' or 'Å' => 'A',
+                'é' or 'è' or 'ê' or 'ë' => 'e',
+                'É' or 'È' or 'Ê' or 'Ë' => 'E',
+                'í' or 'ì' or 'î' or 'ï' => 'i',
+                'Í' or 'Ì' or 'Î' or 'Ï' => 'I',
+                'ó' or 'ò' or 'ô' or 'ö' or 'õ' => 'o',
+                'Ó' or 'Ò' or 'Ô' or 'Ö' or 'Õ' => 'O',
+                'ú' or 'ù' or 'û' or 'ü' => 'u',
+                'Ú' or 'Ù' or 'Û' or 'Ü' => 'U',
+                'ñ' => 'n',
+                'Ñ' => 'N',
+                'ç' => 'c',
+                'Ç' => 'C',
+                '’' => '\'',
+                _ => character,
+            });
+        }
+        return builder.ToString();
+    }
 }
