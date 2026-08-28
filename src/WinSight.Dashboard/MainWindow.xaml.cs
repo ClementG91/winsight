@@ -553,7 +553,12 @@ public partial class MainWindow : Window, IDisposable
         LanguagePicker.IsEnabled = !scanning;
         SettingsButton.IsEnabled = !scanning;
         ProgressPanel.Visibility = scanning || _reports.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-        CancelButton.Visibility = scanning && tool.Command == "all" ? Visibility.Visible : Visibility.Collapsed;
+        // Cancel is offered for every scan, not only the overview. The single longest scan in the
+        // product is `modules` - measured at 9 991 modules across 155 processes - and it was the one
+        // an operator could not stop, while the business layer had accepted a cancellation token all
+        // along. Every tool below the UI either honours the token or completes in well under a
+        // second, so the button is never a promise the scan cannot keep.
+        CancelButton.Visibility = scanning ? Visibility.Visible : Visibility.Collapsed;
         CancelButton.IsEnabled = scanning;
 
         if (scanning)

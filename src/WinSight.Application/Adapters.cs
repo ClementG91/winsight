@@ -130,8 +130,8 @@ public static class Adapters
             "firewall" or "fw" => Firewall(flaggedOnly),
             "processes" or "ps" => Processes(flaggedOnly, cancellationToken),
             "modules" or "dll" => Modules(flaggedOnly, cancellationToken),
-            "extensions" or "ext" => Extensions(flaggedOnly),
-            "certificates" or "certs" => Certificates(flaggedOnly),
+            "extensions" or "ext" => Extensions(flaggedOnly, cancellationToken),
+            "certificates" or "certs" => Certificates(flaggedOnly, cancellationToken),
             "hosts" => Hosts(flaggedOnly),
             "input" or "inputhooks" => InputHooks(flaggedOnly, cancellationToken),
             "integrity" or "ci" => CodeIntegrity(
@@ -1365,8 +1365,9 @@ public static class Adapters
                 + "machine, so WinSight cannot establish folder protection.",
         };
 
-    public static ToolReport Certificates(bool flaggedOnly)
+    public static ToolReport Certificates(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var acquisition = new CertStoreAuditor().SnapshotWithCoverage();
         var certs = acquisition.Items;
         var b = new ToolReport.Builder("certificates");
@@ -1397,8 +1398,9 @@ public static class Adapters
         return b.Build($"{certs.Count} trusted root(s), {certs.Count(c => c.Notable)} flagged{CoverageSuffix(acquisition)}");
     }
 
-    public static ToolReport Extensions(bool flaggedOnly)
+    public static ToolReport Extensions(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var acquisition = new ExtensionScanner().SnapshotWithCoverage();
         var extensions = acquisition.Items;
         var b = new ToolReport.Builder("extensions");
