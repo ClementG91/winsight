@@ -44,6 +44,7 @@ public static partial class CliHelp
         Options:
           --flagged     only noteworthy items
           --json        machine-readable output
+          --no-network  never contact VirusTotal, whatever WINSIGHT_VT_KEY is set to
           --version     print version
           --help, -h    show this help
 

@@ -135,6 +135,14 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
 - **A COM-handler scheduled task whose CLSID resolves to no file is counted, not reported.** Windows
   ships such tasks; reporting the bare GUID would flag them everywhere. They appear in the
   unreadable-locations count instead.
+- **The ransomware burst heuristic has no process attribution and no allowlist.** It counts
+  distinct files touched in a sliding window - twelve in three seconds - so a deliberate bulk
+  operation by the operator (emptying a folder, a batch rename, a large archive extraction, a
+  cloud-sync client reconciling a redirected folder) can reach the threshold. It cannot tell who
+  is doing the touching, because the burst detector is a pure function over file events and process
+  attribution needs an elevated kernel trace. A touched decoy, which is the high-confidence signal,
+  has no such ambiguity. Both the threshold and the window are constructor parameters, but nothing
+  in the UI exposes them yet.
 - **Per-user registry hives are read only for accounts that are logged on.** A profile whose
   `NTUSER.DAT` is not loaded is counted as a location this scan could not read; loading it is a
   privileged, machine-modifying act a read-only tool will not perform.

@@ -39,7 +39,7 @@ public static class CliContract
     /// <summary>Options every command accepts.</summary>
     private static readonly HashSet<string> GlobalOptions = new(StringComparer.OrdinalIgnoreCase)
     {
-        "--json", "--flagged", "--watch", "--help", "-h", "--version",
+        "--json", "--flagged", "--watch", "--help", "-h", "--version", "--no-network",
     };
 
     /// <summary>

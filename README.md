@@ -133,7 +133,10 @@ service and mutates WFP, which should be an explicit decision. See
 ## Security posture
 
 - **No telemetry, no analytics, no account.** The only outbound connection is an explicit,
-  user-initiated VirusTotal hash lookup - a hash, never file contents.
+  user-initiated VirusTotal hash lookup - a hash, never file contents. It is enabled by the
+  presence of a `WINSIGHT_VT_KEY` environment variable, so a shell or a scheduled task that
+  inherits one makes an otherwise local scan reach the network; pass `--no-network` to refuse
+  regardless.
 - **The privileged boundary is an authenticated named-pipe channel**, not the UI. The dashboard is an
   unprivileged IPC client and cannot change policy on its own; an unelevated administrator is refused
   exactly like a standard user.

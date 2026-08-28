@@ -34,6 +34,11 @@ if (CliContract.FirstUnknownOption(args) is { } unknownOption)
 
 var json = args.Contains("--json");
 var flaggedOnly = args.Contains("--flagged");
+// VirusTotal enrichment is opt-in through WINSIGHT_VT_KEY, which means an environment that happens
+// to carry the variable makes an otherwise local scan reach the network - and neither --help nor the
+// README said so on the CLI side. --no-network is the explicit way to refuse, for a scheduled task
+// or an air-gapped run where inheriting the variable would be a surprise.
+var allowNetworkLookups = !args.Contains("--no-network");
 var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?? "all";
 
 // A second verb was silently dropped: `winsight persistence extensions` ran a persistence scan and
@@ -104,8 +109,8 @@ IReadOnlyList<ToolReport> reports;
 try
 {
     reports = command == "all"
-        ? Adapters.RunOverview(flaggedOnly)
-        : [Adapters.Run(command, flaggedOnly)];
+        ? Adapters.RunOverview(flaggedOnly, progress: null, allowNetworkLookups)
+        : [Adapters.Run(command, flaggedOnly, allowNetworkLookups)];
 }
 catch (ArgumentOutOfRangeException)
 {
