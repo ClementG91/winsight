@@ -52,6 +52,15 @@ public partial class MainWindow : Window, IDisposable
     // something and one that only means a checkbox is ticked.
     private bool _guardianStarted;
     private bool _cameraMicStarted;
+
+    // Guardian detections waiting to be announced together, and the timer that decides when
+    // "together" has ended. Both are touched only on the UI thread.
+    private readonly List<PersistenceEvent> _pendingDetections = [];
+    private readonly System.Windows.Threading.DispatcherTimer _guardianBalloonTimer = new()
+    {
+        Interval = GuardianAlertBatcher.DefaultWindow,
+    };
+    private SecurityAlert? _pendingAlert;
     private bool _allowClose;
     private bool _disposed;
     private bool _initializing = true;
@@ -97,6 +106,8 @@ public partial class MainWindow : Window, IDisposable
                 HideToTray();
             }
         };
+
+        _guardianBalloonTimer.Tick += FlushGuardianBalloon;
 
         LanguagePicker.ItemsSource = Text.SupportedLanguages;
         LanguagePicker.SelectedValue = Text.CurrentCode;
@@ -437,13 +448,52 @@ public partial class MainWindow : Window, IDisposable
             {
                 return;
             }
-            _balloonAlert = alert;
-            _trayIcon.ShowBalloonTip(
-                5000,
-                Text["GuardianBalloonTitle"],
-                $"{detection.Entry.Vector}/{detection.Entry.Name} — {Text[PersistenceMonitorPresenter.BalloonMessageKey(detection)]}",
-                detection.IsNotable ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
+            _pendingDetections.Add(detection);
+            _pendingAlert = alert;
+            // Restarting the timer coalesces a burst: the balloon is raised once arrivals stop.
+            _guardianBalloonTimer.Stop();
+            _guardianBalloonTimer.Start();
         });
+    }
+
+    /// <summary>
+    /// Announces the detections that arrived together as one balloon.
+    /// </summary>
+    /// <remarks>
+    /// Guardian raised one balloon per new autostart entry, and an ordinary software installation
+    /// writes several at once - a service, a scheduled task, a Run key, a COM registration. Six
+    /// balloons in a few seconds for one act by the operator is not six times the information; it is
+    /// the mechanism by which somebody learns to dismiss this product's alerts without reading them,
+    /// and the alert that matters then arrives in the same shape as the five that did not.
+    ///
+    /// Nothing is dropped: every detection was already journalled before this ran, and every one
+    /// still appears in the alerts view. Only the number of balloons changes.
+    /// </remarks>
+    private void FlushGuardianBalloon(object? sender, EventArgs e)
+    {
+        _guardianBalloonTimer.Stop();
+        if (_disposed || _pendingDetections.Count == 0)
+        {
+            return;
+        }
+
+        var batch = GuardianAlertBatcher.Describe(_pendingDetections);
+        var body = batch.IsSingle
+            ? $"{batch.Single!.Entry.Vector}/{batch.Single.Entry.Name} — "
+                + Text[GuardianAlertBatcher.BalloonMessageKey(batch)]
+            : string.Format(
+                System.Globalization.CultureInfo.CurrentCulture,
+                Text[GuardianAlertBatcher.BalloonMessageKey(batch)],
+                batch.Count,
+                batch.NotableCount);
+
+        _balloonAlert = _pendingAlert;
+        _pendingDetections.Clear();
+        _trayIcon.ShowBalloonTip(
+            5000,
+            Text["GuardianBalloonTitle"],
+            body,
+            batch.IsNotable ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
     }
 
     private static LocalizationManager Text => LocalizationManager.Instance;
@@ -1121,6 +1171,8 @@ public partial class MainWindow : Window, IDisposable
         }
 
         _scanCancellation?.Dispose();
+        _guardianBalloonTimer.Stop();
+        _guardianBalloonTimer.Tick -= FlushGuardianBalloon;
         StopRansomwareProtection(); // removes any planted decoys before we go
         _guardian.Detected -= OnGuardianDetected;
         _guardian.Dispose();

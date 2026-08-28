@@ -95,6 +95,15 @@ went from 63 s to 22 s with identical output, and the Application test suite fro
   was already re-hardened deliberately; what was missing was the privilege to reclaim it, which is
   why the fix moved to install time rather than widening the service token.
 
+**Alert fatigue.** Guardian raised one tray balloon per new autostart entry, and an ordinary
+software installation writes several at once - a service, a scheduled task, a Run key, a COM
+registration. Six balloons in a few seconds for one act by the operator is not six times the
+information; it is how somebody learns to dismiss this product's alerts without reading them, and
+the alert that matters then arrives in the same shape as the five that did not. Detections arriving
+within three seconds are announced together. Nothing is dropped - every one is still journalled and
+still appears in the alerts view - and a batch containing anything notable is announced as notable,
+led by the notable entry so clicking through lands on it.
+
 **Continuous integration.** `Test-WinSightEtwValidation.ps1` - the contract test for the ETW helpers
 the VM protocol depends on - was invoked by no workflow at all, which is the same defect the coverage
 gate already carries a note about: a gate that exists, is maintained, and cannot fail a build. It now

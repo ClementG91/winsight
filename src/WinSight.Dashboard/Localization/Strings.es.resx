@@ -344,4 +344,6 @@
   <data name="PersistenceVectorSecurityProvider" xml:space="preserve"><value>Proveedor de seguridad (LSASS)</value></data>
   <data name="PersistenceVectorJustInTimeDebugger" xml:space="preserve"><value>Depurador justo a tiempo</value></data>
   <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>Perfil de PowerShell</value></data>
+  <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} nuevos elementos de inicio, {1} para revisar</value></data>
+  <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} nuevos elementos de inicio, todos firmados y de confianza</value></data>
 </root>
