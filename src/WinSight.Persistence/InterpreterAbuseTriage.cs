@@ -84,9 +84,17 @@ public static class InterpreterAbuseTriage
     };
 
     /// <summary>Script bodies and download primitives carried inline on a command line.</summary>
+    /// <remarks>
+    /// <c>-enc</c> alone was not enough. PowerShell accepts any unambiguous prefix of a parameter
+    /// name, so <c>-e</c>, <c>-ec</c>, <c>-en</c> and <c>-encod</c> all mean
+    /// <c>-EncodedCommand</c> and all ran an encoded payload past this rule. Writing two fewer
+    /// characters defeated it, which is the same shape of bypass as dropping the <c>.exe</c>.
+    /// Prefixes are handled by <see cref="ContainsEncodedCommandSwitch"/> rather than by listing
+    /// every spelling, because the list would be one more thing to keep complete.
+    /// </remarks>
     private static readonly string[] EncodedMarkers =
     [
-        "-enc", "-encodedcommand", "/enc", "frombase64string", "invoke-expression",
+        "frombase64string", "invoke-expression",
         "iex(", "iex ", "downloadstring", "downloadfile", "invoke-webrequest",
         "javascript:", "vbscript:", "runhtmlapplication",
     ];
@@ -155,7 +163,7 @@ public static class InterpreterAbuseTriage
         {
             return InterpreterAbuse.ScriptletCom;
         }
-        if (ContainsAny(commandLine, EncodedMarkers))
+        if (ContainsAny(commandLine, EncodedMarkers) || ContainsEncodedCommandSwitch(commandLine))
         {
             return InterpreterAbuse.EncodedCommand;
         }
@@ -194,6 +202,57 @@ public static class InterpreterAbuseTriage
         return next < command.Length && (command[next] == '?' || command[next] == '.');
     }
 
+    /// <summary>
+    /// True when the command line carries PowerShell's <c>-EncodedCommand</c> switch under any of
+    /// the abbreviations PowerShell itself accepts.
+    /// </summary>
+    /// <remarks>
+    /// Parameter-name resolution takes any unambiguous prefix, so everything from <c>-e</c> to the
+    /// full name is the same switch, and <c>-ec</c> is a documented alias besides - not a prefix of
+    /// anything, and the spelling most commonly seen in the wild. Both <c>-</c> and <c>/</c>
+    /// introducers are accepted, matching
+    /// what the interpreter accepts. The switch must be a whole token - preceded by whitespace or
+    /// at the start, and followed by whitespace, a colon or the end - so a path such as
+    /// <c>C:\tools\-enc\x.ps1</c> does not trip it.
+    /// </remarks>
+    internal static bool ContainsEncodedCommandSwitch(string command)
+    {
+        const string Full = "encodedcommand";
+        for (var index = 0; index < command.Length; index++)
+        {
+            var introducer = command[index];
+            if (introducer is not ('-' or '/'))
+            {
+                continue;
+            }
+            if (index > 0 && !char.IsWhiteSpace(command[index - 1]))
+            {
+                continue;
+            }
+
+            var end = index + 1;
+            while (end < command.Length && char.IsAsciiLetter(command[end]))
+            {
+                end++;
+            }
+            var name = command.AsSpan(index + 1, end - index - 1);
+            // Any prefix of the full name, plus the documented "ec" alias, which is not a prefix of
+            // anything and is the spelling most commonly seen in the wild.
+            var isPrefix = name.Length > 0
+                && name.Length <= Full.Length
+                && Full.AsSpan(0, name.Length).Equals(name, StringComparison.OrdinalIgnoreCase);
+            if (!isPrefix && !name.Equals("ec", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (end == command.Length || char.IsWhiteSpace(command[end]) || command[end] == ':')
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static bool ContainsAny(string command, string[] markers)
     {
         foreach (var marker in markers)
@@ -224,6 +283,12 @@ public static class InterpreterAbuseTriage
     /// </remarks>
     private static string? ImageName(AutostartEntry entry)
     {
+        // The vendor's compiled-in name first: it survives a copy, so renaming powershell.exe to
+        // updater.exe no longer takes the entry out of the interpreter table (MITRE T1036.003).
+        if (!string.IsNullOrWhiteSpace(entry.OriginalFileName))
+        {
+            return NormalizeExtension(SafeFileName(entry.OriginalFileName));
+        }
         var path = entry.ImagePath ?? entry.ExpectedImagePath;
         if (!string.IsNullOrWhiteSpace(path))
         {

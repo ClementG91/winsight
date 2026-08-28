@@ -59,6 +59,17 @@ public enum PersistenceStatus
 /// <param name="ExpectedImagePath">Normalized target Windows would load, even when absent.</param>
 /// <param name="ImageStatus">Whether that target is present, absent, inaccessible or unresolved.</param>
 /// <param name="Signature">The executable's Authenticode verdict.</param>
+/// <param name="OriginalFileName">
+/// The name the vendor compiled into the image (VS_VERSIONINFO), when it could be read.
+/// </param>
+/// <remarks>
+/// <b>Why the original file name is carried.</b> The command-line triage matches the resolved file
+/// name against a table of interpreters, so copying <c>powershell.exe</c> to <c>updater.exe</c>
+/// (MITRE T1036.003, masquerading) took the entry out of the table entirely and the rule never
+/// fired. The name a vendor compiles into the image survives a copy, and it is read once during the
+/// scan - beside the signature check, which is already doing I/O - so
+/// <see cref="IsSuspicious"/> stays a pure function that cannot block or throw into a scan.
+/// </remarks>
 public sealed record AutostartEntry(
     AutostartVector Vector,
     string Name,
@@ -67,7 +78,8 @@ public sealed record AutostartEntry(
     string? ImagePath,
     string? ExpectedImagePath,
     ImageResolutionStatus ImageStatus,
-    SignatureVerdict Signature)
+    SignatureVerdict Signature,
+    string? OriginalFileName = null)
 {
     public PersistenceStatus Status => ImageStatus switch
     {
