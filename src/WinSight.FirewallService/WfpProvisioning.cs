@@ -57,6 +57,28 @@ public static partial class WfpProvisioning
     private const string BlockFilterDescription =
         "Blocks outbound connections for one application (per-app, IPv4 and IPv6).";
 
+    /// <summary>
+    /// Arbitration weight of the WinSight sublayer.
+    /// </summary>
+    /// <remarks>
+    /// <b>It was 0, the minimum.</b> WFP arbitrates between sublayers by weight, and a filter in a
+    /// heavier sublayer that carries <c>FWPM_FILTER_FLAG_CLEAR_ACTION_RIGHT</c> can veto a decision
+    /// made in a lighter one. Sitting at the very bottom put WinSight's BLOCK below anything that
+    /// cared to outrank it, on the one function of the product that actually stops traffic. There is
+    /// no benefit to the minimum: a sublayer's weight does not affect what it matches, only who wins
+    /// when two sublayers disagree.
+    ///
+    /// A high value rather than <c>0xFFFF</c>, which is conventionally left to the platform, and a
+    /// deliberate choice not to attempt to outrank the Windows Firewall's own sublayer: WinSight
+    /// blocks what the operator asked to block and has no business overruling the system firewall.
+    ///
+    /// <b>Unverified on hardware.</b> Sublayer arbitration cannot be exercised from a unit test and
+    /// this change has not been through the VM campaign; it moves the sublayer off the floor, which
+    /// is strictly better than where it was, and the effective ordering should be confirmed with
+    /// <c>netsh wfp show state</c> during the next qualification run.
+    /// </remarks>
+    private const ushort SublayerWeight = 0x8000;
+
     private const uint RpcCAuthnWinNt = 10;
     private const uint FwpmSessionFlagDynamic = 0x00000001;
     private const uint DynamicSessionTransactionWaitMilliseconds = 5_000;
@@ -615,6 +637,10 @@ public static partial class WfpProvisioning
             var sublayer = Marshal.PtrToStructure<FwpmSublayer0>(pointer);
             return sublayer.SubLayerKey == SublayerKey
                 && sublayer.Flags == 0
+                // The weight is part of the shape now that it is meaningful: a sublayer left at the
+                // floor by an earlier version must read as not-exact so it is rebuilt rather than
+                // silently kept.
+                && sublayer.Weight == SublayerWeight
                 && sublayer.ProviderKey != IntPtr.Zero
                 && Marshal.PtrToStructure<Guid>(sublayer.ProviderKey) == ProviderKey;
         }
@@ -1007,7 +1033,7 @@ public static partial class WfpProvisioning
                 DisplayData = new FwpmDisplayData0 { Name = name, Description = description },
                 Flags = 0,
                 ProviderKey = providerKey,
-                Weight = 0,
+                Weight = SublayerWeight,
             };
             var result = NativeMethods.FwpmSubLayerAdd0(engine, ref sublayer, IntPtr.Zero);
             if (result is not 0 and not FwpEAlreadyExists)

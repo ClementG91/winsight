@@ -236,7 +236,10 @@ internal sealed class WmiControlledFolderAccessDataSource : IControlledFolderAcc
             scope,
             "SELECT EnableControlledFolderAccess, ControlledFolderAccessProtectedFolders, "
             + "ControlledFolderAccessAllowedApplications FROM MSFT_MpPreference");
-        foreach (ManagementBaseObject row in searcher.Get())
+        // The collection owns an unmanaged enumerator and a COM reference; a bare
+        // foreach over searcher.Get() left both to the finaliser.
+        using var results = searcher.Get();
+        foreach (ManagementBaseObject row in results)
         {
             using (row)
             {
@@ -256,7 +259,10 @@ internal sealed class WmiControlledFolderAccessDataSource : IControlledFolderAcc
         using var searcher = CreateSearcher(
             scope,
             "SELECT AMRunningMode, AntivirusEnabled, RealTimeProtectionEnabled FROM MSFT_MpComputerStatus");
-        foreach (ManagementBaseObject row in searcher.Get())
+        // The collection owns an unmanaged enumerator and a COM reference; a bare
+        // foreach over searcher.Get() left both to the finaliser.
+        using var results2 = searcher.Get();
+        foreach (ManagementBaseObject row in results2)
         {
             using (row)
             {

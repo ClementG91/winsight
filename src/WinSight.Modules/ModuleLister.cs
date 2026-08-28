@@ -67,29 +67,46 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
     /// copy of it is a second chance to get it wrong.
     /// </remarks>
     private AcquisitionSnapshot<LoadedModule> Collect(
-        IReadOnlyList<Process> processes, CancellationToken cancellationToken)
+        Process[] processes, CancellationToken cancellationToken)
     {
         var raw = new List<(int Pid, string Proc, string Mod, string? Path)>();
         var unreadableProcesses = 0;
-        foreach (var p in processes)
+        // Every Process in the list holds an OS handle, and the loop below can leave early: a
+        // cancelled scan used to abandon the remainder to the finaliser, which on a 220-process
+        // machine is 220 handles held until the GC happened to run. Cancellation is the normal way
+        // this ends - the operator pressed Cancel - so the cleanup has to be unconditional.
+        var index = 0;
+        try
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            try
+            for (; index < processes.Length; index++)
             {
-                var name = p.ProcessName;
-                foreach (ProcessModule m in p.Modules)
+                cancellationToken.ThrowIfCancellationRequested();
+                var p = processes[index];
+                try
                 {
-                    raw.Add((p.Id, name, m.ModuleName, SafePath(m)));
+                    var name = p.ProcessName;
+                    foreach (ProcessModule m in p.Modules)
+                    {
+                        raw.Add((p.Id, name, m.ModuleName, SafePath(m)));
+                    }
+                }
+                catch (Exception ex) when (
+                    ex is Win32Exception or InvalidOperationException or NotSupportedException)
+                {
+                    unreadableProcesses++;
+                }
+                finally
+                {
+                    p.Dispose();
                 }
             }
-            catch (Exception ex) when (
-                ex is Win32Exception or InvalidOperationException or NotSupportedException)
+        }
+        finally
+        {
+            for (var remaining = index + 1; remaining < processes.Length; remaining++)
             {
-                unreadableProcesses++;
-            }
-            finally
-            {
-                p.Dispose();
+                try { processes[remaining].Dispose(); }
+                catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException) { }
             }
         }
 

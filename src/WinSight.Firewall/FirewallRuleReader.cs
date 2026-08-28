@@ -33,7 +33,10 @@ public sealed class FirewallRuleReader
             var scope = new ManagementScope(Namespace);
             using var searcher = new ManagementObjectSearcher(scope,
                 new ObjectQuery("SELECT InstanceID, DisplayName, Direction, Action, Enabled FROM MSFT_NetFirewallRule"));
-            foreach (ManagementBaseObject o in searcher.Get())
+            // The collection owns an unmanaged enumerator and a COM reference; a bare
+            // foreach over searcher.Get() left both to the finaliser.
+            using var results = searcher.Get();
+            foreach (ManagementBaseObject o in results)
             {
                 using (o)
                 {
@@ -72,7 +75,10 @@ public sealed class FirewallRuleReader
         {
             var scope = new ManagementScope(Namespace);
             using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery($"SELECT * FROM {className}"));
-            foreach (ManagementBaseObject o in searcher.Get())
+            // The collection owns an unmanaged enumerator and a COM reference; a bare
+            // foreach over searcher.Get() left both to the finaliser.
+            using var results2 = searcher.Get();
+            foreach (ManagementBaseObject o in results2)
             {
                 using (o)
                 {
