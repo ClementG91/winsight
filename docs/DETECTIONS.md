@@ -8,7 +8,7 @@ VirusTotal lookup, analysis stays on the device.
 
 | Area | Evidence and notable signals | User action |
 |---|---|---|
-| Persistence | 22 Windows autostart families, including registry Run keys, services/drivers and `ServiceDll`, scheduled tasks, Winlogon, AppInit, IFEO/SilentProcessExit, WMI subscriptions, startup folders, LSA packages, print monitors/providers, credential providers, browser helper objects, Windows Load/Run values, COM hijacks and screensavers. Images are Authenticode checked. | Inspect details, reveal the validated file location, or open Windows Startup apps. |
+| Persistence | 26 Windows autostart families, including registry Run keys, services/drivers and `ServiceDll`, scheduled tasks, Winlogon, AppInit, IFEO/SilentProcessExit, WMI subscriptions, startup folders, LSA packages, print monitors/providers, credential providers, browser helper objects, Windows Load/Run values, COM hijacks and screensavers. Images are Authenticode checked. | Inspect details, reveal the validated file location, or open Windows Startup apps. |
 | Autostart command lines | A Windows-signed interpreter (`rundll32`, `mshta`, `regsvr32`, `powershell`, `wscript`, `regsvr32`, `msbuild`, … ) handed a payload its signature does not cover: fetched from a URL or share (`RemotePayload`), read from a per-user or temporary location (`PerUserPayload`), carried inline or encoded (`EncodedCommand`), or run through a scriptlet registration (`ScriptletCom`). Reported in `commandLineConcern`. | Read the entry's full command line, and identify what the interpreter is being pointed at. |
 | Camera and microphone | Current and historical Capability Access usage; live CLI transitions. | Identify the application and open Windows privacy settings. |
 | Network connections | IPv4/IPv6 TCP and UDP owner, process image and signature; external established connections with unsigned/untrusted owners are notable. | Inspect the executable and open Resource Monitor. |
@@ -22,9 +22,13 @@ VirusTotal lookup, analysis stays on the device.
 | Antivirus protection | Antivirus products returned by the documented **Windows Security Center** `IWSCProductList`/`IWscProduct` interface: `On`, `Off`, `Snoozed`, `Expired`, signature currency, and explicit unknown future values. Unknown activity or signature evidence stays indeterminate and notable; it is never strengthened into active, inactive, current or stale. | Open Windows Security or the product's own console. The API is supported on Windows desktop clients, not Windows Server; provider failure is reported as unavailable, distinct from a successful zero-product result. |
 
 The default **Overview** intentionally runs the balanced, lower-noise set:
-persistence, camera/microphone, connections, DNS, extensions, hosts and certificates.
-Large process, module and firewall inventories remain explicit checks in the
-dashboard and CLI.
+persistence, camera/microphone, connections, DNS, extensions, hosts, certificates,
+input-path drivers, code integrity and hijack exposure. Large process, module and
+firewall inventories remain explicit checks in the dashboard and CLI.
+
+Note that `hijack` is in that set and **writes**: it creates and immediately deletes a uniquely
+named temporary file in each directory whose writability it reports on. See the note at the top of
+the README.
 
 ## Verdict model
 
@@ -115,6 +119,25 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
 - DNS cache data is historical visibility and does not by itself attribute every
   query to a process. Live DNS ETW needs elevation.
 - Browser coverage is currently Chromium-family; Firefox is not yet covered.
+- **Certificate revocation is checked against the local cache only.** WinSight promises that the
+  optional VirusTotal lookup is its only outbound connection, so `WinVerifyTrust` runs with
+  `WTD_CACHE_ONLY_URL_RETRIEVAL`: a certificate Windows has already learned is revoked is reported
+  as untrusted, and one whose CRL or OCSP response was never fetched is reported as trusted with the
+  revocation state undetermined rather than being downgraded.
+- **Autostart surfaces not yet enumerated**, named rather than left implicit: Winsock LSP catalog
+  entries (the DLL path sits inside a packed binary blob), shell extension handlers,
+  `Winlogon\Notify` (which modern Windows no longer executes), Group Policy scripts, and Office
+  add-ins.
+- **WMI `__EventFilter` and `__FilterToConsumerBinding` are read for coverage but not reported as
+  entries.** Neither names an image, and every entry in a persistence report is graded by the image
+  model, so reporting them would flag the filter Windows itself ships on every machine. Consumers -
+  the side that actually runs something - are reported in full.
+- **A COM-handler scheduled task whose CLSID resolves to no file is counted, not reported.** Windows
+  ships such tasks; reporting the bare GUID would flag them everywhere. They appear in the
+  unreadable-locations count instead.
+- **Per-user registry hives are read only for accounts that are logged on.** A profile whose
+  `NTUSER.DAT` is not loaded is counted as a location this scan could not read; loading it is a
+  privileged, machine-modifying act a read-only tool will not perform.
 - Defender Firewall inventory is read-only. The separate opt-in LocalSystem service can
   enforce stored per-application outbound policies only through authenticated IPC and an
   explicit elevated transition. Direct WFP mutation aliases are disabled. Desired mode is

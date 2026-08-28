@@ -16,7 +16,7 @@
 <p align="center">
   <a href="https://github.com/ClementG91/winsight/actions/workflows/ci.yml"><img src="https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2F11-informational" alt="Platform: Windows" />
+  <img src="https://img.shields.io/badge/platform-Windows%2010%2022H2%2B%20%2F%2011-informational" alt="Platform: Windows 10 22H2 or later" />
   <img src="https://img.shields.io/badge/.NET-10.0_LTS-512bd4" alt=".NET 10 LTS" />
   <img src="https://img.shields.io/badge/production%20readiness-not%20established-critical" alt="Production readiness not established" />
 </p>
@@ -28,10 +28,22 @@ It shows you what **persists** across reboots, what **watches** your camera and 
 **phones home**, and what could be **hijacked** - and it lets you block any application's outbound
 traffic at the kernel filtering layer.
 
-> **Everything observes and reports.** Nothing acts on its own. The two exceptions are explicit and
-> opt-in: the firewall blocks only what you tell it to, and ransomware protection is the one feature
-> that writes anything (its decoy files), which is why it stays off until you turn it on - and removes
-> them when you turn it off.
+> **Everything observes and reports.** Nothing acts on its own, and nothing is modified. Two
+> features write to disk, and both say so here:
+>
+> - **Ransomware protection** creates its decoy files. It stays off until you turn it on, removes
+>   them when you turn it off, and sweeps any left by a previous run at startup. The decoys are
+>   ordinary visible files in Documents, Desktop, Pictures, Downloads, Videos and Music - they are
+>   not hidden, because a good many ransomware families skip hidden files and a decoy that is
+>   skipped is not a decoy.
+> - **The hijack scan** creates a uniquely named temporary file, and immediately deletes it, in each
+>   directory whose writability it reports on - `C:\`, `C:\Program Files`, every auto-start
+>   service's directory and every machine `PATH` entry. It never overwrites anything. This is how it
+>   answers "could somebody plant a file here" by asking the filesystem instead of reasoning about
+>   ACLs, and it runs as part of the default overview. Endpoint protection and Controlled Folder
+>   Access may notice.
+>
+> The firewall blocks only what you tell it to.
 
 ---
 
@@ -94,6 +106,15 @@ Download the installer for your machine from the
 The default install is **per-user** and needs no administrator rights and no .NET runtime. Portable
 ZIPs are published for both architectures.
 
+Two consequences of that default, stated here rather than left to be discovered:
+
+- **The outbound firewall is unavailable.** A per-user install lands under
+  `%LOCALAPPDATA%\Programs`, which the user can write, and the service deliberately refuses to
+  register from any path an unprivileged principal can modify. Install for all users (elevated) if
+  you want the firewall.
+- **WinSight's own binaries are replaceable by the adversary in its threat model.** Anything running
+  as that user can overwrite them. An all-users install puts them somewhere it cannot.
+
 **Verify what you downloaded before running it** - checksums, SBOM and GitHub build provenance:
 
 ```powershell
@@ -147,6 +168,11 @@ Every release carries SHA-256 checksums plus GitHub **build provenance** and **S
 which bind the bytes to this repository's release workflow at a named commit. They do not provide a
 Windows publisher identity; verify them before running anything.
 
+**The two attestations cover different files.** Build provenance covers both the portable `.zip` and
+the `-setup.exe`; the SBOM attestation currently covers the `.zip` only. If you download the
+installer - which the table above recommends - verify its provenance and its SHA-256, and use the
+`.zip` if you also want an attested SBOM.
+
 Who may authorise a signature, what one would and would not prove, and how to check a release
 yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
@@ -156,6 +182,10 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 |---|---|
 | **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; exact dashboard/package candidate `3912d67` passed Windows 11 VM layout, posture and EN/FR/ES smoke checks; successor `8230aa9` passed CI `32789592412` and CodeQL `32789591166` |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
+
+> **CodeQL runs through GitHub's default setup, not a workflow in this repository.** The run IDs
+> above are real, but nothing under `.github/workflows/` configures the analysis, so it cannot be
+> audited from a clone and does not run on forks.
 
 The privileged behaviour CI cannot reach has historical qualification evidence from clean x64 VMs,
 each run bound to the commit and CI run that built it:

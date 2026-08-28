@@ -127,8 +127,8 @@ Kept as small as `OutboundConnectionWatcher`. Each implements
 **`IPersistenceChangeSource`** which raises `SurfaceChanged` events; the interface is what
 the monitor depends on, so tests drive the monitor with a fake source.
 
-- **`RegistryChangeWatcher`** - `RegNotifyChangeKeyValue` (via CsWin32, consistent with the
-  rest of the Win32 surface) with a wait handle per watched key,
+- **`RegistryChangeWatcher`** - `RegNotifyChangeKeyValue` (a hand-written `LibraryImport`,
+  consistent with the rest of the Win32 surface) with a wait handle per watched key,
   `REG_NOTIFY_CHANGE_LAST_SET | REG_NOTIFY_CHANGE_NAME`, `watchSubtree` where the surface
   needs it (Services). Re-arms after each signal. One background wait loop; cancellation via
   `CancellationToken`.

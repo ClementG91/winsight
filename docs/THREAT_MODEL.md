@@ -91,6 +91,31 @@ rejected as `IDENTITY_CHANGED`.
 Verified against real hostile filesystem states, including a 40-iteration ACL-flip race:
 [`docs/validation/2026-07-23-trust-boundary-f84ac36.md`](validation/2026-07-23-trust-boundary-f84ac36.md).
 
+### 2b. Local user denying the service its storage or its endpoint
+
+*Goal: keep the firewall from running at all, without touching policy.*
+
+Two availability attacks, both reachable without privilege, and both previously indistinguishable
+from a machine where nothing was installed:
+
+- **Squatting the policy directory.** The default ACL on `C:\ProgramData` lets `BUILTIN\Users`
+  create subdirectories and materialises CREATOR OWNER as a FullControl entry for whoever created
+  one. A standard user can therefore create `C:\ProgramData\WinSight` before WinSight does, become
+  its owner, and remove SYSTEM. The service cannot reclaim it: its token is deliberately restricted
+  to `SeChangeNotify`/`SeImpersonate`/`SeSystemProfile` and holds neither `SeTakeOwnership` nor
+  `SeRestore`. Installation now provisions and hardens that directory while the caller still holds
+  an administrator token, and refuses - before registering anything - if it cannot. Restoring those
+  privileges to the service token was the alternative and is worse: it would let a LocalSystem
+  service take ownership of anything on the machine, to handle a case an elevated install handles.
+- **Squatting the pipe name.** `FIRST_PIPE_INSTANCE` is requested, so a name already taken makes
+  creation fail - after the startup service has applied the filters. The squatter therefore gets
+  "filters applied, then immediately removed". The service now exits non-zero when it loses its
+  endpoint, so the SCM runs the restart actions the installer configures; it previously exited
+  cleanly, the SCM read that as an intentional stop, and nothing ever restarted it.
+
+Neither is fully closed: a determined squatter can win the race repeatedly. What changed is that
+losing it is now recoverable and visible rather than silent and permanent.
+
 ### 3. Remote attacker
 
 *Goal: reach the control channel over the network.*
@@ -168,3 +193,14 @@ transmitted anywhere.
   current candidate's evidence; unsigned distribution remains a visible accepted risk.
 - The service must be deployed to a protected location by an administrator. WinSight verifies this and
   refuses otherwise, but it cannot create the trust root for you.
+- **A per-user install leaves WinSight's own binaries writable by adversary 1.** The default install
+  needs no administrator rights and therefore lands under `%LOCALAPPDATA%\Programs`, which the user -
+  and anything running as them - can overwrite. WinSight does not verify its own integrity, so a
+  replaced binary would not be detected by it. It is also why the outbound firewall service is
+  unavailable from a per-user install: the service refuses to register from a path an unprivileged
+  principal can write. Install for all users when the machine's own user is part of the threat being
+  modelled.
+- **Trust anchored in a user-installed root is reported, not prevented.** `CurrentUser\Root` is
+  writable without elevation, so an implant signed beneath a root imported there does carry a
+  technically valid signature. WinSight now names the anchor and flags such entries rather than
+  reading them as ordinary signed software, but it cannot stop the import.
