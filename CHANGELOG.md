@@ -1,3 +1,107 @@
+## Unreleased
+
+Response to a third-party static audit of `38f06c7` (v0.11.6). Every one of its 38 findings was
+re-derived from the source before anything was changed; the three it got wrong or overstated are
+named below alongside the rest.
+
+**Detection bypasses closed.**
+
+- An autostart command that omitted `.exe` walked past the entire command-line triage.
+  `powershell -enc <base64>` runs exactly what `powershell.exe -enc <base64>` runs, and three
+  independent gaps lined up so it left the scanner as `Info`: path resolution never probed
+  `System32\<name>.exe` or `%PATH%`, the interpreter table was keyed by names with extensions, and
+  `IsSuspicious` documented "no resolvable image" without implementing it. Four fewer characters
+  removed an entry from `--flagged`, from the MCP tools, from the Guardian tray alert and from
+  VirusTotal enrichment.
+- `-enc` was matched literally although PowerShell accepts `-e`, `-en`, `-encod` and the documented
+  `-ec` alias, and a renamed interpreter (`powershell.exe` copied to `updater.exe`, T1036.003) left
+  the table entirely. The compiled-in `OriginalFilename` is now read once per image during the scan.
+- Guardian could not see an argument rewrite: persistence identity excluded the arguments, so
+  changing `rundll32 ...\ok.dll,Entry` to `rundll32 ...\evil.dll,Start` raised nothing at all.
+
+**Availability of the outbound firewall.**
+
+- A `Win32Exception` raised while answering a read-only status command stopped the service, and
+  because its WFP session is dynamic, BFE then destroyed every filter it owned. Any interactive user
+  the pipe ACL admits could trigger it by deleting their own blocked binary and opening the
+  dashboard.
+- One unresolvable path disarmed the whole policy. `FwpmGetAppIdFromFileName0` fails when the
+  binary is absent, that failure was classified as a failed transition, and the rollback deleted
+  every filter and reset the service to demand-start. The application id is a path rather than a
+  handle, so it is now derived from the volume mapping and the filter outlives the binary.
+- Losing the endpoint exited 0, which the SCM reads as an intentional stop, so the restart actions
+  never ran. Squatting the pipe name gave "filters applied, then immediately removed", in a loop.
+- Pre-creating `C:\ProgramData\WinSight` as a standard user made the service fail on every boot,
+  indistinguishably from a machine where nothing was installed. Installation now provisions and
+  hardens that directory while it still holds an administrator token.
+
+**Trust model.**
+
+- `CurrentUser\Root` is writable without elevation, and a signature chaining to a root imported
+  there read as `SignatureValid` everywhere. Verdicts now name the anchor, and the certificate audit
+  flags roots trusted for one user only - the Superfish/eDellRoot signal it claimed to catch and did
+  not.
+- Revocation was disabled twice over, making the `CERT_E_REVOKED` branch unreachable code while
+  stolen certificates kept verifying for months past revocation. It is now checked cache-only, with
+  the three "revocation undetermined" results mapped explicitly so no offline machine gains a false
+  "unsigned".
+- MSIX-packaged applications are signed as a package, so every Store application - Microsoft's own
+  included - was reported unsigned. The package signature is now read.
+
+**Ransomware.**
+
+- Decoys were named from a constant published in this repository, were plain text claiming to be
+  `.xlsx`, were hidden from the enumeration they exist to be caught by, and there was one per
+  directory in three directories. They are now unguessable (derived from a machine-local seed), real
+  OOXML, visible, and three per directory across six.
+- The watcher was blind at exactly the rate it was tuned for: an 8 KiB buffer, no `Error` handler
+  and synchronous I/O in the callback, against a threshold of twelve events in three seconds. Now
+  64 KiB, overflow counted and surfaced, and no I/O on the notification thread.
+- The burst counts distinct files rather than notifications, so a single large save no longer looks
+  like mass encryption.
+
+**Scope, honesty and reporting.**
+
+- Other users' registry hives and Startup folders were never read, and nothing counted them.
+- IFEO, SilentProcessExit and COM registrations are read in both registry views; service and 32-bit
+  writes are attributable for the first time (`ControlSetNNN` and `WOW6432Node` never matched).
+- Four more autostart surfaces: RunOnceEx, SecurityProviders, AeDebug and PowerShell profiles.
+  COM-handler scheduled tasks are visible. What is still not enumerated is named.
+- The dashboard shows what the real-time protections are actually doing. Ransomware protection
+  remembers whether it was on, and orphaned decoys are swept at startup rather than only when it is
+  switched on.
+- Exit codes separate "found something" from "could not look"; unknown options are refused.
+- The raw command line no longer reaches an MCP client through the one field the sensitive gate does
+  not govern.
+- Presence detection worked only in English. Six tools rendered raw English into the French and
+  Spanish dashboards.
+- The hijack writability probe answered for the current token, so an elevated run graded every
+  service on the machine exploitable.
+
+**Performance.** Signature verification runs the batch in parallel: a 4 429-entry persistence scan
+went from 63 s to 22 s with identical output, and the Application test suite from 4 min 13 s to
+2 min 2 s.
+
+**Where the audit was wrong, and what was done instead.**
+
+- It called the second SHA-256 on a cache miss wasted work. It is the TOCTOU close - without it a
+  verdict for one file can be cached against a replacement under the same path - so it is kept, and
+  now commented where somebody would try to remove it. The cost is paid off by parallelism.
+- It asked for WMI `__EventFilter`/`__FilterToConsumerBinding` to be reported as entries. Neither
+  names an image, every persistence entry is graded by the image model, and Windows ships such a
+  filter - so reporting them would flag every machine. They are read for coverage and the gap is
+  documented instead.
+- It read the `C:\ProgramData` squatting case as an unaddressed hardening gap. The directory chain
+  was already re-hardened deliberately; what was missing was the privilege to reclaim it, which is
+  why the fix moved to install time rather than widening the service token.
+
+**Documentation.** "Ransomware protection is the one feature that writes anything" was false - the
+hijack scan writes, and it is in the default overview. Also corrected: the UI language is a file and
+not a registry value, the platform floor is Windows 10 22H2, there is no CsWin32, the MCP SDK is
+2.2.0, SBOM attestation covers only the `.zip`, CodeQL is not configured in this repository, and
+`-Scanner` is not validated. `--no-network` was added because an inherited `WINSIGHT_VT_KEY` made an
+otherwise local scan reach out, which nothing documented.
+
 ## v0.11.6, 2026-08-25
 
 - Clarified the dashboard's Windows-security scan so Defender Controlled Folder Access is no
