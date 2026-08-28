@@ -23,6 +23,7 @@ public sealed partial class FirewallServiceWorker : BackgroundService
     private readonly ILogger<FirewallServiceWorker> _logger;
     private readonly IHostApplicationLifetime? _applicationLifetime;
     private readonly IFirewallEndpointLossWatchdog _endpointLossWatchdog;
+    private readonly FirewallServiceExitSignal? _exitSignal;
 
     public FirewallServiceWorker(
         IFirewallServiceListener listener,
@@ -40,8 +41,10 @@ public sealed partial class FirewallServiceWorker : BackgroundService
         IFirewallServiceListener listener,
         ILogger<FirewallServiceWorker> logger,
         IHostApplicationLifetime? applicationLifetime,
-        IFirewallEndpointLossWatchdog endpointLossWatchdog)
+        IFirewallEndpointLossWatchdog endpointLossWatchdog,
+        FirewallServiceExitSignal? exitSignal = null)
     {
+        _exitSignal = exitSignal;
         _listener = listener ?? throw new ArgumentNullException(nameof(listener));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _applicationLifetime = applicationLifetime;
@@ -113,6 +116,11 @@ public sealed partial class FirewallServiceWorker : BackgroundService
 
             if (endpointLost)
             {
+                // Recorded before the host is asked to stop, so the process exits non-zero. A clean
+                // exit tells the SCM the stop was intentional and its restart actions never run -
+                // which is why an endpoint that was squatted or faulted stayed down until somebody
+                // noticed.
+                _exitSignal?.ReportEndpointLost();
                 StopApplicationBestEffort();
                 LogListenerFaultBestEffort(listenerFailure);
             }

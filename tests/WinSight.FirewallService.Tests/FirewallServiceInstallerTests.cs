@@ -7,6 +7,14 @@ namespace WinSight.FirewallService.Tests;
 
 public sealed class FirewallServiceInstallerTests
 {
+    /// <summary>
+    /// These cases exercise the SCM contract, not policy storage. Installation provisions
+    /// C:\ProgramData\WinSight for real - deliberately, because a standard user who pre-creates it
+    /// makes the service unable to start on every boot - and a unit test must not need elevation to
+    /// assert a rollback code.
+    /// </summary>
+    private static readonly Action NoStorageProvisioning = static () => { };
+
     [Fact]
     public void BuildBinaryPath_QuotesTheExecutable_AndAppendsRunVerb()
     {
@@ -193,7 +201,7 @@ public sealed class FirewallServiceInstallerTests
         var inspector = new ScriptedInspector(@"C:\canonical\service.exe", PathTrustDecision.Allow(), PathTrustDecision.Allow());
         var scm = new RecordingScm(deleteResult: true);
 
-        FirewallServiceInstaller.Install(@"C:\syntactic\..\service.exe", inspector, scm);
+        FirewallServiceInstaller.Install(@"C:\syntactic\..\service.exe", inspector, scm, NoStorageProvisioning);
 
         Assert.Equal("\"C:\\canonical\\service.exe\" run", scm.BinaryPath);
         Assert.Equal(1, scm.Registration.ConfigureSecurityProfileCalls);
@@ -222,7 +230,7 @@ public sealed class FirewallServiceInstallerTests
         var scm = new RecordingScm(deleteResult);
 
         var exception = Assert.Throws<ServiceInstallTrustException>(() =>
-            FirewallServiceInstaller.Install(@"C:\input.exe", inspector, scm));
+            FirewallServiceInstaller.Install(@"C:\input.exe", inspector, scm, NoStorageProvisioning));
 
         Assert.Equal(expected, exception.Code);
         Assert.Equal(1, scm.Registration.DeleteCalls);
@@ -241,7 +249,7 @@ public sealed class FirewallServiceInstallerTests
         var scm = new RecordingScm(!deleteReturnsFalse, descriptionThrows: true, deleteThrows: deleteThrows);
 
         var exception = Assert.Throws<ServiceInstallTrustException>(() =>
-            FirewallServiceInstaller.Install(@"C:\syntactic\service.exe", inspector, scm));
+            FirewallServiceInstaller.Install(@"C:\syntactic\service.exe", inspector, scm, NoStorageProvisioning));
 
         Assert.Equal(expected, exception.Code);
         Assert.Equal("\"C:\\canonical\\service.exe\" run", scm.BinaryPath);
@@ -257,7 +265,7 @@ public sealed class FirewallServiceInstallerTests
         var scm = new RecordingScm(deleteResult: true, descriptionThrows: true);
 
         var exception = Assert.Throws<ServiceInstallTrustException>(() =>
-            FirewallServiceInstaller.Install(@"C:\input\service.exe", inspector, scm));
+            FirewallServiceInstaller.Install(@"C:\input\service.exe", inspector, scm, NoStorageProvisioning));
 
         Assert.Equal(ServiceInstallTrustCode.PostCreateOperationRolledBack, exception.Code);
         Assert.Equal(1, scm.Registration.DeleteCalls);
@@ -272,7 +280,7 @@ public sealed class FirewallServiceInstallerTests
         var scm = new RecordingScm(deleteResult: true, securityProfileThrows: true);
 
         var exception = Assert.Throws<ServiceInstallTrustException>(() =>
-            FirewallServiceInstaller.Install(@"C:\input\service.exe", inspector, scm));
+            FirewallServiceInstaller.Install(@"C:\input\service.exe", inspector, scm, NoStorageProvisioning));
 
         Assert.Equal(ServiceInstallTrustCode.PostCreateOperationRolledBack, exception.Code);
         Assert.Equal(1, scm.Registration.ConfigureSecurityProfileCalls);

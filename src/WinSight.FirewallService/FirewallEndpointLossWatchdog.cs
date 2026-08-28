@@ -99,11 +99,13 @@ internal static class FirewallServiceWorkerComposition
 
         services.AddSingleton<IFirewallEndpointLossWatchdog>(
             static _ => new HardExitFirewallEndpointLossWatchdog());
+        services.AddSingleton<FirewallServiceExitSignal>();
         services.AddHostedService(sp => new FirewallServiceWorker(
             sp.GetRequiredService<IFirewallServiceListener>(),
             sp.GetRequiredService<ILogger<FirewallServiceWorker>>(),
             sp.GetRequiredService<IHostApplicationLifetime>(),
-            sp.GetRequiredService<IFirewallEndpointLossWatchdog>()));
+            sp.GetRequiredService<IFirewallEndpointLossWatchdog>(),
+            sp.GetRequiredService<FirewallServiceExitSignal>()));
         return services;
     }
 }
