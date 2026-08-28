@@ -340,4 +340,8 @@
   <data name="AlertKindHighEntropyWrite" xml:space="preserve"><value>escritura de alta entropía</value></data>
   <data name="AlertKindRename" xml:space="preserve"><value>ráfaga de renombrados</value></data>
   <data name="AlertKindDelete" xml:space="preserve"><value>ráfaga de eliminaciones</value></data>
+  <data name="PersistenceVectorRunOnceEx" xml:space="preserve"><value>Clave RunOnceEx</value></data>
+  <data name="PersistenceVectorSecurityProvider" xml:space="preserve"><value>Proveedor de seguridad (LSASS)</value></data>
+  <data name="PersistenceVectorJustInTimeDebugger" xml:space="preserve"><value>Depurador justo a tiempo</value></data>
+  <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>Perfil de PowerShell</value></data>
 </root>

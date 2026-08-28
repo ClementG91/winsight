@@ -30,7 +30,7 @@ public enum RansomwareSignalKind
 /// </remarks>
 public sealed class RansomwareBurstDetector
 {
-    /// <summary>Suspicious events within the window needed to call it a burst.</summary>
+    /// <summary>Distinct files touched within the window needed to call it a burst.</summary>
     public const int DefaultThreshold = 12;
 
     /// <summary>The sliding window over which suspicious events are counted.</summary>
@@ -38,7 +38,7 @@ public sealed class RansomwareBurstDetector
 
     private readonly int _threshold;
     private readonly TimeSpan _window;
-    private readonly Queue<DateTimeOffset> _recent = new();
+    private readonly Queue<Observation> _recent = new();
     private readonly Lock _gate = new();
     private bool _fired;
 
@@ -49,10 +49,10 @@ public sealed class RansomwareBurstDetector
         _window = window ?? DefaultWindow;
     }
 
-    /// <summary>Suspicious events currently within the window.</summary>
+    /// <summary>Distinct files touched within the window.</summary>
     public int RecentCount
     {
-        get { lock (_gate) { return _recent.Count; } }
+        get { lock (_gate) { return DistinctFilesInWindow(); } }
     }
 
     /// <summary>True once the detector has fired and is waiting to be acknowledged.</summary>
@@ -66,7 +66,24 @@ public sealed class RansomwareBurstDetector
     /// the one that crosses the burst threshold, or is a touched canary — so the caller alerts once
     /// per burst rather than once per file. Returns false thereafter until <see cref="Reset"/>.
     /// </summary>
-    public bool Observe(RansomwareSignalKind kind, DateTimeOffset atUtc)
+    public bool Observe(RansomwareSignalKind kind, DateTimeOffset atUtc) =>
+        Observe(kind, atUtc, path: null);
+
+    /// <summary>
+    /// The same, counting <b>distinct files</b> rather than raw events.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the path matters.</b> Ransomware's tell is volume across <i>many</i> files. Windows
+    /// reports several change notifications for one file being written - a large document produces a
+    /// stream of them on its own - so counting events made a single big save look like a burst, and
+    /// two Excel workbooks autosaving together were enough to reach twelve. Counting distinct paths
+    /// keeps the signal (many files touched quickly) and removes the noise (one file touched many
+    /// times), without weakening the threshold.
+    ///
+    /// A signal with no path still counts as its own event, so a caller that cannot name the file is
+    /// not silently ignored.
+    /// </remarks>
+    public bool Observe(RansomwareSignalKind kind, DateTimeOffset atUtc, string? path)
     {
         lock (_gate)
         {
@@ -81,19 +98,40 @@ public sealed class RansomwareBurstDetector
                 return true;
             }
 
-            _recent.Enqueue(atUtc);
-            while (_recent.Count > 0 && atUtc - _recent.Peek() > _window)
+            _recent.Enqueue(new Observation(atUtc, path));
+            while (_recent.Count > 0 && atUtc - _recent.Peek().At > _window)
             {
                 _recent.Dequeue();
             }
 
-            if (_recent.Count >= _threshold)
+            if (DistinctFilesInWindow() >= _threshold)
             {
                 _fired = true;
                 return true;
             }
             return false;
         }
+    }
+
+    /// <summary>
+    /// How many distinct files the window covers. Bounded by the queue, which the window bounds.
+    /// </summary>
+    private int DistinctFilesInWindow()
+    {
+        var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var unnamed = 0;
+        foreach (var observation in _recent)
+        {
+            if (observation.Path is { Length: > 0 } path)
+            {
+                named.Add(path);
+            }
+            else
+            {
+                unnamed++;
+            }
+        }
+        return named.Count + unnamed;
     }
 
     /// <summary>Re-arms after the operator has acknowledged, so a later burst fires again.</summary>
@@ -105,4 +143,6 @@ public sealed class RansomwareBurstDetector
             _recent.Clear();
         }
     }
+
+    private readonly record struct Observation(DateTimeOffset At, string? Path);
 }

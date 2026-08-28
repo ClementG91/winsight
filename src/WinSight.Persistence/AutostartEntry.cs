@@ -27,7 +27,14 @@ public enum AutostartVector
     BrowserHelperObject,
     WindowsLoadRun,
     PrintProvider,
-    // Phase 1.2+: Winsock LSP, shell extensions, ...
+    RunOnceEx,
+    SecurityProvider,
+    JustInTimeDebugger,
+    PowerShellProfile,
+    // Still not enumerated, named here rather than left implicit: Winsock LSP catalog entries
+    // (their DLL path lives inside a packed binary blob), shell extension handlers,
+    // Winlogon\Notify (which modern Windows no longer executes), Group Policy scripts and Office
+    // add-ins.
     // Note: installed shim databases (.sdb) are intentionally NOT enumerated here: a .sdb is
     // never Authenticode-signed, so the signature model would flag every legitimate shim as
     // "unsigned/suspicious" (a guaranteed false positive). Revisit only with an info-only,

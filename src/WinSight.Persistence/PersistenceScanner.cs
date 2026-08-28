@@ -47,6 +47,10 @@ public sealed class PersistenceScanner
             new BrowserHelperObjectEnumerator(),
             new WindowsLoadRunEnumerator(),
             new PrintProviderEnumerator(),
+            new RunOnceExEnumerator(),
+            new SecurityProvidersEnumerator(),
+            new JustInTimeDebuggerEnumerator(),
+            new PowerShellProfileEnumerator(),
         };
 
     /// <summary>

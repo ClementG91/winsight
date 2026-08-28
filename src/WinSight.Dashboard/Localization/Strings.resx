@@ -343,4 +343,8 @@
   <data name="AlertKindHighEntropyWrite" xml:space="preserve"><value>high-entropy write</value></data>
   <data name="AlertKindRename" xml:space="preserve"><value>rename burst</value></data>
   <data name="AlertKindDelete" xml:space="preserve"><value>delete burst</value></data>
+  <data name="PersistenceVectorRunOnceEx" xml:space="preserve"><value>RunOnceEx key</value></data>
+  <data name="PersistenceVectorSecurityProvider" xml:space="preserve"><value>Security provider (LSASS)</value></data>
+  <data name="PersistenceVectorJustInTimeDebugger" xml:space="preserve"><value>Just-in-time debugger</value></data>
+  <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>PowerShell profile</value></data>
 </root>

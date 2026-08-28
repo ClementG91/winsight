@@ -252,7 +252,10 @@ public sealed class RansomwareFileWatcher : IDisposable
                 return;
             }
 
-            if (_detector.Observe(kind.Value, _clock()))
+            // The path is passed so the detector counts distinct files: Windows reports several
+            // change notifications for one file being written, and counting raw events made a single
+            // large save look like a burst.
+            if (_detector.Observe(kind.Value, _clock(), change.IdentityPath))
             {
                 Detected?.Invoke(this, new RansomwareDetectedEventArgs(kind.Value, change.FullPath));
             }
