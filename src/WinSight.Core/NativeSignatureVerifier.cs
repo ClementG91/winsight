@@ -30,11 +30,31 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var deferToCatalog = new List<string>();
 
+        // Verified in parallel. Each file is an independent WinVerifyTrust call - the API is
+        // thread-safe and the work is dominated by reading the image off disk - so the batch was
+        // spending nearly all of its time waiting, one file at a time. This is what VerifyMany
+        // existed for and it was looping serially: 4 300 autostart entries at ~19 ms each is over a
+        // minute of a scan the operator is watching.
+        //
+        // Bounded rather than unbounded: the point is to keep several reads in flight, not to hand
+        // every core to a security scan running beside the operator's own work.
+        var options = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+        };
+        var verified = new System.Collections.Concurrent.ConcurrentBag<(string Path, SignatureVerdict? Verdict)>();
+        Parallel.ForEach(paths, options, path => verified.Add((path, VerifyEmbedded(path))));
+
+        // Reassembled in the caller's order so a scan's output does not vary run to run.
+        var byPath = new Dictionary<string, SignatureVerdict?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, verdict) in verified)
+        {
+            byPath[path] = verdict;
+        }
         foreach (var path in paths)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            var verdict = VerifyEmbedded(path);
-            if (verdict is { } v)
+            if (byPath.TryGetValue(path, out var verdict) && verdict is { } v)
             {
                 results[path] = v;
             }

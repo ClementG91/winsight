@@ -74,9 +74,26 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         var preVerificationFingerprints = new Dictionary<string, FileFingerprint?>(
             StringComparer.OrdinalIgnoreCase);
 
+        // Fingerprinting is the expensive half of a cache lookup - in content mode it is a full
+        // SHA-256 of every file - and it is pure, per-file work that was being done one file at a
+        // time. Hashing in parallel first, then consulting the cache serially, keeps every decision
+        // about cache state single-threaded while the I/O overlaps.
+        var fingerprints = new System.Collections.Concurrent.ConcurrentDictionary<string, FileFingerprint?>(
+            StringComparer.OrdinalIgnoreCase);
+        var options = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+        };
+        Parallel.ForEach(
+            paths.Distinct(StringComparer.OrdinalIgnoreCase),
+            options,
+            path => fingerprints[path] = Fingerprint(path));
+
         foreach (var path in paths)
         {
-            if (TryGetCached(path, out var verdict, out var observedFingerprint))
+            var observedFingerprint = fingerprints.TryGetValue(path, out var f) ? f : Fingerprint(path);
+            if (TryGetCached(path, observedFingerprint, out var verdict))
             {
                 results[path] = verdict;
             }
@@ -100,13 +117,16 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         return results;
     }
 
+    /// <param name="observedFingerprint">
+    /// The fingerprint already computed for this path. Passed in rather than taken here so a batch
+    /// can hash in parallel while every decision about cache state stays serialised.
+    /// </param>
     private bool TryGetCached(
         string path,
-        out SignatureVerdict verdict,
-        out FileFingerprint? observedFingerprint)
+        FileFingerprint? observedFingerprint,
+        out SignatureVerdict verdict)
     {
         verdict = default;
-        observedFingerprint = Fingerprint(path);
         if (observedFingerprint is null)
         {
             return false;
@@ -138,6 +158,11 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         // The verifier works on a path, so the file can be replaced after WinVerifyTrust returns
         // but before this cache entry is written. Never bind that old verdict to the replacement.
         // Metadata mode deliberately cannot detect a same-metadata swap; content mode can.
+        //
+        // This second hash looks like duplicated work and is the TOCTOU close itself: removing it
+        // would let a verdict for one file be cached against another under the same path, which is
+        // the entire reason content mode exists. The cost it represents is addressed by hashing the
+        // batch in parallel, not by hashing once.
         if (preVerificationFingerprint is null ||
             postVerificationFingerprint is null ||
             preVerificationFingerprint != postVerificationFingerprint)
