@@ -94,6 +94,22 @@ internal static partial class WfpApplicationId
         {
             return false;
         }
+        // A drive letter that resolves to a network redirector or to a SUBST target is a mapping
+        // that belongs to a logon session, not to the machine. The service resolves it in session 0,
+        // where the user's mappings do not exist - so a policy on Z:\app.exe either resolves to
+        // nothing, or resolves through the service's own view to a device that is not the file the
+        // operator meant. The filter then matches nothing while the verification, applying the same
+        // derivation, declares the state exact.
+        //
+        // Refusing is the only honest answer: the identity cannot be established from here, and an
+        // identity that cannot be established must not become a filter that claims to block
+        // something.
+        if (device.StartsWith(@"\Device\LanmanRedirector", StringComparison.OrdinalIgnoreCase)
+            || device.StartsWith(@"\Device\Mup", StringComparison.OrdinalIgnoreCase)
+            || device.StartsWith(@"\??\", StringComparison.Ordinal))
+        {
+            return false;
+        }
 
         var remainder = executablePath[2..].Replace('/', '\\');
         appId = Encode(device.TrimEnd('\\') + remainder);

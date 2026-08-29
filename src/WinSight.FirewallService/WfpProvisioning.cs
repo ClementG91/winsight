@@ -856,7 +856,22 @@ public static partial class WfpProvisioning
                 Action = new FwpmAction0 { Type = action, FilterOrCalloutKey = Guid.Empty },
             };
             var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
-            if (result is not 0 and not FwpEAlreadyExists)
+            if (result == FwpEAlreadyExists)
+            {
+                // Not success. A filter already carrying this key is not necessarily the filter
+                // being installed: it can hold different conditions or the opposite action - an old
+                // PERMIT where a BLOCK is wanted. Accepting it meant the reconciler believed it had
+                // installed what it asked for, and the verification, which enumerates by key, then
+                // found a filter and agreed.
+                //
+                // Reconciliation is exact and deletes before it adds, so reaching this at all means
+                // something survived that delete. Replacing it is what makes the installed filter
+                // the intended one; this runs inside the provisioning transaction, so a failure
+                // still aborts the whole change rather than leaving a hole.
+                DeleteFilter(engine, filterKey);
+                result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
+            }
+            if (result != 0)
             {
                 throw new Win32Exception((int)result);
             }

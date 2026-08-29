@@ -371,6 +371,25 @@ public static partial class FirewallServiceInstaller
     internal static string RequiredPrivilegesMultiString() =>
         "SeChangeNotifyPrivilege\0SeImpersonatePrivilege\0SeSystemProfilePrivilege\0\0";
 
+    /// <summary>
+    /// Applies the service's own security profile: SID type, required privileges and failure
+    /// actions.
+    /// </summary>
+    /// <remarks>
+    /// <b>What is deliberately not here.</b> No <c>SetServiceObjectSecurity</c> call, so the service
+    /// keeps the SCM's default DACL: reconfiguring or stopping it requires administrator, and
+    /// nothing beyond that. The service SID is unrestricted and the process is not protected.
+    ///
+    /// That is a defensible position for a tool with no kernel driver - an administrator who wants
+    /// this service stopped can stop it, and WinSight reports the resulting state honestly rather
+    /// than resisting - but it was left to be inferred from a document that is otherwise careful
+    /// about privilege boundaries. It is now stated in docs/THREAT_MODEL.md.
+    ///
+    /// A tighter DACL and a restricted service SID are both worth having and are both changes to a
+    /// live SYSTEM service that cannot be exercised outside the VM campaign: getting either wrong
+    /// leaves a service an administrator cannot manage, which is a worse outcome than the one being
+    /// fixed. They belong to a qualification run.
+    /// </remarks>
     internal static void ConfigureSecurityProfile(IntPtr service)
     {
         var sid = new ServiceSidInfo { ServiceSidType = ServiceSidTypeUnrestricted };

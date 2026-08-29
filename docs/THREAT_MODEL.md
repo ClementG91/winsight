@@ -195,6 +195,7 @@ means no antivirus was registered. WinSight does not register, configure or reme
 | Not defended | Why |
 |---|---|
 | An adversary already running as SYSTEM | They outrank every control WinSight has |
+| An administrator tampering with the firewall service itself | The service carries the SCM's default DACL, so reconfiguring or stopping it requires administrator - and nothing beyond that. It uses an unrestricted service SID and is not a protected process, so an administrator can change its configuration or stop it, and WinSight will report the resulting state honestly rather than resist it. Said outright because the rest of this document is careful about privilege boundaries and this one was left to be inferred. |
 | Kernel-mode malware, rootkits, hypervisor attacks | No driver; user-mode only |
 | Physical access, DMA, offline disk tampering | Outside a user-mode tool's reach |
 | Detection evasion by malware | WinSight is triage, not EDR - a missed technique is a coverage gap |
