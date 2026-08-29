@@ -400,9 +400,17 @@ public static partial class FirewallServiceInstaller
         {
             var actions = new[]
             {
+                // The SCM repeats the LAST action for every failure beyond the array, so making
+                // the third a restart is what turns recovery from "twice, then give up" into
+                // "for ever, once a minute".
+                //
+                // It used to be SC_ACTION_NONE. Combined with a 24-hour reset period that handed an
+                // unprivileged squatter the machine: take the pipe name, let the service fail three
+                // times over 35 seconds, and outbound enforcement stays off for a day. Nothing about
+                // that attack needs privilege, and nothing told the operator it had happened.
                 new ScAction { Type = ScActionRestart, DelayMilliseconds = 5_000 },
                 new ScAction { Type = ScActionRestart, DelayMilliseconds = 30_000 },
-                new ScAction { Type = ScActionNone, DelayMilliseconds = 0 },
+                new ScAction { Type = ScActionRestart, DelayMilliseconds = 60_000 },
             };
             for (var index = 0; index < actions.Length; index++)
             {
@@ -411,7 +419,10 @@ public static partial class FirewallServiceInstaller
             }
             var failureActions = new ServiceFailureActions
             {
-                ResetPeriodSeconds = 86_400,
+                // An hour, not a day. The count decides which delay the next failure gets, so a
+                // long window meant a service that failed once at boot and then ran perfectly was
+                // still treated as a repeat offender the following evening.
+                ResetPeriodSeconds = 3_600,
                 ActionCount = (uint)actions.Length,
                 Actions = actionsPtr,
             };
