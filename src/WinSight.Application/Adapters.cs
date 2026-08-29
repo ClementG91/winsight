@@ -217,7 +217,7 @@ public static class Adapters
             var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? CommandHead(e.Command);
             var verdict = report is not null
                 ? $"VT {report.Malicious}/{report.Total}"
-                : PersistenceStatusLabel(e.Status, e.Signature.Anchor);
+                : PersistenceStatusLabel(e.Status, e.Signature.Anchor, e.Signature.Revocation);
             // The command-line reason has to ride beside the signature verdict rather than replace
             // it, because the pair is the finding: "signature valid" alone reads as an all-clear on
             // exactly the entries this rule exists to catch. The raw command line stays in the
@@ -262,6 +262,12 @@ public static class Adapters
                     // null-valued fields, so a clean entry costs nothing on the wire.
                     ["commandLineConcern"] = e.Abuse == InterpreterAbuse.None ? null : e.Abuse.ToString(),
                     ["signer"] = e.Signature.Signer,
+                    // Null rather than "Unspecified" when nothing was established, so a consumer
+                    // tests for the key's presence and the MCP projector drops it from a clean
+                    // entry rather than paying for a word that means "no answer".
+                    ["revocation"] = e.Signature.Revocation == RevocationStanding.Unspecified
+                        ? null
+                        : e.Signature.Revocation.ToString(),
                     ["vtMalicious"] = report?.Malicious.ToString(),
                     ["vtTotal"] = report?.Total.ToString(),
                     ["vtLink"] = report?.Permalink,
@@ -406,11 +412,14 @@ public static class Adapters
 
     private static string PersistenceStatusLabel(
         PersistenceStatus status,
-        SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified) => status switch
+        SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified,
+        RevocationStanding revocation = RevocationStanding.Unspecified) => status switch
         {
             PersistenceStatus.FileMissing => "file missing, signature not checked",
             PersistenceStatus.SignatureValid when anchor == SignatureTrustAnchor.UserInstalledRoot =>
                 "signature valid ONLY through a user-installed root",
+            PersistenceStatus.SignatureValid when revocation == RevocationStanding.Revoked =>
+                "signature valid but the certificate is REVOKED",
             PersistenceStatus.SignatureValid => "signature valid",
             PersistenceStatus.Unsigned => "unsigned",
             PersistenceStatus.InvalidSignature => "invalid signature",

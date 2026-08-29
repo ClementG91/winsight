@@ -232,7 +232,14 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
                 var state = NativeSignatureVerifier.MapResult(result);
                 if (state is SignatureState.SignedTrusted or SignatureState.SignedUntrusted)
                 {
-                    return new SignatureVerdict(state.Value, batch.SignerOf(info.wszCatalogFile));
+                    // The same result code carries the revocation answer here as it does for an
+                    // embedded signature, and catalog-signed files are most of Windows - leaving it
+                    // out would have made the field say "no answer" for the majority of the report.
+                    return new SignatureVerdict(
+                        state.Value,
+                        batch.SignerOf(info.wszCatalogFile),
+                        SignatureTrustAnchor.Unspecified,
+                        NativeSignatureVerifier.MapRevocation(result));
                 }
                 // A machine can contain more than one catalog for the same member. An unusable
                 // first catalog must not hide a valid later one.

@@ -58,13 +58,48 @@ public enum SignatureTrustAnchor
 /// <summary>
 /// The signature verdict for a file: its state plus the signer subject when signed.
 /// </summary>
+/// <summary>
+/// Whether the signing certificate's revocation status was actually established.
+/// </summary>
+/// <remarks>
+/// <b>Why this is reported rather than folded into the verdict.</b> Revocation runs cache-only, so
+/// nothing leaves the machine during a scan - a deliberate choice, and the right one. The
+/// consequence is that on a machine with no cached CRL or OCSP response Windows reports the check as
+/// undetermined, and WinSight maps that to trusted, because refusing to trust ordinary signed
+/// software on every offline machine would be a false accusation.
+///
+/// That mapping is correct and it also throws away the one fact an operator investigating a stolen
+/// certificate needs. Campaigns using stolen signing keys run for months past the revocation, and
+/// "signature valid" is exactly what those binaries produce. The verdict now says which of the two
+/// it is, so "valid" and "valid, and revocation was not established" stop reading identically.
+/// </remarks>
+public enum RevocationStanding
+{
+    /// <summary>Not established either way, or the question does not apply.</summary>
+    Unspecified,
+
+    /// <summary>Revocation was checked against the local cache and the certificate was not revoked.</summary>
+    NotRevoked,
+
+    /// <summary>
+    /// The check could not run: nothing cached to answer from, and a scan never fetches. This is not
+    /// evidence against the file - it is the absence of evidence either way.
+    /// </summary>
+    NotChecked,
+
+    /// <summary>The certificate was revoked.</summary>
+    Revoked,
+}
+
 /// <param name="State">Coarse trust standing.</param>
 /// <param name="Signer">Signer certificate subject, or null when unsigned/missing.</param>
 /// <param name="Anchor">Which trusted root a <see cref="SignatureState.SignedTrusted"/> rests on.</param>
+/// <param name="Revocation">Whether revocation was actually established. See the enum for why.</param>
 public readonly record struct SignatureVerdict(
     SignatureState State,
     string? Signer,
-    SignatureTrustAnchor Anchor = SignatureTrustAnchor.Unspecified)
+    SignatureTrustAnchor Anchor = SignatureTrustAnchor.Unspecified,
+    RevocationStanding Revocation = RevocationStanding.Unspecified)
 {
     public static readonly SignatureVerdict Missing = new(SignatureState.Missing, null);
     public static readonly SignatureVerdict Unsigned = new(SignatureState.Unsigned, null);
@@ -79,4 +114,16 @@ public readonly record struct SignatureVerdict(
     /// </summary>
     public bool RestsOnUserInstalledTrust =>
         State == SignatureState.SignedTrusted && Anchor == SignatureTrustAnchor.UserInstalledRoot;
+
+    /// <summary>
+    /// True when the file is trusted but its revocation status was never established.
+    /// </summary>
+    /// <remarks>
+    /// A triage hint, not an accusation, exactly like <see cref="RestsOnUserInstalledTrust"/>: it is
+    /// the ordinary state of every signed file on a machine that has not talked to a CRL
+    /// distribution point. It matters when the question is whether a certificate was stolen, because
+    /// that is the one case where "valid" and "valid, unverified" differ.
+    /// </remarks>
+    public bool TrustedWithoutRevocationCheck =>
+        State == SignatureState.SignedTrusted && Revocation == RevocationStanding.NotChecked;
 }

@@ -84,7 +84,9 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         }
         try
         {
-            var state = MapResult((uint)WinVerifyTrustFile(path));
+            var result = (uint)WinVerifyTrustFile(path);
+            var state = MapResult(result);
+            var revocation = MapRevocation(result);
             return state switch
             {
                 SignatureState.SignedTrusted => new SignatureVerdict(
@@ -96,8 +98,13 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                     // where its trust came from.
                     UserInstalledRoots.TrustsAUserInstalledRoot(path)
                         ? SignatureTrustAnchor.UserInstalledRoot
-                        : SignatureTrustAnchor.MachineRoot),
-                SignatureState.SignedUntrusted => new SignatureVerdict(SignatureState.SignedUntrusted, SignerOf(path)),
+                        : SignatureTrustAnchor.MachineRoot,
+                    revocation),
+                SignatureState.SignedUntrusted => new SignatureVerdict(
+                    SignatureState.SignedUntrusted,
+                    SignerOf(path),
+                    SignatureTrustAnchor.Unspecified,
+                    revocation),
                 // No embedded signature. Before the catalog, ask whether this file belongs to an
                 // installed MSIX package: those are signed once as a package, so their executables
                 // carry no embedded signature and appear in no catalog. Without this the chain ran
@@ -141,6 +148,29 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         0x80092013 => SignatureState.SignedTrusted,      // CRYPT_E_REVOCATION_OFFLINE
         0x800B0100 => null,                              // TRUST_E_NOSIGNATURE -> try catalog
         _ => null,                                       // unknown -> try catalog
+    };
+
+    /// <summary>
+    /// What the same result code says about revocation.
+    /// </summary>
+    /// <remarks>
+    /// The information was already in hand and discarded. <see cref="MapResult"/> deliberately maps
+    /// the three "could not check" codes to trusted - refusing to trust ordinary signed software on
+    /// every offline machine would be a false accusation - and in doing so it erased the difference
+    /// between "revocation was checked" and "revocation could not be". A stolen signing certificate
+    /// produces exactly the second, for months, and the report said "signature valid" either way.
+    /// </remarks>
+    public static RevocationStanding MapRevocation(uint result) => result switch
+    {
+        0x00000000 => RevocationStanding.NotRevoked,     // checked against the cache, not revoked
+        0x800B010C => RevocationStanding.Revoked,        // CERT_E_REVOKED
+        0x800B010E => RevocationStanding.NotChecked,     // CERT_E_REVOCATION_FAILURE
+        0x80092012 => RevocationStanding.NotChecked,     // CRYPT_E_NO_REVOCATION_CHECK
+        0x80092013 => RevocationStanding.NotChecked,     // CRYPT_E_REVOCATION_OFFLINE
+        // Every other code is a verdict about the signature itself, and says nothing either way
+        // about revocation. Claiming otherwise would put a fact in the report that was never
+        // established.
+        _ => RevocationStanding.Unspecified,
     };
 
     private static string? SignerOf(string path)
