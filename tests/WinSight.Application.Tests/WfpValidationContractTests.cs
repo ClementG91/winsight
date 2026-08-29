@@ -121,7 +121,21 @@ public sealed class WfpValidationContractTests
         }
     }
 
-    [Fact(Timeout = 30000)]
+    /// <summary>
+    /// A script that hangs must be killed, not waited on for ever.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the timeout is eight seconds and not one.</b> The assertion below needs the child to
+    /// have reached its first statement and written its pid; with a one-second timeout that raced
+    /// PowerShell's own startup, and on a loaded machine startup wins. It failed exactly that way
+    /// during a full coverage run on 2026-08-29 - not because the termination logic was wrong, but
+    /// because the process under test had not started yet. A test that fails when the machine is
+    /// busy teaches people to re-run it, which is how a real failure gets waved through.
+    ///
+    /// Eight seconds is far above PowerShell's startup and far below the script's 300-second sleep,
+    /// so what is being measured - that the timeout fires and the child is gone - is unchanged.
+    /// </remarks>
+    [Fact(Timeout = 60000)]
     public async Task TimedOutContractTerminatesThePowerShellProcess()
     {
         var temporaryDirectory = Path.Combine(Path.GetTempPath(), "winsight-wfp-timeout-" + Guid.NewGuid());
@@ -146,11 +160,11 @@ public sealed class WfpValidationContractTests
                 RunScriptAtAsync(
                     useCallOperator: false,
                     hangingScript,
-                    TimeSpan.FromSeconds(1),
+                    TimeSpan.FromSeconds(8),
                     "-PidPath",
                     pidPath));
 
-            Assert.Contains("did not exit within 1 seconds (-File)", timeout.Message, StringComparison.Ordinal);
+            Assert.Contains("did not exit within 8 seconds (-File)", timeout.Message, StringComparison.Ordinal);
             Assert.True(File.Exists(pidPath), "The PowerShell process did not publish its PID before timeout.");
             var processId = int.Parse(await File.ReadAllTextAsync(pidPath), System.Globalization.CultureInfo.InvariantCulture);
             Assert.Throws<ArgumentException>(() => Process.GetProcessById(processId));

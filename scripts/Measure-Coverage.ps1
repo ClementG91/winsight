@@ -51,7 +51,18 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-# The libraries holding detection and policy logic: pure enough that a real bar is meaningful.
+# Every library holding detection, policy or composition logic.
+#
+# This list used to name ten of them and stop. The ten were not chosen for being riskier -- they were
+# the ten already above the bar. WinSight.NetMonitor sat at 63%, WinSight.Attribution at 66% and
+# WinSight.InputHooks at 78%, and the gate said "all engine libraries are at or above 80%" on every
+# run, because it was not looking at them. That is the same failure mode as reading one cobertura
+# file and reporting a pass: a number that cannot be contradicted.
+#
+# A library is on this list unless it is an entry point (the CLI's Program.cs), WPF code-behind, or
+# the SYSTEM service -- which has its own tier below. Being hard to test is not a reason to be
+# absent; it is a reason to name the untestable files explicitly, which is what $liveCaptureFiles
+# does.
 $engineAssemblies = @(
     "WinSight.Core"
     "WinSight.Persistence"
@@ -63,7 +74,36 @@ $engineAssemblies = @(
     "WinSight.Modules"
     "WinSight.Browser"
     "WinSight.Processes"
+    "WinSight.NetMonitor"
+    "WinSight.Attribution"
+    "WinSight.InputHooks"
+    "WinSight.Presence"
+    "WinSight.AvMonitor"
+    "WinSight.Drivers"
+    "WinSight.Hijack"
+    "WinSight.CodeIntegrity"
+    "WinSight.Application"
+    "WinSight.Mcp"
 )
+
+# The live ETW capture boundary, excluded from the engine tier for exactly the reason the native
+# WFP/SCM files are excluded from the privileged tier: creating a kernel trace session requires
+# Administrator, and a unit test that mocks TraceEvent asserts against the mock rather than against
+# Windows. Each of these files is a session opened against a real provider and a callback fed by it;
+# the decision logic they depend on -- EtwSessionLifecycle, the failure classifier, the process
+# identity probe, the correlation index -- is ordinary code and is held to the bar like everything
+# else.
+#
+# What covers them instead is section 6 of docs/validation/VM_QUALIFICATION_KIT.md, which starts the
+# real sessions in a disposable VM, kills owners, and requires that orphans are reclaimed and live
+# sessions are not stopped. That is evidence of a different kind, and it is recorded as such.
+#
+# Excluding a file is a claim that something else covers it. If that stops being true, the exclusion
+# is the bug -- not the percentage.
+$liveCaptureFiles = @{
+    "WinSight.NetMonitor" = @("OutboundConnectionWatcher.cs", "DnsEtwWatcher.cs")
+    "WinSight.Attribution" = @("WriteAttributionWatcher.cs")
+}
 
 # The component that runs as SYSTEM and drives WFP. It had no floor at all while the pure detection
 # libraries above -- the ones that cannot break anything -- were held to 80%, which protects the
@@ -161,6 +201,11 @@ try
     }
 
     $totals = @{}
+    # Engine assemblies measured with their live-ETW boundary removed, which is the only figure a
+    # unit-test percentage can honestly speak for. The raw number stays in the table above it, so the
+    # exclusion is visible rather than folded away.
+    $engineGated = @{}
+    $engineExcluded = 0
     # The privileged assembly measured with its native boundary removed, which is the only figure a
     # unit-test percentage can honestly speak for. Accumulated in the same pass; see the note above.
     $privilegedManaged = [pscustomobject]@{ Lines = 0; Covered = 0 }
@@ -174,6 +219,26 @@ try
         }
         $totals[$assembly].Lines++
         if ($entry.Value -gt 0) { $totals[$assembly].Covered++ }
+
+        if ($engineAssemblies -contains $assembly)
+        {
+            if (-not $engineGated.ContainsKey($assembly))
+            {
+                $engineGated[$assembly] = [pscustomobject]@{ Lines = 0; Covered = 0 }
+            }
+            $excludedForAssembly = @()
+            if ($liveCaptureFiles.ContainsKey($assembly)) { $excludedForAssembly = $liveCaptureFiles[$assembly] }
+            $leaf = Split-Path -Leaf $parts[1]
+            if ($excludedForAssembly -contains $leaf)
+            {
+                $engineExcluded++
+            }
+            else
+            {
+                $engineGated[$assembly].Lines++
+                if ($entry.Value -gt 0) { $engineGated[$assembly].Covered++ }
+            }
+        }
 
         if ($privilegedAssemblies -contains $assembly)
         {
@@ -229,6 +294,42 @@ try
         "Engine libraries:   {0}/{1} lines ({2}%)" -f `
             $engineCovered, $engineLines, [math]::Round(100 * $engineCovered / $engineLines, 1) | Write-Output
     }
+    if ($engineExcluded)
+    {
+        "Excluded from the engine gate: {0} lines of live ETW capture, qualified by the VM protocol." -f `
+            $engineExcluded | Write-Output
+    }
+
+    # The gated view, which is what the bar is actually applied to.
+    $gatedRows = foreach ($assembly in $engineGated.Keys)
+    {
+        $gated = $engineGated[$assembly]
+        [pscustomobject]@{
+            Assembly = $assembly
+            Lines    = $gated.Lines
+            Covered  = $gated.Covered
+            Percent  = if ($gated.Lines) { [math]::Round(100 * $gated.Covered / $gated.Lines, 1) } else { 0 }
+        }
+    }
+    $gatedRows = @($gatedRows)
+
+    # Printed whenever it differs from the raw table. Without this, an assembly whose raw number is
+    # below the bar sits in the table directly above the line "all engine libraries are at or above
+    # 80%", and a reader has to take it on faith that two different things are being measured. A
+    # gate that looks like it is lying is not much better than one that is.
+    $adjusted = @($gatedRows | Where-Object {
+        $raw = $production | Where-Object Assembly -EQ $_.Assembly
+        $raw -and $raw.Lines -ne $_.Lines
+    })
+    if ($adjusted.Count -gt 0)
+    {
+        "" | Write-Output
+        "Gated view (live ETW capture removed) -- these are the numbers the bar is applied to:" | Write-Output
+        ($adjusted |
+            Sort-Object Percent |
+            Format-Table Assembly, Lines, Covered, Percent -AutoSize |
+            Out-String).TrimEnd() | Write-Output
+    }
 
     if ($EngineMinimum -gt 0)
     {
@@ -243,7 +344,26 @@ try
                    "no test project loaded it; both mean this gate cannot vouch for it." -f ($unmeasured -join ", "))
         }
 
-        $below = @($engine | Where-Object { $_.Percent -lt $EngineMinimum })
+        # An exclusion that matches no file is a stale claim: the file was renamed or deleted, and
+        # the entry now quietly protects nothing while reading as though it protects something.
+        foreach ($assembly in $liveCaptureFiles.Keys)
+        {
+            foreach ($excludedFile in $liveCaptureFiles[$assembly])
+            {
+                $matched = @($hits.Keys | Where-Object {
+                    $key = $_.Split('|')
+                    $key[0] -eq $assembly -and (Split-Path -Leaf $key[1]) -eq $excludedFile
+                })
+                if ($matched.Count -eq 0)
+                {
+                    throw ("The live-capture exclusion {0}/{1} matches no measured file. Either it " +
+                           "was renamed or it no longer exists; both mean the exclusion is now a " +
+                           "claim about nothing." -f $assembly, $excludedFile)
+                }
+            }
+        }
+
+        $below = @($gatedRows | Where-Object { $_.Percent -lt $EngineMinimum })
         if ($below)
         {
             $names = ($below | ForEach-Object { "$($_.Assembly) $($_.Percent)%" }) -join ", "

@@ -122,7 +122,7 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
     /// ImagePath would be more thorough; this covers the overwhelming majority and a filter whose
     /// file cannot be found is itself reported rather than quietly dropped.
     /// </remarks>
-    private static (string? Path, bool Unreadable) ResolveDriverPath(string name)
+    internal static (string? Path, bool Unreadable) ResolveDriverPath(string name)
     {
         try
         {
@@ -175,7 +175,16 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
         }
     }
 
-    private static string? NormalizeDriverPath(string? registered)
+    /// <summary>
+    /// The absolute image path a service's <c>ImagePath</c> value refers to.
+    /// </summary>
+    /// <remarks>
+    /// Internal rather than private so the four prefix forms can be tested directly. They are the
+    /// whole of this method's risk and none of them were reachable from a test: the registry is
+    /// read-only here, so exercising them through <see cref="ResolveDriverPath"/> would have meant
+    /// writing to HKLM\SYSTEM\CurrentControlSet\Services on the machine running the suite.
+    /// </remarks>
+    internal static string? NormalizeDriverPath(string? registered)
     {
         if (string.IsNullOrWhiteSpace(registered))
         {

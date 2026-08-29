@@ -68,7 +68,18 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
         }
     }
 
-    private static string RunNetstat(CancellationToken cancellationToken)
+    /// <summary>
+    /// The bounded <c>netstat.exe</c> fallback, used only when the native table is unavailable.
+    /// </summary>
+    /// <remarks>
+    /// Internal so it can be tested directly. It is reached at runtime only on "very old or
+    /// locked-down Windows", which is another way of saying it is the one code path in this scan
+    /// that never executes on a developer's machine or in CI - and it is also the path carrying the
+    /// binary-planting defence, the kill-on-cancel registration and the drain-with-timeout that stop
+    /// a hung child holding the scan open. Untested, it would be discovered broken by the one user
+    /// who needs it.
+    /// </remarks>
+    internal static string RunNetstat(CancellationToken cancellationToken)
     {
         try
         {

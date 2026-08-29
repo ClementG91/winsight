@@ -40,12 +40,34 @@ public sealed class NativeConnectionReaderTests
 
 public sealed class DnsRecordTypeTests
 {
+    // Every arm, not a sample of them. This is the label on every line of the DNS report, and a
+    // wrong one is not obviously wrong to a reader: "MX" where the record is really SRV reads as a
+    // fact about the machine. Four of the eleven were covered, which is the number of arms somebody
+    // is comfortable typing rather than the number that can be wrong.
     [Theory]
     [InlineData(1, "A")]
-    [InlineData(28, "AAAA")]
+    [InlineData(2, "NS")]
     [InlineData(5, "CNAME")]
-    [InlineData(999, "TYPE999")]
+    [InlineData(6, "SOA")]
+    [InlineData(12, "PTR")]
+    [InlineData(15, "MX")]
+    [InlineData(16, "TXT")]
+    [InlineData(28, "AAAA")]
+    [InlineData(33, "SRV")]
+    [InlineData(65, "HTTPS")]
     public void Name_MapsRecordTypes(int type, string expected)
+    {
+        Assert.Equal(expected, DnsRecordType.Name(type));
+    }
+
+    // An unrecognised type keeps its number rather than being blanked or guessed at: a blank type
+    // on a cache entry reads as "nothing to see", which is the wrong impression to leave about the
+    // one record the tool did not recognise.
+    [Theory]
+    [InlineData(0, "TYPE0")]
+    [InlineData(999, "TYPE999")]
+    [InlineData(65535, "TYPE65535")]
+    public void Name_KeepsTheNumberOfAnUnrecognisedType(int type, string expected)
     {
         Assert.Equal(expected, DnsRecordType.Name(type));
     }
