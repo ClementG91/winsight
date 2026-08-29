@@ -283,6 +283,23 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
             // Authentication and admission intentionally execute before the first await.
             // A rejected peer is closed synchronously, keeping instance count bounded.
             var capability = _authorise(server);
+
+            // A caller with no capability at all is closed here, before any lane is entered.
+            // It used to fall into the read lane and travel the whole path - a read of up to five
+            // seconds, the dispatch, the write - only to be refused at the end. That is one of the
+            // four read slots held for five seconds by a caller who was never going to be answered,
+            // and it is available to anyone who can open the pipe. The read/mutate split itself is
+            // correct; this is the case that fell through it.
+            if (capability == FirewallCallerCapability.None)
+            {
+                DisposeAcceptedServer(
+                    server,
+                    fatalConnectionFailure,
+                    activeConnections,
+                    activeConnectionsSync);
+                return Task.CompletedTask;
+            }
+
             lane = capability == FirewallCallerCapability.MutateMachinePolicy
                 ? _mutationAdmission
                 : _readAdmission;

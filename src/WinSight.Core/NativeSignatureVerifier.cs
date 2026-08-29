@@ -244,6 +244,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         };
         var pFile = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustFileInfo>());
         var pData = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustData>());
+        var closed = false;
         try
         {
             Marshal.StructureToPtr(fileInfo, pFile, false);
@@ -280,11 +281,30 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             data.dwStateAction = WtdStateActionClose;
             Marshal.StructureToPtr(data, pData, true);
             _ = WinVerifyTrust(IntPtr.Zero, ref _actionGenericVerifyV2, pData);
+            closed = true;
 
             return result;
         }
         finally
         {
+            // WinVerifyTrust allocates state on the verify call and frees it on the close call.
+            // Between the two sit two marshalling operations, either of which can throw - and the
+            // close was only reached on the success path, so a throw leaked that state for the life
+            // of the process. Small, and free to fix: the close belongs where the frees are.
+            if (!closed)
+            {
+                try
+                {
+                    var pending = Marshal.PtrToStructure<WinTrustData>(pData);
+                    pending.dwStateAction = WtdStateActionClose;
+                    Marshal.StructureToPtr(pending, pData, true);
+                    _ = WinVerifyTrust(IntPtr.Zero, ref _actionGenericVerifyV2, pData);
+                }
+                catch (Exception ex) when (ex is ArgumentException or MissingMethodException)
+                {
+                    // Best effort: the original failure is what the caller needs to see.
+                }
+            }
             Marshal.DestroyStructure<WinTrustFileInfo>(pFile);
             Marshal.FreeHGlobal(pFile);
             Marshal.FreeHGlobal(pData);
