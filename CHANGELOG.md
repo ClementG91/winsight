@@ -1,5 +1,42 @@
 ## Unreleased
 
+A review of the audit response itself, which found one defect the response had introduced and two
+places where it had stopped short.
+
+**A file that aged out of the window went on being counted.** The fix for the burst detector's
+unbounded window discarded duplicate observations, and when the oldest entry was the only one naming
+its path it was moved to the end of the queue so its distinct count would not be lost. That broke
+the invariant everything else in the class rests on - the window is in ascending time order, and
+expiry stops at the first entry still inside it - so a rotated entry sat behind newer ones, expiry
+never reached it, and it counted as a distinct file indefinitely. The burst threshold was then
+reached with one fewer real file than it claims to require, in the one detector that must not cry
+wolf. Every existing test used a single timestamp, so expiry never ran and the ordering was never
+exercised. A duplicate is now removed where it lies rather than rotated, and a second latent case -
+retiring a path the bookkeeping no longer held wrote a count of -1, inflating the very number the
+threshold is compared against - is closed with it.
+
+**The two largest additions had never run.** Per-class coverage, rather than the per-assembly gate,
+is what showed it: an assembly stays comfortably above the bar while a file added inside it does
+not execute. The service-environment half of profiler injection - the stealthiest form of the
+vector, and the one living under a key no test can write to without installing a service - had no
+coverage at all; its block parsing is now separated from the registry walk and driven directly.
+The side-by-side store's give-up behaviour had never executed either, and everything about that
+class turns on it: an index that did not finish must answer "unknown", never "absent", because
+answering "absent" from a partial index puts the phantom-import false positive straight back, on
+precisely the machines whose store was too large to index.
+
+**The coverage gate was extended to everything except the dashboard.** Its assembly-wide number is
+53%, because a thousand lines of WPF code-behind sit at zero - so omitting the library avoided an
+inconvenient figure and stopped anyone measuring the part of it that is ordinary logic. The script's
+own rule already said to name the untestable files instead, which is now done. What that exposed:
+the presenter every operator actually reads sat at 70%, with six tool arms never executed once - the
+same six written because they had been rendering raw English into the French and Spanish dashboards,
+among them the sentence about a driver that is unsigned and can see every keystroke. That fix had
+never been verified in either language it was written for. Presenter 70% to 93%, dashboard logic
+88.4%, and the gate now covers twenty-one libraries rather than twenty.
+
+---
+
 Response to a second third-party static audit, this one of `7c9ec93`. As before every finding was
 re-derived from the source before anything changed, and the measurements below were taken on a real
 machine rather than assumed.
