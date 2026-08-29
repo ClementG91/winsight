@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -14,6 +15,13 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
 {
     public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default)
     {
+        using var batch = new CatalogBatch();
+        return Verify(path, batch, cancellationToken);
+    }
+
+    private static SignatureVerdict Verify(
+        string path, CatalogBatch batch, CancellationToken cancellationToken)
+    {
         cancellationToken.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
         {
@@ -29,7 +37,7 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
                 FileShare.Read,
                 bufferSize: 1,
                 FileOptions.RandomAccess);
-            return VerifyOpenFile(path, stream.SafeFileHandle, cancellationToken);
+            return VerifyOpenFile(path, stream.SafeFileHandle, batch, cancellationToken);
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -47,26 +55,130 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(paths);
+        var distinct = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
+        if (distinct.Length == 0)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            results[path] = Verify(path, cancellationToken);
+            return results;
+        }
+
+        // Verified in parallel, like the embedded path beside it, and for the same reason: each file
+        // is an independent WinVerifyTrust call dominated by reading the image off disk.
+        //
+        // One context per worker rather than one shared across them. CryptCATAdmin handles carry no
+        // documented thread-safety guarantee, and a security tool is the wrong place to assume one
+        // from the absence of a warning - the failure mode of guessing wrong is a wrong verdict, not
+        // a crash. Each worker therefore acquires its own context and its own signer cache, which
+        // costs one acquisition per worker instead of one per file.
+        var options = new ParallelOptions
+        {
+            CancellationToken = cancellationToken,
+            MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
+        };
+        var verified = new ConcurrentBag<(string Path, SignatureVerdict Verdict)>();
+        Parallel.ForEach(
+            distinct,
+            options,
+            () => new CatalogBatch(),
+            (path, _, batch) =>
+            {
+                verified.Add((path, Verify(path, batch, cancellationToken)));
+                return batch;
+            },
+            batch => batch.Dispose());
+
+        // Reassembled in the caller's order, so a scan's output does not vary run to run.
+        var byPath = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (path, verdict) in verified)
+        {
+            byPath[path] = verdict;
+        }
+        foreach (var path in distinct)
+        {
+            if (byPath.TryGetValue(path, out var verdict))
+            {
+                results[path] = verdict;
+            }
         }
         return results;
+    }
+
+    /// <summary>
+    /// The per-batch state: one <c>CryptCATAdmin</c> context, and the signer of each catalog already
+    /// read.
+    /// </summary>
+    /// <remarks>
+    /// <b>What this changes.</b> Every file used to acquire and release its own catalog admin
+    /// context, and re-read the signing certificate of whatever catalog it landed in. On a
+    /// persistence scan that is thousands of acquisitions of a context Windows builds by opening the
+    /// catalog store, and thousands of certificate parses of the same handful of catalog files -
+    /// almost every Microsoft binary on the machine is a member of one of a few dozen catalogs, so
+    /// the same certificate was read hundreds of times over.
+    ///
+    /// Both are now established once per batch. The context is per-batch rather than shared for the
+    /// process because <c>CryptCATAdmin</c> handles carry no documented thread-safety guarantee, and
+    /// a batch runs on one thread; the signer cache is per-batch for the same reason it is per-scan
+    /// elsewhere - a catalog replaced between two scans must be read again.
+    /// </remarks>
+    private sealed class CatalogBatch : IDisposable
+    {
+        private readonly Dictionary<string, string?> _signers =
+            new(StringComparer.OrdinalIgnoreCase);
+        private IntPtr _admin;
+        private bool _attempted;
+
+        /// <summary>
+        /// The shared context, acquired on first use. <see cref="IntPtr.Zero"/> when Windows refused,
+        /// which every caller already treats as "no verdict".
+        /// </summary>
+        internal IntPtr Admin
+        {
+            get
+            {
+                if (!_attempted)
+                {
+                    _attempted = true;
+                    if (!NativeMethods.CryptCATAdminAcquireContext2(
+                            out var acquired, IntPtr.Zero, "SHA256", IntPtr.Zero, 0))
+                    {
+                        acquired = IntPtr.Zero;
+                    }
+                    _admin = acquired;
+                }
+                return _admin;
+            }
+        }
+
+        /// <summary>The signer of a catalog, read once however many members point at it.</summary>
+        internal string? SignerOf(string catalogPath)
+        {
+            if (_signers.TryGetValue(catalogPath, out var signer))
+            {
+                return signer;
+            }
+            signer = SignerOfCatalog(catalogPath);
+            _signers[catalogPath] = signer;
+            return signer;
+        }
+
+        public void Dispose()
+        {
+            if (_admin != IntPtr.Zero)
+            {
+                _ = NativeMethods.CryptCATAdminReleaseContext(_admin, 0);
+                _admin = IntPtr.Zero;
+            }
+        }
     }
 
     private static SignatureVerdict VerifyOpenFile(
         string path,
         SafeFileHandle file,
+        CatalogBatch batch,
         CancellationToken cancellationToken)
     {
-        if (!NativeMethods.CryptCATAdminAcquireContext2(
-                out var catalogAdmin,
-                IntPtr.Zero,
-                "SHA256",
-                IntPtr.Zero,
-                0))
+        var catalogAdmin = batch.Admin;
+        if (catalogAdmin == IntPtr.Zero)
         {
             return SignatureVerdict.Unknown;
         }
@@ -118,13 +230,9 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
                 var result = unchecked((uint)VerifyCatalog(
                     path, file.DangerousGetHandle(), hash, memberTag, info.wszCatalogFile, catalogAdmin));
                 var state = NativeSignatureVerifier.MapResult(result);
-                if (state == SignatureState.SignedTrusted)
+                if (state is SignatureState.SignedTrusted or SignatureState.SignedUntrusted)
                 {
-                    return new SignatureVerdict(state.Value, SignerOfCatalog(info.wszCatalogFile));
-                }
-                if (state == SignatureState.SignedUntrusted)
-                {
-                    return new SignatureVerdict(state.Value, SignerOfCatalog(info.wszCatalogFile));
+                    return new SignatureVerdict(state.Value, batch.SignerOf(info.wszCatalogFile));
                 }
                 // A machine can contain more than one catalog for the same member. An unusable
                 // first catalog must not hide a valid later one.
@@ -139,7 +247,7 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
             {
                 _ = NativeMethods.CryptCATAdminReleaseCatalogContext(catalogAdmin, catalog, 0);
             }
-            _ = NativeMethods.CryptCATAdminReleaseContext(catalogAdmin, 0);
+            // The admin context belongs to the batch and is released when the batch ends, not here.
         }
     }
 
