@@ -1,6 +1,8 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 
+using WinSight.Core;
+
 namespace WinSight.Hijack;
 
 /// <summary>
@@ -50,7 +52,13 @@ public static class UnprivilegedWriteAccess
 
     // The rights that let somebody place a new file (or a new directory) in this one. WriteData and
     // CreateFiles are the same bit on a directory; both spellings are listed because a descriptor
-    // may carry either, and GenericWrite maps onto this set.
+    // may carry either.
+    //
+    // GenericWrite does NOT map onto this set on its own, which this comment used to claim. The
+    // generic bits live in the high word and share nothing with the specific rights below, so an
+    // ACE granting Users GENERIC_WRITE - what `icacls /grant Users:(GW)` and an SDDL `GW` produce -
+    // read as granting no planting right at all, and a real DLL side-loading point was reported as
+    // safe. Every mask is now expanded through the file generic mapping first.
     private const FileSystemRights PlantingRights =
         FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories | FileSystemRights.Write;
 
@@ -112,7 +120,7 @@ public static class UnprivilegedWriteAccess
             if (rule is not FileSystemAccessRule access
                 || access.IdentityReference is not SecurityIdentifier sid
                 || !principals.Contains(sid)
-                || (access.FileSystemRights & PlantingRights) == 0)
+                || (GenericFileRights.Expand(access.FileSystemRights) & PlantingRights) == 0)
             {
                 continue;
             }

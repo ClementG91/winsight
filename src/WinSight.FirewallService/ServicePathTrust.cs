@@ -3,6 +3,8 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
+using WinSight.Core;
+
 namespace WinSight.FirewallService;
 
 public enum PathTrustCode
@@ -41,6 +43,13 @@ public static class ServicePathRights
     /// </remarks>
     public static DangerousPathAccess Map(FileSystemRights rights, bool isDirectory)
     {
+        // An ACE may express its grant with the generic bits, which Windows resolves through the
+        // object's generic mapping at access-check time and .NET hands back unresolved. A component
+        // granting Users GENERIC_ALL shares no bit with WriteData or Delete, so every test below
+        // read None and the path was trusted - a path an unprivileged account fully controls,
+        // accepted by the check whose entire job is to refuse exactly that.
+        rights = GenericFileRights.Expand(rights);
+
         var result = DangerousPathAccess.None;
         // 0x2 — WriteData (file: overwrite) / CreateFiles (directory: plant → DLL side-load). Both dangerous.
         if ((rights & FileSystemRights.WriteData) != 0)

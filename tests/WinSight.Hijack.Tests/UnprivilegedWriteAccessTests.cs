@@ -166,4 +166,48 @@ public sealed class UnprivilegedWriteAccessTests
             Directory.Delete(directory, recursive: true);
         }
     }
+
+    /// <summary>
+    /// A grant spelled with the generic bits is still a grant.
+    /// </summary>
+    /// <remarks>
+    /// <b>The hole.</b> This check tested specific rights against a mask read straight out of the
+    /// DACL, and .NET returns that mask exactly as stored - it does not apply the object's generic
+    /// mapping. <c>GENERIC_WRITE</c> is <c>0x40000000</c> and shares no bit with
+    /// <c>FileSystemRights.Write</c>, so a directory granting Users <c>(GW)</c> read as granting no
+    /// planting right, and a real DLL side-loading point was reported as safe.
+    ///
+    /// It is not an exotic spelling: <c>icacls /grant Users:(GW)</c>, an SDDL <c>GW</c> or
+    /// <c>GA</c>, and any installer calling <c>SetNamedSecurityInfo</c> with the generic mapping all
+    /// produce it. An attacker who can set an ACL can choose the spelling the checker does not read.
+    ///
+    /// <b>Why these build the descriptor from SDDL.</b> <see cref="FileSystemAccessRule"/>'s
+    /// constructor rejects a generic mask outright, so an ACL carrying one cannot be assembled
+    /// through the managed API at all - which is precisely why this gap was easy to miss. Windows
+    /// stores the raw ACE mask regardless, and the read path hands it back unmapped. SDDL builds the
+    /// descriptor in a shape a real one can actually have.
+    /// </remarks>
+    [Theory]
+    [InlineData("GW")]
+    [InlineData("GA")]
+    public void AGenericGrantIsStillAPlantingRight(string right) =>
+        Assert.True(UnprivilegedWriteAccess.IsGrantedBy(FromSddl(right)));
+
+    /// <summary>
+    /// Expansion must not invent access: a generic read or execute grant confers no planting right,
+    /// or every readable directory on the machine becomes a finding.
+    /// </summary>
+    [Theory]
+    [InlineData("GR")]
+    [InlineData("GX")]
+    public void AGenericReadOrExecuteGrantIsNot(string right) =>
+        Assert.False(UnprivilegedWriteAccess.IsGrantedBy(FromSddl(right)));
+
+    /// <summary>An allow ACE granting BUILTIN\Users the named right and nothing else.</summary>
+    private static DirectorySecurity FromSddl(string right)
+    {
+        var security = new DirectorySecurity();
+        security.SetSecurityDescriptorSddlForm($"O:SYG:SYD:(A;;{right};;;BU)");
+        return security;
+    }
 }
