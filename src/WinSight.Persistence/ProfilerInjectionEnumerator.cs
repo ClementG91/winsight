@@ -156,17 +156,8 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
                     {
                         continue;
                     }
-                    Add(entries,
-                        enabled: Value(block, Enable),
-                        profiler: Value(block, Profiler),
-                        profilerPath: Value(block, ProfilerPath),
-                        location: $@"HKLM\{Services}\{service} [Environment]",
-                        name: service);
-                    AddDomainManager(entries,
-                        assembly: Value(block, DomainManagerAssembly),
-                        type: Value(block, DomainManagerType),
-                        location: $@"HKLM\{Services}\{service} [Environment]",
-                        name: service);
+                    ReadEnvironmentBlock(
+                        entries, block, $@"HKLM\{Services}\{service} [Environment]", service);
                 }
                 catch (Exception ex) when (ex is System.Security.SecurityException
                                              or UnauthorizedAccessException
@@ -176,6 +167,33 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Both vectors, read out of one <c>NAME=VALUE</c> environment block.
+    /// </summary>
+    /// <remarks>
+    /// Separated from the registry walk so it can be exercised directly. The block a service
+    /// carries lives under <c>HKLM\SYSTEM\CurrentControlSet\Services</c>, which a test cannot write
+    /// to without installing a service on the machine running it - so the parsing that decides
+    /// whether a service is carrying a profiler could otherwise only be verified by hand, on the
+    /// stealthiest form of the vector: one chosen SYSTEM process, with nothing another process
+    /// would read touched at all.
+    /// </remarks>
+    internal static void ReadEnvironmentBlock(
+        List<RawAutostart> entries, string[] block, string location, string name)
+    {
+        Add(entries,
+            enabled: Value(block, Enable),
+            profiler: Value(block, Profiler),
+            profilerPath: Value(block, ProfilerPath),
+            location: location,
+            name: name);
+        AddDomainManager(entries,
+            assembly: Value(block, DomainManagerAssembly),
+            type: Value(block, DomainManagerType),
+            location: location,
+            name: name);
     }
 
     /// <summary>

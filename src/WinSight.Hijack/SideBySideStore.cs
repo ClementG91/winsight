@@ -49,13 +49,35 @@ public sealed class SideBySideStore : ISideBySideStore
     public const int MaxEntries = 400_000;
 
     private readonly string _root;
+    private readonly TimeSpan _budget;
+    private readonly int _maxEntries;
     private HashSet<string>? _names;
     private bool _complete;
 
-    public SideBySideStore(string? windowsDirectory = null) =>
+    public SideBySideStore(string? windowsDirectory = null)
+        : this(windowsDirectory, Budget, MaxEntries)
+    {
+    }
+
+    /// <summary>
+    /// The same store with the limits made explicit, so the give-up behaviour can be exercised.
+    /// </summary>
+    /// <remarks>
+    /// The interesting property of this class is what it does when the walk does <i>not</i> finish:
+    /// every later lookup has to answer "unknown" rather than "absent", because an absence it never
+    /// looked for would be reported as a phantom import - the false positive the whole class exists
+    /// to remove. Reaching that path against the real store means building a tree of four hundred
+    /// thousand files or waiting eight seconds, so the limits are injectable and a test sets them
+    /// to something it can actually reach.
+    /// </remarks>
+    internal SideBySideStore(string? windowsDirectory, TimeSpan budget, int maxEntries)
+    {
         _root = Path.Combine(
             windowsDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.Windows),
             "WinSxS");
+        _budget = budget;
+        _maxEntries = maxEntries;
+    }
 
     /// <inheritdoc />
     public int UnansweredLookups { get; private set; }
@@ -112,7 +134,7 @@ public sealed class SideBySideStore : ISideBySideStore
             foreach (var file in Directory.EnumerateFiles(_root, "*.dll", options))
             {
                 names.Add(Path.GetFileName(file));
-                if (names.Count >= MaxEntries || spent.Elapsed > Budget)
+                if (names.Count >= _maxEntries || spent.Elapsed > _budget)
                 {
                     _names = names;
                     _complete = false;

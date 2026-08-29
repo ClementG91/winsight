@@ -191,4 +191,115 @@ public sealed class ProfilerInjectionTests : IDisposable
         Assert.DoesNotContain(
             Scan(), raw => raw.Command.Contains("Orphan.Type", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// A service carrying a profiler in its own environment block is reported, named by the service
+    /// it was found under.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this half needed its own tests.</b> The SCM applies a service's <c>Environment</c>
+    /// value to that service alone, so this is how a profiler is put inside one chosen SYSTEM
+    /// process without touching anything another process would read - the stealthiest form of the
+    /// vector, and the one an operator is least likely to find by hand. It also lives under
+    /// <c>HKLM\SYSTEM\CurrentControlSet\Services</c>, which a test cannot write to without
+    /// installing a service on the machine running it, so the parsing was previously reachable only
+    /// by the registry walk and never exercised at all.
+    /// </remarks>
+    [Fact]
+    public void AProfilerInAServiceEnvironmentBlockIsFound()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            ["COR_ENABLE_PROFILING=1", @"COR_PROFILER_PATH=C:\ProgramData\x\p.dll"],
+            @"HKLM\SYSTEM\CurrentControlSet\Services\Spooler [Environment]",
+            "Spooler");
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(AutostartVector.ProfilerInjection, entry.Vector);
+        Assert.Equal("Spooler", entry.Name);
+        Assert.Equal(@"C:\ProgramData\x\p.dll", entry.Command);
+    }
+
+    /// <summary>
+    /// An <c>AppDomainManager</c> in a service block is reported, and carries its type.
+    /// </summary>
+    [Fact]
+    public void AnAppDomainManagerInAServiceEnvironmentBlockIsFound()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            ["APPDOMAIN_MANAGER_ASM=Payload, Version=1.0.0.0", "APPDOMAIN_MANAGER_TYPE=Payload.Boot"],
+            @"HKLM\SYSTEM\CurrentControlSet\Services\Spooler [Environment]",
+            "Spooler");
+
+        var entry = Assert.Single(entries);
+        Assert.Contains("Payload.Boot", entry.Command, StringComparison.Ordinal);
+        Assert.Contains("AppDomainManager", entry.Name, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A name is matched entire, so a longer variable that merely starts with one is not read as it.
+    /// </summary>
+    /// <remarks>
+    /// The pair is the mechanism: without <c>COR_ENABLE_PROFILING</c> the CLR loads nothing. If a
+    /// prefix satisfied the lookup, any block holding <c>COR_ENABLE_PROFILING_SOMETHING=1</c> would
+    /// report the machine as carrying an injected profiler.
+    /// </remarks>
+    [Fact]
+    public void AVariableWhoseNameMerelyStartsWithOneOfThemIsNotReadAsIt()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            ["COR_ENABLE_PROFILING_LEGACY=1", @"COR_PROFILER_PATH=C:\ProgramData\x\p.dll"],
+            "location",
+            "Svc");
+
+        Assert.Empty(entries);
+    }
+
+    /// <summary>
+    /// A profiler named but not enabled is not a finding, and neither is a malformed block.
+    /// </summary>
+    /// <remarks>
+    /// <c>COR_PROFILER</c> on its own loads nothing, and reporting it would flag every machine with
+    /// a development tool installed - the false positive this surface has to avoid to be worth
+    /// shipping. A line with no separator, or one whose name is empty, is not a variable at all.
+    /// </remarks>
+    [Theory]
+    [InlineData(@"COR_PROFILER_PATH=C:\x\p.dll")]
+    [InlineData("COR_ENABLE_PROFILING=0", @"COR_PROFILER_PATH=C:\x\p.dll")]
+    [InlineData("COR_ENABLE_PROFILING")]
+    [InlineData("=C:=C:\\", "COR_ENABLE_PROFILING=1")]
+    [InlineData("")]
+    public void ABlockThatDoesNotSpellTheMechanismIsNotAFinding(params string[] block)
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(entries, block, "location", "Svc");
+
+        Assert.Empty(entries);
+    }
+
+    /// <summary>
+    /// Whitespace around a name or a value does not hide the mechanism.
+    /// </summary>
+    [Fact]
+    public void SurroundingWhitespaceDoesNotHideTheMechanism()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            ["  COR_ENABLE_PROFILING = 1 ", @" COR_PROFILER_PATH = C:\x\p.dll "],
+            "location",
+            "Svc");
+
+        Assert.Equal(@"C:\x\p.dll", Assert.Single(entries).Command);
+    }
 }
