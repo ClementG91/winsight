@@ -65,7 +65,8 @@ public sealed class PhantomScanIntegrationTests
             probe ?? new Probe(writable: false),
             new Known(),
             readImports: _ => imports,
-            fileExists: present.Contains);
+            fileExists: present.Contains,
+            sideBySideStore: new EmptyStore());
     }
 
     [Fact]
@@ -163,7 +164,8 @@ public sealed class PhantomScanIntegrationTests
             probe,
             new Known(),
             readImports: _ => new PeImportSet(["wlbsctrl.dll"], []),
-            fileExists: path => path.Equals(Image, StringComparison.OrdinalIgnoreCase));
+            fileExists: path => path.Equals(Image, StringComparison.OrdinalIgnoreCase),
+            sideBySideStore: new EmptyStore());
 
         var findings = scanner.Scan();
 
@@ -202,5 +204,20 @@ public sealed class PhantomScanIntegrationTests
 
         Assert.DoesNotContain(scan.Items, finding => finding.Kind == HijackKind.PhantomImport);
         Assert.Equal(1, scan.UnreadableItems);
+    }
+
+    /// <summary>
+    /// A side-by-side store that holds nothing, so these tests measure the phantom rule rather than
+    /// this machine's WinSxS contents.
+    /// </summary>
+    /// <remarks>
+    /// It is also why the store is injectable at all: the first version walked the real tree per
+    /// lookup and took this suite from 70 ms to 75 seconds.
+    /// </remarks>
+    private sealed class EmptyStore : ISideBySideStore
+    {
+        public int UnansweredLookups => 0;
+
+        public bool? Contains(string dll) => false;
     }
 }
