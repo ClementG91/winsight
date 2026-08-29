@@ -24,7 +24,14 @@ public static class ReportRenderer
         writer.WriteLine($"== {report.Tool} == {report.Summary}");
         foreach (var item in report.Items)
         {
-            var mark = item.Severity == Severity.Notable ? "[!]" : "[ ]";
+            // Three marks, because two made "the check could not run" indistinguishable from a
+            // finding. [?] reads as a question, which is what an unverified item is.
+            var mark = item.Severity switch
+            {
+                Severity.Notable => "[!]",
+                Severity.Unverified => "[?]",
+                _ => "[ ]",
+            };
             writer.WriteLine($"  {mark} {item.Title}");
             if (item.Detail.Length > 0)
             {

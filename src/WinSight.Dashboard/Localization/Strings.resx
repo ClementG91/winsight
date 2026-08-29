@@ -349,4 +349,5 @@
   <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>PowerShell profile</value></data>
   <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} new startup items, {1} worth a look</value></data>
   <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} new startup items, all signed and trusted</value></data>
+  <data name="UnverifiedSeverity" xml:space="preserve"><value>Unverified</value></data>
 </root>

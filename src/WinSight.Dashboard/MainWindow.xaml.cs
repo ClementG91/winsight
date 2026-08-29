@@ -713,7 +713,12 @@ public partial class MainWindow : Window, IDisposable
                 ? $"{DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool} · {presentation.Title}"
                 : presentation.Title;
             return new FindingView(
-                item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
+                item.Severity switch
+                {
+                    Severity.Notable => Text["NotableSeverity"],
+                    Severity.Unverified => Text["UnverifiedSeverity"],
+                    _ => Text["InfoSeverity"],
+                },
                 title,
                 presentation.Detail,
                 item,

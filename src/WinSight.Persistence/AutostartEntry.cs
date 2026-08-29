@@ -134,12 +134,32 @@ public sealed record AutostartEntry(
     /// character <c>U</c>). An unresolvable autostart command is rare, and each one is exactly the
     /// case where no signature verdict exists to speak for the entry.
     /// </remarks>
-    public bool IsSuspicious =>
-        Status is PersistenceStatus.FileMissing
-            or PersistenceStatus.Unsigned
-            or PersistenceStatus.InvalidSignature
-            or PersistenceStatus.AccessDenied
-        || ImageStatus is ImageResolutionStatus.Unresolved
+    public bool IsSuspicious => IsUnverified || IsAdverse;
+
+    /// <summary>
+    /// True when the entry's check could not complete: the target is not on disk, could not be
+    /// opened, or the command names nothing resolvable. Nothing is known about it either way.
+    /// </summary>
+    /// <remarks>
+    /// <b>Split out because these are not findings.</b> They were reported at the same weight as an
+    /// unsigned DLL in an IFEO Debugger value, and an orphaned registration left by an OEM
+    /// uninstaller is far more common than a hijack - which made this the dominant source of noise
+    /// in the product. The distinction is the one the rest of the codebase already draws between
+    /// "I looked and found nothing" and "I could not look"; it simply had nowhere to land.
+    ///
+    /// Still surfaced, still worth reading, and deliberately not counted as something to examine.
+    /// </remarks>
+    public bool IsUnverified =>
+        Status is PersistenceStatus.FileMissing or PersistenceStatus.AccessDenied
+        || ImageStatus is ImageResolutionStatus.Unresolved;
+
+    /// <summary>
+    /// True when the check completed and what it found is adverse: an unsigned or untrusted image,
+    /// trust resting on a root any account can install, or a signed interpreter handed somebody
+    /// else's payload.
+    /// </summary>
+    public bool IsAdverse =>
+        Status is PersistenceStatus.Unsigned or PersistenceStatus.InvalidSignature
         // "Signed and trusted" is worth no more than the root it chains to, and WinVerifyTrust
         // consults CurrentUser\Root - a store any account writes with no elevation. An implant
         // signed beneath a root imported that way read SignatureValid here, which defeated the

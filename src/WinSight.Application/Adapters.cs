@@ -185,8 +185,16 @@ public static class Adapters
             cancellationToken);
 
         var b = new ToolReport.Builder("persistence");
-        foreach (var e in entries.Where(e => !flaggedOnly || e.IsSuspicious)
-                     .OrderByDescending(e => e.IsSuspicious).ThenBy(e => e.Vector))
+        // --flagged means "only noteworthy items", so it now shows what was checked and found
+        // adverse - not what could not be checked. An orphaned OEM registration used to sit in that
+        // list beside a live IFEO hijack, which is what made the list too long to read.
+        //
+        // The coverage signal is not lost: the summary line names the unverified count, and a full
+        // scan still shows every one of them at their own severity. Moving them out of this view is
+        // what makes the view worth having; naming them in the header is what keeps the scan honest.
+        foreach (var e in entries.Where(e => !flaggedOnly || e.IsAdverse)
+                     .OrderByDescending(e => e.IsAdverse).ThenByDescending(e => e.IsUnverified)
+                     .ThenBy(e => e.Vector))
         {
             var report = e.ImagePath is not null && vt.TryGetValue(e.ImagePath, out var v) ? v : null;
             // The whole command line must not become the detail. The MCP projector withholds
@@ -210,7 +218,12 @@ public static class Adapters
                 ? $"{displayedPath}  [{verdict}]"
                 : $"{displayedPath}  [{verdict}; {abuse}]";
             b.Add(
-                e.IsSuspicious ? Severity.Notable : Severity.Info,
+                // Three levels, not two. An entry whose target could not be checked is Unverified:
+                // present in the report, absent from the "worth examining" count, and not a reason
+                // for a scheduled task to exit non-zero.
+                e.IsAdverse ? Severity.Notable
+                    : e.IsUnverified ? Severity.Unverified
+                    : Severity.Info,
                 $"{e.Vector}/{e.Name}",
                 detail,
                 new Dictionary<string, string?>
@@ -257,7 +270,16 @@ public static class Adapters
     internal static string PersistenceSummary(
         IReadOnlyList<AutostartEntry> entries, PersistenceCoverage coverage)
     {
-        var line = $"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged";
+        // Flagged counts what was checked and found adverse. Entries whose check could not complete
+        // are named separately: reporting an orphaned OEM registration as "flagged" alongside a live
+        // IFEO hijack is what made this number stop meaning anything.
+        var adverse = entries.Count(e => e.IsAdverse);
+        var unverified = entries.Count(e => e.IsUnverified);
+        var line = $"{entries.Count} autostart item(s), {adverse} flagged";
+        if (unverified > 0)
+        {
+            line += $", {unverified} unverified";
+        }
         if (!coverage.IsPartial)
         {
             return line;

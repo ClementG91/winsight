@@ -346,4 +346,5 @@
   <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>Perfil de PowerShell</value></data>
   <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} nuevos elementos de inicio, {1} para revisar</value></data>
   <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} nuevos elementos de inicio, todos firmados y de confianza</value></data>
+  <data name="UnverifiedSeverity" xml:space="preserve"><value>Sin verificar</value></data>
 </root>

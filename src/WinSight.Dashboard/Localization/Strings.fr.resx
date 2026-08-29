@@ -346,4 +346,5 @@
   <data name="PersistenceVectorPowerShellProfile" xml:space="preserve"><value>Profil PowerShell</value></data>
   <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} nouveaux éléments de démarrage, dont {1} à examiner</value></data>
   <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} nouveaux éléments de démarrage, tous signés et fiables</value></data>
+  <data name="UnverifiedSeverity" xml:space="preserve"><value>Non vérifié</value></data>
 </root>
