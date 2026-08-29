@@ -1,18 +1,37 @@
 # Production readiness
 
-This is the authoritative status as of 2026-08-25. Evidence is candidate-bound: a successful result
+This is the authoritative status as of 2026-08-29. Evidence is candidate-bound: a successful result
 for one commit or package does not qualify different executable bytes.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Technical VM qualification passed**: the privileged runtime candidate `8486155` passed the complete security campaign; exact UI/package candidate `3912d67` passed local build, installer and test gates plus Windows 11 VM layout, EN/FR/ES smoke and live posture checks; successor `8230aa9` passed CI `32789592412` and CodeQL `32789591166`. |
+| **x64** | **v0.12.0 is not yet production-ready.** The last fully qualified runtime remains the historical v0.11.6 candidate `8486155`; the v0.12.0 candidate changes privileged firewall behavior, detection logic and the public JSON contract, so it must pass new CI and the complete VM campaign before release. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
 Authenticode is an accepted distribution limitation and is not counted as a blocker here. Public
 binaries remain deliberately unsigned and Windows therefore cannot establish a publisher identity.
 
-## Current x64 qualification
+## Current v0.12.0 candidate
+
+`Directory.Build.props` now targets v0.12.0 because the candidate replaces the public `--json` bare
+array with a versioned envelope and contains a substantial security and detection delta. Reusing the
+already published v0.11.6 version for different bytes and an incompatible contract would be
+misleading.
+
+Local Release build, formatting, dependency audit, ETW helper contract, CFA provider contract and
+the complete coverage gate pass. Those are development results, not release qualification. Until a
+successful CI run is bound to the final commit and the x64 CI artifacts pass the complete VM kit,
+the authoritative statement is:
+
+```text
+production_ready=false
+```
+
+No result below is inherited by v0.12.0; it remains useful only as regression history and as the
+known-good baseline the new campaign must meet or exceed.
+
+## Last fully qualified x64 runtime baseline
 
 The exact runtime candidate is commit
 `8486155b5d09b57e424c513863b0b15498e4a472`. It was built locally as v0.11.6, protected by exact
@@ -69,6 +88,10 @@ installer packages. CodeQL run `32789591166` passed its C# and Actions analyses.
 
 ## Remaining gates
 
+- complete native-x64 v0.12.0 qualification of the final CI candidate, including installer,
+  WFP/SCM/trust/local and Network IPC, ETW recovery, and the new privileged regression scenarios;
+- green CI and CodeQL bound to that same final commit, followed by separate qualification of the
+  published release artifacts because CI and release packages are not bit-for-bit interchangeable;
 - independent human EN/FR/ES presentation review remains recommended; the project owner has reviewed
   the French flow interactively, while EN/ES have automated layout/resource and smoke coverage;
 - native Arm64 privileged WFP/SCM/trust/IPC/session qualification when suitable hardware is available;
@@ -83,8 +106,8 @@ but must remain visible to users.
 ## Historical evidence
 
 Earlier candidate-bound records remain under [`validation/`](validation/README.md). They are useful
-regression history, but the current verdict relies on the 2026-08-23 record rather than inheriting an
-older pass. The invalid early 18/18 transcript remains marked as superseded and is not evidence.
+regression history, but they do not qualify v0.12.0. The invalid early 18/18 transcript remains
+marked as superseded and is not evidence.
 
 ## Authenticode policy
 
