@@ -347,4 +347,30 @@
   <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} nouveaux éléments de démarrage, dont {1} à examiner</value></data>
   <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} nouveaux éléments de démarrage, tous signés et fiables</value></data>
   <data name="UnverifiedSeverity" xml:space="preserve"><value>Non vérifié</value></data>
+  <data name="IntegrityProtectionDriverSignatureEnforcement" xml:space="preserve"><value>Contrôle de signature des pilotes</value></data>
+  <data name="IntegrityProtectionTestSigning" xml:space="preserve"><value>Signature de test</value></data>
+  <data name="IntegrityProtectionMemoryIntegrity" xml:space="preserve"><value>Intégrité de la mémoire</value></data>
+  <data name="IntegrityProtectionSecureBoot" xml:space="preserve"><value>Démarrage sécurisé</value></data>
+  <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Débogueur noyau</value></data>
+  <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Mode de débogage noyau</value></data>
+  <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>Intégrité du code en mode utilisateur</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>Le noyau n’a pas communiqué ses options d’intégrité du code : le contrôle de signature des pilotes est indéterminé — ce n’est pas la même chose que désactivé.</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>Le contrôle de signature des pilotes est actif : le noyau refuse les pilotes non signés.</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>Le contrôle de signature des pilotes est DÉSACTIVÉ : le noyau chargera des pilotes non signés. Tout pilote non signé signalé ailleurs doit être lu à cette lumière.</value></data>
+  <data name="IntegrityStateTestSigningUnreadable" xml:space="preserve"><value>Impossible d’établir si la signature de test est activée.</value></data>
+  <data name="IntegrityStateTestSigningOn" xml:space="preserve"><value>La SIGNATURE DE TEST est activée : cette machine chargera un pilote signé par n’importe qui, y compris par un certificat fabriqué par un attaquant. Sauf si vous développez des pilotes, cela devrait être désactivé.</value></data>
+  <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>La signature de test est désactivée : un pilote doit donc porter une signature en laquelle Windows a confiance.</value></data>
+  <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>Impossible d’établir si l’intégrité de la mémoire fonctionne.</value></data>
+  <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) ne fonctionne pas. Elle est désactivée sur de nombreuses machines saines, mais lorsqu’elle est active, contourner la signature des pilotes ne suffit plus à exécuter du code dans le noyau.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) est en mode AUDIT : les violations sont journalisées mais restées autorisées. Elle apparaît activée alors qu’elle n’applique rien.</value></data>
+  <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) s’applique, en mode strict.</value></data>
+  <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) s’applique.</value></data>
+  <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>Le démarrage sécurisé est actif : le micrologiciel vérifie la chaîne de démarrage avant le lancement de Windows.</value></data>
+  <data name="IntegrityStateSecureBootOff" xml:space="preserve"><value>Le démarrage sécurisé est désactivé : rien ne vérifie la chaîne de démarrage avant le lancement de Windows. Souvent désactivé volontairement pour un double amorçage ; si ce n’est pas vous, cherchez qui.</value></data>
+  <data name="IntegrityStateSecureBootUnreadable" xml:space="preserve"><value>L’état du démarrage sécurisé n’a pas pu être lu — sur une machine BIOS/CSM, il n’existe tout simplement pas.</value></data>
+  <data name="IntegrityStateKernelDebuggerAttached" xml:space="preserve"><value>Un débogueur noyau est attaché et actif. Qui le contrôle peut lire et modifier n’importe quoi dans la mémoire du noyau, y compris chacune des protections ci-dessus.</value></data>
+  <data name="IntegrityStateKernelDebuggerAbsent" xml:space="preserve"><value>Aucun débogueur noyau n’est attaché.</value></data>
+  <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>Impossible d’établir si un débogueur noyau est attaché.</value></data>
+  <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>Le mode de débogage noyau est autorisé, ce qui assouplit ce que le noyau accepte de charger et permet à un débogueur de lire et de modifier la mémoire du noyau.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est appliquée, en plus de la signature des pilotes.</value></data>
 </root>

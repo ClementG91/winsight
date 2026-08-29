@@ -347,4 +347,30 @@
   <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} nuevos elementos de inicio, {1} para revisar</value></data>
   <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} nuevos elementos de inicio, todos firmados y de confianza</value></data>
   <data name="UnverifiedSeverity" xml:space="preserve"><value>Sin verificar</value></data>
+  <data name="IntegrityProtectionDriverSignatureEnforcement" xml:space="preserve"><value>Control de firma de controladores</value></data>
+  <data name="IntegrityProtectionTestSigning" xml:space="preserve"><value>Firma de prueba</value></data>
+  <data name="IntegrityProtectionMemoryIntegrity" xml:space="preserve"><value>Integridad de la memoria</value></data>
+  <data name="IntegrityProtectionSecureBoot" xml:space="preserve"><value>Arranque seguro</value></data>
+  <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Depurador del núcleo</value></data>
+  <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Modo de depuración del núcleo</value></data>
+  <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>Integridad del código en modo usuario</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>El núcleo no comunicó sus opciones de integridad de código, por lo que el control de firma de controladores queda indeterminado: no es lo mismo que desactivado.</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>El control de firma de controladores está activo: el núcleo rechaza los controladores sin firmar.</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>El control de firma de controladores está DESACTIVADO: el núcleo cargará controladores sin firmar. Cualquier controlador sin firmar detectado en otro lugar debe leerse a esa luz.</value></data>
+  <data name="IntegrityStateTestSigningUnreadable" xml:space="preserve"><value>No se pudo establecer si la firma de prueba está activada.</value></data>
+  <data name="IntegrityStateTestSigningOn" xml:space="preserve"><value>La FIRMA DE PRUEBA está activada: esta máquina cargará un controlador firmado por cualquiera, incluido un certificado generado por un atacante. Salvo que esté desarrollando controladores, esto debería estar desactivado.</value></data>
+  <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>La firma de prueba está desactivada, por lo que un controlador debe llevar una firma en la que Windows confíe.</value></data>
+  <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>No se pudo establecer si la integridad de la memoria está en funcionamiento.</value></data>
+  <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>La integridad de la memoria (HVCI) no está en funcionamiento. Está desactivada en muchas máquinas sanas, pero con ella activa, eludir la firma de controladores ya no basta para ejecutar código en el núcleo.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>La integridad de la memoria (HVCI) está en modo AUDITORÍA: las infracciones se registran pero se siguen permitiendo. Aparece como activada sin aplicar nada.</value></data>
+  <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>La integridad de la memoria (HVCI) se aplica, en modo estricto.</value></data>
+  <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>La integridad de la memoria (HVCI) se aplica.</value></data>
+  <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>El arranque seguro está activo: el firmware verifica la cadena de arranque antes de que se inicie Windows.</value></data>
+  <data name="IntegrityStateSecureBootOff" xml:space="preserve"><value>El arranque seguro está desactivado, por lo que nada verifica la cadena de arranque antes de que se inicie Windows. A menudo se desactiva a propósito para el arranque dual; si no fue usted, averigüe quién lo hizo.</value></data>
+  <data name="IntegrityStateSecureBootUnreadable" xml:space="preserve"><value>No se pudo leer el estado del arranque seguro: en una máquina BIOS/CSM sencillamente no existe.</value></data>
+  <data name="IntegrityStateKernelDebuggerAttached" xml:space="preserve"><value>Hay un depurador del núcleo conectado y activo. Quien lo controle puede leer y modificar cualquier cosa en la memoria del núcleo, incluidas todas las protecciones anteriores.</value></data>
+  <data name="IntegrityStateKernelDebuggerAbsent" xml:space="preserve"><value>No hay ningún depurador del núcleo conectado.</value></data>
+  <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>No se pudo establecer si hay un depurador del núcleo conectado.</value></data>
+  <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>El modo de depuración del núcleo está permitido, lo que relaja lo que el núcleo aceptará cargar y permite a un depurador leer y modificar la memoria del núcleo.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>La integridad del código de las aplicaciones (WDAC) se aplica además de la firma de controladores.</value></data>
 </root>

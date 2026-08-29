@@ -350,4 +350,30 @@
   <data name="GuardianDetectedBatchNotable" xml:space="preserve"><value>{0} new startup items, {1} worth a look</value></data>
   <data name="GuardianDetectedBatchSigned" xml:space="preserve"><value>{0} new startup items, all signed and trusted</value></data>
   <data name="UnverifiedSeverity" xml:space="preserve"><value>Unverified</value></data>
+  <data name="IntegrityProtectionDriverSignatureEnforcement" xml:space="preserve"><value>Driver signature enforcement</value></data>
+  <data name="IntegrityProtectionTestSigning" xml:space="preserve"><value>Test signing</value></data>
+  <data name="IntegrityProtectionMemoryIntegrity" xml:space="preserve"><value>Memory integrity</value></data>
+  <data name="IntegrityProtectionSecureBoot" xml:space="preserve"><value>Secure Boot</value></data>
+  <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Kernel debugger</value></data>
+  <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Kernel debug mode</value></data>
+  <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>User-mode code integrity</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>The kernel did not report its code-integrity options, so driver signing enforcement is undetermined — not the same as off.</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>Driver signature enforcement is on: the kernel refuses unsigned drivers.</value></data>
+  <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>Driver signature enforcement is OFF: the kernel will load unsigned drivers. Any unsigned driver reported elsewhere should be read in that light.</value></data>
+  <data name="IntegrityStateTestSigningUnreadable" xml:space="preserve"><value>Whether test signing is enabled could not be established.</value></data>
+  <data name="IntegrityStateTestSigningOn" xml:space="preserve"><value>TEST SIGNING is enabled: this machine will load a driver signed by anyone, including a certificate an attacker generated. Unless you are developing drivers, this should be off.</value></data>
+  <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>Test signing is off, so a driver must carry a signature Windows trusts.</value></data>
+  <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>Whether memory integrity is running could not be established.</value></data>
+  <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>Memory integrity (HVCI) is not running. It is off on many healthy machines, but with it on, a driver-signing bypass alone is not enough to run code in the kernel.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>Memory integrity (HVCI) is in AUDIT mode: violations are logged but still allowed. It reads as enabled while enforcing nothing.</value></data>
+  <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>Memory integrity (HVCI) is enforcing, in strict mode.</value></data>
+  <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>Memory integrity (HVCI) is enforcing.</value></data>
+  <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>Secure Boot is on: the firmware verifies the boot chain before Windows starts.</value></data>
+  <data name="IntegrityStateSecureBootOff" xml:space="preserve"><value>Secure Boot is off, so nothing verifies the boot chain before Windows starts. Often disabled deliberately for dual-boot; if you did not turn it off, find out who did.</value></data>
+  <data name="IntegrityStateSecureBootUnreadable" xml:space="preserve"><value>Secure Boot state could not be read — on a BIOS/CSM machine it does not exist at all.</value></data>
+  <data name="IntegrityStateKernelDebuggerAttached" xml:space="preserve"><value>A kernel debugger is attached and active. Whoever controls it can read and change anything in kernel memory, including every protection above.</value></data>
+  <data name="IntegrityStateKernelDebuggerAbsent" xml:space="preserve"><value>No kernel debugger is attached.</value></data>
+  <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>Whether a kernel debugger is attached could not be established.</value></data>
+  <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>Kernel debug mode is permitted, which relaxes what the kernel will load and lets a debugger read and change kernel memory.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>Application code integrity (WDAC) is enforced as well as driver signing.</value></data>
 </root>

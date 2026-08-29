@@ -96,6 +96,14 @@ public sealed class EveryScannerRunsTests
     /// the flagged item from the same predicate it derives <c>Notable</c> from, so a flagged report
     /// contains notable items or nothing. That also catches the leak the count comparison could not
     /// see, an <c>Info</c> item surviving the filter.
+    ///
+    /// <b>Why <c>Unverified</c> is admitted here.</b> The thing being protected is that the short
+    /// list stays short and that automation does not exit non-zero over routine facts. An
+    /// <c>Unverified</c> item threatens neither: it is excluded from <c>NotableCount</c>, so it
+    /// cannot move an exit code, and the only scanner that emits one into this view emits exactly
+    /// one - "these autostart surfaces could not be read". Filtering that out would leave the view an
+    /// operator actually uses looking clean while the scan was blind to nine locations, which is the
+    /// failure the finding exists to prevent. <c>Info</c> is still refused outright.
     /// </remarks>
     [Theory]
     [MemberData(nameof(EveryScanner))]
@@ -103,10 +111,15 @@ public sealed class EveryScannerRunsTests
     {
         var flagged = Adapters.Run(command, flaggedOnly: true, allowNetworkLookups: false);
 
-        Assert.All(flagged.Items, item => Assert.Equal(Severity.Notable, item.Severity));
+        Assert.All(
+            flagged.Items,
+            item => Assert.True(
+                item.Severity is Severity.Notable or Severity.Unverified,
+                $"{command}: {item.Severity} item '{item.Title}' survived the flagged filter"));
         // An empty flagged report is a normal answer on a clean machine, so the count is not asserted
         // to be positive; what must hold is that the header agrees with the body an operator reads.
-        Assert.Equal(flagged.Items.Count, flagged.NotableCount);
+        Assert.Equal(
+            flagged.Items.Count(item => item.Severity == Severity.Notable), flagged.NotableCount);
     }
 
     /// <summary>

@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using WinSight.Attribution;
 using WinSight.AvMonitor;
 using WinSight.Browser;
@@ -254,7 +256,50 @@ public static class Adapters
             b,
             entries.Where(entry => entry.ImageStatus == ImageResolutionStatus.Present)
                 .Select(entry => entry.Signature));
+        AddPersistenceCoverageFinding(b, scan.Coverage);
         return b.Build(PersistenceSummary(entries, scan.Coverage));
+    }
+
+    /// <summary>
+    /// Surfaces the scan was not allowed to read, as a finding rather than only as a clause in the
+    /// summary line.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the clause was not enough.</b> Persistence was the one scanner of eleven that reported
+    /// its coverage gap only through <c>Summary</c>. The CLI and the MCP server print that string,
+    /// so both saw it - but the dashboard replaces <c>SummaryText</c> with its own "N results, M to
+    /// examine" line, and the clause went with it. The audience that lost it is precisely the
+    /// non-technical one, on the scanner where the difference between "there is nothing there" and
+    /// "I could not look" is measured at 210 items on a real machine.
+    ///
+    /// Emitting a finding puts it in the results grid, where no presentation layer can drop it, and
+    /// makes persistence behave like the ten scanners beside it.
+    ///
+    /// It is Unverified rather than Notable: an unelevated scan is not a finding about the machine,
+    /// and making it drive the exit code would mean every scheduled task without elevation reports
+    /// failure for ever.
+    /// </remarks>
+    internal static void AddPersistenceCoverageFinding(
+        ToolReport.Builder builder, PersistenceCoverage coverage)
+    {
+        if (!coverage.IsPartial)
+        {
+            return;
+        }
+        var surfaces = string.Join(", ", coverage.UnreadableSurfaces.Distinct().Order(StringComparer.Ordinal));
+        builder.Add(
+            Severity.Unverified,
+            "autostart surfaces not readable",
+            coverage.UnreadableLocations > 0
+                ? $"{coverage.UnreadableLocations} location(s) could not be read ({surfaces}); "
+                    + "run elevated to cover them"
+                : $"surface(s) could not be read ({surfaces}); run elevated to cover them",
+            new Dictionary<string, string?>
+            {
+                ["unreadableLocations"] = coverage.UnreadableLocations.ToString(
+                    CultureInfo.InvariantCulture),
+                ["unreadableSurfaces"] = surfaces,
+            });
     }
 
     /// <summary>
@@ -1076,13 +1121,21 @@ public static class Adapters
                 continue;
             }
             b.Add(
-                isNotable ? Severity.Notable : Severity.Info,
+                isNotable ? Severity.Notable
+                    // A protection whose state the kernel would not report is the same kind of thing
+                    // as an autostart entry whose target is not on disk: nothing is known either way.
+                    : finding.Concern is IntegrityConcern.Unreadable ? Severity.Unverified
+                    : Severity.Info,
                 finding.Name,
                 finding.Detail,
                 new Dictionary<string, string?>
                 {
                     ["protection"] = finding.Name,
                     ["concern"] = finding.Concern.ToString(),
+                    // The sub-case, not just the verdict. HVCI is a hardening gap both when it is off
+                    // and when it is in audit mode, and those are not the same sentence - the
+                    // dashboard needs the distinction to say either of them in French.
+                    ["state"] = finding.State,
                 });
         }
 
