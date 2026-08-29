@@ -82,6 +82,25 @@ scan rather than adding a second signature-verification pass to the machine. A p
 running is reported as not running — a different answer from a process that is running and has
 nothing notable — and `pid 0`, the System Idle Process, is refused rather than described.
 
+### Reading a large report
+
+Evidence is paged. `maxItems` bounds one response and `offset` says where it starts, so a client
+reads a large report by asking again with `offset` set to the previous `offset` plus
+`returnedItemCount` for as long as `truncated` is true.
+
+Before, `maxItems` capped a response at 200 items and there was no way to ask for the rest. A
+persistence scan on an ordinary desktop returns over four thousand items, so a model received the
+first page, was told `truncated: true`, and had nothing it could do with that. "There is more
+evidence and you cannot have it" is a worse answer than a smaller page with a way to continue.
+
+A response is also bounded by size, not only by item count. A finding's fields hold registry values,
+command lines and certificate subjects whose length is decided by the machine's contents rather
+than by WinSight, so two hundred items can be tens of kilobytes or megabytes depending on what
+somebody wrote into the registry. When a page stops at that budget it reports
+`budgetExhausted: true`, which is deliberately separate from `truncated`: the remedy is a smaller
+page rather than a later one. A single finding larger than the whole budget is still returned, on
+its own, because an empty page says less than one oversized item that admits what it is.
+
 ### Resources
 
 | Resource | Contents |
