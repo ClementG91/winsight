@@ -67,7 +67,15 @@ public sealed class RansomwareBurstDetector
     /// </remarks>
     private const int MaxObservations = 4096;
 
-    /// <summary>Evictions attempted per arrival, so the trimming itself stays constant-time.</summary>
+    /// <summary>
+    /// Entries examined from the front of the window per arrival, so trimming stays constant-time.
+    /// </summary>
+    /// <remarks>
+    /// The budget has to exceed the distinct-file threshold for the window to stay capped, and it
+    /// does by a wide margin: only an entry that is the sole observation of its path is skipped
+    /// rather than dropped, and there can never be more of those than the distinct count - which,
+    /// at the threshold, has already fired and stopped accumulating.
+    /// </remarks>
     private const int TrimBudget = 64;
 
     private readonly int _threshold;
@@ -75,7 +83,9 @@ public sealed class RansomwareBurstDetector
     private readonly TimeSpan _cooldown;
     private DateTimeOffset _firedAt;
     private int _suppressed;
-    private readonly Queue<Observation> _recent = new();
+    // A linked list rather than a queue, because trimming has to remove an entry from inside the
+    // window while leaving the rest in the order they arrived. See TrimDuplicates.
+    private readonly LinkedList<Observation> _recent = new();
 
     /// <summary>
     /// How many observations in the window name each path, so the distinct count is maintained as
@@ -179,9 +189,12 @@ public sealed class RansomwareBurstDetector
             }
 
             Admit(new Observation(atUtc, path));
-            while (_recent.Count > 0 && atUtc - _recent.Peek().At > _window)
+            // The window is in ascending time order, so expiry stops at the first entry still
+            // inside it. TrimDuplicates is what keeps that ordering true.
+            while (_recent.First is { } oldest && atUtc - oldest.Value.At > _window)
             {
-                Retire(_recent.Dequeue());
+                _recent.RemoveFirst();
+                Retire(oldest.Value);
             }
             TrimDuplicates();
 
@@ -208,7 +221,7 @@ public sealed class RansomwareBurstDetector
     /// <summary>Adds an observation to the window and to the running distinct count.</summary>
     private void Admit(Observation observation)
     {
-        _recent.Enqueue(observation);
+        _recent.AddLast(observation);
         if (observation.Path is { Length: > 0 } path)
         {
             _byPath[path] = _byPath.TryGetValue(path, out var seen) ? seen + 1 : 1;
@@ -226,7 +239,14 @@ public sealed class RansomwareBurstDetector
     {
         if (observation.Path is { Length: > 0 } path)
         {
-            if (_byPath.TryGetValue(path, out var seen) && seen <= 1)
+            // Absent means the bookkeeping already retired it. Decrementing anyway would leave a
+            // count of -1 behind, and the distinct count is the dictionary's size, so a phantom
+            // entry inflates the very number the threshold is compared against.
+            if (!_byPath.TryGetValue(path, out var seen))
+            {
+                return;
+            }
+            if (seen <= 1)
             {
                 _byPath.Remove(path);
             }
@@ -246,9 +266,22 @@ public sealed class RansomwareBurstDetector
     /// </summary>
     /// <remarks>
     /// Only an observation naming a path the window still holds another of is dropped, so the
-    /// distinct count - the number the threshold is compared against - is never lowered by this. If
-    /// every entry at the front is the sole observation of its path, the queue length equals the
-    /// distinct count, which is below the threshold, so there is nothing to trim in the first place.
+    /// distinct count - the number the threshold is compared against - is never lowered by this.
+    ///
+    /// <b>Why entries are removed in place rather than rotated.</b> The first version dequeued the
+    /// oldest entry and, when it was the sole observation of its path, put it back at the end so its
+    /// distinct count would not be lost. That silently broke the invariant the rest of the class
+    /// rests on - the window is in ascending time order, and expiry stops at the first entry still
+    /// inside it. A rotated entry sits behind newer ones, expiry never reaches it, and it goes on
+    /// being counted as a distinct file indefinitely: the threshold was then reached with one fewer
+    /// real file than it claims to require, in the one detector that must not cry wolf. Skipping
+    /// such an entry where it lies keeps both the ordering and the count.
+    ///
+    /// <b>Why it still terminates.</b> Each arrival adds one entry and this examines up to
+    /// <see cref="TrimBudget"/> from the front. If any of those names a path the window holds twice,
+    /// it is removed and the window does not grow. The only way all of them are sole observations is
+    /// that the front alone holds <see cref="TrimBudget"/> distinct files - far past the threshold,
+    /// where the detector has already fired and stopped accumulating.
     /// </remarks>
     private void TrimDuplicates()
     {
@@ -256,24 +289,18 @@ public sealed class RansomwareBurstDetector
         {
             return;
         }
-        // Bounded work per observation. Scanning the whole queue for something to discard is how the
-        // distinct count became quadratic in the first place, and enforcing a bound by
-        // reintroducing that would trade one unbounded thing for another: a window full of distinct
-        // files has nothing to trim, and would have been walked end to end on every event to
-        // discover it. Sixty-four evictions per arrival comfortably outpaces one arrival.
+        var node = _recent.First;
         var budget = TrimBudget;
-        while (budget-- > 0 && _recent.Count > MaxObservations)
+        while (node is not null && budget-- > 0 && _recent.Count > MaxObservations)
         {
-            var oldest = _recent.Dequeue();
-            if (oldest.Path is { Length: > 0 } path
+            var next = node.Next;
+            if (node.Value.Path is { Length: > 0 } path
                 && _byPath.TryGetValue(path, out var seen) && seen > 1)
             {
                 _byPath[path] = seen - 1;
-                continue;
+                _recent.Remove(node);
             }
-            // The sole observation of its path, or an unnamed event: it carries a distinct count, so
-            // it goes back rather than being lost.
-            _recent.Enqueue(oldest);
+            node = next;
         }
     }
 

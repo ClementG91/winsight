@@ -203,4 +203,60 @@ public sealed class BurstDistinctFileTests
             stopwatch.Elapsed < TimeSpan.FromSeconds(10),
             $"100k observations took {stopwatch.Elapsed}; the per-event cost is growing with the window");
     }
+
+    /// <summary>
+    /// An observation that has aged out of the window stops being counted, even when the window was
+    /// trimmed while it held it.
+    /// </summary>
+    /// <remarks>
+    /// <b>The defect this pins.</b> Trimming dequeued the oldest entry and, when that entry was the
+    /// sole observation of its path, put it back at the <i>end</i> of the queue so its distinct
+    /// count would not be lost. That silently broke the invariant everything else depends on: the
+    /// queue is in ascending time order, and expiry stops at the first entry still inside the
+    /// window. A rotated entry sits behind newer ones, so expiry never reaches it, and it goes on
+    /// being counted as a distinct file forever.
+    ///
+    /// The consequence is a false positive in the one detector that must not cry wolf: the threshold
+    /// is reached with one fewer real file than it claims to require. Every earlier test used a
+    /// single timestamp, so expiry never ran and the ordering was never exercised.
+    /// </remarks>
+    [Fact]
+    public void AnEntryThatAgedOutIsNotStillCountedAfterTheWindowWasTrimmed()
+    {
+        var detector = new RansomwareBurstDetector();
+        var start = DateTimeOffset.UnixEpoch;
+
+        // One file, written once, at the very front of the queue.
+        detector.Observe(RansomwareSignalKind.HighEntropyWrite, start, @"C:\Users\me\sole.txt");
+
+        // A flood on a single other file drives the window past its cap, so trimming runs while the
+        // sole observation is the oldest entry.
+        for (var index = 0; index < 6_000; index++)
+        {
+            detector.Observe(
+                RansomwareSignalKind.HighEntropyWrite,
+                start.AddMilliseconds(index * 0.05),
+                @"C:\noise\hammer.tmp");
+        }
+
+        // Past the window for `sole.txt` and for the oldest of the flood, but not for its tail, so
+        // expiry stops partway - which is the case that exposes a queue out of time order.
+        var later = start.AddSeconds(3.2);
+        detector.Observe(RansomwareSignalKind.HighEntropyWrite, later, @"C:\noise\hammer.tmp");
+
+        // Only `hammer.tmp` is still inside the window; `sole.txt` was written 3.2 seconds ago.
+        Assert.Equal(1, detector.RecentCount);
+
+        // Ten more distinct files: eleven in the window with the flood's, one short of the threshold.
+        var fired = false;
+        for (var index = 0; index < RansomwareBurstDetector.DefaultThreshold - 2; index++)
+        {
+            fired |= detector.Observe(
+                RansomwareSignalKind.HighEntropyWrite, later, $@"C:\Users\me\Documents\{index}.docx");
+        }
+
+        Assert.False(
+            fired,
+            "fired on eleven distinct files: a file that aged out of the window is still counted");
+    }
 }
