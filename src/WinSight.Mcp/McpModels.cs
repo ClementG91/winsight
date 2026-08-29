@@ -36,7 +36,11 @@ public sealed record McpScanResult(
     DateTimeOffset GeneratedAt,
     bool EvidenceIncluded,
     bool SensitiveFieldsIncluded,
-    List<McpScannerReport> Reports);
+    List<McpScannerReport> Reports,
+    // Carried on every result rather than only on the ones that happen to contain evidence: a
+    // client that learns the rule once should not have to re-learn it per response, and a summary
+    // still carries a machine-written tool name.
+    string UntrustedDataNotice = UntrustedText.Notice);
 
 internal static class McpJson
 {
@@ -79,25 +83,33 @@ internal static class McpResultProjector
             var selected = includeEvidence
                 ? report.Items.Take(maxItemsPerReport).ToList()
                 : [];
+            // Title and Detail are prose positions - a client renders them into the conversation -
+            // so they are delimited as well as neutralised. Field values sit in named JSON slots
+            // that a client does not read as narrative, so they are neutralised only: wrapping
+            // every one of fifteen fields per finding would triple the payload to restate a
+            // boundary the structure already provides.
             var items = selected.Select(item => new McpFinding(
                 item.Severity.ToString().ToLowerInvariant(),
-                ProtectRequired(item.Title, includeSensitive),
-                ProtectRequired(item.Detail, includeSensitive),
+                UntrustedText.Wrap(ProtectRequired(item.Title, includeSensitive)),
+                UntrustedText.Wrap(ProtectRequired(item.Detail, includeSensitive)),
                 includeSensitive
                     ? item.Fields
                         .Where(pair => pair.Value is not null)
-                        .ToDictionary(pair => pair.Key, pair => pair.Value!, StringComparer.Ordinal)
+                        .ToDictionary(
+                            pair => pair.Key,
+                            pair => UntrustedText.Neutralize(pair.Value!),
+                            StringComparer.Ordinal)
                     : item.Fields
                         .Where(pair => !SensitiveFieldNames.Contains(pair.Key) && pair.Value is not null)
                         .ToDictionary(
                             pair => pair.Key,
-                            pair => Protect(pair.Value, includeSensitive: false)!,
+                            pair => UntrustedText.Neutralize(Protect(pair.Value, includeSensitive: false)),
                             StringComparer.Ordinal)))
                 .ToList();
 
             return new McpScannerReport(
                 report.Tool,
-                report.Summary,
+                UntrustedText.Neutralize(report.Summary),
                 report.NotableCount,
                 report.Items.Count,
                 items.Count,
