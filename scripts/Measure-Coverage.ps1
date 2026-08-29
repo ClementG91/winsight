@@ -61,8 +61,8 @@ Set-StrictMode -Version Latest
 #
 # A library is on this list unless it is an entry point (the CLI's Program.cs), WPF code-behind, or
 # the SYSTEM service -- which has its own tier below. Being hard to test is not a reason to be
-# absent; it is a reason to name the untestable files explicitly, which is what $liveCaptureFiles
-# does.
+# absent; it is a reason to name the untestable files explicitly, which is what
+# $engineExcludedFiles does.
 $engineAssemblies = @(
     "WinSight.Core"
     "WinSight.Persistence"
@@ -84,6 +84,13 @@ $engineAssemblies = @(
     "WinSight.CodeIntegrity"
     "WinSight.Application"
     "WinSight.Mcp"
+    # The dashboard was absent for the reason the ten were: its assembly-wide number is 53%, because
+    # MainWindow.xaml.cs is a thousand lines of WPF code-behind at zero. Omitting the whole assembly
+    # to avoid that also stopped anyone measuring DashboardFindingPresenter, which is pure logic, is
+    # what every operator actually reads, and sat at 70% with six of its tool arms never executed at
+    # all. The rule this file already states applies: name the untestable files, do not drop the
+    # library.
+    "winsight-dashboard"
 )
 
 # The live ETW capture boundary, excluded from the engine tier for exactly the reason the native
@@ -100,9 +107,15 @@ $engineAssemblies = @(
 #
 # Excluding a file is a claim that something else covers it. If that stops being true, the exclusion
 # is the bug -- not the percentage.
-$liveCaptureFiles = @{
+# WPF code-behind is excluded on the same terms. A window class is instantiated by the framework
+# against a live visual tree and a message pump; a unit test that stands one up asserts against its
+# own harness. What keeps them honest is section 3 of docs/validation/VM_QUALIFICATION_KIT.md, which
+# drives the real dashboard. Everything these files call into - the presenter, the settings stores,
+# the localization manager, the palette - is ordinary code and is held to the bar like the rest.
+$engineExcludedFiles = @{
     "WinSight.NetMonitor" = @("OutboundConnectionWatcher.cs", "DnsEtwWatcher.cs")
     "WinSight.Attribution" = @("WriteAttributionWatcher.cs")
+    "winsight-dashboard" = @("MainWindow.xaml.cs", "App.xaml.cs", "VirusTotalSettingsWindow.xaml.cs")
 }
 
 # The component that runs as SYSTEM and drives WFP. It had no floor at all while the pure detection
@@ -227,7 +240,7 @@ try
                 $engineGated[$assembly] = [pscustomobject]@{ Lines = 0; Covered = 0 }
             }
             $excludedForAssembly = @()
-            if ($liveCaptureFiles.ContainsKey($assembly)) { $excludedForAssembly = $liveCaptureFiles[$assembly] }
+            if ($engineExcludedFiles.ContainsKey($assembly)) { $excludedForAssembly = $engineExcludedFiles[$assembly] }
             $leaf = Split-Path -Leaf $parts[1]
             if ($excludedForAssembly -contains $leaf)
             {
@@ -296,8 +309,8 @@ try
     }
     if ($engineExcluded)
     {
-        "Excluded from the engine gate: {0} lines of live ETW capture, qualified by the VM protocol." -f `
-            $engineExcluded | Write-Output
+        ("Excluded from the engine gate: {0} lines of live ETW capture and WPF code-behind, " +
+         "each named above and qualified by the VM protocol.") -f $engineExcluded | Write-Output
     }
 
     # The gated view, which is what the bar is actually applied to.
@@ -346,9 +359,9 @@ try
 
         # An exclusion that matches no file is a stale claim: the file was renamed or deleted, and
         # the entry now quietly protects nothing while reading as though it protects something.
-        foreach ($assembly in $liveCaptureFiles.Keys)
+        foreach ($assembly in $engineExcludedFiles.Keys)
         {
-            foreach ($excludedFile in $liveCaptureFiles[$assembly])
+            foreach ($excludedFile in $engineExcludedFiles[$assembly])
             {
                 $matched = @($hits.Keys | Where-Object {
                     $key = $_.Split('|')
@@ -356,7 +369,7 @@ try
                 })
                 if ($matched.Count -eq 0)
                 {
-                    throw ("The live-capture exclusion {0}/{1} matches no measured file. Either it " +
+                    throw ("The engine exclusion {0}/{1} matches no measured file. Either it " +
                            "was renamed or it no longer exists; both mean the exclusion is now a " +
                            "claim about nothing." -f $assembly, $excludedFile)
                 }

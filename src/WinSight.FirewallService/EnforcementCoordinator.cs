@@ -536,6 +536,15 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
                 // Joining keeps the property this branch exists for - no second detached read
                 // against the shared reconciler - while answering with the verification's actual
                 // result. The caller's own deadline still applies.
+                //
+                // The joined task was started against the policy list as it stood when it began,
+                // which may no longer be this caller's. That is safe in the only direction that
+                // matters: the verification is exact, so a list that has since gained a policy
+                // cannot match a WFP state that has gained the matching filter, and the answer is
+                // false - Degraded, fail-closed. It cannot report exact for a policy set whose
+                // filters are missing, because the missing filter is precisely what exactness
+                // tests. A transition that failed to install has already set Degraded anyway, and
+                // this whole branch is only reached while the state is still Active.
                 verification = inFlight;
             }
             else

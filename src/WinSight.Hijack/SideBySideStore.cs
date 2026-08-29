@@ -39,6 +39,14 @@ public interface ISideBySideStore
 /// <b>It gives up rather than guessing.</b> The walk stops at a time budget and an entry cap. If it
 /// did not finish, the index cannot prove a name is absent, so every lookup answers null and the
 /// caller reports coverage instead of a finding - the same rule the rest of this codebase follows.
+///
+/// <b>One instance per scan, on one thread.</b> The index is built lazily on first use and the
+/// unanswered-lookup count is a plain increment, neither of which is synchronised: this is a
+/// per-scan object, created inside <c>HijackScanner.ScanWithCoverage</c> and used by the single
+/// loop that walks the services. Sharing one across threads would race the index against its own
+/// completeness flag, and a lookup could then read a finished index as a partial one - answering
+/// "unknown" where it knows the answer, which silently turns findings into coverage. If this ever
+/// needs to be shared, that is the thing to fix first.
 /// </remarks>
 public sealed class SideBySideStore : ISideBySideStore
 {
