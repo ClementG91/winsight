@@ -116,6 +116,7 @@ internal static class McpResultProjector
         }
 
         var remainingBudget = EvidenceCharacterBudget;
+        var emittedAnyEvidence = false;
         var projected = reports.Select(report =>
         {
             var selected = includeEvidence
@@ -152,15 +153,23 @@ internal static class McpResultProjector
             foreach (var finding in items)
             {
                 var cost = Size(finding);
-                if (withinBudget.Count > 0 && cost > remainingBudget)
+                if (cost > remainingBudget)
                 {
                     budgetExhausted = true;
+                    if (emittedAnyEvidence)
+                    {
+                        break;
+                    }
+                    // A single first finding can be larger than the whole response budget. Return
+                    // it once, mark the overrun, and let no later report force another exception.
+                    withinBudget.Add(finding);
+                    emittedAnyEvidence = true;
+                    remainingBudget = 0;
                     break;
                 }
-                // The first finding is always emitted, however large. A page that returns nothing
-                // says less than a page that returns one oversized item and admits it.
                 remainingBudget -= cost;
                 withinBudget.Add(finding);
+                emittedAnyEvidence = true;
             }
 
             return new McpScannerReport(

@@ -90,12 +90,17 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
         };
         Parallel.ForEach(
-            paths.Distinct(StringComparer.OrdinalIgnoreCase),
+            paths.Where(AutomaticFileAccess.IsLocal).Distinct(StringComparer.OrdinalIgnoreCase),
             options,
             path => fingerprints[path] = Fingerprint(path));
 
         foreach (var path in paths)
         {
+            if (!AutomaticFileAccess.IsLocal(path))
+            {
+                results[path] = SignatureVerdict.Unknown;
+                continue;
+            }
             var observedFingerprint = fingerprints.TryGetValue(path, out var f) ? f : Fingerprint(path);
             if (TryGetCached(path, observedFingerprint, out var verdict))
             {
@@ -210,7 +215,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     {
         try
         {
-            if (!File.Exists(path))
+            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
             {
                 return null;
             }

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 
+using WinSight.Core;
+
 namespace WinSight.Ransomware;
 
 /// <summary>Raised once when ransomware-like activity is detected (a touched canary, or a burst).</summary>
@@ -198,7 +200,9 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     private FileSystemWatcher? TryCreate(string directory)
     {
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        if (string.IsNullOrWhiteSpace(directory)
+            || !AutomaticFileAccess.IsLocal(directory)
+            || !Directory.Exists(directory))
         {
             return null;
         }

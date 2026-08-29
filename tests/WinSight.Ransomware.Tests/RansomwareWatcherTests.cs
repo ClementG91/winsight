@@ -265,7 +265,7 @@ public sealed class CanaryManagerTests
 
             // Simulate a run that died without disposing: the decoys are still on disk and the
             // manager that planted them is gone, so only the manifest identifies them.
-            var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest);
+            var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest, new byte[32]);
 
             Assert.Equal(planted.Count, removed);
             Assert.All(planted, path => Assert.False(File.Exists(path)));
@@ -275,6 +275,35 @@ public sealed class CanaryManagerTests
         finally
         {
             File.Delete(manifest);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RemoveOrphans_RejectsManifestPathsThatWereNotExpectedCanaries()
+    {
+        var dir = TempDir();
+        var outside = Path.Combine(Path.GetTempPath(), $"wsg-real-{Guid.NewGuid():N}.txt");
+        var manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt");
+        try
+        {
+            var inside = Path.Combine(dir, "my-real-spreadsheet.xlsx");
+            File.WriteAllText(inside, "user data");
+            File.WriteAllText(outside, "user data");
+            File.WriteAllLines(manifest, new[] { inside, outside, @"..\relative.txt" });
+
+            var removed = CanaryManager.RemoveOrphans(
+                new[] { dir }, manifest, new byte[32]);
+
+            Assert.Equal(0, removed);
+            Assert.True(File.Exists(inside));
+            Assert.True(File.Exists(outside));
+            Assert.False(File.Exists(manifest));
+        }
+        finally
+        {
+            File.Delete(manifest);
+            File.Delete(outside);
             Directory.Delete(dir, recursive: true);
         }
     }
@@ -291,8 +320,10 @@ public sealed class CanaryManagerTests
         try
         {
             var legacy = Path.Combine(dir, $"WinSightGuard_{Guid.NewGuid():N}.xlsx");
-            File.WriteAllText(legacy, "leftover");
+            File.WriteAllText(legacy, CanaryIdentity.LegacyContent);
             File.SetAttributes(legacy, FileAttributes.Hidden);
+            var lookalike = Path.Combine(dir, $"WinSightGuard_{Guid.NewGuid():N}.xlsx");
+            File.WriteAllText(lookalike, "real user data");
             var userFile = Path.Combine(dir, "my-real-spreadsheet.xlsx");
             File.WriteAllText(userFile, "user data");
 
@@ -300,6 +331,7 @@ public sealed class CanaryManagerTests
 
             Assert.Equal(1, removed);
             Assert.False(File.Exists(legacy));
+            Assert.True(File.Exists(lookalike));
             Assert.True(File.Exists(userFile));
         }
         finally

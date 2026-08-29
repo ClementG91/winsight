@@ -60,10 +60,24 @@ machine rather than assumed.
 - .NET profiler injection was not enumerated at all. The CLR loads an arbitrary DLL into a managed
   process when `COR_ENABLE_PROFILING=1` and a profiler is named; all three registry locations that
   survive a reboot are now read, including the per-service `Environment` block that puts a DLL
-  inside one chosen SYSTEM process and touches nothing else.
+  inside one chosen SYSTEM process and touches nothing else. The detector follows Microsoft's
+  current contract: activation without the required profiler GUID is not reported, while the
+  `CORECLR_*`/`DOTNET_*` prefixes and x86, x64, ARM32 and ARM64 path overrides are covered instead
+  of only the historical generic `COR_*` path.
 - Winlogon was reading two of its five executable values. `Taskman` is the pointed one: Winlogon
   runs it instead of Task Manager, so a single value is both persistence and a way to stop somebody
   looking at the process list.
+- Input-filter driver resolution now refuses UNC and unsupported object-manager paths before any
+  filesystem probe, so a registry-controlled service image cannot make a no-network scan
+  authenticate to a remote host or verify an unrelated file under its working directory.
+- Automatic file inspection is local-only across signature verification, hashing, persistence,
+  hijack probes and real-time watchers. UNC/device paths and mapped network drives remain reportable
+  evidence but are never opened implicitly, preventing attacker-controlled registry data from
+  coercing SMB authentication during a scan.
+- Chromium manifests can no longer turn `default_locale` into a path traversal or UNC read;
+  locale directories accept only Chromium's bounded locale-token alphabet, and browser roots are
+  checked as local before enumeration. Manifest and translation JSON files are capped at 1 MiB
+  before allocation/parsing, so a local extension cannot exhaust the scanner with one file.
 - A validly signed third-party DLL registered into LSASS, the print spooler, the logon UI or every
   process that links user32 was reported as routine, because its signature was fine. Those twelve
   surfaces are empty or Microsoft-only on an ordinary machine - the flagged count on this desktop
@@ -108,7 +122,15 @@ honoured by four verbs, so `winsight persistence --watch` ran a one-shot scan an
 **MCP evidence is paged.** `maxItems` capped a response at 200 items with no way to ask for the
 rest, so on a 4538-item persistence scan a model was told evidence existed and given no way to
 reach it. Responses are also bounded by size now, because a finding's fields hold registry values
-whose length the machine decides.
+whose length the machine decides. The bound walks Unicode scalars rather than UTF-16 code units, so
+truncation cannot split a surrogate pair and turn attacker-chosen evidence into invalid JSON. The
+response-size budget is global across an overview: after one report consumes it, later reports can
+no longer each force one additional oversized finding through.
+
+The packaged MCP smoke test now correlates JSON-RPC responses by request id and tolerates only real
+protocol notifications between them. It no longer mistakes an asynchronous notification for a tool
+result, while server errors are emitted with their complete JSON payload instead of surfacing as a
+missing PowerShell property.
 
 **Two more detection surfaces, and one declared gap.** The managed half of profiler injection - a
 type instantiated as a process's `AppDomainManager` before any application code runs - was missing
@@ -135,7 +157,10 @@ counted rather than dropped. And the one signal the product presents as unambigu
 decoy, was raised by any OneDrive placeholder hydration: a decoy's content is deterministic, so
 "rewritten with the same bytes" is now distinguishable from "modified". Uninstall left up to
 eighteen deliberately unrecognisable files in the user's folders, synchronised to their cloud; it
-now runs the sweep the product already performs at startup.
+now runs the sweep the product already performs at startup. That sweep no longer trusts arbitrary
+paths from its per-user manifest: only seed-derived decoy names in the declared protected folders
+are eligible, legacy-name lookalikes must contain the exact legacy payload, and its count includes
+only files it actually removed.
 
 **A status read could hold up an administrator.** Reading the firewall status took the same lock
 every mutation takes and performed a full path-trust inspection and WFP verification under it -

@@ -51,6 +51,18 @@ public sealed class DriverPathResolutionTests
             @"C:\Program Files\Vendor\filter.sys",
             InputFilterScanner.NormalizeDriverPath(@"\??\C:\Program Files\Vendor\filter.sys"));
 
+    [Theory]
+    [InlineData(@"\\server\share\filter.sys")]
+    [InlineData(@"\??\UNC\server\share\filter.sys")]
+    public void ARemotePathIsRefusedBeforeTheFilesystemIsTouched(string path) =>
+        Assert.Null(InputFilterScanner.NormalizeDriverPath(path));
+
+    [Theory]
+    [InlineData(@"\??\Volume{00000000-0000-0000-0000-000000000000}\filter.sys")]
+    [InlineData(@"\??\GLOBALROOT\Device\HarddiskVolumeShadowCopy1\filter.sys")]
+    public void AnUnsupportedDevicePathIsNotMistakenForAWorkingDirectoryPath(string path) =>
+        Assert.Null(InputFilterScanner.NormalizeDriverPath(path));
+
     [Fact]
     public void AnAlreadyRootedPathIsLeftAlone() =>
         Assert.Equal(

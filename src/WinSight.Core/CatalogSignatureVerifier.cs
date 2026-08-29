@@ -23,7 +23,15 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
         string path, CatalogBatch batch, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return SignatureVerdict.Missing;
+        }
+        if (!AutomaticFileAccess.IsLocal(path))
+        {
+            return SignatureVerdict.Unknown;
+        }
+        if (!File.Exists(path))
         {
             return SignatureVerdict.Missing;
         }

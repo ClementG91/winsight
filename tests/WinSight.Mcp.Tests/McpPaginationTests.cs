@@ -119,10 +119,33 @@ public sealed class McpPaginationTests
     [Fact]
     public void OneItemLargerThanTheBudgetIsStillReturned()
     {
-        var page = Project(
-            Report(1, fieldLength: McpResultProjector.EvidenceCharacterBudget * 2), maxItems: 50);
+        var fields = Enumerable.Range(0, 300).ToDictionary(
+            index => $"field-{index}",
+            _ => (string?)new string('x', UntrustedText.MaxValueLength));
+        var report = new ToolReport.Builder("persistence")
+            .Add(Severity.Info, "item", "detail", fields)
+            .Build("one item");
+
+        var page = Project(report, maxItems: 50);
 
         Assert.Single(page.Items);
+        Assert.True(page.BudgetExhausted);
+    }
+
+    [Fact]
+    public void MultipleReportsShareOneStrictResponseBudget()
+    {
+        var result = McpResultProjector.Project(
+            [Report(200, fieldLength: 20_000), Report(200, fieldLength: 20_000)],
+            includeEvidence: true,
+            includeSensitive: false,
+            sensitiveEnabled: false,
+            maxItemsPerReport: 200);
+
+        Assert.NotEmpty(result.Reports[0].Items);
+        Assert.Empty(result.Reports[1].Items);
+        Assert.True(result.Reports[1].BudgetExhausted);
+        Assert.True(result.Reports[1].Truncated);
     }
 
     /// <summary>An ordinary page is nowhere near the budget and must not be trimmed by it.</summary>

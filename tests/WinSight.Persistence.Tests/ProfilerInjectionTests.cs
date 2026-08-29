@@ -48,13 +48,14 @@ public sealed class ProfilerInjectionTests : IDisposable
         [.. new ProfilerInjectionEnumerator().Enumerate()];
 
     /// <summary>
-    /// The mechanism, spelled the direct way: profiling on, a DLL named by path.
+    /// The mechanism, spelled the direct way: profiling on, a GUID and its DLL path named.
     /// </summary>
     [Fact]
     public void AProfilerNamedByPathIsFound()
     {
         var image = @"C:\Users\Public\totally-a-profiler.dll";
         Set("COR_ENABLE_PROFILING", "1");
+        Set("COR_PROFILER", "{0F0F0F0F-DEAD-BEEF-0000-000000000010}");
         Set("COR_PROFILER_PATH", image);
 
         var entry = Assert.Single(Scan(), raw => raw.Command == image);
@@ -71,6 +72,7 @@ public sealed class ProfilerInjectionTests : IDisposable
     public void ThePathIsExpanded()
     {
         Set("COR_ENABLE_PROFILING", "1");
+        Set("COR_PROFILER", "{0F0F0F0F-DEAD-BEEF-0000-000000000011}");
         Set("COR_PROFILER_PATH", @"%SystemRoot%\Temp\p.dll");
 
         var expected = Path.Combine(
@@ -104,6 +106,7 @@ public sealed class ProfilerInjectionTests : IDisposable
     {
         var image = @"C:\Users\Public\disabled-profiler.dll";
         Set("COR_ENABLE_PROFILING", "0");
+        Set("COR_PROFILER", "{0F0F0F0F-DEAD-BEEF-0000-000000000012}");
         Set("COR_PROFILER_PATH", image);
 
         Assert.DoesNotContain(Scan(), raw => raw.Command == image);
@@ -212,14 +215,76 @@ public sealed class ProfilerInjectionTests : IDisposable
 
         ProfilerInjectionEnumerator.ReadEnvironmentBlock(
             entries,
-            ["COR_ENABLE_PROFILING=1", @"COR_PROFILER_PATH=C:\ProgramData\x\p.dll"],
+            [
+                "COR_ENABLE_PROFILING=1",
+                "COR_PROFILER={0F0F0F0F-DEAD-BEEF-0000-000000000013}",
+                @"COR_PROFILER_PATH=C:\ProgramData\x\p.dll",
+            ],
             @"HKLM\SYSTEM\CurrentControlSet\Services\Spooler [Environment]",
             "Spooler");
 
         var entry = Assert.Single(entries);
         Assert.Equal(AutostartVector.ProfilerInjection, entry.Vector);
-        Assert.Equal("Spooler", entry.Name);
+        Assert.Contains("Spooler", entry.Name, StringComparison.Ordinal);
+        Assert.Contains(".NET Framework", entry.Name, StringComparison.Ordinal);
         Assert.Equal(@"C:\ProgramData\x\p.dll", entry.Command);
+    }
+
+    [Fact]
+    public void CoreClrArchitectureSpecificProfilerPathsAreFound()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            [
+                "CORECLR_ENABLE_PROFILING=1",
+                "CORECLR_PROFILER={0F0F0F0F-DEAD-BEEF-0000-000000000014}",
+                @"CORECLR_PROFILER_PATH_32=C:\ProgramData\x\p-x86.dll",
+                @"CORECLR_PROFILER_PATH_64=C:\ProgramData\x\p-x64.dll",
+                @"CORECLR_PROFILER_PATH_ARM64=C:\ProgramData\x\p-arm64.dll",
+            ],
+            "location",
+            "Svc");
+
+        Assert.Equal(3, entries.Count);
+        Assert.Contains(entries, entry => entry.Command.EndsWith("p-x86.dll", StringComparison.Ordinal));
+        Assert.Contains(entries, entry => entry.Command.EndsWith("p-x64.dll", StringComparison.Ordinal));
+        Assert.Contains(entries, entry => entry.Command.EndsWith("p-arm64.dll", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void DotnetProfilerPrefixIsFound()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            [
+                "DOTNET_ENABLE_PROFILING=1",
+                "DOTNET_PROFILER={0F0F0F0F-DEAD-BEEF-0000-000000000015}",
+                @"DOTNET_PROFILER_PATH=C:\ProgramData\x\future.dll",
+            ],
+            "location",
+            "Svc");
+
+        var entry = Assert.Single(entries);
+        Assert.Equal(@"C:\ProgramData\x\future.dll", entry.Command);
+        Assert.Contains(".NET", entry.Name, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APathWithoutTheRequiredProfilerGuidIsNotAFinding()
+    {
+        var entries = new List<RawAutostart>();
+
+        ProfilerInjectionEnumerator.ReadEnvironmentBlock(
+            entries,
+            ["CORECLR_ENABLE_PROFILING=1", @"CORECLR_PROFILER_PATH=C:\x\p.dll"],
+            "location",
+            "Svc");
+
+        Assert.Empty(entries);
     }
 
     /// <summary>
@@ -296,7 +361,11 @@ public sealed class ProfilerInjectionTests : IDisposable
 
         ProfilerInjectionEnumerator.ReadEnvironmentBlock(
             entries,
-            ["  COR_ENABLE_PROFILING = 1 ", @" COR_PROFILER_PATH = C:\x\p.dll "],
+            [
+                "  COR_ENABLE_PROFILING = 1 ",
+                " COR_PROFILER = {0F0F0F0F-DEAD-BEEF-0000-000000000016} ",
+                @" COR_PROFILER_PATH = C:\x\p.dll ",
+            ],
             "location",
             "Svc");
 

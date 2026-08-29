@@ -67,38 +67,26 @@ public static class UntrustedText
             return value ?? string.Empty;
         }
 
-        var builder = new StringBuilder(value.Length);
+        var builder = new StringBuilder(Math.Min(value.Length, MaxValueLength));
         var truncated = false;
-        foreach (var character in value)
+        foreach (var rune in value.EnumerateRunes())
         {
-            if (builder.Length >= MaxValueLength)
+            var escaped = rune.Value switch
+            {
+                '\n' => @"\n",
+                '\r' => @"\r",
+                '\t' => @"\t",
+                <= char.MaxValue when MustEscape((char)rune.Value) =>
+                    @"\u" + rune.Value.ToString(
+                        "x4", System.Globalization.CultureInfo.InvariantCulture),
+                _ => rune.ToString(),
+            };
+            if (builder.Length + escaped.Length > MaxValueLength)
             {
                 truncated = true;
                 break;
             }
-            switch (character)
-            {
-                case '\n':
-                    builder.Append("\\n");
-                    break;
-                case '\r':
-                    builder.Append("\\r");
-                    break;
-                case '\t':
-                    builder.Append("\\t");
-                    break;
-                default:
-                    if (MustEscape(character))
-                    {
-                        builder.Append(@"\u").Append(((int)character).ToString(
-                            "x4", System.Globalization.CultureInfo.InvariantCulture));
-                    }
-                    else
-                    {
-                        builder.Append(character);
-                    }
-                    break;
-            }
+            builder.Append(escaped);
         }
         if (truncated)
         {

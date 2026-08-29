@@ -8,8 +8,10 @@ namespace WinSight.Persistence;
 /// </summary>
 /// <remarks>
 /// <b>What this catches.</b> The CLR loads an arbitrary DLL at startup when
-/// <c>COR_ENABLE_PROFILING=1</c> and a profiler is named - by CLSID in <c>COR_PROFILER</c>, or
-/// directly by path in <c>COR_PROFILER_PATH</c>. Nothing about the DLL needs to be a real profiler.
+/// <c>COR_ENABLE_PROFILING=1</c> and a profiler GUID is named in <c>COR_PROFILER</c>; an optional
+/// <c>COR_PROFILER_PATH</c> locates its DLL. The equivalent <c>CORECLR_*</c> and current
+/// <c>DOTNET_*</c> spellings, including architecture-specific paths, are covered too. Nothing about
+/// the DLL needs to be a real profiler.
 /// It is a supported, documented loading mechanism, which is precisely why it is used as one
 /// (ATT&amp;CK T1574.012): the code runs inside a legitimate signed process, and the only trace is a
 /// registry value or an environment variable.
@@ -37,10 +39,6 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
         @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
     private const string UserEnvironment = "Environment";
     private const string Services = @"SYSTEM\CurrentControlSet\Services";
-
-    private const string Enable = "COR_ENABLE_PROFILING";
-    private const string Profiler = "COR_PROFILER";
-    private const string ProfilerPath = "COR_PROFILER_PATH";
 
     /// <summary>
     /// The managed-assembly variant of the same technique.
@@ -96,12 +94,11 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
             var scope = hive == RegistryHive.LocalMachine
                 ? "machine environment"
                 : "user environment";
-            Add(entries,
-                enabled: key.GetValue(Enable) as string,
-                profiler: key.GetValue(Profiler) as string,
-                profilerPath: key.GetValue(ProfilerPath) as string,
-                location: $@"{hiveName}\{path}",
-                name: scope);
+            AddProfilers(
+                entries,
+                variable => key.GetValue(variable) as string,
+                $@"{hiveName}\{path}",
+                scope);
             AddDomainManager(entries,
                 assembly: key.GetValue(DomainManagerAssembly) as string,
                 type: key.GetValue(DomainManagerType) as string,
@@ -183,12 +180,7 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
     internal static void ReadEnvironmentBlock(
         List<RawAutostart> entries, string[] block, string location, string name)
     {
-        Add(entries,
-            enabled: Value(block, Enable),
-            profiler: Value(block, Profiler),
-            profilerPath: Value(block, ProfilerPath),
-            location: location,
-            name: name);
+        AddProfilers(entries, variable => Value(block, variable), location, name);
         AddDomainManager(entries,
             assembly: Value(block, DomainManagerAssembly),
             type: Value(block, DomainManagerType),
@@ -200,37 +192,75 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
     /// Records the finding when profiling is switched on and something is named to load.
     /// </summary>
     /// <remarks>
-    /// Both halves are required. <c>COR_PROFILER</c> alone loads nothing, and reporting it would
-    /// flag every machine with a development tool installed; <c>COR_ENABLE_PROFILING=1</c> alone
-    /// names no DLL. The pair is the mechanism.
+    /// Both activation and the profiler GUID are required. A path only locates the required GUID's
+    /// DLL and is not itself an activation mechanism.
     /// </remarks>
-    private static void Add(
+    private static void AddProfilers(
         List<RawAutostart> entries,
-        string? enabled,
-        string? profiler,
-        string? profilerPath,
+        Func<string, string?> value,
         string location,
         string name)
     {
+        AddProfilerFamily(entries, value, "COR", ".NET Framework", location, name);
+        AddProfilerFamily(entries, value, "CORECLR", "CoreCLR", location, name);
+        // .NET 11 makes DOTNET_* the standard spelling while retaining CORECLR_* for backwards
+        // compatibility. Reading it now prevents this detector becoming stale on a runtime update.
+        AddProfilerFamily(entries, value, "DOTNET", ".NET", location, name);
+    }
+
+    private static void AddProfilerFamily(
+        List<RawAutostart> entries,
+        Func<string, string?> value,
+        string prefix,
+        string runtime,
+        string location,
+        string name)
+    {
+        var enabled = value($"{prefix}_ENABLE_PROFILING");
+        var profiler = value($"{prefix}_PROFILER");
         if (enabled?.Trim() != "1")
         {
             return;
         }
-        var image = !string.IsNullOrWhiteSpace(profilerPath)
-            ? Environment.ExpandEnvironmentVariables(profilerPath.Trim())
-            : ResolveClsid(profiler);
-        if (string.IsNullOrWhiteSpace(image))
+        if (string.IsNullOrWhiteSpace(profiler))
         {
-            // Enabled with nothing resolvable named. Still reported: the registration is the
-            // finding, and one whose image cannot be found is if anything more interesting than one
-            // that can. The CLSID is carried as the command so the operator has something to follow.
-            image = string.IsNullOrWhiteSpace(profiler) ? null : profiler.Trim();
+            // Microsoft requires activation and a profiler GUID. A path alone loads nothing.
+            return;
         }
-        if (string.IsNullOrWhiteSpace(image))
+
+        var paths = new (string Variable, string Architecture)[]
+        {
+            ($"{prefix}_PROFILER_PATH", "all architectures"),
+            ($"{prefix}_PROFILER_PATH_32", "x86"),
+            ($"{prefix}_PROFILER_PATH_64", "x64"),
+            ($"{prefix}_PROFILER_PATH_ARM32", "ARM32"),
+            ($"{prefix}_PROFILER_PATH_ARM64", "ARM64"),
+        };
+        var foundPath = false;
+        foreach (var (variable, architecture) in paths)
+        {
+            var profilerPath = value(variable);
+            if (string.IsNullOrWhiteSpace(profilerPath))
+            {
+                continue;
+            }
+            foundPath = true;
+            entries.Add(new RawAutostart(
+                AutostartVector.ProfilerInjection,
+                $"{name} ({runtime}, {architecture})",
+                location,
+                Environment.ExpandEnvironmentVariables(profilerPath.Trim())));
+        }
+        if (foundPath)
         {
             return;
         }
-        entries.Add(new RawAutostart(AutostartVector.ProfilerInjection, name, location, image));
+
+        // Without a path, Windows resolves the required GUID through COM registration. An
+        // unresolvable GUID is still the finding and gives the operator something to follow.
+        var image = ResolveClsid(profiler) ?? profiler.Trim();
+        entries.Add(new RawAutostart(
+            AutostartVector.ProfilerInjection, $"{name} ({runtime})", location, image));
     }
 
     /// <summary>

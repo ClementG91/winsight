@@ -49,18 +49,50 @@ function Send-McpMessage([hashtable]$Message)
 # surfaced. Its budget is the server's own 90-second scan limit plus margin, so a genuinely stuck
 # scan is still caught while the server's own timeout error gets the chance to arrive and be read as
 # a response rather than as silence.
-function Receive-McpMessage([int]$TimeoutMs = 10000)
+function Receive-McpResponse([int]$ExpectedId, [int]$TimeoutMs = 10000)
 {
-    $read = $process.StandardOutput.ReadLineAsync()
-    if (-not $read.Wait($TimeoutMs))
+    $deadline = [Diagnostics.Stopwatch]::StartNew()
+    while ($true)
     {
-        throw "MCP response timed out after $TimeoutMs ms."
+        $remaining = $TimeoutMs - [int]$deadline.ElapsedMilliseconds
+        if ($remaining -le 0)
+        {
+            throw "MCP response $ExpectedId timed out after $TimeoutMs ms."
+        }
+        $read = $process.StandardOutput.ReadLineAsync()
+        if (-not $read.Wait($remaining))
+        {
+            throw "MCP response $ExpectedId timed out after $TimeoutMs ms."
+        }
+        if ($null -eq $read.Result)
+        {
+            throw "MCP server closed stdout: $($process.StandardError.ReadToEnd())"
+        }
+        $message = $read.Result | ConvertFrom-Json
+        $id = $message.PSObject.Properties['id']
+        if ($null -eq $id)
+        {
+            if ($null -ne $message.PSObject.Properties['method'] -and
+                $message.method -like 'notifications/*')
+            {
+                continue
+            }
+            throw "Unexpected MCP message without an id: $($message | ConvertTo-Json -Depth 12 -Compress)"
+        }
+        if ([int]$message.id -ne $ExpectedId)
+        {
+            throw "Expected MCP response $ExpectedId, got $($message.id)."
+        }
+        if ($null -ne $message.PSObject.Properties['error'])
+        {
+            throw "MCP response $ExpectedId returned an error: $($message.error | ConvertTo-Json -Depth 12 -Compress)"
+        }
+        if ($null -eq $message.PSObject.Properties['result'])
+        {
+            throw "MCP response $ExpectedId has no result."
+        }
+        return $message
     }
-    if ($null -eq $read.Result)
-    {
-        throw "MCP server closed stdout: $($process.StandardError.ReadToEnd())"
-    }
-    return $read.Result | ConvertFrom-Json
 }
 
 try
@@ -84,7 +116,7 @@ try
         method = "server/discover"
         params = @{ _meta = $statelessMeta }
     }
-    $discover = Receive-McpMessage
+    $discover = Receive-McpResponse -ExpectedId 100
     if (@($discover.result.supportedVersions) -notcontains "2026-07-28")
     {
         throw "server/discover does not advertise the 2026-07-28 protocol revision."
@@ -103,7 +135,7 @@ try
         method = "tools/list"
         params = @{ _meta = $statelessMeta }
     }
-    $statelessTools = @((Receive-McpMessage).result.tools | ForEach-Object { $_.name })
+    $statelessTools = @((Receive-McpResponse -ExpectedId 101).result.tools | ForEach-Object { $_.name })
     foreach ($expected in @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_process", "winsight_alerts", "winsight_outbound_firewall"))
     {
         if ($statelessTools -notcontains $expected)
@@ -122,7 +154,7 @@ try
             clientInfo = @{ name = "winsight-package-smoke"; version = "1.0" }
         }
     }
-    $initialize = Receive-McpMessage
+    $initialize = Receive-McpResponse -ExpectedId 1
     if ($initialize.result.protocolVersion -ne "2025-11-25" -or
         $initialize.result.serverInfo.name -ne "winsight" -or
         $initialize.result.serverInfo.version -ne $Version)
@@ -132,7 +164,7 @@ try
 
     Send-McpMessage @{ jsonrpc = "2.0"; method = "notifications/initialized" }
     Send-McpMessage @{ jsonrpc = "2.0"; id = 2; method = "tools/list"; params = @{} }
-    $toolList = Receive-McpMessage
+    $toolList = Receive-McpResponse -ExpectedId 2
     $tools = @($toolList.result.tools)
     $expectedTools = @("winsight_get_capabilities", "winsight_overview", "winsight_scan", "winsight_process", "winsight_alerts", "winsight_outbound_firewall")
     if ($tools.Count -ne $expectedTools.Count)
@@ -155,7 +187,7 @@ try
         method = "tools/call"
         params = @{ name = "winsight_get_capabilities"; arguments = @{} }
     }
-    $capabilities = Receive-McpMessage
+    $capabilities = Receive-McpResponse -ExpectedId 3
     if (-not $capabilities.result.structuredContent.readOnly -or
         $capabilities.result.structuredContent.networkListener -or
         $capabilities.result.structuredContent.networkReputationLookups -or
@@ -176,7 +208,7 @@ try
         method = "tools/call"
         params = @{ name = "winsight_scan"; arguments = @{ scanner = "hosts" } }
     }
-    $scan = Receive-McpMessage
+    $scan = Receive-McpResponse -ExpectedId 4
     $reports = @($scan.result.structuredContent.reports)
     if ($scan.result.structuredContent.evidenceIncluded -or
         $reports.Count -ne 1 -or $reports[0].tool -ne "hosts" -or
@@ -210,7 +242,7 @@ try
         method = "tools/call"
         params = @{ name = "winsight_process"; arguments = @{ pid = 999999 } }
     }
-    $drillDown = Receive-McpMessage -TimeoutMs 100000
+    $drillDown = Receive-McpResponse -ExpectedId 7 -TimeoutMs 100000
     $processReports = @($drillDown.result.structuredContent.reports)
     if ($drillDown.result.structuredContent.evidenceIncluded -or
         $processReports.Count -ne 1 -or $processReports[0].tool -ne "process" -or
@@ -222,7 +254,7 @@ try
     # Prompts carry the two interpretation rules whose wrong answer reads as a confident one, so an
     # empty prompt surface is a regression even though every tool still works.
     Send-McpMessage @{ jsonrpc = "2.0"; id = 8; method = "prompts/list"; params = @{} }
-    $promptNames = @((Receive-McpMessage).result.prompts | ForEach-Object { $_.name })
+    $promptNames = @((Receive-McpResponse -ExpectedId 8).result.prompts | ForEach-Object { $_.name })
     foreach ($expected in @("winsight_triage_machine", "winsight_explain_alert"))
     {
         if ($promptNames -notcontains $expected)
@@ -232,7 +264,7 @@ try
     }
 
     Send-McpMessage @{ jsonrpc = "2.0"; id = 9; method = "resources/list"; params = @{} }
-    $resourceUris = @((Receive-McpMessage).result.resources | ForEach-Object { $_.uri })
+    $resourceUris = @((Receive-McpResponse -ExpectedId 9).result.resources | ForEach-Object { $_.uri })
     foreach ($expected in @("winsight://capabilities", "winsight://security-model", "winsight://verdict-model"))
     {
         if ($resourceUris -notcontains $expected)
@@ -247,7 +279,7 @@ try
         method = "tools/call"
         params = @{ name = "winsight_alerts"; arguments = @{} }
     }
-    $alerts = Receive-McpMessage
+    $alerts = Receive-McpResponse -ExpectedId 5
     $alertReports = @($alerts.result.structuredContent.reports)
     if ($alerts.result.structuredContent.evidenceIncluded -or
         $alertReports.Count -ne 1 -or $alertReports[0].tool -ne "alerts")
@@ -265,7 +297,7 @@ try
         method = "tools/call"
         params = @{ name = "winsight_outbound_firewall"; arguments = @{} }
     }
-    $posture = Receive-McpMessage
+    $posture = Receive-McpResponse -ExpectedId 6
     $postureReports = @($posture.result.structuredContent.reports)
     if ($posture.result.structuredContent.evidenceIncluded -or
         $postureReports.Count -ne 1 -or $postureReports[0].tool -ne "outbound-firewall" -or

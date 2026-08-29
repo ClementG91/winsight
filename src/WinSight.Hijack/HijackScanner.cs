@@ -189,7 +189,7 @@ public sealed class HijackScanner(
         {
             if (!plantable.TryGetValue(directory, out var writable))
             {
-                writable = Directory.Exists(directory)
+                writable = AutomaticFileAccess.IsLocal(directory) && Directory.Exists(directory)
                     && _probe.CanCreate(Path.Combine(directory, "winsight-probe.dll"));
                 plantable[directory] = writable;
             }
@@ -283,7 +283,9 @@ public sealed class HijackScanner(
         Func<string, bool> canPlantIn,
         ISideBySideStore sideBySide)
     {
-        if (ExecutablePath(service.CommandLine) is not { } image || !_fileExists(image))
+        if (ExecutablePath(service.CommandLine) is not { } image
+            || !AutomaticFileAccess.IsLocal(image)
+            || !_fileExists(image))
         {
             return ([], 0);
         }

@@ -213,6 +213,12 @@ VirusTotal hash lookup, which is explicit, user-initiated, rate-limited, and sen
 contents. Executable paths are preserved verbatim in reports as forensic evidence and are not
 transmitted anywhere.
 
+Paths discovered in registry values and service configuration are untrusted. UNC/device paths and
+mapped network drives are reported but never opened automatically for hashing, signature checking,
+hijack probing or filesystem watching, because even `File.Exists` can initiate SMB authentication.
+An already-local reparse point can still redirect a later Windows filesystem operation; preventing
+that completely requires an OS policy that blocks outbound SMB/NTLM, not a user-mode path parser.
+
 ## Residual risk
 
 - **Architecture qualification remains asymmetric.** Current native-x64 WFP/SCM, TOCTOU, IPC and
@@ -231,6 +237,10 @@ transmitted anywhere.
   unavailable from a per-user install: the service refuses to register from a path an unprivileged
   principal can write. Install for all users when the machine's own user is part of the threat being
   modelled.
+- **Ransomware decoy names are varied, not secret from a local compromise.** A machine-local seed
+  prevents a family from shipping one public WinSight filename rule that works everywhere. Malware
+  already executing as the same user can still read that per-user seed or simply enumerate the
+  visible documents, so the decoys are a detection signal rather than an anti-evasion boundary.
 - **Trust anchored in a user-installed root is reported, not prevented.** `CurrentUser\Root` is
   writable without elevation, so an implant signed beneath a root imported there does carry a
   technically valid signature. WinSight now names the anchor and flags such entries rather than

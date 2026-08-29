@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using WinSight.Mcp;
 using Xunit;
 
@@ -92,6 +94,31 @@ public sealed class UntrustedTextTests
             neutralized.Length < UntrustedText.MaxValueLength + 32,
             $"a 16 383-character value survived as {neutralized.Length} characters");
         Assert.EndsWith("[truncated]", neutralized, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TruncationNeverSplitsAUnicodeScalar()
+    {
+        var value = new string('A', UntrustedText.MaxValueLength - 1) + "😀tail";
+
+        var neutralized = UntrustedText.Neutralize(value);
+
+        Assert.DoesNotContain('\ud83d', neutralized);
+        var json = JsonSerializer.Serialize(neutralized);
+        Assert.NotEmpty(json);
+    }
+
+    [Fact]
+    public void InvalidUtf16CannotBreakJsonSerialization()
+    {
+        foreach (var surrogate in new[] { '\ud83d', '\ude00' })
+        {
+            var invalid = new string(surrogate, 1);
+            var neutralized = UntrustedText.Neutralize(invalid);
+
+            Assert.All(neutralized, character => Assert.False(char.IsSurrogate(character)));
+            Assert.NotEmpty(JsonSerializer.Serialize(neutralized));
+        }
     }
 
     [Theory]

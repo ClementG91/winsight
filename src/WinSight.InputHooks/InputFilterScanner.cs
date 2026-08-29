@@ -220,8 +220,22 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
         }
         if (value.StartsWith(devicePrefix, StringComparison.Ordinal))
         {
-            return value[devicePrefix.Length..];
+            var devicePath = value[devicePrefix.Length..];
+            // UNC would make this read-only scanner authenticate to a registry-chosen server.
+            // Other object-manager names (Volume{...}, GLOBALROOT, Device) are not Win32 paths;
+            // treating them as relative would verify a same-named file under the working directory.
+            return IsLocalFullyQualifiedPath(devicePath) ? devicePath : null;
         }
-        return Path.IsPathRooted(value) ? value : Path.Combine(windows, value);
+        if (value.StartsWith(@"\\", StringComparison.Ordinal)
+            || value.StartsWith("//", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        return Path.IsPathFullyQualified(value) ? value : Path.Combine(windows, value);
     }
+
+    private static bool IsLocalFullyQualifiedPath(string path) =>
+        Path.IsPathFullyQualified(path)
+        && !path.StartsWith(@"\\", StringComparison.Ordinal)
+        && !path.StartsWith("//", StringComparison.Ordinal);
 }

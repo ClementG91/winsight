@@ -1,5 +1,7 @@
 using System.Security.Principal;
 
+using WinSight.Core;
+
 namespace WinSight.Hijack;
 
 /// <summary>Whether an unprivileged user could place a file at a given path.</summary>
@@ -104,7 +106,9 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
         }
 
         var directory = Path.GetDirectoryName(path);
-        if (string.IsNullOrEmpty(directory) || !Directory.Exists(directory))
+        if (string.IsNullOrEmpty(directory)
+            || !AutomaticFileAccess.IsLocal(directory)
+            || !Directory.Exists(directory))
         {
             // No directory to plant into means nothing to plant. A missing parent is not a finding:
             // creating it would itself require write access further up, which is a different path

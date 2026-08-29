@@ -78,7 +78,15 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     // the native check could not run (both defer to the catalog fallback).
     private static SignatureVerdict? VerifyEmbedded(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return SignatureVerdict.Missing;
+        }
+        if (!AutomaticFileAccess.IsLocal(path))
+        {
+            return SignatureVerdict.Unknown;
+        }
+        if (!File.Exists(path))
         {
             return SignatureVerdict.Missing;
         }

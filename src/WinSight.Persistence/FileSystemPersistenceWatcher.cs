@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>
@@ -115,7 +117,9 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
 
     private FileSystemWatcher? TryCreate(PersistenceWatchTarget target)
     {
-        if (string.IsNullOrWhiteSpace(target.Path) || !Directory.Exists(target.Path))
+        if (string.IsNullOrWhiteSpace(target.Path)
+            || !AutomaticFileAccess.IsLocal(target.Path)
+            || !Directory.Exists(target.Path))
         {
             // A folder that does not exist (e.g. no Common Startup on this SKU) is an honest gap,
             // not an error: the on-start diff still covers it if it later appears at scan time.

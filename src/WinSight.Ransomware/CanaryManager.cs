@@ -1,3 +1,5 @@
+using WinSight.Core;
+
 namespace WinSight.Ransomware;
 
 /// <summary>
@@ -71,7 +73,9 @@ public sealed class CanaryManager
         // directories, so it is worth resolving by convention rather than being skipped.
         var downloads = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-        if (Directory.Exists(downloads) && seen.Add(downloads))
+        if (AutomaticFileAccess.IsLocal(downloads)
+            && Directory.Exists(downloads)
+            && seen.Add(downloads))
         {
             directories.Add(downloads);
         }
@@ -110,6 +114,10 @@ public sealed class CanaryManager
         }
         try
         {
+            if (!AutomaticFileAccess.IsLocal(path!))
+            {
+                return false;
+            }
             var expected = CanaryDocument.For(Path.GetExtension(path!));
             using var stream = new FileStream(
                 path!, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -165,7 +173,9 @@ public sealed class CanaryManager
         {
             foreach (var directory in directories)
             {
-                if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+                if (string.IsNullOrWhiteSpace(directory)
+                    || !AutomaticFileAccess.IsLocal(directory)
+                    || !Directory.Exists(directory))
                 {
                     continue;
                 }
@@ -227,6 +237,10 @@ public sealed class CanaryManager
     {
         try
         {
+            if (!AutomaticFileAccess.IsLocal(_manifestPath))
+            {
+                return;
+            }
             Directory.CreateDirectory(Path.GetDirectoryName(_manifestPath)!);
             File.WriteAllLines(_manifestPath, _canaries);
         }
@@ -238,21 +252,24 @@ public sealed class CanaryManager
         }
     }
 
-    private static void TryDelete(string path)
+    private static bool TryDelete(string path)
     {
         try
         {
-            if (File.Exists(path))
+            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
             {
-                File.SetAttributes(path, FileAttributes.Normal);
-                File.Delete(path);
+                return false;
             }
+            File.SetAttributes(path, FileAttributes.Normal);
+            File.Delete(path);
+            return true;
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
                                      or System.Security.SecurityException)
         {
             // A decoy we cannot delete (already gone, locked) is not fatal.
+            return false;
         }
     }
 
@@ -265,21 +282,24 @@ public sealed class CanaryManager
     /// no pattern any more. The legacy <c>WinSightGuard_*.xlsx</c> glob is still swept so decoys
     /// planted by an earlier version are not stranded in the operator's folders forever.
     /// </remarks>
-    public static int RemoveOrphans(IReadOnlyList<string> directories, string? manifestPath = null)
+    public static int RemoveOrphans(
+        IReadOnlyList<string> directories,
+        string? manifestPath = null,
+        byte[]? seed = null)
     {
         ArgumentNullException.ThrowIfNull(directories);
         var removed = 0;
         var manifest = manifestPath ?? CanaryIdentity.ManifestPath;
+        var expected = ExpectedCanaryPaths(directories, seed ?? CanaryIdentity.LoadOrCreateSeed());
 
         try
         {
-            if (File.Exists(manifest))
+            if (AutomaticFileAccess.IsLocal(manifest) && File.Exists(manifest))
             {
                 foreach (var path in File.ReadAllLines(manifest))
                 {
-                    if (!string.IsNullOrWhiteSpace(path) && File.Exists(path))
+                    if (IsExpectedCanary(path, expected) && TryDelete(path))
                     {
-                        TryDelete(path);
                         removed++;
                     }
                 }
@@ -295,7 +315,9 @@ public sealed class CanaryManager
 
         foreach (var directory in directories)
         {
-            if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+            if (string.IsNullOrWhiteSpace(directory)
+                || !AutomaticFileAccess.IsLocal(directory)
+                || !Directory.Exists(directory))
             {
                 continue;
             }
@@ -314,10 +336,81 @@ public sealed class CanaryManager
 
             foreach (var orphan in legacy)
             {
-                TryDelete(orphan);
-                removed++;
+                if (IsLegacyCanary(orphan) && TryDelete(orphan))
+                {
+                    removed++;
+                }
             }
         }
         return removed;
+    }
+
+    private static HashSet<string> ExpectedCanaryPaths(
+        IReadOnlyList<string> directories, byte[] seed)
+    {
+        var expected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var directory in directories)
+        {
+            if (string.IsNullOrWhiteSpace(directory))
+            {
+                continue;
+            }
+            try
+            {
+                var fullDirectory = Path.GetFullPath(directory);
+                if (!AutomaticFileAccess.IsLocal(fullDirectory))
+                {
+                    continue;
+                }
+                for (var index = 0; index < CanaryIdentity.PerDirectory; index++)
+                {
+                    expected.Add(Path.Combine(
+                        fullDirectory,
+                        CanaryIdentity.FileName(seed, directory, index)));
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                         or PathTooLongException)
+            {
+                // An invalid protection root authorises no cleanup.
+            }
+        }
+        return expected;
+    }
+
+    private static bool IsExpectedCanary(string? path, HashSet<string> expected)
+    {
+        if (string.IsNullOrWhiteSpace(path) || !Path.IsPathFullyQualified(path))
+        {
+            return false;
+        }
+        try
+        {
+            return expected.Contains(Path.GetFullPath(path));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                     or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsLegacyCanary(string path)
+    {
+        try
+        {
+            if (new FileInfo(path).Length != CanaryIdentity.LegacyContent.Length)
+            {
+                return false;
+            }
+            return File.ReadAllText(path).Equals(
+                CanaryIdentity.LegacyContent, StringComparison.Ordinal);
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            return false;
+        }
     }
 }

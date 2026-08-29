@@ -11,6 +11,8 @@ namespace WinSight.Browser;
 /// </summary>
 public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots = null)
 {
+    private const long MaximumJsonBytes = 1024 * 1024;
+
     /// <summary>A browser's on-disk "Extensions" directory to scan.</summary>
     /// <param name="Browser">Friendly browser name for reporting.</param>
     /// <param name="ExtensionsDir">Path containing per-extension-id subdirectories.</param>
@@ -154,7 +156,11 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         try
         {
             var manifestPath = System.IO.Path.Combine(versionDir, "manifest.json");
-            using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            using var doc = ParseJson(manifestPath);
+            if (doc is null)
+            {
+                return null;
+            }
             var root = doc.RootElement;
 
             var name = ResolveName(root, versionDir, id);
@@ -192,14 +198,27 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         {
             return raw;
         }
+        if (locale.Length > 35 || locale.Any(character =>
+                !char.IsAsciiLetterOrDigit(character) && character is not '_' and not '-'))
+        {
+            // A manifest is attacker-controlled evidence. Path.Combine discards its earlier parts
+            // when a later component is absolute, so an UNC "locale" would otherwise turn this
+            // no-network scan into a read from that server. Chromium locale names are simple BCP
+            // 47-style directory tokens (en, en_US, pt-BR), never paths.
+            return raw;
+        }
         try
         {
             var messages = System.IO.Path.Combine(versionDir, "_locales", locale, "messages.json");
-            if (!File.Exists(messages))
+            if (!AutomaticFileAccess.IsLocal(messages) || !File.Exists(messages))
             {
                 return raw;
             }
-            using var doc = JsonDocument.Parse(File.ReadAllText(messages));
+            using var doc = ParseJson(messages);
+            if (doc is null)
+            {
+                return raw;
+            }
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
                 if (string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase) &&
@@ -234,6 +253,11 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
 
     private static string[] SafeEnumerate(string dir, out bool unreadable)
     {
+        if (!AutomaticFileAccess.IsLocal(dir))
+        {
+            unreadable = true;
+            return [];
+        }
         try
         {
             var result = Directory.GetDirectories(dir);
@@ -249,6 +273,11 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
 
     private static bool DirectoryPresent(string path, out bool unreadable)
     {
+        if (!AutomaticFileAccess.IsLocal(path))
+        {
+            unreadable = true;
+            return false;
+        }
         try
         {
             unreadable = false;
@@ -266,5 +295,13 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
             unreadable = true;
             return false;
         }
+    }
+
+    private static JsonDocument? ParseJson(string path)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096,
+            FileOptions.SequentialScan);
+        return stream.Length <= MaximumJsonBytes ? JsonDocument.Parse(stream) : null;
     }
 }

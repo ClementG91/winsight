@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>
@@ -138,7 +140,9 @@ public sealed class StartupFolderEnumerator(
     {
         try
         {
-            return Directory.Exists(dir) ? Directory.GetFiles(dir) : Array.Empty<string>();
+            return AutomaticFileAccess.IsLocal(dir) && Directory.Exists(dir)
+                ? Directory.GetFiles(dir)
+                : Array.Empty<string>();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

@@ -6,6 +6,7 @@
     <!-- Controlled Folder Access posture is read from the Defender WMI provider (MSFT_MpPreference),
          the same source Get-MpPreference uses. Version is pinned centrally in Directory.Packages.props. -->
     <PackageReference Include="System.Management" />
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinSight.Ransomware.Tests" />
