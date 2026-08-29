@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics;
 using WinSight.Firewall;
 
 namespace WinSight.FirewallService;
@@ -21,6 +22,27 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
 {
     private static readonly TimeSpan DefaultStatusVerificationTimeout = TimeSpan.FromSeconds(1);
 
+    /// <summary>
+    /// How long a runtime status is served from memory before it is established again.
+    /// </summary>
+    /// <remarks>
+    /// <b>What this closes.</b> A status read takes the same lock every mutation takes, and under
+    /// it performs a full path-trust inspection and an exhaustive verification of the machine's WFP
+    /// filters - native work the caller cannot abort. Reading is a capability granted to any
+    /// interactive user, so an unprivileged caller could hold that lock in a loop and delay an
+    /// elevated administrator's EmergencyDisable. The careful separation of read and mutate
+    /// capabilities at the pipe was undone one storey down.
+    ///
+    /// A short-lived cache bounds it: however many callers ask, the expensive path runs at most
+    /// once per lifetime. Two seconds is long enough that a loop cannot drive it and short enough
+    /// that an operator watching the dashboard sees a transition promptly - and every mutation
+    /// invalidates the cache, so a read taken straight after a transition still reports the truth.
+    ///
+    /// It is a cache of an observation, not of a decision: the value served is one this service
+    /// established itself, within the last two seconds.
+    /// </remarks>
+    private static readonly TimeSpan StatusCacheLifetime = TimeSpan.FromSeconds(2);
+
     private readonly FirewallPolicyStore _store;
     private readonly Func<IWinSightWfpReconciler> _reconcilerFactory;
     private readonly IFirewallServiceStartModeController _startMode;
@@ -31,6 +53,8 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
     private readonly TaskCompletionSource _disposeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private IWinSightWfpReconciler? _reconciler;
     private Task<bool>? _runtimeVerification;
+    private FirewallRuntimeStatus? _cachedStatus;
+    private long _cachedStatusAt;
     private int _outstanding;
     private bool _stopping;
     private bool _disposed;
@@ -72,9 +96,25 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
     public async Task<FirewallRuntimeStatus> GetRuntimeStatusAsync(
         CancellationToken cancellationToken = default)
     {
+        // Served from the cache when it is fresh, without taking the transition lock at all. This
+        // is the half of the fix that matters: an unprivileged reader can no longer queue ahead of
+        // an administrator's transition, however often it asks.
+        if (ReadCachedStatus() is { } cached)
+        {
+            return cached;
+        }
+
         FirewallRuntimeStatus? result = null;
         await LockedAsync(async () =>
         {
+            // Checked again now the lock is held. Readers that arrived together all missed the
+            // cache outside it, and without this every one of them would run its own verification -
+            // the burst case, which is exactly the shape a caller trying to apply pressure uses.
+            if (ReadCachedStatus() is { } fresh)
+            {
+                result = fresh;
+                return;
+            }
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
             var state = EffectiveState;
             if (state == FirewallEnforcementState.Active)
@@ -99,6 +139,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
                 }
             }
             result = new FirewallRuntimeStatus(configuration.Mode, EngineSupported, state);
+            PublishStatus(result);
         }, cancellationToken).ConfigureAwait(false);
         return result!;
     }
@@ -483,17 +524,29 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
             // A timed-out native read can be unabortable. Until it completes, fail closed
             // without starting another worker so recovery/status cycles cannot accumulate
             // detached reads against the shared reconciler.
-            if (_runtimeVerification is { IsCompleted: false })
+            if (_runtimeVerification is { IsCompleted: false } inFlight)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                return false;
+                // Joined rather than refused. Returning false here meant that a verification which
+                // had exceeded its one-second deadline and was still running in the background made
+                // the *next* status read fail immediately - and a failed verification downgrades
+                // the machine to Degraded until the next explicit successful transition. A slow
+                // native read was therefore reported as a firewall that had stopped filtering.
+                //
+                // Joining keeps the property this branch exists for - no second detached read
+                // against the shared reconciler - while answering with the verification's actual
+                // result. The caller's own deadline still applies.
+                verification = inFlight;
             }
-
-            verification = Task.Run(
-                () => reconciler.VerifyExactAsync(policies, verificationToken),
-                CancellationToken.None);
-            _runtimeVerification = verification;
+            else
+            {
+                verification = Task.Run(
+                    () => reconciler.VerifyExactAsync(policies, verificationToken),
+                    CancellationToken.None);
+                _runtimeVerification = verification;
+            }
         }
+
         TrackRuntimeVerification(verification);
         try
         {
@@ -538,8 +591,35 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         Win32Exception or IOException or UnauthorizedAccessException or InvalidDataException or
         InvalidOperationException or OperationCanceledException;
 
-    private void SetEffectiveState(FirewallEnforcementState state) =>
+    private void SetEffectiveState(FirewallEnforcementState state)
+    {
         Volatile.Write(ref _effectiveState, (int)state);
+        // Any change to the effective state makes a cached status a statement about the past.
+        InvalidateStatus();
+    }
+
+    /// <summary>The cached status when it is still current, or null.</summary>
+    private FirewallRuntimeStatus? ReadCachedStatus()
+    {
+        var status = Volatile.Read(ref _cachedStatus);
+        if (status is null)
+        {
+            return null;
+        }
+        var age = Stopwatch.GetElapsedTime(Volatile.Read(ref _cachedStatusAt));
+        return age <= StatusCacheLifetime ? status : null;
+    }
+
+    /// <summary>Remembers a status this service just established.</summary>
+    private void PublishStatus(FirewallRuntimeStatus status)
+    {
+        // The timestamp is written first, so a reader can never see a fresh timestamp against a
+        // stale value - only the harmless reverse, which expires the entry.
+        Volatile.Write(ref _cachedStatusAt, Stopwatch.GetTimestamp());
+        Volatile.Write(ref _cachedStatus, status);
+    }
+
+    private void InvalidateStatus() => Volatile.Write(ref _cachedStatus, null);
 
     private static FirewallTransitionException RollbackFailed(string code, Exception cause, Exception rollback) =>
         new(code, new AggregateException(cause, rollback));
