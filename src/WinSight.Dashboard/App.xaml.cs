@@ -11,6 +11,11 @@ public partial class App : System.Windows.Application
         // makes a user's "it crashed" impossible to diagnose. Local-only, never sent anywhere.
         CrashReporter.Install(this);
 
+        // Before any window is built: the palette is seven hard-coded colours, and Windows'
+        // high-contrast mode - the setting people with low vision actually use - changed nothing
+        // at all. It follows the setting live rather than at startup only.
+        HighContrastPalette.Attach(this);
+
         VirusTotalSettingsStore.Default.ApplyToCurrentProcess();
 
         var languageIndex = Array.FindIndex(
