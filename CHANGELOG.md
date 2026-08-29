@@ -1,5 +1,82 @@
 ## Unreleased
 
+Response to a second third-party static audit, this one of `7c9ec93`. As before every finding was
+re-derived from the source before anything changed, and the measurements below were taken on a real
+machine rather than assumed.
+
+**Two checks that failed open.**
+
+- An ACE may express its grant with the generic bits, which Windows resolves through the object's
+  generic mapping at access-check time and .NET hands back unresolved. `GENERIC_ALL` is
+  `0x10000000` and shares no bit with `WriteData` or `Delete`, so two checks that tested specific
+  rights against a raw mask read "nothing dangerous here": the SYSTEM service trusted a policy path
+  an unprivileged account fully controls, and the hijack scan reported a plantable directory as
+  safe. Neither spelling is exotic - `icacls /grant Users:(F)` and an SDDL `GA` both produce one,
+  and an attacker who can set an ACL can choose the spelling the checker does not read.
+- The service's path-trust inspection walked UNC and device paths. On a remote path the owner and
+  ACL it reasons about come from the server, so an attacker controlling it also controlled the
+  decision - and reaching the path made a SYSTEM service authenticate to that host as the machine
+  account. Anything not on local storage is now refused before a single component is opened.
+
+**Detection the scan was not doing.**
+
+- .NET profiler injection was not enumerated at all. The CLR loads an arbitrary DLL into a managed
+  process when `COR_ENABLE_PROFILING=1` and a profiler is named; all three registry locations that
+  survive a reboot are now read, including the per-service `Environment` block that puts a DLL
+  inside one chosen SYSTEM process and touches nothing else.
+- Winlogon was reading two of its five executable values. `Taskman` is the pointed one: Winlogon
+  runs it instead of Task Manager, so a single value is both persistence and a way to stop somebody
+  looking at the process list.
+- A validly signed third-party DLL registered into LSASS, the print spooler, the logon UI or every
+  process that links user32 was reported as routine, because its signature was fine. Those twelve
+  surfaces are empty or Microsoft-only on an ordinary machine - the flagged count on this desktop
+  did not move when the rule was added - which is exactly what makes them worth reading.
+
+**Two dashboard regressions.** Persistence was the one scanner of eleven reporting its coverage gap
+only through `Summary`, and the dashboard replaces that line with its own, so the clause vanished
+for the audience least able to infer it. And five of seven integrity sub-cases fell through to the
+English source string: a French operator read a title spelled `test-signing` on the check that
+reframes every other kernel finding. Both now fail the build if they recur.
+
+**A contract that had no version.** `--json` emitted a bare array, so adding `unverifiedCount`
+broke `Test-CfaProvider.ps1` against the live CLI while its fixtures kept passing. It now carries
+`schemaVersion` and `generatedAt`, and all four readers check the version before the contents.
+
+**Coverage the gate was not measuring.** The engine list named ten libraries and stopped - the ten
+already above the bar. NetMonitor sat at 63%, Attribution at 66% and InputHooks at 78% while every
+run printed "all engine libraries are at or above 80%". Every detection library is now held to the
+floor, with the live-ETW capture files named as explicit exclusions the gate fails on if they stop
+matching a real file, and the gated numbers printed beside the raw table so the output cannot look
+like it is lying.
+
+**Work that was being wasted.**
+
+- The burst detector rebuilt its distinct-file set on every observation, so the cost of a burst grew
+  with its square - slowest during mass encryption, the one event it exists to catch. It is now
+  constant-time per event and bounded before it fires, not only after.
+- The reputation budget hashed every candidate before using four of the digests, spent those four on
+  whatever the enumerator reached first, and asked again on every scan. It now hashes lazily, takes
+  the callers' most-adverse-first order, and caches by content hash for thirty minutes.
+- The writability probe created and deleted a real file once per candidate rather than once per
+  directory - a few hundred writes into Program Files per scan.
+- The catalog verifier acquired a context and re-read a catalog's certificate per file. Now once per
+  batch, verified in parallel. Measured honestly: no difference on this machine, because the catalog
+  path is a fallback and that set is small here.
+
+**Two ways a report could mislead.** Both file watchers counted a watch that Windows had torn down
+as still live, and the persistence watcher had no overflow handler at all - the exact failure the
+ransomware watcher was rebuilt around, three files away. And `--watch` was accepted globally but
+honoured by four verbs, so `winsight persistence --watch` ran a one-shot scan and exited.
+
+**MCP evidence is paged.** `maxItems` capped a response at 200 items with no way to ask for the
+rest, so on a 4538-item persistence scan a model was told evidence existed and given no way to
+reach it. Responses are also bounded by size now, because a finding's fields hold registry values
+whose length the machine decides.
+
+---
+
+The rest of this section is the response to the previous audit, which ships in the same version.
+
 Response to a third-party static audit of `38f06c7` (v0.11.6). Every one of its 38 findings was
 re-derived from the source before anything was changed; the three it got wrong or overstated are
 named below alongside the rest.
