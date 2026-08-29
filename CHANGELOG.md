@@ -73,6 +73,64 @@ rest, so on a 4538-item persistence scan a model was told evidence existed and g
 reach it. Responses are also bounded by size now, because a finding's fields hold registry values
 whose length the machine decides.
 
+**MCP evidence is paged.** `maxItems` capped a response at 200 items with no way to ask for the
+rest, so on a 4538-item persistence scan a model was told evidence existed and given no way to
+reach it. Responses are also bounded by size now, because a finding's fields hold registry values
+whose length the machine decides.
+
+**Two more detection surfaces, and one declared gap.** The managed half of profiler injection - a
+type instantiated as a process's `AppDomainManager` before any application code runs - was missing
+while the native half was covered. `GinaDLL` is now read for the opposite reason to the other
+Winlogon values: modern Windows does not execute it, so nothing legitimate sets it and its presence
+is itself the finding. BITS transfer jobs are named in the list of known gaps rather than
+half-implemented: the job's notify command line is reachable only through COM, enumerating other
+users' jobs needs elevation, and shipping untested interop into a privileged enumeration is worse
+than saying it is not covered.
+
+**The DLL search order ignored bitness and side-by-side.** A 32-bit process is served SysWOW64 by
+the file-system redirector, and the scan searched System32 for every binary regardless - so every
+32-bit auto-start service importing a DLL that ships only in SysWOW64 was reported as carrying a
+phantom import. The bitness was read during the PE parse and thrown away. Separately, "no directory
+in the search order holds this file" was read as "the loader cannot find it", which reported every
+service linked against a Visual C++ or MFC redistributable the same way. Both are confident
+accusations against ordinary software, at scale, from a SYSTEM-service scanner.
+
+**Ransomware signal quality.** Six formats that arrive in bulk during ordinary work were missing
+from the compressed-by-design list, and a git object store under Documents produced the same signal
+as mass encryption. A real attack looked like a false positive repeating, because the latch is reset
+as soon as the caller has notified - there is now a cooldown, and the bursts it suppresses are
+counted rather than dropped. And the one signal the product presents as unambiguous, a touched
+decoy, was raised by any OneDrive placeholder hydration: a decoy's content is deterministic, so
+"rewritten with the same bytes" is now distinguishable from "modified". Uninstall left up to
+eighteen deliberately unrecognisable files in the user's folders, synchronised to their cloud; it
+now runs the sweep the product already performs at startup.
+
+**A status read could hold up an administrator.** Reading the firewall status took the same lock
+every mutation takes and performed a full path-trust inspection and WFP verification under it -
+work an unprivileged reader could repeat in a loop to delay an elevated emergency disable. And a
+verification that had exceeded its deadline made the next read fail immediately, which downgrades
+the machine to Degraded until the next explicit transition: a slow native read was reported as a
+firewall that had stopped filtering.
+
+**Accessibility.** The palette is seven hard-coded colours, so Windows' high-contrast mode - the
+setting people with low vision actually use - changed nothing at all. It is followed now, live.
+
+**Also.** The ETW sessions ran on default buffers while subscribing to Process, Registry and
+FileIOInit, and the DNS provider was enabled for every keyword at Verbose. `--watch` was accepted on
+verbs that silently ignored it. The netstat fallback exposed no coverage flag. Generic access bits
+were not decoded, so an ACE granting `GENERIC_ALL` read as granting nothing dangerous in two
+different checks. UNC paths were walked by the SYSTEM service's path-trust inspection. A caller with
+no capability held a read slot for five seconds. A policy on a mapped drive claimed to block
+something and did not.
+
+**Named because they were wrong or unactionable.** The suspicion that the `actions/attest` SHA
+carried a version comment copied from `actions/attest-build-provenance` was checked against the tag
+API: both actions genuinely are at v4.2.2 and both pins match. Three changes are deliberately left
+for a VM qualification run rather than shipped unverified - exempting loopback from the outbound
+block, a tighter service DACL, and a restricted service SID - because each is a change to a live
+SYSTEM service that this project's own rules forbid exercising on a development machine, and each
+fails in a direction worse than the defect. The reasoning sits next to the code in every case.
+
 ---
 
 The rest of this section is the response to the previous audit, which ships in the same version.
