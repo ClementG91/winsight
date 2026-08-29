@@ -224,9 +224,16 @@ public static class Adapters
             // fields below rather than moving into the detail, so MCP's existing rule — command
             // text is withheld unless the operator opened the sensitive gate — keeps governing it.
             var abuse = InterpreterAbuseTriage.Describe(e.Abuse);
-            var detail = abuse is null
-                ? $"{displayedPath}  [{verdict}]"
-                : $"{displayedPath}  [{verdict}; {abuse}]";
+            // A valid signature that is nonetheless flagged has to say why on the same line. Without
+            // this the entry reads "signature valid" beside a [!] mark, which is the most confusing
+            // thing a report can do: it looks like the tool contradicting itself rather than making
+            // a point about where the code is registered to load.
+            var privileged = PrivilegedSurfaceTriage.IsForeignCodeInAPrivilegedHost(e)
+                ? $"third-party code loaded by {PrivilegedHostLabel(e.Vector)}"
+                : null;
+            var reasons = string.Join("; ", new[] { verdict, abuse, privileged }
+                .Where(reason => !string.IsNullOrEmpty(reason)));
+            var detail = $"{displayedPath}  [{reasons}]";
             b.Add(
                 // Three levels, not two. An entry whose target could not be checked is Unverified:
                 // present in the report, absent from the "worth examining" count, and not a reason
@@ -378,6 +385,23 @@ public static class Adapters
         const int MaxHeadLength = 160;
         return head.Length <= MaxHeadLength ? head : head[..MaxHeadLength] + "…";
     }
+
+    /// <summary>The process an entry on a privileged surface is loaded into, in plain words.</summary>
+    private static string PrivilegedHostLabel(AutostartVector vector) => vector switch
+    {
+        AutostartVector.AppInitDll => "every process that links user32",
+        AutostartVector.AppCertDll => "every process that is created",
+        AutostartVector.LsaPackage or AutostartVector.SecurityProvider => "LSASS",
+        AutostartVector.CredentialProvider => "the logon UI, as SYSTEM, before sign-in",
+        AutostartVector.PrintMonitor or AutostartVector.PrintProvider =>
+            "the print spooler, as SYSTEM",
+        AutostartVector.TimeProvider => "the time service",
+        AutostartVector.BootExecute => "the session manager, before Windows starts",
+        AutostartVector.NetshHelper => "netsh, typically elevated",
+        AutostartVector.Winlogon => "Winlogon",
+        AutostartVector.WmiSubscription => "WMI, as SYSTEM",
+        _ => "a privileged process",
+    };
 
     private static string PersistenceStatusLabel(
         PersistenceStatus status,

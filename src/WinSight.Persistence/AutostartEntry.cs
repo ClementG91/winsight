@@ -160,6 +160,11 @@ public sealed record AutostartEntry(
     /// </summary>
     public bool IsAdverse =>
         Status is PersistenceStatus.Unsigned or PersistenceStatus.InvalidSignature
+        // A validly signed DLL is still a finding when it is registered to load into LSASS, the
+        // print spooler, the logon UI, or every process on the machine. Those surfaces are empty or
+        // Microsoft-only on an ordinary machine, and somebody else's code on one of them is how an
+        // attacker with a signing certificate reaches a process they could not otherwise touch.
+        || PrivilegedSurfaceTriage.IsForeignCodeInAPrivilegedHost(this)
         // "Signed and trusted" is worth no more than the root it chains to, and WinVerifyTrust
         // consults CurrentUser\Root - a store any account writes with no elevation. An implant
         // signed beneath a root imported that way read SignatureValid here, which defeated the
