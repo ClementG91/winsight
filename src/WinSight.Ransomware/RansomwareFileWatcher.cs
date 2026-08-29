@@ -56,6 +56,7 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     private readonly IReadOnlyList<string> _directories;
     private readonly Func<string?, bool> _isCanary;
+    private readonly Func<string?, bool>? _canaryIsIntact;
     private readonly Func<string?, bool> _looksEncrypted;
     private readonly RansomwareBurstDetector _detector;
     private readonly Func<DateTimeOffset> _clock;
@@ -78,10 +79,12 @@ public sealed class RansomwareFileWatcher : IDisposable
         Func<string?, bool> isCanary,
         RansomwareBurstDetector? detector = null,
         Func<DateTimeOffset>? clock = null,
-        Func<string?, bool>? looksEncrypted = null)
+        Func<string?, bool>? looksEncrypted = null,
+        Func<string?, bool>? canaryIsIntact = null)
     {
         _directories = directories ?? throw new ArgumentNullException(nameof(directories));
         _isCanary = isCanary ?? throw new ArgumentNullException(nameof(isCanary));
+        _canaryIsIntact = canaryIsIntact;
         _detector = detector ?? new RansomwareBurstDetector();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _looksEncrypted = looksEncrypted ?? RansomwareEntropySampler.LooksEncrypted;
@@ -305,6 +308,19 @@ public sealed class RansomwareFileWatcher : IDisposable
         try
         {
             var isCanary = _isCanary(change.IdentityPath);
+
+            // A decoy rewritten with exactly its own bytes has not been touched in any sense that
+            // matters. The decoy directories follow the OneDrive redirection on purpose and
+            // LastWrite is in the notify filter, so a placeholder hydration or any synchronisation
+            // client rewriting the file raised the one signal this product presents as unambiguous.
+            // A rename or a delete is never an identical rewrite, so only a change is qualified.
+            if (isCanary
+                && change.ChangeType == WatcherChangeTypes.Changed
+                && _canaryIsIntact is not null
+                && _canaryIsIntact(change.IdentityPath))
+            {
+                return;
+            }
 
             // Only score content for a create/change of an ordinary file; the sampler's own
             // extension gate then skips formats that are compressed by design.

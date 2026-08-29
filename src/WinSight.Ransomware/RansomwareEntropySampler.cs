@@ -36,6 +36,15 @@ public static class RansomwareEntropySampler
         // Modern archive and media containers that behave the same way.
         ".zst", ".lz4", ".br", ".opus", ".aac", ".wma", ".avif", ".jxl",
         ".exe", ".dll", ".sys", ".apk", ".jar", ".nupkg", ".whl",
+        // Measured against ordinary developer and creative work on a real machine, each of which
+        // produced high-entropy writes in bulk under a watched folder:
+        //   .pack   git packfiles, written by every clone and gc
+        //   .wasm   compiled modules, shipped inside node_modules
+        //   .psd    Photoshop documents, compressed by design
+        //   .vhdx   virtual disks, whose contents are whatever the guest wrote
+        //   .bak    backups, which are usually a compressed copy of something
+        //   .vsix   Visual Studio extensions, which are ZIP containers
+        ".pack", ".wasm", ".psd", ".vhdx", ".bak", ".vsix",
     };
 
     /// <summary>
@@ -57,7 +66,47 @@ public static class RansomwareEntropySampler
         {
             return false;
         }
-        return !CompressedByDesign.Contains(extension);
+        // A content-addressed object store is excluded by its location, not by its extension.
+        //
+        // The obvious move was to stop scoring files with no extension - git loose objects and pack
+        // files are exactly that, and a `git clone` under Documents produced the same signal as mass
+        // encryption. But this codebase already decided the other way, and the reasoning holds:
+        // ransomware writes extensionless output too, and widening the exclusion by extension would
+        // trade a broad false positive for a real false negative.
+        //
+        // Naming the actual cause costs nothing on either side. Files inside a .git directory are
+        // high-entropy by construction and are written in bulk by ordinary work; a document in the
+        // working tree beside it is still scored, and encrypting a repository still produces the
+        // renames and deletes the same detector counts.
+        return !IsInsideObjectStore(path) && !CompressedByDesign.Contains(extension);
+    }
+
+    /// <summary>
+    /// Whether the path sits inside a content-addressed object store whose contents are
+    /// high-entropy by construction.
+    /// </summary>
+    /// <remarks>
+    /// Matched as a path segment, so a document called <c>.gitignore</c> or a folder named
+    /// <c>github</c> is not swept up with it.
+    /// </remarks>
+    private static bool IsInsideObjectStore(string path)
+    {
+        const string git = ".git";
+        var span = path.AsSpan();
+        var index = span.IndexOf(git, StringComparison.OrdinalIgnoreCase);
+        while (index >= 0)
+        {
+            var startsSegment = index == 0 || span[index - 1] is '\\' or '/';
+            var after = index + git.Length;
+            var endsSegment = after < span.Length && span[after] is '\\' or '/';
+            if (startsSegment && endsSegment)
+            {
+                return true;
+            }
+            var next = span[(index + git.Length)..].IndexOf(git, StringComparison.OrdinalIgnoreCase);
+            index = next < 0 ? -1 : index + git.Length + next;
+        }
+        return false;
     }
 
     /// <summary>

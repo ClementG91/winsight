@@ -487,7 +487,11 @@ public sealed class RansomwareMonitorTests
         var detections = new System.Collections.Concurrent.ConcurrentQueue<RansomwareDetectedEventArgs>();
         var first = new ManualResetEventSlim(false);
         var second = new ManualResetEventSlim(false);
-        var monitor = new RansomwareMonitor(new[] { dir });
+        // No cooldown, because this test is about re-arming: the two waves are milliseconds apart
+        // and the default thirty-second quiet period would suppress the second one, which is the
+        // cooldown working rather than the latch failing. The cooldown has its own tests.
+        var monitor = new RansomwareMonitor(
+            new[] { dir }, new RansomwareBurstDetector(cooldown: TimeSpan.Zero));
         monitor.Detected += (_, e) =>
         {
             detections.Enqueue(e);

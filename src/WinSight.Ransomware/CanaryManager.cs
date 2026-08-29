@@ -84,6 +84,52 @@ public sealed class CanaryManager
         get { lock (_gate) { return _canaries.ToArray(); } }
     }
 
+    /// <summary>
+    /// True when the decoy at <paramref name="path"/> still holds exactly the bytes it was planted
+    /// with.
+    /// </summary>
+    /// <remarks>
+    /// <b>The signal this qualifies.</b> A touched decoy is the one thing this product presents as
+    /// unambiguous, and it was raised by any <c>Changed</c> notification. The decoy directories
+    /// deliberately follow the OneDrive redirection and <c>LastWrite</c> is in the notify filter, so
+    /// a placeholder being hydrated or dehydrated - or any synchronisation client rewriting the file
+    /// byte for byte - raised the alert the operator is told to trust most.
+    ///
+    /// A decoy's content is deterministic, so the question has an exact answer: rewritten with the
+    /// same bytes is not modified.
+    ///
+    /// <b>Unreadable counts as modified.</b> A decoy that cannot be read is exactly what encryption
+    /// in progress looks like, and this is the one place in the codebase where "I could not look"
+    /// must not resolve to silence.
+    /// </remarks>
+    public bool ContentIsIntact(string? path)
+    {
+        if (!IsCanary(path))
+        {
+            return false;
+        }
+        try
+        {
+            var expected = CanaryDocument.For(Path.GetExtension(path!));
+            using var stream = new FileStream(
+                path!, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            if (stream.Length != expected.Length)
+            {
+                return false;
+            }
+            var actual = new byte[expected.Length];
+            stream.ReadExactly(actual);
+            return actual.AsSpan().SequenceEqual(expected);
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or EndOfStreamException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>True when <paramref name="path"/> is one of the planted decoys (case-insensitive).</summary>
     public bool IsCanary(string? path)
     {

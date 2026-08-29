@@ -131,4 +131,71 @@ public sealed class CanaryDocumentFormatTests
             Assert.Contains(expected, parts, StringComparer.Ordinal);
         }
     }
+
+    /// <summary>
+    /// A decoy rewritten with exactly its own bytes has not been touched in any sense that matters.
+    /// </summary>
+    /// <remarks>
+    /// The decoy directories follow the OneDrive redirection deliberately and LastWrite is in the
+    /// notify filter, so a placeholder hydrating or dehydrating - or any synchronisation client
+    /// round-tripping the file - raised the one signal this product presents as unambiguous.
+    /// </remarks>
+    [Fact]
+    public void ADecoyRewrittenWithItsOwnBytesIsIntact()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"winsight-intact-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var manifest = Path.Combine(directory, "manifest.txt");
+        var manager = new CanaryManager(seed: new byte[32], manifestPath: manifest);
+        try
+        {
+            var decoy = manager.Plant([directory])[0];
+
+            Assert.True(manager.ContentIsIntact(decoy));
+
+            // What a sync client does: write the same bytes back.
+            File.WriteAllBytes(decoy, File.ReadAllBytes(decoy));
+            Assert.True(manager.ContentIsIntact(decoy));
+
+            // What encryption does.
+            File.WriteAllBytes(decoy, [0xDE, 0xAD, 0xBE, 0xEF]);
+            Assert.False(manager.ContentIsIntact(decoy));
+        }
+        finally
+        {
+            manager.Remove();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A decoy that cannot be read counts as modified. It is the one place in this codebase where
+    /// "I could not look" must not resolve to silence: an unreadable decoy is exactly what
+    /// encryption in progress looks like.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableDecoyIsNotReportedAsIntact()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"winsight-gone-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var manifest = Path.Combine(directory, "manifest.txt");
+        var manager = new CanaryManager(seed: new byte[32], manifestPath: manifest);
+        try
+        {
+            var decoy = manager.Plant([directory])[0];
+            File.Delete(decoy);
+
+            Assert.False(manager.ContentIsIntact(decoy));
+        }
+        finally
+        {
+            manager.Remove();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>A path that is not a decoy is never "intact"; it is not this manager's file.</summary>
+    [Fact]
+    public void APathThatIsNotADecoyIsNotIntact() =>
+        Assert.False(new CanaryManager(seed: new byte[32]).ContentIsIntact(@"C:\Windows\notepad.exe"));
 }

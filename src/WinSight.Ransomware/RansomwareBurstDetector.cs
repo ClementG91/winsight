@@ -37,6 +37,22 @@ public sealed class RansomwareBurstDetector
     public static readonly TimeSpan DefaultWindow = TimeSpan.FromSeconds(3);
 
     /// <summary>
+    /// How long the detector stays quiet after firing, when nobody acknowledges it.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why a cooldown and not just the latch.</b> The latch already stops one burst producing
+    /// twelve alerts - but the caller resets it as soon as it has notified, so a genuine mass
+    /// encryption, which keeps producing bursts for as long as it runs, produced a stream of alerts
+    /// indistinguishable from a false positive repeating. The operator cannot tell "this fired
+    /// twelve times because twelve different things happened" from "this fired twelve times because
+    /// one thing is still happening".
+    ///
+    /// With a cooldown the second reading is a single alert followed by silence, and the count of
+    /// suppressed bursts says how much was still going on - which is the fact worth having.
+    /// </remarks>
+    public static readonly TimeSpan DefaultCooldown = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// The most observations the window will hold before it starts discarding duplicates.
     /// </summary>
     /// <remarks>
@@ -56,6 +72,9 @@ public sealed class RansomwareBurstDetector
 
     private readonly int _threshold;
     private readonly TimeSpan _window;
+    private readonly TimeSpan _cooldown;
+    private DateTimeOffset _firedAt;
+    private int _suppressed;
     private readonly Queue<Observation> _recent = new();
 
     /// <summary>
@@ -77,11 +96,26 @@ public sealed class RansomwareBurstDetector
     private int _unnamed;
     private bool _fired;
 
-    public RansomwareBurstDetector(int threshold = DefaultThreshold, TimeSpan? window = null)
+    public RansomwareBurstDetector(
+        int threshold = DefaultThreshold, TimeSpan? window = null, TimeSpan? cooldown = null)
     {
         ArgumentOutOfRangeException.ThrowIfLessThan(threshold, 1);
         _threshold = threshold;
         _window = window ?? DefaultWindow;
+        _cooldown = cooldown ?? DefaultCooldown;
+    }
+
+    /// <summary>
+    /// Bursts that crossed the threshold during a cooldown and were not alerted on.
+    /// </summary>
+    /// <remarks>
+    /// Non-zero means the activity did not stop. It is the number that separates "one alert because
+    /// one thing happened" from "one alert because something is still happening", and it is
+    /// deliberately reported rather than silently dropped.
+    /// </remarks>
+    public int SuppressedBursts
+    {
+        get { lock (_gate) { return _suppressed; } }
     }
 
     /// <summary>Distinct files touched within the window.</summary>
@@ -126,10 +160,21 @@ public sealed class RansomwareBurstDetector
             {
                 return false; // already alerted this burst; wait for the operator to acknowledge
             }
+            // Inside the cooldown the detector still counts, still latches, and stays quiet. The
+            // caller resets the latch as soon as it has notified, so without this a mass encryption
+            // - which keeps producing bursts for as long as it runs - produced a stream of alerts
+            // indistinguishable from a false positive repeating.
+            var cooling = _firedAt != default && atUtc - _firedAt < _cooldown;
 
             if (kind == RansomwareSignalKind.CanaryTouched)
             {
                 _fired = true;
+                if (cooling)
+                {
+                    _suppressed++;
+                    return false;
+                }
+                _firedAt = atUtc;
                 return true;
             }
 
@@ -143,6 +188,12 @@ public sealed class RansomwareBurstDetector
             if (DistinctFilesInWindow() >= _threshold)
             {
                 _fired = true;
+                if (cooling)
+                {
+                    _suppressed++;
+                    return false;
+                }
+                _firedAt = atUtc;
                 return true;
             }
             return false;

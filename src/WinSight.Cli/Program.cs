@@ -83,6 +83,23 @@ if (command == "dns" && args.Contains("--watch"))
     return Adapters.WatchDns();
 }
 
+// Sweeps the ransomware decoys out of the operator's folders. Called by the uninstaller, which had
+// no way to do it: the installer removed its own directory and left up to eighteen files in
+// Documents, Desktop, Pictures, Videos, Music and Downloads - deliberately named to be
+// unrecognisable, which is what makes them work and what makes them impossible for the user to
+// identify afterwards. Because the folders follow the OneDrive redirection, they had also
+// synchronised to the cloud.
+//
+// It is the sweep the product already performs at startup, exposed so uninstall can run it. Absent
+// from the help catalogue: it is a lifecycle command, not a scanner.
+if (command == "remove-decoys")
+{
+    var removed = WinSight.Ransomware.CanaryManager.RemoveOrphans(
+        WinSight.Ransomware.CanaryManager.DefaultDirectories());
+    Console.WriteLine($"removed {removed} decoy file(s)");
+    return CliContract.Clean;
+}
+
 // Undocumented diagnostic, like the dashboard's --smoke-test: reports what the authenticated
 // firewall pipe grants this caller's identity, without changing machine state. Used by the VM
 // multi-user IPC gate to prove an unprivileged caller is refused a mutation. Not a scanner, so it
