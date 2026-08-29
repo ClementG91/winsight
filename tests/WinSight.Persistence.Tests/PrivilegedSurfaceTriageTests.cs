@@ -56,7 +56,8 @@ public sealed class PrivilegedSurfaceTriageTests
         AutostartVector.BootExecute,
         AutostartVector.NetshHelper,
         AutostartVector.Winlogon,
-        AutostartVector.WmiSubscription);
+        AutostartVector.WmiSubscription,
+        AutostartVector.ProfilerInjection);
 
     /// <summary>Where ordinary software lives, in its thousands.</summary>
     public static TheoryData<AutostartVector> OrdinarySurfaces() => Data(
@@ -181,6 +182,6 @@ public sealed class PrivilegedSurfaceTriageTests
         var privileged = Enum.GetValues<AutostartVector>()
             .Count(PrivilegedSurfaceTriage.IsPrivilegedSurface);
 
-        Assert.Equal(12, privileged);
+        Assert.Equal(13, privileged);
     }
 }

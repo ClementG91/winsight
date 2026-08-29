@@ -54,6 +54,11 @@ public static class PrivilegedSurfaceTriage
         AutostartVector.NetshHelper => true,
         // Winlogon's own userinit/shell chain, and WMI event consumers running as SYSTEM.
         AutostartVector.Winlogon or AutostartVector.WmiSubscription => true,
+        // A .NET profiler is loaded into whichever managed process the setting reaches - every one
+        // of them for the machine environment, or one chosen SYSTEM service for a per-service
+        // block. A legitimate APM agent looks exactly like this, which is the point: an operator
+        // should be told an agent is injecting into their processes, and be able to recognise it.
+        AutostartVector.ProfilerInjection => true,
         _ => false,
     };
 

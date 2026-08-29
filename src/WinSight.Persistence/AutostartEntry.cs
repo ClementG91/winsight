@@ -31,6 +31,7 @@ public enum AutostartVector
     SecurityProvider,
     JustInTimeDebugger,
     PowerShellProfile,
+    ProfilerInjection,
     // Still not enumerated, named here rather than left implicit: Winsock LSP catalog entries
     // (their DLL path lives inside a packed binary blob), shell extension handlers,
     // Winlogon\Notify (which modern Windows no longer executes), Group Policy scripts and Office

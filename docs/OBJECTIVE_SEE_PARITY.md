@@ -17,7 +17,7 @@ Two structural differences shape everything below:
 | Objective-See | What it does | WinSight today | Gap |
 |---|---|---|---|
 | **BlockBlock** | Real-time persistence alerts | **Guardian** - ~17 live registry/file surfaces, tray alert, journalled | **Parity.** Cannot block the write (driver). |
-| **KnockKnock** | One-shot persistence enumeration | **Persistence scan** - 26 autostart surfaces with signature verdicts | **Parity, arguably ahead** (more surfaces, Authenticode + catalog). |
+| **KnockKnock** | One-shot persistence enumeration | **Persistence scan** - 27 autostart surfaces with signature verdicts | **Parity, arguably ahead** (more surfaces, Authenticode + catalog). |
 | **LuLu** | Per-app outbound firewall | **Outbound firewall** - WFP per-app, enforcement opt-in, survives reboot | **Feature parity in code; current-candidate qualification incomplete.** Historical candidate-bound x64 records cover WFP/SCM/rollback/per-app scoping, adversarial trust and IPC, but later WFP/SCM changes require that gate to be rerun. Native Arm64 remains pending. |
 | **RansomWhere?** | Ransomware behaviour detection | **Ransomware protection** - canaries, rename/delete burst, entropy-on-write, opt-in | **Parity.** Cannot halt the process mid-encryption (driver). |
 | **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** - live, tray alert, journalled | **Parity** (the host landed 2026-07-21; the detector predated it). |

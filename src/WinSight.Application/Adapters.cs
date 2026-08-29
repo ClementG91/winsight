@@ -400,6 +400,7 @@ public static class Adapters
         AutostartVector.NetshHelper => "netsh, typically elevated",
         AutostartVector.Winlogon => "Winlogon",
         AutostartVector.WmiSubscription => "WMI, as SYSTEM",
+        AutostartVector.ProfilerInjection => "the CLR, into managed processes",
         _ => "a privileged process",
     };
 
