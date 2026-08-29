@@ -63,7 +63,9 @@ public sealed class RansomwareFileWatcher : IDisposable
     private readonly Lock _gate = new();
     private readonly BlockingCollection<PendingChange> _pending =
         new(new ConcurrentQueue<PendingChange>(), MaxQueuedChanges);
+    private readonly ConcurrentDictionary<FileSystemWatcher, byte> _lost = new();
     private Thread? _worker;
+    private int _unwatchable;
     private int _overflows;
     private int _dropped;
     private bool _started;
@@ -88,11 +90,40 @@ public sealed class RansomwareFileWatcher : IDisposable
     /// <summary>The burst detector, exposed so the operator can acknowledge (Reset) after responding.</summary>
     public RansomwareBurstDetector Detector => _detector;
 
-    /// <summary>How many directories are actively watched. Zero until <see cref="Start"/>.</summary>
+    /// <summary>
+    /// How many directories are actively watched, right now. Zero until <see cref="Start"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this subtracts.</b> An overflow tears the watch down, and the handler re-arms it. When
+    /// the re-arm fails - the directory was removed, the volume went away - the watcher stays in the
+    /// list, dead. This property counted it, so the dashboard reported "3 directories watched" while
+    /// one of them had been blind since the first burst. That is the failure this whole class was
+    /// rebuilt around, reintroduced one level up: a coverage hole presented as coverage.
+    ///
+    /// A watcher is counted out the first time its re-arm fails and never counted again, so a
+    /// directory that keeps overflowing does not drive the number negative.
+    /// </remarks>
     public int WatchedDirectoryCount
     {
-        get { lock (_gate) { return _watchers.Count; } }
+        get { lock (_gate) { return Math.Max(0, _watchers.Count - _lost.Count); } }
     }
+
+    /// <summary>
+    /// Directories that were asked for but never watched at all: absent when the watch started, or
+    /// refused by Windows.
+    /// </summary>
+    /// <remarks>
+    /// Silently dropped before. A caller comparing what it asked for against
+    /// <see cref="WatchedDirectoryCount"/> could infer the difference; nothing did, and the
+    /// difference is precisely the set of folders nobody is watching.
+    /// </remarks>
+    public int UnwatchableDirectoryCount => Volatile.Read(ref _unwatchable);
+
+    /// <summary>
+    /// Watches that overflowed and could not be re-armed. Each one is a directory that stopped being
+    /// observed at some point and has not resumed.
+    /// </summary>
+    public int LostWatchCount => _lost.Count;
 
     /// <summary>
     /// Times Windows reported that it dropped changes because the watch buffer overran. Non-zero
@@ -104,8 +135,19 @@ public sealed class RansomwareFileWatcher : IDisposable
     /// <summary>Changes discarded because the internal queue was full. Same reasoning as above.</summary>
     public int DroppedChangeCount => Volatile.Read(ref _dropped);
 
-    /// <summary>True when any observation was lost, from either cause.</summary>
-    public bool CoverageIsIncomplete => OverflowCount > 0 || DroppedChangeCount > 0;
+    /// <summary>
+    /// True when any observation was lost, from any cause: a buffer overrun, a full queue, a watch
+    /// that could not be re-armed, or a directory that was never watched in the first place.
+    /// </summary>
+    /// <remarks>
+    /// The last two were missing. A watch list that silently shrank read as complete coverage, which
+    /// is the one thing this class promises never to do.
+    /// </remarks>
+    public bool CoverageIsIncomplete =>
+        OverflowCount > 0
+        || DroppedChangeCount > 0
+        || LostWatchCount > 0
+        || UnwatchableDirectoryCount > 0;
 
     public void Start()
     {
@@ -123,6 +165,12 @@ public sealed class RansomwareFileWatcher : IDisposable
                 if (watcher is not null)
                 {
                     _watchers.Add(watcher);
+                }
+                else
+                {
+                    // Counted rather than dropped. A folder that could not be watched is a folder
+                    // nobody is watching, and the caller has no other way to learn that.
+                    _unwatchable++;
                 }
             }
 
@@ -193,14 +241,19 @@ public sealed class RansomwareFileWatcher : IDisposable
             {
                 watcher.EnableRaisingEvents = false;
                 watcher.EnableRaisingEvents = true;
+                // Observed again, so it stops counting against the live total. The overflow count
+                // keeps the record that something was missed in between.
+                _lost.TryRemove(watcher, out _);
             }
             catch (Exception ex) when (ex is IOException
                                          or ObjectDisposedException
                                          or UnauthorizedAccessException
                                          or System.Security.SecurityException)
             {
-                // The directory is gone or the watcher is disposed; the overflow count already
-                // records that coverage is incomplete.
+                // The directory is gone or the watcher is disposed. The overflow count records that
+                // coverage was incomplete at some point; this records that it still is, so
+                // WatchedDirectoryCount stops claiming a dead watch as live.
+                _lost.TryAdd(watcher, 0);
             }
         }
     }

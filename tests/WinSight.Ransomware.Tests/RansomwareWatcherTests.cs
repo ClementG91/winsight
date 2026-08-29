@@ -380,6 +380,68 @@ public sealed class RansomwareFileWatcherTests
             Directory.Delete(dir, recursive: true);
         }
     }
+    /// <summary>
+    /// A directory that was never watched is counted, not dropped.
+    /// </summary>
+    /// <remarks>
+    /// It was silently skipped. A caller comparing what it asked for against what is watched could
+    /// have inferred the difference; nothing did, and the difference is exactly the set of folders
+    /// nobody is observing - on the detector whose entire promise is that "I could not see" is never
+    /// reported as "nothing there".
+    /// </remarks>
+    [Fact]
+    public void ADirectoryThatCannotBeWatchedIsCountedRatherThanDropped()
+    {
+        var absent = Path.Combine(Path.GetTempPath(), $"winsight-absent-{Guid.NewGuid():N}");
+        using var watcher = new RansomwareFileWatcher([absent], _ => false);
+
+        watcher.Start();
+
+        Assert.Equal(0, watcher.WatchedDirectoryCount);
+        Assert.Equal(1, watcher.UnwatchableDirectoryCount);
+        Assert.True(watcher.CoverageIsIncomplete);
+    }
+
+    /// <summary>
+    /// A watch that overflows and cannot be re-armed stops counting as live.
+    /// </summary>
+    /// <remarks>
+    /// The re-arm in the error handler is best-effort, and when it fails the watcher stayed in the
+    /// list, dead, still counted. The dashboard reported the directory as watched while it had been
+    /// blind since the first burst - the same silent false negative this class was rebuilt to
+    /// remove, one level up.
+    /// </remarks>
+    [Fact]
+    public void AWatchOnADeletedDirectoryStopsCountingAsLive()
+    {
+        var directory = TempDir();
+        var watcher = new RansomwareFileWatcher([directory], _ => false);
+        try
+        {
+            watcher.Start();
+            Assert.Equal(1, watcher.WatchedDirectoryCount);
+
+            Directory.Delete(directory, recursive: true);
+
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (watcher.WatchedDirectoryCount != 0 && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(50);
+            }
+
+            Assert.Equal(0, watcher.WatchedDirectoryCount);
+            Assert.Equal(1, watcher.LostWatchCount);
+            Assert.True(watcher.CoverageIsIncomplete);
+        }
+        finally
+        {
+            watcher.Dispose();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
 }
 
 public sealed class RansomwareMonitorTests

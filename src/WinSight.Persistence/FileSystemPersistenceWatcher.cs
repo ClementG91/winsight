@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace WinSight.Persistence;
 
 /// <summary>
@@ -8,10 +10,24 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPersistenceWatchCoverage
 {
+    /// <summary>
+    /// Kernel buffer per watched directory. 64 KiB is the documented practical maximum: beyond it
+    /// the buffer must come from non-paged pool and Windows can fail the watch outright.
+    /// </summary>
+    /// <remarks>
+    /// It was the 8 KiB default, roughly 250 pending events. <c>\System32\Tasks</c> is watched
+    /// recursively, so an ordinary burst of task churn - or a deliberate one - overruns it. The
+    /// ransomware watcher was rebuilt around exactly this and raised its buffer; this watcher, which
+    /// is what tells Guardian a file appeared in a Startup folder, was left on the default.
+    /// </remarks>
+    private const int WatchBufferBytes = 64 * 1024;
+
     private readonly IReadOnlyList<PersistenceWatchTarget> _targets;
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly Dictionary<FileSystemWatcher, PersistenceWatchTarget> _targetByWatcher = [];
+    private readonly ConcurrentDictionary<FileSystemWatcher, byte> _lost = new();
     private readonly Lock _gate = new();
+    private int _overflows;
     private bool _started;
     private bool _disposed;
 
@@ -47,8 +63,23 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
     /// <inheritdoc />
     public int RequestedLocations => _targets.Count;
 
+    /// <summary>
+    /// Times Windows reported that it discarded changes because the watch buffer overran. Non-zero
+    /// means this watcher was blind for an interval.
+    /// </summary>
+    public int OverflowCount => Volatile.Read(ref _overflows);
+
+    /// <summary>Watches that overflowed and could not be re-armed, so they are no longer observing.</summary>
+    public int LostWatchCount => _lost.Count;
+
     /// <inheritdoc />
-    public int ArmedLocations => WatchedDirectoryCount;
+    /// <remarks>
+    /// A watch torn down by an overflow and not recoverable is not armed, whatever the list length
+    /// says. Counting it kept the difference between <see cref="RequestedLocations"/> and this
+    /// number at zero while a Startup folder had stopped being observed - a coverage hole presented
+    /// as coverage, which is the one thing these watchers promise never to do.
+    /// </remarks>
+    public int ArmedLocations => Math.Max(0, WatchedDirectoryCount - _lost.Count);
 
     public void Start()
     {
@@ -99,11 +130,18 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
                     | NotifyFilters.DirectoryName
                     | NotifyFilters.LastWrite
                     | NotifyFilters.CreationTime,
+                InternalBufferSize = WatchBufferBytes,
             };
             watcher.Created += OnChanged;
             watcher.Changed += OnChanged;
             watcher.Deleted += OnChanged;
             watcher.Renamed += OnChanged;
+            // Unhandled before. An internal-buffer overflow tears the watch down, and with no
+            // handler the watcher stayed in the list, permanently deaf: Guardian stopped noticing
+            // new Startup-folder files and nothing said so. The first burst ended monitoring of that
+            // directory for the lifetime of the process, which is the opposite of what a detector
+            // should do when it sees a burst.
+            watcher.Error += OnError;
             // Deliberately NOT enabled here — Start enables every watcher only after all of them are
             // registered, so no event can race the registration.
             return watcher;
@@ -113,6 +151,35 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
                                      or System.Security.SecurityException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Windows raises this when it discarded changes. The watch is torn down by the overflow, so
+    /// re-arm it; when that fails the directory has stopped being observed and must stop counting
+    /// as armed.
+    /// </summary>
+    private void OnError(object sender, ErrorEventArgs e)
+    {
+        Interlocked.Increment(ref _overflows);
+        if (sender is not FileSystemWatcher watcher)
+        {
+            return;
+        }
+        try
+        {
+            watcher.EnableRaisingEvents = false;
+            watcher.EnableRaisingEvents = true;
+            _lost.TryRemove(watcher, out _);
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or ObjectDisposedException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            // The directory is gone or the watcher is disposed. Either way it is not observing, and
+            // ArmedLocations must say so rather than counting a dead watch.
+            _lost.TryAdd(watcher, 0);
         }
     }
 
@@ -145,6 +212,7 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
             watcher.Changed -= OnChanged;
             watcher.Deleted -= OnChanged;
             watcher.Renamed -= OnChanged;
+            watcher.Error -= OnError;
             watcher.Dispose();
         }
     }
