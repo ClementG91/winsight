@@ -36,6 +36,14 @@ public enum AutostartVector
     // (their DLL path lives inside a packed binary blob), shell extension handlers,
     // Winlogon\Notify (which modern Windows no longer executes), Group Policy scripts and Office
     // add-ins.
+    //
+    // BITS transfer jobs (T1197) are a real surface and are deliberately declared here rather than
+    // half-implemented. A job's notify command line is reachable only through the
+    // IBackgroundCopyManager COM interfaces, enumerating other users' jobs requires elevation, and
+    // neither the interop nor the elevated path can be exercised on a development machine without
+    // creating BITS jobs on it. Shipping untested COM interop that reaches a privileged enumeration
+    // is worse than saying it is not covered - and saying so is what lets somebody decide whether
+    // they need it.
     // Note: installed shim databases (.sdb) are intentionally NOT enumerated here: a .sdb is
     // never Authenticode-signed, so the signature model would flag every legitimate shim as
     // "unsigned/suspicious" (a guaranteed false positive). Revisit only with an info-only,

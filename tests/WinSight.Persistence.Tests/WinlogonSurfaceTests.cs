@@ -30,19 +30,30 @@ public sealed class WinlogonSurfaceTests
         Assert.Contains(value, WinlogonEnumerator.ExecutedValues, StringComparer.Ordinal);
 
     /// <summary>
-    /// Values Windows has not executed since Vista are deliberately absent. Enumerating one would
-    /// add a finding an operator cannot act on, which costs more than the coverage is worth.
+    /// <c>GinaDLL</c> is read for the opposite reason to the others.
+    /// </summary>
+    /// <remarks>
+    /// Modern Windows does not execute it, so nothing legitimate sets it, and its mere presence on
+    /// a supported machine is the finding. Reading a value the OS ignores is normally noise;
+    /// reading one that should not exist at all is not.
+    /// </remarks>
+    [Fact]
+    public void GinaDllIsReadBecauseItsPresenceIsTheFinding() =>
+        Assert.Contains("GinaDLL", WinlogonEnumerator.ExecutedValues, StringComparer.Ordinal);
+
+    /// <summary>
+    /// <c>Notify</c> and <c>VmApplet</c> are legacy in the same way but are set by real software
+    /// that predates Vista, so enumerating them adds findings an operator cannot act on.
     /// </summary>
     [Theory]
-    [InlineData("GinaDLL")]
     [InlineData("Notify")]
     [InlineData("VmApplet")]
-    public void LegacyValuesModernWindowsIgnoresAreNot(string value) =>
+    public void LegacyValuesRealSoftwareStillSetsAreNotRead(string value) =>
         Assert.DoesNotContain(value, WinlogonEnumerator.ExecutedValues, StringComparer.Ordinal);
 
     [Fact]
-    public void TheSetIsExactlyTheFiveExecutedValues() =>
-        Assert.Equal(5, WinlogonEnumerator.ExecutedValues.Count);
+    public void TheSetIsExactlyTheSixValuesRead() =>
+        Assert.Equal(6, WinlogonEnumerator.ExecutedValues.Count);
 
     /// <summary>
     /// Every value is comma-split, because the hijack is appending to a value that already holds

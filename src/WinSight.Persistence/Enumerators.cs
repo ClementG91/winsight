@@ -229,12 +229,17 @@ public sealed class WinlogonEnumerator : IAutostartEnumerator
     /// <item><c>UIHost</c> - the logon UI host, launched as SYSTEM before anybody signs in.</item>
     /// </list>
     ///
-    /// <b>Deliberately still absent.</b> <c>GinaDLL</c> and <c>Notify</c> have not been executed
-    /// since Vista, and <c>VmApplet</c> is legacy in the same way. Enumerating a value modern
-    /// Windows ignores adds a finding an operator cannot act on, which costs more than it is worth.
+    /// <c>GinaDLL</c> is read for the opposite reason to the others: modern Windows does not
+    /// execute it, so nothing legitimate sets it, and its mere presence on a supported machine is
+    /// the finding. Reading a value the OS ignores is normally noise; reading one that should not
+    /// exist at all is not.
+    ///
+    /// <b>Deliberately still absent.</b> <c>Notify</c> and <c>VmApplet</c> are legacy in the same
+    /// way but are set by real software that predates Vista, so enumerating them adds findings an
+    /// operator cannot act on.
     /// </remarks>
     private static readonly string[] Values =
-        ["Shell", "Userinit", "Taskman", "AppSetup", "UIHost"];
+        ["Shell", "Userinit", "Taskman", "AppSetup", "UIHost", "GinaDLL"];
 
     /// <summary>
     /// The values this enumerator reads. Public because it is a claim about coverage, and a claim

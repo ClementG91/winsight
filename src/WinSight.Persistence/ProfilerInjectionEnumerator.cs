@@ -42,6 +42,19 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
     private const string Profiler = "COR_PROFILER";
     private const string ProfilerPath = "COR_PROFILER_PATH";
 
+    /// <summary>
+    /// The managed-assembly variant of the same technique.
+    /// </summary>
+    /// <remarks>
+    /// Instead of a native profiler DLL, the CLR is told to instantiate a managed type as the
+    /// process's <c>AppDomainManager</c> before any application code runs. It needs no profiling
+    /// flag, it is set the same way in the same places, and it puts an attacker's assembly inside
+    /// the target process just as effectively - the managed half of T1574.012, and it was missing
+    /// while the native half was covered.
+    /// </remarks>
+    private const string DomainManagerAssembly = "APPDOMAIN_MANAGER_ASM";
+    private const string DomainManagerType = "APPDOMAIN_MANAGER_TYPE";
+
     private int _unreadableLocations;
 
     public string Surface => ".NET profiler injection";
@@ -80,12 +93,20 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
             {
                 return;
             }
+            var scope = hive == RegistryHive.LocalMachine
+                ? "machine environment"
+                : "user environment";
             Add(entries,
                 enabled: key.GetValue(Enable) as string,
                 profiler: key.GetValue(Profiler) as string,
                 profilerPath: key.GetValue(ProfilerPath) as string,
                 location: $@"{hiveName}\{path}",
-                name: hive == RegistryHive.LocalMachine ? "machine environment" : "user environment");
+                name: scope);
+            AddDomainManager(entries,
+                assembly: key.GetValue(DomainManagerAssembly) as string,
+                type: key.GetValue(DomainManagerType) as string,
+                location: $@"{hiveName}\{path}",
+                name: scope);
         }
         catch (Exception ex) when (ex is System.Security.SecurityException
                                      or UnauthorizedAccessException
@@ -141,6 +162,11 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
                         profilerPath: Value(block, ProfilerPath),
                         location: $@"HKLM\{Services}\{service} [Environment]",
                         name: service);
+                    AddDomainManager(entries,
+                        assembly: Value(block, DomainManagerAssembly),
+                        type: Value(block, DomainManagerType),
+                        location: $@"HKLM\{Services}\{service} [Environment]",
+                        name: service);
                 }
                 catch (Exception ex) when (ex is System.Security.SecurityException
                                              or UnauthorizedAccessException
@@ -187,6 +213,28 @@ public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
             return;
         }
         entries.Add(new RawAutostart(AutostartVector.ProfilerInjection, name, location, image));
+    }
+
+    /// <summary>
+    /// Records a managed assembly named as the process's <c>AppDomainManager</c>.
+    /// </summary>
+    /// <remarks>
+    /// The assembly name is enough on its own: unlike a profiler there is no enabling flag, and the
+    /// CLR loads whatever is named before any application code runs. The type is carried alongside
+    /// it because "which type in that assembly" is the first thing an operator will want.
+    /// </remarks>
+    private static void AddDomainManager(
+        List<RawAutostart> entries, string? assembly, string? type, string location, string name)
+    {
+        if (string.IsNullOrWhiteSpace(assembly))
+        {
+            return;
+        }
+        var command = string.IsNullOrWhiteSpace(type)
+            ? assembly.Trim()
+            : $"{assembly.Trim()} [{type.Trim()}]";
+        entries.Add(new RawAutostart(
+            AutostartVector.ProfilerInjection, $"{name} (AppDomainManager)", location, command));
     }
 
     /// <summary>The DLL a profiler CLSID registers, through the same COM lookup as the hijack surface.</summary>

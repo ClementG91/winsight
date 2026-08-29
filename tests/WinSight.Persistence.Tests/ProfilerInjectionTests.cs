@@ -146,4 +146,49 @@ public sealed class ProfilerInjectionTests : IDisposable
         Assert.All(entries, entry =>
             Assert.Equal(AutostartVector.ProfilerInjection, entry.Vector));
     }
+
+    /// <summary>
+    /// The managed half of the same technique: a type instantiated as the process's
+    /// AppDomainManager before any application code runs.
+    /// </summary>
+    /// <remarks>
+    /// It needs no profiling flag, it is set in the same places by the same means, and it puts an
+    /// attacker's assembly inside the target process just as effectively. The native half was
+    /// covered and this was not.
+    /// </remarks>
+    [Fact]
+    public void AnAppDomainManagerAssemblyIsFound()
+    {
+        Set("APPDOMAIN_MANAGER_ASM", "Contoso.Agent, Version=1.0.0.0");
+        Set("APPDOMAIN_MANAGER_TYPE", "Contoso.Agent.Manager");
+
+        var entry = Assert.Single(
+            Scan(), raw => raw.Command.Contains("Contoso.Agent", StringComparison.Ordinal));
+
+        Assert.Equal(AutostartVector.ProfilerInjection, entry.Vector);
+        Assert.Contains("AppDomainManager", entry.Name, StringComparison.Ordinal);
+        Assert.Contains("Contoso.Agent.Manager", entry.Command, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The assembly alone is enough. There is no enabling flag to pair it with, so requiring one
+    /// would mean never reporting it.
+    /// </summary>
+    [Fact]
+    public void TheAssemblyAloneIsEnough()
+    {
+        Set("APPDOMAIN_MANAGER_ASM", "Solo.Assembly");
+
+        Assert.Contains(Scan(), raw => raw.Command.Contains("Solo.Assembly", StringComparison.Ordinal));
+    }
+
+    /// <summary>A type with no assembly names nothing loadable and is not a finding.</summary>
+    [Fact]
+    public void ATypeWithoutAnAssemblyIsNotAFinding()
+    {
+        Set("APPDOMAIN_MANAGER_TYPE", "Orphan.Type");
+
+        Assert.DoesNotContain(
+            Scan(), raw => raw.Command.Contains("Orphan.Type", StringComparison.Ordinal));
+    }
 }
