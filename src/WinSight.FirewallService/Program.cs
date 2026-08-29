@@ -338,7 +338,7 @@ static async Task<int> RunHostAsync()
     // The pipe worker is registered FIRST, and the startup service waits on its readiness before
     // installing a single filter. Hosted services start in registration order, and with the old
     // order filters were applied before the listener had even tried to claim its name: an
-    // unprivileged caller holding \.\pipe\WinSightirewall made that claim fail, the host
+    // unprivileged caller holding \\.\pipe\WinSightFirewall made that claim fail, the host
     // stopped, and BFE - the session being dynamic - destroyed everything just installed. The
     // squatter got a loop of "filters applied, then immediately removed", which is worse than never
     // arming because the machine spent each interval believing it was protected.

@@ -116,16 +116,20 @@ if ($LASTEXITCODE -ne 0 -or ($before -join "`n") -notmatch 'VMState="poweroff"')
 }
 @(& $VBoxManage snapshot $VmName take $SnapshotName 2>&1) | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'Création S0 échouée.' }
-$snapshotInfo = @(
-    & $VBoxManage snapshot $VmName showvminfo $SnapshotName --machinereadable 2>&1)
+$snapshotInfo = @(& $VBoxManage snapshot $VmName showvminfo $SnapshotName 2>&1)
 if ($LASTEXITCODE -ne 0) { throw 'Lecture de la preuve S0 échouée.' }
+$machineInfo = @(& $VBoxManage showvminfo $VmName --machinereadable 2>&1)
+if ($LASTEXITCODE -ne 0) { throw 'Lecture de la configuration VM échouée.' }
 $record = Join-Path $HostEvidenceRoot "$SnapshotName.txt"
 @(
     "utc=$([DateTime]::UtcNow.ToString('O'))"
     "vm=$VmName"
     "snapshot=$SnapshotName"
     'operation=take'
+    '--- snapshot ---'
     $snapshotInfo
+    '--- vm ---'
+    $machineInfo
 ) | Set-Content -LiteralPath $record
 Get-FileHash -LiteralPath $record -Algorithm SHA256
 ```

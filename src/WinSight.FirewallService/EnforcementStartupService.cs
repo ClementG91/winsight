@@ -42,7 +42,7 @@ public sealed partial class EnforcementStartupService : IHostedService
     /// <remarks>
     /// <b>The order is the security property.</b> This used to be registered before the pipe worker,
     /// so filters were installed and only afterwards did the listener try to claim its name. An
-    /// unprivileged caller who owns <c>\.\pipe\WinSightirewall</c> first makes that claim fail,
+    /// unprivileged caller who owns <c>\\.\pipe\WinSightFirewall</c> first makes that claim fail,
     /// the host stops, and because the WFP session is dynamic BFE destroys everything just
     /// installed. The squatter therefore got a loop of "filters applied, then immediately removed" -
     /// worse than never arming, because the machine spent the interval believing it was protected.
