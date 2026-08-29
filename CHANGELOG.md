@@ -135,6 +135,11 @@ missing PowerShell property.
 The current documentation no longer inherits the previous v0.11.6 VM verdict for the changed
 v0.12.0 candidate, calls visible ransomware decoys hidden, or omits the hijack scanner's documented
 temporary writability probe from the list of filesystem writes.
+Repository documentation is now consistently written in English. Localized UI examples were
+rephrased instead of embedding translated labels; the product's localization resources are
+unchanged. The VM qualification bootstrap now also reconstructs the artifact name from the bound
+`ArtifactKind` after elevation and S1 restore instead of silently labelling release evidence as a
+CI artifact.
 
 **Two more detection surfaces, and one declared gap.** The managed half of profiler injection - a
 type instantiated as a process's `AppDomainManager` before any application code runs - was missing
@@ -331,7 +336,7 @@ nothing documented.
   integrity, Secure Boot and ransomware folder protection are now described as independent
   controls; a disabled CFA result remains notable when Defender reports the documented mode `0`.
 - Made a successful VirusTotal key save close the modal and report the outcome in the main window,
-  corrected the French action to "Enregistrer en toute sécurité", and separated the local-analysis
+  corrected the French save action, and separated the local-analysis
   status dot from translated text so the badge is geometrically centred in every language. The
   resizable settings dialog now separates provider and confirmation actions into two responsive
   rows, preventing translated labels or larger text from clipping the primary action.
@@ -2263,7 +2268,7 @@ down to the minimum window size. Everything here is detect-and-alert and user-mo
 needs a signed kernel driver. Local-only, no telemetry.
 
 ### Ransomware protection moved to the header as a real-time toggle
-- It used to be a lone checkbox at the bottom of the "Que voulez-vous vérifier ?" sidebar, wedged
+- It used to be a lone checkbox at the bottom of the scan-selection sidebar, wedged
   under the scan button among on-demand controls. That framed the single most consequential switch in
   the app - the only feature that *writes* to disk (decoy files), and a persistent background
   protection rather than a one-shot scan - as a minor scan option.
@@ -2317,8 +2322,8 @@ needs a signed kernel driver. Local-only, no telemetry.
   guidance panel is pushed off-screen. Verified on a real machine before reverting it.
 
 ### The alert journal is now readable from the dashboard, not just from disk
-- Journalling a detection that only a text editor can read solves half the problem. "Alertes
-  récentes" is a normal entry in the tool catalog, so the same list, filter, detail pane and JSON
+- Journalling a detection that only a text editor can read solves half the problem. The recent-alerts
+  view is a normal entry in the tool catalog, so the same list, filter, detail pane and JSON
   export that every other check uses now work on WinSight's own detection history - this is how an
   operator sees an alert raised while they were away from the screen.
 - Every row is `Notable`, because everything in the journal is by definition something WinSight
@@ -2333,8 +2338,8 @@ needs a signed kernel driver. Local-only, no telemetry.
 
 ### Detections are journalled locally, so a suppressed balloon no longer loses them
 - Live testing made the weakness concrete: a detection's only visible output was a tray balloon, and
-  Windows is free to drop those - Focus Assist ("Ne pas déranger", including its automatic
-  full-screen rule) suppresses them, and the shell throttles an app posting several toasts quickly.
+  Windows is free to drop those - Focus Assist, including its automatic full-screen rule,
+  suppresses them, and the shell throttles an app posting several toasts quickly.
   Both are indistinguishable from "nothing was detected", and a security tool must not depend on a
   single channel the OS may silently discard.
 - `AlertJournal` (in `WinSight.Application`) appends every Guardian and ransomware detection to

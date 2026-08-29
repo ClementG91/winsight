@@ -19,6 +19,8 @@ public sealed class VmQualificationKitContractTests
 
         Assert.Contains("Win32_Processor", kit, StringComparison.Ordinal);
         Assert.Contains("winsight-win-$NativeArchitecture", kit, StringComparison.Ordinal);
+        Assert.Contains("release-$NativeArchitecture", kit, StringComparison.Ordinal);
+        Assert.Contains("-ArtifactKind $ArtifactKind", kit, StringComparison.Ordinal);
         Assert.Contains("$ExpectedInstallerSha256", kit, StringComparison.Ordinal);
         Assert.Contains("$ProtectedArtifactRoot", kit, StringComparison.Ordinal);
         Assert.Contains("$ProtectedPayloadRoot", kit, StringComparison.Ordinal);
@@ -90,11 +92,11 @@ public sealed class VmQualificationKitContractTests
         var kit = File.ReadAllText(Path.Combine(
             RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
 
-        Assert.Contains("HOTE UNIQUEMENT", kit, StringComparison.Ordinal);
+        Assert.Contains("HOST ONLY", kit, StringComparison.Ordinal);
         Assert.Contains("VBoxManage.exe", kit, StringComparison.Ordinal);
         Assert.Contains("showvminfo", kit, StringComparison.Ordinal);
-        Assert.Contains("preuve hote", kit, StringComparison.Ordinal);
-        Assert.Contains("seconde machine de controle", kit, StringComparison.Ordinal);
+        Assert.Contains("host evidence", kit, StringComparison.Ordinal);
+        Assert.Contains("second control machine", kit, StringComparison.Ordinal);
         Assert.Contains("Invoke-Command", kit, StringComparison.Ordinal);
         Assert.Contains("-NetworkLogon", kit, StringComparison.Ordinal);
         Assert.Contains("S-1-5-2", kit, StringComparison.Ordinal);
@@ -145,7 +147,7 @@ public sealed class VmQualificationKitContractTests
     {
         var kit = File.ReadAllText(Path.Combine(
             RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
-        var start = kit.IndexOf("### Bootstrap de reprise S1", StringComparison.Ordinal);
+        var start = kit.IndexOf("### S1 recovery bootstrap", StringComparison.Ordinal);
         var end = kit.IndexOf("## 6.", StringComparison.Ordinal);
 
         Assert.True(start >= 0 && end > start, "Missing bounded S1 resume bootstrap.");
@@ -168,6 +170,6 @@ public sealed class VmQualificationKitContractTests
             "The S1 bootstrap must rehash before importing a protected module.");
         Assert.DoesNotContain("git clone", bootstrap, StringComparison.Ordinal);
         Assert.DoesNotContain("Expand-Archive", bootstrap, StringComparison.Ordinal);
-        Assert.DoesNotContain("racine protégée doit être absente", bootstrap, StringComparison.Ordinal);
+        Assert.DoesNotContain("protected root must be absent", bootstrap, StringComparison.Ordinal);
     }
 }

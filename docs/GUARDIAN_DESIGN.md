@@ -234,7 +234,7 @@ boundary with the same honesty:
   visible "and N more not recorded" - never a silent truncation. A security tool that hides
   its own blind spot is worse than one without the feature.
 - **The balloon is not the only record.** Windows can suppress tray balloons outright (Focus
-  Assist / "Ne pas déranger", including its automatic full-screen rule) and throttles an app that
+  Assist, including its automatic full-screen rule) and throttles an app that
   posts several toasts quickly - both indistinguishable from "nothing was detected". Every
   detection is therefore also appended to a local, bounded alert journal
   (`%LocalAppData%\WinSight\alerts.log`, see `AlertJournal`) *before* the balloon is raised, so a

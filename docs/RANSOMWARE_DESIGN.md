@@ -106,7 +106,7 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
   alert rather than one per file, and `RansomwareMonitor` re-arms it immediately afterwards so the
   next wave still alerts - bounded state, but never a permanently silent detector.
 - **Alerts are subject to the OS, not just to us.** Windows suppresses tray balloons under Focus
-  Assist / "Ne pas déranger" (including its automatic full-screen rule), and throttles an app that
+  Assist (including its automatic full-screen rule), and throttles an app that
   posts many toasts in quick succession. Both are Windows behaviours WinSight cannot override, and
   both look exactly like "the alert is broken" when testing by hand - check the notification centre
   and the Focus Assist state before concluding a detection failed. Because of this, every detection
