@@ -135,7 +135,8 @@ public sealed class CanaryManager
 
     private void PlantOne(string directory, int index)
     {
-        var path = Path.Combine(directory, CanaryIdentity.FileName(_seed, directory, index));
+        var name = CanaryIdentity.FileName(_seed, directory, index);
+        var path = Path.Combine(directory, name);
         try
         {
             // CreateNew, so a real file that happens to collide is never overwritten. A security
@@ -143,7 +144,10 @@ public sealed class CanaryManager
             using (var stream = new FileStream(
                        path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                var content = CanaryDocument.Workbook();
+                // Matched to the name. Every decoy used to get a workbook, including the ones
+                // named .docx: both are OOXML ZIPs so the magic number matched, but the package
+                // declared a spreadsheet - the same tell one level in.
+                var content = CanaryDocument.For(Path.GetExtension(name));
                 stream.Write(content, 0, content.Length);
             }
             var full = Path.GetFullPath(path);
