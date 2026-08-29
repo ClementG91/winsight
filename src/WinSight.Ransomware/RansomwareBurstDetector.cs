@@ -36,10 +36,45 @@ public sealed class RansomwareBurstDetector
     /// <summary>The sliding window over which suspicious events are counted.</summary>
     public static readonly TimeSpan DefaultWindow = TimeSpan.FromSeconds(3);
 
+    /// <summary>
+    /// The most observations the window will hold before it starts discarding duplicates.
+    /// </summary>
+    /// <remarks>
+    /// The class documents itself as bounded, and it was - but only <i>after</i> it fired. Before
+    /// that, every notification inside the window was retained, and Windows reports many
+    /// notifications for one file being written. A single process rewriting one file in a loop grows
+    /// this without limit for as long as it keeps below the distinct-file threshold, which is
+    /// exactly the shape of a program that is not ransomware.
+    ///
+    /// Only duplicate observations are ever discarded - see <c>TrimDuplicates</c> - so the distinct
+    /// count the threshold is compared against cannot be lowered by the cap.
+    /// </remarks>
+    private const int MaxObservations = 4096;
+
+    /// <summary>Evictions attempted per arrival, so the trimming itself stays constant-time.</summary>
+    private const int TrimBudget = 64;
+
     private readonly int _threshold;
     private readonly TimeSpan _window;
     private readonly Queue<Observation> _recent = new();
+
+    /// <summary>
+    /// How many observations in the window name each path, so the distinct count is maintained as
+    /// events arrive rather than recomputed from scratch on each one.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this replaced a HashSet built per event.</b> The distinct count was recomputed by
+    /// walking the whole window and allocating a fresh set, on every single observation - so the
+    /// work per event grew with the number of events already in the window, and the total cost of a
+    /// burst grew with its square. The one moment that matters is mass encryption, when thousands of
+    /// notifications arrive in the three-second window, and that is precisely when the detector was
+    /// slowest. A detector that becomes the bottleneck during the event it exists to catch is a
+    /// detector that arrives late.
+    /// </remarks>
+    private readonly Dictionary<string, int> _byPath = new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Lock _gate = new();
+    private int _unnamed;
     private bool _fired;
 
     public RansomwareBurstDetector(int threshold = DefaultThreshold, TimeSpan? window = null)
@@ -98,11 +133,12 @@ public sealed class RansomwareBurstDetector
                 return true;
             }
 
-            _recent.Enqueue(new Observation(atUtc, path));
+            Admit(new Observation(atUtc, path));
             while (_recent.Count > 0 && atUtc - _recent.Peek().At > _window)
             {
-                _recent.Dequeue();
+                Retire(_recent.Dequeue());
             }
+            TrimDuplicates();
 
             if (DistinctFilesInWindow() >= _threshold)
             {
@@ -114,24 +150,80 @@ public sealed class RansomwareBurstDetector
     }
 
     /// <summary>
-    /// How many distinct files the window covers. Bounded by the queue, which the window bounds.
+    /// How many distinct files the window covers. Maintained incrementally, so reading it is free.
     /// </summary>
-    private int DistinctFilesInWindow()
+    private int DistinctFilesInWindow() => _byPath.Count + _unnamed;
+
+    /// <summary>Adds an observation to the window and to the running distinct count.</summary>
+    private void Admit(Observation observation)
     {
-        var named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var unnamed = 0;
-        foreach (var observation in _recent)
+        _recent.Enqueue(observation);
+        if (observation.Path is { Length: > 0 } path)
         {
-            if (observation.Path is { Length: > 0 } path)
+            _byPath[path] = _byPath.TryGetValue(path, out var seen) ? seen + 1 : 1;
+        }
+        else
+        {
+            // A signal with no path still counts as its own event, so a caller that cannot name the
+            // file is not silently ignored.
+            _unnamed++;
+        }
+    }
+
+    /// <summary>Removes an observation that has aged out, and its contribution to the count.</summary>
+    private void Retire(Observation observation)
+    {
+        if (observation.Path is { Length: > 0 } path)
+        {
+            if (_byPath.TryGetValue(path, out var seen) && seen <= 1)
             {
-                named.Add(path);
+                _byPath.Remove(path);
             }
             else
             {
-                unnamed++;
+                _byPath[path] = seen - 1;
             }
         }
-        return named.Count + unnamed;
+        else if (_unnamed > 0)
+        {
+            _unnamed--;
+        }
+    }
+
+    /// <summary>
+    /// Discards the oldest <i>duplicate</i> observations once the window holds more than it needs.
+    /// </summary>
+    /// <remarks>
+    /// Only an observation naming a path the window still holds another of is dropped, so the
+    /// distinct count - the number the threshold is compared against - is never lowered by this. If
+    /// every entry at the front is the sole observation of its path, the queue length equals the
+    /// distinct count, which is below the threshold, so there is nothing to trim in the first place.
+    /// </remarks>
+    private void TrimDuplicates()
+    {
+        if (_recent.Count <= MaxObservations)
+        {
+            return;
+        }
+        // Bounded work per observation. Scanning the whole queue for something to discard is how the
+        // distinct count became quadratic in the first place, and enforcing a bound by
+        // reintroducing that would trade one unbounded thing for another: a window full of distinct
+        // files has nothing to trim, and would have been walked end to end on every event to
+        // discover it. Sixty-four evictions per arrival comfortably outpaces one arrival.
+        var budget = TrimBudget;
+        while (budget-- > 0 && _recent.Count > MaxObservations)
+        {
+            var oldest = _recent.Dequeue();
+            if (oldest.Path is { Length: > 0 } path
+                && _byPath.TryGetValue(path, out var seen) && seen > 1)
+            {
+                _byPath[path] = seen - 1;
+                continue;
+            }
+            // The sole observation of its path, or an unnamed event: it carries a distinct count, so
+            // it goes back rather than being lost.
+            _recent.Enqueue(oldest);
+        }
     }
 
     /// <summary>Re-arms after the operator has acknowledged, so a later burst fires again.</summary>
@@ -141,6 +233,8 @@ public sealed class RansomwareBurstDetector
         {
             _fired = false;
             _recent.Clear();
+            _byPath.Clear();
+            _unnamed = 0;
         }
     }
 
