@@ -181,8 +181,16 @@ public static class Adapters
         var entries = scan.Entries;
 
         // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
+        //
+        // Ordered most adverse first, because the enricher looks up at most four distinct files and
+        // takes them in the order given. Unordered, those four went to whichever entries the
+        // enumerator reached first - so an unsigned DLL in an IFEO Debugger value could lose its
+        // lookup to four orphaned registrations whose only fault is that their target is missing.
         var vt = VirusTotalEnricher.Lookup(
-            entries.Where(e => e.IsSuspicious && e.ImagePath is not null).Select(e => e.ImagePath!),
+            entries.Where(e => e.IsSuspicious && e.ImagePath is not null)
+                .OrderByDescending(e => e.Abuse != InterpreterAbuse.None)
+                .ThenByDescending(e => e.IsAdverse)
+                .Select(e => e.ImagePath!),
             allowNetworkLookups,
             cancellationToken);
 
@@ -1619,9 +1627,16 @@ public static class Adapters
     {
         var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
 
-        // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections.
+        // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections. Ordered
+        // most adverse first for the same reason as the persistence scan: the enricher looks up at
+        // most four distinct files, in the order given. An unsigned binary holding a live connection
+        // to an off-box address is the one worth spending a lookup on.
         var vt = VirusTotalEnricher.Lookup(
-            connections.Where(c => c.Noteworthy && c.ImagePath is not null).Select(c => c.ImagePath!),
+            connections.Where(c => c.Noteworthy && c.ImagePath is not null)
+                .OrderByDescending(c => c.Signature.State is SignatureState.Unsigned
+                    or SignatureState.SignedUntrusted)
+                .ThenByDescending(c => c.External)
+                .Select(c => c.ImagePath!),
             allowNetworkLookups,
             cancellationToken);
 
