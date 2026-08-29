@@ -19,7 +19,22 @@ namespace WinSight.Application;
 /// </remarks>
 public static partial class CliHelp
 {
-    public const string Text = """
+    /// <summary>
+    /// The help text, with the exit-code table rendered from <see cref="CliContract"/> rather than
+    /// restated.
+    /// </summary>
+    /// <remarks>
+    /// It was restated, and the two copies had already diverged in wording. The class documentation
+    /// above explains at length why the command list lives in one place; the exit codes were a
+    /// second hand-maintained copy of the same kind, added later, and they drift for the same
+    /// reason - one of them gets edited.
+    /// </remarks>
+    public static string Text { get; } = Body.Replace(
+        ExitCodePlaceholder, CliContract.ExitCodeTable, StringComparison.Ordinal);
+
+    private const string ExitCodePlaceholder = "<<exit-codes>>";
+
+    private const string Body = """
         winsight, free, open-source security tools for Windows.
 
         Usage:
@@ -48,16 +63,7 @@ public static partial class CliHelp
           --version     print version
           --help, -h    show this help
 
-        Exit codes:
-          0   nothing notable found
-          1   something notable was found (the scan succeeded)
-          2   usage error: unknown command, argument or option
-          10  an observation could not be made (live ETW unavailable)
-          11  the privileged firewall service could not be reached
-          12  the scan failed unexpectedly
-
-        Findings are 0 and 1; failures are 10 and above, so a scheduled task can tell
-        "could not look" from "looked and found something".
+        <<exit-codes>>
         """;
 
     /// <summary>

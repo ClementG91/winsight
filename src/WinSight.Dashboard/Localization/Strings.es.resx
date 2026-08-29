@@ -5,7 +5,7 @@
   <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms</value></resheader>
   <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms</value></resheader>
   <data name="WindowTitle" xml:space="preserve"><value>WinSight, seguridad de Windows</value></data>
-  <data name="AppTagline" xml:space="preserve"><value>Comprende lo que ocurre en tu PC, sin telemetría</value></data>
+  <data name="AppTagline" xml:space="preserve"><value>Comprenda lo que ocurre en su PC, sin telemetría</value></data>
   <data name="LocalAnalysis" xml:space="preserve"><value>Análisis local</value></data>
   <data name="LanguageLabel" xml:space="preserve"><value>Idioma</value></data>
   <data name="LanguagePickerAutomation" xml:space="preserve"><value>Idioma de la interfaz</value></data>
@@ -15,8 +15,8 @@
   <data name="VtSettingsHeading" xml:space="preserve"><value>Reputación de VirusTotal</value></data>
   <data name="VtSettingsDescription" xml:space="preserve"><value>Opcional. WinSight solo envía a VirusTotal el hash SHA-256 de un archivo existente destacable. No se sube ningún archivo. El acceso MCP nunca activa estas solicitudes.</value></data>
   <data name="VtQuotaPolicy" xml:space="preserve"><value>Protecciones Community: 4 consultas por minuto móvil, 500/día y 15 500/mes (UTC). Solo uso personal/no comercial; el uso profesional requiere un acuerdo VirusTotal Premium.</value></data>
-  <data name="VtApiKeyLabel" xml:space="preserve"><value>Tu clave API de VirusTotal</value></data>
-  <data name="VtApiKeyHint" xml:space="preserve"><value>La clave se cifra para tu cuenta de Windows (DPAPI) y nunca aparece en las exportaciones. WINSIGHT_VT_KEY sigue disponible para automatización y tiene prioridad.</value></data>
+  <data name="VtApiKeyLabel" xml:space="preserve"><value>Su clave API de VirusTotal</value></data>
+  <data name="VtApiKeyHint" xml:space="preserve"><value>La clave se cifra para su cuenta de Windows (DPAPI) y nunca aparece en las exportaciones. WINSIGHT_VT_KEY sigue disponible para automatización y tiene prioridad.</value></data>
   <data name="VtStatusEnabled" xml:space="preserve"><value>Activado: hay una clave cifrada configurada para esta cuenta de Windows.</value></data>
   <data name="VtStatusDisabled" xml:space="preserve"><value>Desactivado: los análisis permanecen totalmente locales.</value></data>
   <data name="VtStatusEnvironment" xml:space="preserve"><value>Activado para esta sesión. Una clave proporcionada por el entorno tiene prioridad.</value></data>
@@ -24,11 +24,11 @@
   <data name="VtDisable" xml:space="preserve"><value>Desactivar</value></data>
   <data name="VtSave" xml:space="preserve"><value>Guardar de forma segura</value></data>
   <data name="Cancel" xml:space="preserve"><value>Cancelar</value></data>
-  <data name="VtInvalidKey" xml:space="preserve"><value>Introduce una clave API de VirusTotal válida (32 a 128 letras, números, «-» o «_»).</value></data>
+  <data name="VtInvalidKey" xml:space="preserve"><value>Introduzca una clave API de VirusTotal válida (32 a 128 letras, números, «-» o «_»).</value></data>
   <data name="VtSaved" xml:space="preserve"><value>Clave de VirusTotal guardada de forma segura. Se reconoce su formato; el acceso se confirmará en la próxima consulta.</value></data>
   <data name="VtSavedEnvironment" xml:space="preserve"><value>Clave cifrada guardada. WINSIGHT_VT_KEY sigue activa y tiene prioridad en esta sesión; la clave guardada se aplicará cuando se quite esa prioridad.</value></data>
   <data name="VtDisabled" xml:space="preserve"><value>VirusTotal está desactivado para WinSight.</value></data>
-  <data name="VtDisabledEnvironment" xml:space="preserve"><value>Clave cifrada eliminada. VirusTotal sigue activado por WINSIGHT_VT_KEY; elimina esa variable para desactivarlo.</value></data>
+  <data name="VtDisabledEnvironment" xml:space="preserve"><value>Clave cifrada eliminada. VirusTotal sigue activado por WINSIGHT_VT_KEY; elimine esa variable para desactivarlo.</value></data>
   <data name="VtSettingsError" xml:space="preserve"><value>No se pudo cambiar el ajuste: {0}</value></data>
   <data name="ChooseCheckTitle" xml:space="preserve"><value>¿Qué quieres comprobar?</value></data>
   <data name="ChooseCheckSubtitle" xml:space="preserve"><value>Elige un análisis. La vista general es la opción recomendada para empezar.</value></data>
@@ -50,7 +50,7 @@
   <data name="StopAfterStep" xml:space="preserve"><value>Detener después de este paso</value></data>
   <data name="ProgressAutomation" xml:space="preserve"><value>Progreso del análisis</value></data>
   <data name="ReadySummary" xml:space="preserve"><value>Listo. Selecciona un análisis y pulsa Iniciar.</value></data>
-  <data name="RunThisAnalysis" xml:space="preserve"><value>Ejecuta «{0}» para mostrar sus propios resultados.</value></data>
+  <data name="RunThisAnalysis" xml:space="preserve"><value>Ejecute «{0}» para mostrar sus propios resultados.</value></data>
   <data name="NoAnalysisForTool" xml:space="preserve"><value>Aquí no se muestran resultados de otra categoría. Inicia esta comprobación o la vista general.</value></data>
   <data name="ReportPickerAutomation" xml:space="preserve"><value>Informe mostrado</value></data>
   <data name="ResultsAutomation" xml:space="preserve"><value>Resultados de seguridad</value></data>
@@ -62,7 +62,7 @@
   <data name="OpenFile" xml:space="preserve"><value>Ver archivo</value></data>
   <data name="CopyDetails" xml:space="preserve"><value>Copiar detalles</value></data>
   <data name="ExportJson" xml:space="preserve"><value>Exportar como JSON</value></data>
-  <data name="ReadOnlyFooter" xml:space="preserve"><value>WinSight nunca elimina ni bloquea automáticamente; los cambios del firewall son siempre tu elección explícita. VirusTotal es opcional en Ajustes.</value></data>
+  <data name="ReadOnlyFooter" xml:space="preserve"><value>WinSight nunca elimina ni bloquea automáticamente; los cambios del firewall son siempre su elección explícita. VirusTotal es opcional en Ajustes.</value></data>
   <data name="FirewallControlsTitle" xml:space="preserve"><value>Controles del firewall</value></data>
   <data name="FirewallControlsHint" xml:space="preserve"><value>Bloquea una app, o selecciona una fila de política abajo para permitirla, bloquearla o quitarla. Desmarca «Mostrar solo lo que merece atención» para ver todas las políticas.</value></data>
   <data name="FirewallBlockApp" xml:space="preserve"><value>Bloquear una app…</value></data>
@@ -76,7 +76,7 @@
   <data name="FirewallActionApplied" xml:space="preserve"><value>Cambio del firewall aplicado.</value></data>
   <data name="FirewallActionAppliedNotEnforced" xml:space="preserve"><value>Guardado. Este bloqueo solo filtra el tráfico cuando se activa el filtrado del firewall (acción con privilegios).</value></data>
   <data name="FirewallActionUnavailable" xml:space="preserve"><value>El servicio de firewall no está disponible. Instálalo e inícialo, luego inténtalo de nuevo.</value></data>
-  <data name="FirewallActionUnauthorized" xml:space="preserve"><value>No tienes autorización para cambiar la política del firewall en esta máquina.</value></data>
+  <data name="FirewallActionUnauthorized" xml:space="preserve"><value>No tiene autorización para cambiar la política del firewall en esta máquina.</value></data>
   <data name="FirewallEnableEnforcement" xml:space="preserve"><value>Activar el filtrado</value></data>
   <data name="FirewallEnableEnforcementConfirm" xml:space="preserve"><value>¿Empezar a filtrar el tráfico saliente ahora? Cada bloqueo guardado surte efecto de inmediato y las aplicaciones que bloqueó pierden su acceso a la red. La desactivación de emergencia devuelve la máquina a solo auditoría en cualquier momento.</value></data>
   <data name="FirewallEnforcementEnabled" xml:space="preserve"><value>El filtrado está activado. Los bloqueos guardados ya filtran el tráfico saliente.</value></data>
@@ -136,19 +136,19 @@
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vista general</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>La comprobación recomendada en un clic</value></data>
   <data name="ToolOverviewDescription" xml:space="preserve"><value>Comprueba las señales principales: inicio automático, cámara/micrófono, conexiones, DNS, extensiones, hosts y certificados.</value></data>
-  <data name="ToolOverviewGuidance" xml:space="preserve"><value>Empieza por las filas «Requiere atención». Una alerta es una pista: comprueba el nombre, la ubicación y el editor antes de actuar.</value></data>
+  <data name="ToolOverviewGuidance" xml:space="preserve"><value>Empiece por las filas «Requiere atención». Una alerta es una pista: compruebe el nombre, la ubicación y el editor antes de actuar.</value></data>
   <data name="ToolPersistenceLabel" xml:space="preserve"><value>Inicio automático</value></data>
   <data name="ToolPersistenceShort" xml:space="preserve"><value>Lo que se inicia con Windows</value></data>
   <data name="ToolPersistenceDescription" xml:space="preserve"><value>Busca programas, servicios y ajustes que pueden reaparecer en cada inicio o inicio de sesión.</value></data>
   <data name="ToolPersistenceGuidance" xml:space="preserve"><value>Un elemento desconocido o sin firma merece revisión. No elimines una entrada del sistema sin copia de seguridad y confirmación.</value></data>
   <data name="ToolAvLabel" xml:space="preserve"><value>Cámara y micrófono</value></data>
-  <data name="ToolAvShort" xml:space="preserve"><value>Aplicaciones que usaron tus sensores</value></data>
+  <data name="ToolAvShort" xml:space="preserve"><value>Aplicaciones que usaron sus sensores</value></data>
   <data name="ToolAvDescription" xml:space="preserve"><value>Muestra las aplicaciones registradas por Windows como usuarias de la cámara o el micrófono, incluidas las activas ahora.</value></data>
-  <data name="ToolAvGuidance" xml:space="preserve"><value>Si un sensor está activo sin motivo, cierra la aplicación y revisa sus permisos en la configuración de privacidad.</value></data>
+  <data name="ToolAvGuidance" xml:space="preserve"><value>Si un sensor está activo sin motivo, cierre la aplicación y revise sus permisos en la configuración de privacidad.</value></data>
   <data name="ToolNetworkLabel" xml:space="preserve"><value>Conexiones de red</value></data>
   <data name="ToolNetworkShort" xml:space="preserve"><value>Programas conectados a Internet</value></data>
   <data name="ToolNetworkDescription" xml:space="preserve"><value>Relaciona las conexiones TCP/UDP con los programas que las abrieron y sus firmas digitales.</value></data>
-  <data name="ToolNetworkGuidance" xml:space="preserve"><value>Una conexión externa no es necesariamente maliciosa. Comprueba primero el programa, su ruta y su firma.</value></data>
+  <data name="ToolNetworkGuidance" xml:space="preserve"><value>Una conexión externa no es necesariamente maliciosa. Compruebe primero el programa, su ruta y su firma.</value></data>
   <data name="ToolDnsLabel" xml:space="preserve"><value>Nombres de dominio (DNS)</value></data>
   <data name="ToolDnsShort" xml:space="preserve"><value>Sitios contactados recientemente</value></data>
   <data name="ToolDnsDescription" xml:space="preserve"><value>Muestra la caché DNS de Windows: nombres de dominio resueltos recientemente por el equipo.</value></data>
@@ -175,7 +175,7 @@
   <data name="ToolProcessesLabel" xml:space="preserve"><value>Procesos</value></data>
   <data name="ToolProcessesShort" xml:space="preserve"><value>Programas en ejecución</value></data>
   <data name="ToolProcessesDescription" xml:space="preserve"><value>Enumera procesos, rutas, procesos padre, líneas de comandos y firmas.</value></data>
-  <data name="ToolProcessesGuidance" xml:space="preserve"><value>Un proceso sin firma puede ser legítimo. Abre su ubicación y confirma su origen antes de finalizarlo.</value></data>
+  <data name="ToolProcessesGuidance" xml:space="preserve"><value>Un proceso sin firma puede ser legítimo. Abra su ubicación y confirme su origen antes de finalizarlo.</value></data>
   <data name="ToolModulesLabel" xml:space="preserve"><value>Módulos cargados</value></data>
   <data name="ToolModulesShort" xml:space="preserve"><value>Bibliotecas usadas por los programas</value></data>
   <data name="ToolModulesDescription" xml:space="preserve"><value>Busca DLL sin firma o no fiables cargadas en los procesos accesibles.</value></data>
@@ -183,7 +183,7 @@
   <data name="ToolExtensionsLabel" xml:space="preserve"><value>Extensiones del navegador</value></data>
   <data name="ToolExtensionsShort" xml:space="preserve"><value>Extensiones con acceso amplio</value></data>
   <data name="ToolExtensionsDescription" xml:space="preserve"><value>Inspecciona extensiones de Chromium y señala permisos capaces de leer o modificar muchas páginas.</value></data>
-  <data name="ToolExtensionsGuidance" xml:space="preserve"><value>Desactiva en el navegador las extensiones innecesarias o desconocidas y comprueba su editor y ficha oficial.</value></data>
+  <data name="ToolExtensionsGuidance" xml:space="preserve"><value>Desactive en el navegador las extensiones innecesarias o desconocidas y compruebe su editor y ficha oficial.</value></data>
   <data name="ToolCertificatesLabel" xml:space="preserve"><value>Certificados de confianza</value></data>
   <data name="ToolCertificatesShort" xml:space="preserve"><value>Autoridades capaces de validar HTTPS</value></data>
   <data name="ToolCertificatesDescription" xml:space="preserve"><value>Busca certificados raíz con señales de riesgo: clave privada local, firma débil o clave demasiado corta.</value></data>
@@ -191,7 +191,7 @@
   <data name="ToolHostsLabel" xml:space="preserve"><value>Archivo hosts</value></data>
   <data name="ToolHostsShort" xml:space="preserve"><value>Redirecciones locales de sitios</value></data>
   <data name="ToolHostsDescription" xml:space="preserve"><value>Detecta redirecciones que podrían secuestrar un sitio o bloquear servicios de seguridad y actualización.</value></data>
-  <data name="ToolHostsGuidance" xml:space="preserve"><value>Los bloqueadores de anuncios también usan este archivo. Comprueba el dominio y la dirección antes de modificar nada.</value></data>
+  <data name="ToolHostsGuidance" xml:space="preserve"><value>Los bloqueadores de anuncios también usan este archivo. Compruebe el dominio y la dirección antes de modificar nada.</value></data>
   <data name="ToolAlertsLabel" xml:space="preserve"><value>Alertas recientes</value></data>
   <data name="ToolAlertsShort" xml:space="preserve"><value>Lo detectado mientras no estabas</value></data>
   <data name="ToolAlertsDescription" xml:space="preserve"><value>El historial de detecciones en tiempo real: nuevos elementos de inicio y actividad propia de ransomware. Cada alerta se registra aquí en cuanto salta, para que una que te perdiste no se pierda.</value></data>

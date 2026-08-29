@@ -12,7 +12,14 @@ public sealed class McpResultProjectorTests
         Assert.Equal(
             Adapters.SnapshotCommands.Order(),
             McpCatalog.Scanners.Select(scanner => scanner.Name).Order());
-        Assert.Equal(Adapters.OverviewCommands.Count, McpCatalog.Scanners.Count(scanner => scanner.InOverview));
+        // Sets, not cardinalities. The overview assertion compared two counts, so swapping one
+        // scanner for another in the catalogue kept the number right and the catalogue wrong -
+        // which is the same class of defect this test was written to catch, left in the half of it
+        // nobody re-read.
+        Assert.Equal(
+            Adapters.OverviewCommands.Order(),
+            McpCatalog.Scanners.Where(scanner => scanner.InOverview)
+                .Select(scanner => scanner.Name).Order());
     }
 
     [Fact]

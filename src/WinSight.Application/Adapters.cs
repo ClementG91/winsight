@@ -1659,7 +1659,8 @@ public static class Adapters
         bool allowNetworkLookups = true,
         CancellationToken cancellationToken = default)
     {
-        var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
+        var monitor = new ConnectionMonitor(SharedVerifier);
+        var connections = monitor.Snapshot(cancellationToken);
 
         // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections. Ordered
         // most adverse first for the same reason as the persistence scan: the enricher looks up at
@@ -1675,6 +1676,19 @@ public static class Adapters
             cancellationToken);
 
         var b = new ToolReport.Builder("connections");
+        if (monitor.UsedNetstatFallback)
+        {
+            // Said out loud, like every other scanner says what it could not read. The fallback
+            // re-derives the table by parsing a text rendering of it, which is a materially weaker
+            // acquisition than the structured API - and the report used to present both as the same
+            // answer.
+            b.Add(
+                Severity.Unverified,
+                "connection table read indirectly",
+                "the native connection API was unavailable, so this list was parsed from netstat "
+                    + "output; process attribution is unchanged but the acquisition is weaker",
+                new Dictionary<string, string?> { ["acquisition"] = "NetstatFallback" });
+        }
         foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)
                      .OrderByDescending(c => c.Noteworthy).ThenByDescending(c => c.External))
         {

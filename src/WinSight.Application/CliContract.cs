@@ -117,7 +117,16 @@ public static class CliContract
         return index < 0 ? [] : verbs.Skip(index + 1).ToList();
     }
 
-    /// <summary>The exit-code table, rendered for <c>--help</c> and the documentation.</summary>
+    /// <summary>
+    /// The exit-code table, rendered for <c>--help</c> and the documentation.
+    /// </summary>
+    /// <remarks>
+    /// <b>Code 11 is qualified rather than listed plainly.</b> Nothing a documented verb can do
+    /// returns it: the only producer is <c>firewall-ipc-selftest</c>, a diagnostic deliberately
+    /// absent from this catalogue. Listing it beside the codes a scan actually returns told a
+    /// reader to handle a case they would never meet, which is the same kind of untrue documentation
+    /// this table exists to replace - a help text describing behaviour the binary does not have.
+    /// </remarks>
     public static string ExitCodeTable =>
         $"""
         Exit codes
@@ -125,7 +134,8 @@ public static class CliContract
           {Notable}   something notable was found (the scan succeeded)
           {UsageError}   usage error: unknown command, argument or option
           {ObservationFailed}  an observation could not be made (live ETW unavailable)
-          {ServiceUnavailable}  the privileged firewall service could not be reached
+          {ServiceUnavailable}  the firewall service could not be reached
+              (firewall-ipc-selftest only; no scanner returns this)
           {UnexpectedFailure}  the scan failed unexpectedly
 
         Findings are 0 and 1; failures are 10 and above, so `if ($LASTEXITCODE -ge 10)`
