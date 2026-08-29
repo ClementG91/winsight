@@ -242,7 +242,11 @@ dotnet run --project src/WinSight.Dashboard
 To reproduce the full release payload, including SBOM, installer and signing stage:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.11.6 -Architectures x64 -DisableSignature
+[xml]$props = Get-Content Directory.Build.props
+./scripts/Build-Release.ps1 `
+  -Version $props.Project.PropertyGroup.Version `
+  -Architectures x64 `
+  -DisableSignature
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned Inno Setup compiler

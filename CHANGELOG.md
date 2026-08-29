@@ -110,11 +110,6 @@ rest, so on a 4538-item persistence scan a model was told evidence existed and g
 reach it. Responses are also bounded by size now, because a finding's fields hold registry values
 whose length the machine decides.
 
-**MCP evidence is paged.** `maxItems` capped a response at 200 items with no way to ask for the
-rest, so on a 4538-item persistence scan a model was told evidence existed and given no way to
-reach it. Responses are also bounded by size now, because a finding's fields hold registry values
-whose length the machine decides.
-
 **Two more detection surfaces, and one declared gap.** The managed half of profiler injection - a
 type instantiated as a process's `AppDomainManager` before any application code runs - was missing
 while the native half was covered. `GinaDLL` is now read for the opposite reason to the other
