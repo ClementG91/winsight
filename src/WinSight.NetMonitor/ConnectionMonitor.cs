@@ -27,8 +27,16 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
                 byPid[r.Pid] = ResolveProcess(r.Pid);
             }
         }
+        // Distinct, like ProcessLister and ModuleLister already do. Twenty Chrome tabs are twenty
+        // processes sharing one image: without this, one machine with a browser open produced twenty
+        // WinVerifyTrust calls and twenty content hashes of the same file, serialised.
         var verdicts = _verifier.VerifyMany(
-            byPid.Values.Where(p => p.Path is not null).Select(p => p.Path!).ToList(), cancellationToken);
+            byPid.Values
+                .Where(p => p.Path is not null)
+                .Select(p => p.Path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            cancellationToken);
 
         var connections = new List<Connection>(rows.Count);
         foreach (var r in rows)

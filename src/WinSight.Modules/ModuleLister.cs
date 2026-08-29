@@ -103,7 +103,11 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
         }
         finally
         {
-            for (var remaining = index + 1; remaining < processes.Length; remaining++)
+            // From index, not index + 1. When cancellation throws at the top of an iteration the
+            // current element has not entered its inner try/finally yet, so starting one past it
+            // abandoned exactly one handle to the finaliser - the thing the comment above says this
+            // block exists to prevent. Disposing twice is harmless; leaking one is not.
+            for (var remaining = index; remaining < processes.Length; remaining++)
             {
                 try { processes[remaining].Dispose(); }
                 catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException) { }

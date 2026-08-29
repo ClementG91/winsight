@@ -213,9 +213,22 @@ public sealed class RansomwareFileWatcher : IDisposable
     {
         // A rename reports the decoy as the OLD path, so that is what identifies a touched canary.
         var identity = e is RenamedEventArgs renamed ? renamed.OldFullPath : e.FullPath;
-        if (!_pending.TryAdd(new PendingChange(e.ChangeType, identity, e.FullPath)))
+        try
         {
-            Interlocked.Increment(ref _dropped);
+            if (!_pending.TryAdd(new PendingChange(e.ChangeType, identity, e.FullPath)))
+            {
+                Interlocked.Increment(ref _dropped);
+            }
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+        {
+            // Windows delivers this on a thread pool thread, and an unhandled exception there ends
+            // the process. Disposal completes the queue and then disposes it after a bounded join,
+            // so a callback still in flight when that join expires - a slow consumer, an entropy
+            // read on a network file - would arrive at a disposed collection and take the dashboard
+            // down during an ordinary shutdown. The change is already lost at that point; losing it
+            // quietly is the correct outcome, and the count below is deliberately not incremented
+            // because the watch is ending rather than falling behind.
         }
     }
 

@@ -582,9 +582,21 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
             });
             return capability;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception)
         {
             // Fail closed: if the client identity cannot be established, deny.
+            //
+            // Every exception, not a list of three. The list said "fail closed" and did not do it:
+            // WindowsPrincipal.IsInRole(SecurityIdentifier) raises SecurityException when
+            // CheckTokenMembership fails, and reading identity.Groups raises Win32Exception - neither
+            // was caught, so either one escaped into ProcessAcceptedConnection, which classifies any
+            // throw there as a fatal connection failure. The accept loop then stops the host, and
+            // because the WFP session is dynamic, BFE destroys every filter the service owned.
+            //
+            // This is the same defect FirewallRequestDispatcher was hardened against one layer down,
+            // where a long comment describes exactly this failure. Authorisation sits above that
+            // hardening and kept its narrow list. Denying is the only correct answer here whatever
+            // went wrong, so there is nothing an enumeration of types can buy.
             return FirewallCallerCapability.None;
         }
     }

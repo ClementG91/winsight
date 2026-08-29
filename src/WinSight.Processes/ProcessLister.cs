@@ -11,6 +11,12 @@ namespace WinSight.Processes;
 /// </summary>
 public sealed class ProcessLister(ISignatureVerifier? verifier = null)
 {
+    /// <summary>
+    /// Ceiling on one WMI enumeration. Matches ControlledFolderAccessReader, which is the only
+    /// caller in the product that bounded its query before this.
+    /// </summary>
+    private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(5);
+
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
 
     public IReadOnlyList<ProcessInfo> Snapshot(CancellationToken cancellationToken = default) =>
@@ -25,8 +31,20 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
         try
         {
             var scope = new ManagementScope(@"\\.\root\cimv2");
-            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery(
-                "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine FROM Win32_Process"));
+            // Bounded like the Controlled Folder Access reader already bounds its own queries. A
+            // stuck WMI provider otherwise hangs this command for ever, and the cancellation check
+            // inside the loop below cannot help: the block happens inside the enumeration itself,
+            // before a single object is yielded.
+            using var searcher = new ManagementObjectSearcher(
+                scope,
+                new ObjectQuery(
+                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine FROM Win32_Process"),
+                new System.Management.EnumerationOptions
+                {
+                    Timeout = QueryTimeout,
+                    ReturnImmediately = false,
+                    Rewindable = false,
+                });
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results = searcher.Get();

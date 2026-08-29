@@ -24,6 +24,7 @@ public sealed class AvWatchHost : IDisposable
     private readonly CameraMicMonitor _monitor;
     private readonly Lock _gate = new();
     private CancellationTokenSource? _cancellation;
+    private Thread? _worker;
     private bool _disposed;
 
     public AvWatchHost(CameraMicMonitor? monitor = null) => _monitor = monitor ?? new CameraMicMonitor();
@@ -36,6 +37,7 @@ public sealed class AvWatchHost : IDisposable
     /// <summary>Begins watching. Safe to call twice; the second call does nothing.</summary>
     public void Start()
     {
+        CancellationTokenSource cancellation;
         CancellationToken token;
         lock (_gate)
         {
@@ -43,8 +45,9 @@ public sealed class AvWatchHost : IDisposable
             {
                 return;
             }
-            _cancellation = new CancellationTokenSource();
-            token = _cancellation.Token;
+            cancellation = new CancellationTokenSource();
+            _cancellation = cancellation;
+            token = cancellation.Token;
         }
 
         // The poll loop blocks its thread until cancelled, so it cannot run on the caller's — and it
@@ -83,12 +86,29 @@ public sealed class AvWatchHost : IDisposable
             IsBackground = true,
             Name = "winsight-av-watch",
         };
-        worker.Start();
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                if (ReferenceEquals(_cancellation, cancellation))
+                {
+                    _cancellation = null;
+                }
+                cancellation.Dispose();
+                return;
+            }
+            _worker = worker;
+            worker.Start();
+        }
     }
+
+    /// <summary>How long <see cref="Dispose"/> waits for the poll to unwind before giving up.</summary>
+    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
 
     public void Dispose()
     {
         CancellationTokenSource? cancellation;
+        Thread? worker;
         lock (_gate)
         {
             if (_disposed)
@@ -97,13 +117,29 @@ public sealed class AvWatchHost : IDisposable
             }
             _disposed = true;
             cancellation = _cancellation;
-            _cancellation = null;
+            worker = _worker;
+            _worker = null;
         }
 
-        if (cancellation is not null)
+        if (cancellation is null)
+        {
+            return;
+        }
+
+        try
         {
             cancellation.Cancel();
-            cancellation.Dispose();
         }
+        catch (ObjectDisposedException)
+        {
+            // The worker completed between the state snapshot and cancellation.
+        }
+
+        // Wait before disposing the source. The poll loop is blocked on this token's wait handle,
+        // and disposing it out from under that thread turns a clean shutdown into an
+        // ObjectDisposedException on a background thread nobody is watching. AttributionHost in the
+        // sibling project already does exactly this, with a comment describing this bug; this host
+        // did the opposite.
+        _ = worker?.Join(StopTimeout);
     }
 }
