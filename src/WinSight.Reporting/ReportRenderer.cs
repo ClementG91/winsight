@@ -40,6 +40,13 @@ public static class ReportRenderer
         }
     }
 
+    /// <summary>
+    /// Writes the reports as the versioned JSON contract.
+    /// </summary>
+    /// <remarks>
+    /// The envelope, rather than a bare array: see <see cref="ReportEnvelope"/> for why a contract
+    /// consumed by four independent readers needs to be able to say which version produced it.
+    /// </remarks>
     public static void RenderJson(IReadOnlyList<ToolReport> reports, TextWriter writer) =>
-        writer.WriteLine(JsonSerializer.Serialize(reports, JsonOptions));
+        writer.WriteLine(JsonSerializer.Serialize(ReportEnvelope.For(reports), JsonOptions));
 }

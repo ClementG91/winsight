@@ -518,9 +518,16 @@ $integrityPath = Join-Path $EvidenceRoot 'integrity.json'
 & $Cli integrity --json > $integrityPath
 $integrityExit = $LASTEXITCODE
 if ($integrityExit -notin @(0, 1)) { throw "integrity exit inattendu : $integrityExit" }
-$integrity = @(Get-Content $integrityPath -Raw | ConvertFrom-Json)
+$envelope = Get-Content $integrityPath -Raw | ConvertFrom-Json
+# L'enveloppe est verifiee avant son contenu : accepter une version inconnue puis esperer que la
+# forme corresponde, c'est certifier un rapport qu'on a mal lu.
+if ($envelope.schemaVersion -ne 1 -or $null -eq $envelope.generatedAt) {
+    throw 'Enveloppe JSON absente ou de version inattendue.'
+}
+$integrity = @($envelope.reports)
 if ($integrity.Count -ne 1 -or $integrity[0].tool -cne 'integrity' -or
-    $null -eq $integrity[0].items -or $null -eq $integrity[0].notableCount) {
+    $null -eq $integrity[0].items -or $null -eq $integrity[0].notableCount -or
+    $null -eq $integrity[0].unverifiedCount) {
     throw 'Contrat JSON integrity invalide.'
 }
 ```

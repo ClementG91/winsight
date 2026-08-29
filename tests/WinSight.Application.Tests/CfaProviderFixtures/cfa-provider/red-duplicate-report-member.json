@@ -1,1 +1,11 @@
-{"exitCode":0,"stdout":"[{\"tool\":\"integrity\",\"tool\":\"integrity\"}]","stderr":"","operatingSystem":{"product":"Fixture Windows 11","version":"10.0.99999.0","build":"99999","architecture":"x64"}}
+{
+  "exitCode": 0,
+  "stdout": "{\"schemaVersion\":1,\"generatedAt\":\"2026-01-01T00:00:00.0000000+00:00\",\"reports\":[{\"tool\":\"integrity\",\"tool\":\"integrity\"}]}",
+  "stderr": "",
+  "operatingSystem": {
+    "product": "Fixture Windows 11",
+    "version": "10.0.99999.0",
+    "build": "99999",
+    "architecture": "x64"
+  }
+}
