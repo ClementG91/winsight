@@ -44,6 +44,26 @@ public static partial class WfpProvisioning
     // FWPM_CONDITION_ALE_APP_ID: matches the connecting application's binary.
     internal static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
 
+    // Two properties of this filter shape that the UI now states outright, because neither is
+    // obvious and both change what an operator should expect:
+    //
+    //   Blocking is at ALE_AUTH_CONNECT only. Nothing is posted on ALE_FLOW_ESTABLISHED or
+    //   ALE_ENDPOINT_CLOSURE, so blocking an application does not interrupt connections it already
+    //   has open - the block takes effect at its next connect.
+    //
+    //   The only condition is ALE_APP_ID, with nothing on FLAG_IS_LOOPBACK, so the application's
+    //   own local traffic is filtered too. That can break communication between components of one
+    //   application, which is a surprising way for a "block outbound" rule to behave.
+    //
+    // Exempting loopback means a second filter condition (FWPM_CONDITION_FLAGS matched with
+    // FWP_MATCH_FLAGS_NONE_SET against FWP_CONDITION_FLAG_IS_LOOPBACK) and a matching change to
+    // the exact-inventory verification, which is the code that decides whether the machine reports
+    // Active or Degraded. Neither can be exercised outside the VM campaign - creating WFP filters
+    // on a development machine is forbidden by this project's own qualification rules - and getting
+    // the verification subtly wrong would leave every machine reporting Degraded for ever. It is
+    // deliberately left for a qualification run rather than shipped unverified; until then the
+    // behaviour is stated where the operator decides.
+
     private const string ProviderName = "WinSight";
     private const string ProviderDescription = "WinSight-owned outbound firewall provider.";
     private const string SublayerName = "WinSight outbound";
