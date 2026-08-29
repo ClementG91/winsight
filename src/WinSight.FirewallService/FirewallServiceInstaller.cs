@@ -598,6 +598,7 @@ public static class ServicePathTrustDiagnosticCodes
     public const string WritableByUnprivileged = "[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]";
     public const string IdentityChanged = "[FW_INSTALL_PATH_IDENTITY_CHANGED]";
     public const string InspectionFailed = "[FW_INSTALL_PATH_INSPECTION_FAILED]";
+    public const string NotOnLocalStorage = "[FW_INSTALL_PATH_NOT_LOCAL]";
 
     public static string ForInstallDenial(PathTrustCode code) => code switch
     {
@@ -609,6 +610,9 @@ public static class ServicePathTrustDiagnosticCodes
         PathTrustCode.WritableByUnprivilegedPrincipal => WritableByUnprivileged,
         PathTrustCode.IdentityChanged => IdentityChanged,
         PathTrustCode.InspectionFailed => InspectionFailed,
+        // Its own token: "the inspection failed" would say the check broke, when it in fact
+        // refused, and an operator reading a log needs to know which.
+        PathTrustCode.NotOnLocalStorage => NotOnLocalStorage,
         PathTrustCode.Trusted => InspectionFailed,
         _ => InspectionFailed,
     };
