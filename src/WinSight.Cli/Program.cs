@@ -51,6 +51,17 @@ if (command != "process" && CliContract.ExtraVerbs(args, command) is { Count: > 
     return CliContract.UsageError;
 }
 
+// An option this verb cannot honour is a usage error too. `persistence --watch` used to run a
+// one-shot scan and exit, so an operator who asked to be told when something changed got a snapshot
+// and no indication that the word they typed had been dropped.
+if (CliContract.FirstUnsupportedOption(args, command) is { } unsupportedOption)
+{
+    Console.Error.WriteLine(
+        $"'{unsupportedOption}' is not supported by '{command}' — it works with "
+        + $"{CliContract.WatchableVerbList}");
+    return CliContract.UsageError;
+}
+
 // MCP owns stdout completely: no banner or CLI renderer may run in this mode.
 if (command == "mcp")
 {

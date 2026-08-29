@@ -123,4 +123,56 @@ public sealed class CliContractTests
                 StringComparison.Ordinal);
         }
     }
+
+    /// <summary>
+    /// An option the verb cannot honour is a usage error, not something to drop.
+    /// </summary>
+    /// <remarks>
+    /// <c>--watch</c> was accepted globally and honoured by four verbs, so
+    /// <c>winsight persistence --watch</c> ran a one-shot scan, printed it and exited. The operator
+    /// asked to be told when something changed and was handed a snapshot, with nothing saying the
+    /// word they typed had been dropped - and somebody who leaves that in a scheduled task believes
+    /// they have a live watch.
+    ///
+    /// This class already refuses a second verb and a misspelled option for exactly that reason. It
+    /// was fixed where the argument was wrong and missed where the argument is right and the verb
+    /// cannot do it.
+    /// </remarks>
+    [Theory]
+    [InlineData("persistence")]
+    [InlineData("hosts")]
+    [InlineData("processes")]
+    [InlineData("firewall")]
+    [InlineData("all")]
+    public void WatchOnAVerbThatCannotWatchIsAUsageError(string verb) =>
+        Assert.Equal("--watch", CliContract.FirstUnsupportedOption([verb, "--watch"], verb));
+
+    [Theory]
+    [InlineData("av")]
+    [InlineData("avmonitor")]
+    [InlineData("attribution")]
+    [InlineData("dns")]
+    public void WatchOnAVerbThatCanWatchIsAccepted(string verb) =>
+        Assert.Null(CliContract.FirstUnsupportedOption([verb, "--watch"], verb));
+
+    [Fact]
+    public void AVerbWithoutWatchIsUnaffected() =>
+        Assert.Null(CliContract.FirstUnsupportedOption(
+            ["persistence", "--json", "--flagged", "--no-network"], "persistence"));
+
+    /// <summary>
+    /// The message names where the option does work, because "unsupported" on its own sends
+    /// somebody back to the help text to find out.
+    /// </summary>
+    [Fact]
+    public void TheWatchableVerbsAreNamedForTheUsageMessage()
+    {
+        var verbs = CliContract.WatchableVerbList;
+
+        Assert.Contains("av", verbs, StringComparison.Ordinal);
+        Assert.Contains("dns", verbs, StringComparison.Ordinal);
+        Assert.Contains("attribution", verbs, StringComparison.Ordinal);
+        // The alias is not listed twice under two spellings.
+        Assert.DoesNotContain("avmonitor", verbs, StringComparison.Ordinal);
+    }
 }
