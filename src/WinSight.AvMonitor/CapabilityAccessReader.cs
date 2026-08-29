@@ -33,8 +33,22 @@ public interface ICapabilityAccessReader
 /// </summary>
 public sealed class CapabilityAccessReader : ICapabilityAccessReader
 {
-    private const string Base =
+    private const string DefaultBasePath =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";
+
+    private readonly string _basePath;
+
+    /// <summary>Creates the production reader over the Windows ConsentStore.</summary>
+    public CapabilityAccessReader() : this(DefaultBasePath)
+    {
+    }
+
+    /// <summary>Creates a reader over an isolated registry path for deterministic tests.</summary>
+    internal CapabilityAccessReader(string basePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(basePath);
+        _basePath = basePath;
+    }
 
     /// <summary>Reads recorded webcam + microphone usage across HKCU and HKLM.</summary>
     public IReadOnlyList<DeviceUsage> Read() => ReadWithCoverage().Items;
@@ -64,14 +78,14 @@ public sealed class CapabilityAccessReader : ICapabilityAccessReader
         return new AcquisitionSnapshot<DeviceUsage>(results, unreadableSources, unreadableItems);
     }
 
-    private static (bool SourceReadable, int UnreadableItems) ReadCapability(
+    private (bool SourceReadable, int UnreadableItems) ReadCapability(
         RegistryHive hive, string capability, DeviceKind kind, List<DeviceUsage> results)
     {
         var unreadableItems = 0;
         try
         {
             using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
-            using var capKey = baseKey.OpenSubKey($@"{Base}\{capability}");
+            using var capKey = baseKey.OpenSubKey($@"{_basePath}\{capability}");
             if (capKey is null)
             {
                 return (true, 0);

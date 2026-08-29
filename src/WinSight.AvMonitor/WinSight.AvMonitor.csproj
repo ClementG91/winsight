@@ -5,4 +5,7 @@
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.AvMonitor.Tests" />
+  </ItemGroup>
 </Project>

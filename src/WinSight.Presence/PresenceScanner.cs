@@ -140,11 +140,18 @@ public sealed class SystemLogWakeSource : IWakeEventSource
     /// numeric type and the raw device name in every locale.
     /// </remarks>
     internal static WakeRecord? Parse(EventRecord entry)
+        => ParseXml(entry.ToXml(), entry.TimeCreated);
+
+    /// <summary>
+    /// Parses the locale-independent payload separately from Event Log I/O so every supported
+    /// shape is deterministic on machines that have never slept, including CI runners.
+    /// </summary>
+    internal static WakeRecord? ParseXml(string xml, DateTime? timeCreated)
     {
         XElement root;
         try
         {
-            root = XElement.Parse(entry.ToXml());
+            root = XElement.Parse(xml);
         }
         catch (System.Xml.XmlException)
         {
@@ -158,7 +165,7 @@ public sealed class SystemLogWakeSource : IWakeEventSource
                 element => element.Value,
                 StringComparer.Ordinal);
 
-        var woke = entry.TimeCreated?.ToUniversalTime();
+        var woke = timeCreated?.ToUniversalTime();
         if (woke is null)
         {
             // Without a time the record cannot be placed on a timeline, and a wake with no "when" is
