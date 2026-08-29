@@ -132,6 +132,10 @@ protocol notifications between them. It no longer mistakes an asynchronous notif
 result, while server errors are emitted with their complete JSON payload instead of surfacing as a
 missing PowerShell property.
 
+The current documentation no longer inherits the previous v0.11.6 VM verdict for the changed
+v0.12.0 candidate, calls visible ransomware decoys hidden, or omits the hijack scanner's documented
+temporary writability probe from the list of filesystem writes.
+
 **Two more detection surfaces, and one declared gap.** The managed half of profiler injection - a
 type instantiated as a process's `AppDomainManager` before any application code runs - was missing
 while the native half was covered. `GinaDLL` is now read for the opposite reason to the other

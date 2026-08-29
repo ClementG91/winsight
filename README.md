@@ -54,7 +54,7 @@ traffic at the kernel filtering layer.
 | **Persistence scanner** | KnockKnock | 27 autostart surfaces, catalog-aware Authenticode verdicts, command-line triage for signed interpreters handed someone else's payload, optional VirusTotal enrichment |
 | **Outbound firewall** | LuLu | Per-application block/allow enforced through the Windows Filtering Platform; audit-only until you arm it |
 | **Guardian** | BlockBlock | Live tray alert the moment a new startup item appears, plus reconciliation of what changed while WinSight was not running |
-| **Ransomware detection** | RansomWhere? | Hidden decoy files, rename/delete-burst and entropy-on-write heuristics |
+| **Ransomware detection** | RansomWhere? | Visible machine-varied decoy files, rename/delete-burst and entropy-on-write heuristics |
 | **Camera & mic monitor** | OverSight | Which process turned the webcam or microphone on |
 | **Connections & DNS** | Netiquette, DNSMonitor | Live outbound connections and DNS queries, attributed to processes |
 | **Signature verification** | What's Your Sign? | Authenticode verdicts with catalog fallback, used by every tool |
