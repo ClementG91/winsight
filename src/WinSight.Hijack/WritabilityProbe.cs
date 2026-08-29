@@ -51,6 +51,36 @@ public interface IWritabilityProbeCoverage
 /// </remarks>
 public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCoverage
 {
+    /// <summary>
+    /// The answer for one directory, remembered for the lifetime of this probe.
+    /// </summary>
+    /// <param name="CanCreate">Whether an unprivileged principal could place a file there.</param>
+    /// <param name="Unreadable">
+    /// Whether the attempt failed for a reason that is not proof either way, so the caller's
+    /// coverage count still rises on every question asked about this directory.
+    /// </param>
+    private readonly record struct DirectoryVerdict(bool CanCreate, bool Unreadable);
+
+    /// <summary>
+    /// Answers already established, keyed by directory.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this is safe and why it matters.</b> The question is a property of the directory, not
+    /// of the file name: the caller has already established that the candidate itself does not
+    /// exist, and after that only the directory decides. Without the memo, one hijack scan created
+    /// and deleted a real file in <c>System32</c>, in every machine PATH entry, and in each of ~88
+    /// service directories - repeatedly, because a service with an unquoted path asks about several
+    /// candidates in the same folder, and the PATH sweep asks about every entry again. A security
+    /// tool that writes to Program Files a few hundred times per scan is doing more I/O than the
+    /// scan it is performing, and every one of those writes is a chance to leave litter behind.
+    ///
+    /// The memo lives on the instance, which is one scan. Caching across scans would answer today's
+    /// question with yesterday's ACL, which is the kind of staleness this tool exists to catch.
+    /// </remarks>
+    private readonly Dictionary<string, DirectoryVerdict> _byDirectory =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly Lock _gate = new();
     private readonly bool _elevated;
     private int _unreadableAttempts;
 
@@ -89,10 +119,41 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
             return false;
         }
 
-        return _elevated ? UnprivilegedWriteAccess.IsGrantedIn(directory) : TryCreate(directory);
+        return Ask(directory);
     }
 
-    private bool TryCreate(string directory)
+    /// <summary>
+    /// The directory's answer, established once and remembered. The unreadable count still rises per
+    /// question rather than per directory, so the coverage figure the caller reports keeps meaning
+    /// "questions I could not answer" and not "directories I could not read".
+    /// </summary>
+    private bool Ask(string directory)
+    {
+        DirectoryVerdict verdict;
+        lock (_gate)
+        {
+            if (!_byDirectory.TryGetValue(directory, out verdict))
+            {
+                verdict = _elevated
+                    ? new DirectoryVerdict(UnprivilegedWriteAccess.IsGrantedIn(directory), false)
+                    : TryCreate(directory);
+                _byDirectory[directory] = verdict;
+                return Report(verdict);
+            }
+        }
+        return Report(verdict);
+    }
+
+    private bool Report(DirectoryVerdict verdict)
+    {
+        if (verdict.Unreadable)
+        {
+            Interlocked.Increment(ref _unreadableAttempts);
+        }
+        return verdict.CanCreate;
+    }
+
+    private static DirectoryVerdict TryCreate(string directory)
     {
         // A distinct name, so a real candidate is never created and never deleted by this check.
         var probe = Path.Combine(directory, $".winsight-writability-{Guid.NewGuid():N}.tmp");
@@ -102,19 +163,18 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
                        FileOptions.DeleteOnClose))
             {
             }
-            return true;
+            return new DirectoryVerdict(CanCreate: true, Unreadable: false);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException
                                      or System.Security.SecurityException)
         {
-            return false;
+            return new DirectoryVerdict(CanCreate: false, Unreadable: false);
         }
         catch (Exception ex) when (ex is IOException or NotSupportedException)
         {
             // This is not proof of non-writability (the volume may be unavailable or the path
             // syntax unsupported). Keep the conservative false answer, but expose the blind spot.
-            Interlocked.Increment(ref _unreadableAttempts);
-            return false;
+            return new DirectoryVerdict(CanCreate: false, Unreadable: true);
         }
         finally
         {
