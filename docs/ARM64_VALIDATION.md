@@ -170,9 +170,11 @@ Run `& $protocol -ContractSelfTest` without `-ServicePath` for the final normal 
 control must exit **1**. The former 14/14 and the first local report based on it are invalid,
 non-qualifying evidence. The intermediate 15/15 was a transient development count and is not proof.
 The VM skip/full paths retain exactly **17**/**35** mandatory checks. Both query the exact SCM
-security/recovery profile through the native service API. The nine dynamic-lifecycle full-path
-checks stop the service while enforcement is active, prove the dynamic WFP namespace disappears and
-connectivity returns, then restart and prove the persisted scoped block is reconstructed.
+security/recovery profile through the native service API, including restart after 5 seconds,
+restart after 30 seconds, repeated restart after 60 seconds and a one-hour failure-count reset. The
+nine dynamic-lifecycle full-path checks stop the service while enforcement is active, prove the
+dynamic WFP namespace disappears and connectivity returns, then restart and prove the persisted
+scoped block is reconstructed.
 
 One `New-ValidationAdapter` owns native command construction, staging, workflow operations and the
 Running, Stopped and SCM-absent polls. Real and scripted modes inject only elementary host effects;

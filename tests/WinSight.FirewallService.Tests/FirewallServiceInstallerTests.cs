@@ -219,6 +219,31 @@ public sealed class FirewallServiceInstallerTests
         Assert.EndsWith("\0\0", privileges, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void RecoveryProfile_RetriesIndefinitelyWithoutDayLongFailureMemory()
+    {
+        var actions = FirewallServiceInstaller.RecoveryActions();
+
+        Assert.Equal(3_600U, FirewallServiceInstaller.RecoveryResetPeriodSeconds);
+        Assert.Collection(
+            actions,
+            action =>
+            {
+                Assert.Equal(1, action.Type);
+                Assert.Equal(5_000U, action.DelayMilliseconds);
+            },
+            action =>
+            {
+                Assert.Equal(1, action.Type);
+                Assert.Equal(30_000U, action.DelayMilliseconds);
+            },
+            action =>
+            {
+                Assert.Equal(1, action.Type);
+                Assert.Equal(60_000U, action.DelayMilliseconds);
+            });
+    }
+
     [Theory]
     [InlineData(true, ServiceInstallTrustCode.PathChangedRolledBack)]
     [InlineData(false, ServiceInstallTrustCode.RollbackFailed)]

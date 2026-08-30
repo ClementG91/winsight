@@ -108,13 +108,15 @@ from a machine where nothing was installed:
   privileges to the service token was the alternative and is worse: it would let a LocalSystem
   service take ownership of anything on the machine, to handle a case an elevated install handles.
 - **Squatting the pipe name.** `FIRST_PIPE_INSTANCE` is requested, so a name already taken makes
-  creation fail - after the startup service has applied the filters. The squatter therefore gets
-  "filters applied, then immediately removed". The service now exits non-zero when it loses its
-  endpoint, so the SCM runs the restart actions the installer configures; it previously exited
-  cleanly, the SCM read that as an intentional stop, and nothing ever restarted it.
+  creation fail. The startup service now waits for endpoint readiness before applying any filter;
+  a squatter therefore causes an honestly unfiltered startup failure rather than a misleading
+  "filters applied, then immediately removed" interval. The service exits non-zero, and SCM retries
+  after 5 seconds, 30 seconds and then every 60 seconds, with the failure count reset after one
+  hour. It previously exited cleanly and SCM treated the stop as intentional.
 
-Neither is fully closed: a determined squatter can win the race repeatedly. What changed is that
-losing it is now recoverable and visible rather than silent and permanent.
+Neither is fully closed: a determined squatter can win the pipe race repeatedly. What changed is
+that losing it is honestly unfiltered, recoverable and visible rather than transiently misleading,
+silent and permanent.
 
 ### 2c. Local user writing text a language model will read
 

@@ -90,6 +90,25 @@ public sealed class WfpValidationContractTests
         Assert.DoesNotContain("operation-threw", negative.StandardOutput, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ScmRecoveryInspectorMatchesTheHardenedServiceProfile()
+    {
+        var script = await File.ReadAllTextAsync(
+            Path.Combine(RepositoryRoot, "scripts", "Test-WfpValidation.ps1"));
+
+        Assert.Contains("actions.ResetPeriodSeconds != 3600U", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "third.Type == 1 && third.DelayMilliseconds == 60000U",
+            script,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "restart 5s/30s/60s indefinitely; 1h reset",
+            script,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("actions.ResetPeriodSeconds != 86400U", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("third.Type == 0", script, StringComparison.Ordinal);
+    }
+
     [Fact(Timeout = 90000)]
     public async Task ContractSelfTestFailsWhenExactScmAbsencePredicatesAreBroadened()
     {

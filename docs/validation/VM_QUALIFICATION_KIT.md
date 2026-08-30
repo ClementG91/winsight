@@ -1112,7 +1112,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 17/17 failed.' }
 
 Shut down the VM and have the host create `S2-before-WFP` with sealed `take` evidence. Restart only
 after exporting that host evidence, then run the full WFP gate: expected 35/35, exact SCM profile
-(service SID, three required privileges, and recovery actions), target curl 200→000, control curl
+(service SID, three required privileges, restart after 5 seconds, restart after 30 seconds, repeated
+restart after 60 seconds, and a one-hour failure-count reset), target curl 200→000, control curl
 200, armed stop with dynamic removal and return to 200, restart with blocking back at 000 while the
 control remains 200, AuditOnly rollback, empty WFP state, restored connectivity, and SCM 1060. Any
 S2 restore after failure is also a host operation requiring its own `operation=restore` evidence.
