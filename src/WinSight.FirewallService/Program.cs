@@ -365,6 +365,10 @@ static async Task<int> RunHostAsync()
     // a service provider refuses to dispose a singleton that implements only IAsyncDisposable from a
     // synchronous Dispose(), which is exactly what EnforcementCoordinator now is.
     var host = builder.Build();
+    // Capture the exit signal while the provider is alive. The host owns that provider and
+    // DisposeAsync tears it down; resolving the signal afterwards races normal service shutdown
+    // and turns an otherwise successful SCM recovery into an unhandled ObjectDisposedException.
+    var exitSignal = host.Services.GetRequiredService<FirewallServiceExitSignal>();
     try
     {
         await host.RunAsync().ConfigureAwait(false);
@@ -385,5 +389,5 @@ static async Task<int> RunHostAsync()
     // Non-zero when the endpoint was lost, so the Service Control Manager runs the failure actions
     // the installer configured. Exiting 0 told it the stop was intentional and nothing ever
     // restarted a service whose pipe had been squatted or had faulted.
-    return host.Services.GetRequiredService<FirewallServiceExitSignal>().ExitCode;
+    return exitSignal.ExitCode;
 }

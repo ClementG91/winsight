@@ -4,6 +4,27 @@ namespace WinSight.FirewallService.Tests;
 
 public sealed class FirewallDocumentationContractTests
 {
+    [Fact]
+    public void ServiceHostCapturesItsExitSignalBeforeDisposingTheProvider()
+    {
+        var source = Read("src", "WinSight.FirewallService", "Program.cs");
+        var capture = source.IndexOf(
+            "var exitSignal = host.Services.GetRequiredService<FirewallServiceExitSignal>();",
+            StringComparison.Ordinal);
+        var run = source.IndexOf("await host.RunAsync()", StringComparison.Ordinal);
+        var dispose = source.IndexOf("await asyncHost.DisposeAsync()", StringComparison.Ordinal);
+        var result = source.IndexOf("return exitSignal.ExitCode;", StringComparison.Ordinal);
+
+        Assert.True(capture >= 0, "The exit signal must be resolved while the host provider is alive.");
+        Assert.True(capture < run, "The exit signal must be captured before the host begins teardown.");
+        Assert.True(run < dispose, "Host disposal must remain after RunAsync.");
+        Assert.True(dispose < result, "The captured signal may be read after host disposal.");
+        Assert.DoesNotContain(
+            "return host.Services.GetRequiredService<FirewallServiceExitSignal>()",
+            source,
+            StringComparison.Ordinal);
+    }
+
     private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
