@@ -536,7 +536,11 @@ public sealed class FirewallRequestDispatcherTests : IDisposable
             new FirewallPolicyStore(PolicyPath), new RecordingAuthority(), pending);
 
         var response = await dispatcher.DispatchAsync(
-            Request(FirewallCommand.GetStatus), FirewallCallerCapability.ReadStatus);
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion,
+                Guid.NewGuid(),
+                FirewallCommand.GetStatus),
+            FirewallCallerCapability.ReadStatus);
 
         Assert.Equal(5, response.Status!.UnrecordedApps);
     }
@@ -1564,6 +1568,65 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
     }
 
     [Fact]
+    public async Task DispatchFailureObserver_ReceivesOnlySanitizedNativeMetadata()
+    {
+        FirewallDispatchFailure? observed = null;
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "observed-native-failure.json")),
+            new NativeFailureAuthority(),
+            failureObserver: failure => observed = failure);
+
+        var response = await dispatcher.DispatchAsync(
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion,
+                Guid.NewGuid(),
+                FirewallCommand.GetStatus),
+            FirewallCallerCapability.ReadStatus);
+
+        Assert.Equal(FirewallProtocolError.InternalFailure, response.Error);
+        Assert.Equal(
+            new FirewallDispatchFailure(
+                FirewallCommand.GetStatus,
+                FirewallDispatchFailureKind.Native),
+            observed);
+    }
+
+    [Fact]
+    public async Task DispatchFailureObserverFailure_DoesNotEscapeOrChangeTheResponse()
+    {
+        var dispatcher = new FirewallRequestDispatcher(
+            new FirewallPolicyStore(Path.Combine(_directory, "throwing-observer.json")),
+            new NativeFailureAuthority(),
+            failureObserver: _ => throw new InvalidOperationException("diagnostic sink failed"));
+
+        var response = await dispatcher.DispatchAsync(
+            new FirewallCommandRequest(
+                FirewallProtocolCodec.CurrentVersion,
+                Guid.NewGuid(),
+                FirewallCommand.GetStatus),
+            FirewallCallerCapability.ReadStatus);
+
+        Assert.False(response.Success);
+        Assert.Equal(FirewallProtocolError.InternalFailure, response.Error);
+    }
+
+    [Theory]
+    [InlineData("EnableApplyFailed", "EnableApplyFailed")]
+    [InlineData("secret.exe", null)]
+    [InlineData("../../secret", null)]
+    public void ClassifyFailure_ExposesOnlyCanonicalCodes(string suppliedCode, string? expectedCode)
+    {
+        var failure = FirewallRequestDispatcher.ClassifyFailure(
+            FirewallCommand.EnableEnforcement,
+            new CodedFailureException(suppliedCode));
+
+        Assert.Equal(expectedCode is null
+            ? FirewallDispatchFailureKind.Unexpected
+            : FirewallDispatchFailureKind.Coded, failure.Kind);
+        Assert.Equal(expectedCode, failure.Code);
+    }
+
+    [Fact]
     public async Task FatalConnection_DrainsNonCooperativeMutationWithinTheConfiguredBound()
     {
         var pipeName = UniquePipeName();
@@ -1916,6 +1979,11 @@ public sealed class NamedPipeFirewallServerTests : IDisposable
             Task.FromResult(OutboundFirewallConfiguration.Empty);
         public Task<OutboundFirewallConfiguration> EmergencyDisableAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(OutboundFirewallConfiguration.Empty);
+    }
+
+    private sealed class CodedFailureException(string code) : Exception, IFirewallFailureCode
+    {
+        public string Code { get; } = code;
     }
 
     private sealed class NonCooperativeEmergencyAuthority : IFirewallMutationAuthority

@@ -104,6 +104,12 @@ public sealed class FirewallDocumentationContractTests
         // turned working enforcement into a false "degraded" with a protection-destroying rollback.
         Assert.Contains("FilterFlagsAreClean(filter.Flags)", source, StringComparison.Ordinal);
         Assert.DoesNotContain("filter.Flags == 0", source, StringComparison.Ordinal);
+
+        // BFE assigns the closest available sublayer weight. Requiring literal 0x8000 reproduced a
+        // live false degraded state when Windows returned 0x8001, so the shape check must use the
+        // bounded verifier instead of exact equality.
+        Assert.Contains("SublayerWeightIsAcceptable(sublayer.Weight)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("sublayer.Weight == SublayerWeight", source, StringComparison.Ordinal);
     }
 
     // WFP sets FWPM_FILTER_FLAG_INDEXED (0x40) on any app-id filter itself, so a correctly applied
@@ -117,6 +123,21 @@ public sealed class FirewallDocumentationContractTests
     [InlineData(0x41u, false)]  // INDEXED + PERSISTENT: the extra flag still disqualifies
     public void FilterFlagsAreClean_AcceptsOnlyTheIndexFlagWfpSetsItself(uint flags, bool expected) =>
         Assert.Equal(expected, WfpProvisioning.FilterFlagsAreClean(flags));
+
+    [Theory]
+    [InlineData(0x8000, true)]  // requested value
+    [InlineData(0x8001, true)]  // value observed from BFE in native VM qualification
+    [InlineData(0x7FFF, true)]  // the equally-close lower neighbour is also valid
+    [InlineData(0x7000, true)]  // lower bound of the accepted arbitration band
+    [InlineData(0x9000, true)]  // upper bound of the accepted arbitration band
+    [InlineData(0x6FFF, false)]
+    [InlineData(0x9001, false)]
+    [InlineData(0x0000, false)] // historical floor weight must be rebuilt
+    [InlineData(0xFFFF, false)]
+    public void SublayerWeightIsAcceptable_AllowsOnlyBoundedBfeDrift(
+        ushort actualWeight,
+        bool expected) =>
+        Assert.Equal(expected, WfpProvisioning.SublayerWeightIsAcceptable(actualWeight));
 
     private static string Read(params string[] segments) =>
         File.ReadAllText(Path.Combine([RepositoryRoot, .. segments]));

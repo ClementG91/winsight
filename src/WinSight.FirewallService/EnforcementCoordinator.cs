@@ -778,7 +778,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
     }
 }
 
-public sealed class FirewallTransitionException : IOException
+public sealed class FirewallTransitionException : IOException, IFirewallFailureCode
 {
     public FirewallTransitionException(string code, Exception innerException)
         : base("The firewall transition failed.", innerException) => Code = code;

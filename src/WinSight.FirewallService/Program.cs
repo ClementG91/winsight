@@ -325,11 +325,13 @@ static async Task<int> RunHostAsync()
     // Shared by the observer that fills it and the dispatcher that serves and prunes it.
     builder.Services.AddSingleton<PendingOutboundLog>();
     builder.Services.AddSingleton<IOutboundConnectionWatcher, OutboundConnectionWatcher>();
+    builder.Services.AddSingleton<FirewallDispatchLog>();
 
     builder.Services.AddSingleton(sp => new FirewallRequestDispatcher(
         sp.GetRequiredService<FirewallPolicyStore>(),
         sp.GetRequiredService<IFirewallMutationAuthority>(),
-        sp.GetRequiredService<PendingOutboundLog>()));
+        sp.GetRequiredService<PendingOutboundLog>(),
+        sp.GetRequiredService<FirewallDispatchLog>().Failure));
     builder.Services.AddSingleton(sp => new FirewallConnectionHandler(
         sp.GetRequiredService<FirewallRequestDispatcher>()));
     builder.Services.AddSingleton<IFirewallServiceListener>(sp => new NamedPipeFirewallServer(

@@ -92,12 +92,15 @@ public static partial class WfpProvisioning
     /// deliberate choice not to attempt to outrank the Windows Firewall's own sublayer: WinSight
     /// blocks what the operator asked to block and has no business overruling the system firewall.
     ///
-    /// <b>Unverified on hardware.</b> Sublayer arbitration cannot be exercised from a unit test and
-    /// this change has not been through the VM campaign; it moves the sublayer off the floor, which
-    /// is strictly better than where it was, and the effective ordering should be confirmed with
-    /// <c>netsh wfp show state</c> during the next qualification run.
+    /// BFE does not promise to preserve the requested value verbatim. Microsoft's provider sample
+    /// uses <c>0x8000</c> specifically as a middle weight and documents that BFE assigns the closest
+    /// available value. Native VM qualification observed the expected adjacent value
+    /// <c>0x8001</c>. Exact-shape verification therefore accepts a bounded neighbourhood around the
+    /// request while still rejecting the old floor weight and any materially different arbitration
+    /// position.
     /// </remarks>
     private const ushort SublayerWeight = 0x8000;
+    private const ushort SublayerWeightMaximumDrift = 0x1000;
 
     private const uint RpcCAuthnWinNt = 10;
     private const uint FwpmSessionFlagDynamic = 0x00000001;
@@ -657,10 +660,10 @@ public static partial class WfpProvisioning
             var sublayer = Marshal.PtrToStructure<FwpmSublayer0>(pointer);
             return sublayer.SubLayerKey == SublayerKey
                 && sublayer.Flags == 0
-                // The weight is part of the shape now that it is meaningful: a sublayer left at the
-                // floor by an earlier version must read as not-exact so it is rebuilt rather than
-                // silently kept.
-                && sublayer.Weight == SublayerWeight
+                // BFE assigns the closest available value rather than guaranteeing the requested
+                // weight verbatim. Keep the meaningful arbitration band exact enough to rebuild an
+                // old floor-weight sublayer without rejecting a healthy BFE-adjusted value.
+                && SublayerWeightIsAcceptable(sublayer.Weight)
                 && sublayer.ProviderKey != IntPtr.Zero
                 && Marshal.PtrToStructure<Guid>(sublayer.ProviderKey) == ProviderKey;
         }
@@ -787,6 +790,14 @@ public static partial class WfpProvisioning
     /// DISABLED — stays disqualifying, since WinSight never creates such a filter.
     /// </summary>
     internal static bool FilterFlagsAreClean(uint flags) => (flags & ~FwpmFilterFlagIndexed) == 0;
+
+    /// <summary>
+    /// True when BFE kept the sublayer in the intended middle-high arbitration band. The bounded
+    /// drift accommodates its documented closest-available assignment while 4,096 occupied
+    /// neighbouring weights would already be an abnormal state worth rebuilding and reporting.
+    /// </summary>
+    internal static bool SublayerWeightIsAcceptable(ushort actualWeight) =>
+        Math.Abs((int)actualWeight - SublayerWeight) <= SublayerWeightMaximumDrift;
 
     private static void DeleteAllOwnedFilters(IntPtr engine)
     {

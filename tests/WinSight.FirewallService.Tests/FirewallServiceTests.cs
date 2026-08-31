@@ -882,7 +882,12 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
     [Fact]
     public void FirewallServiceLoggerMessages_StaticContractHasNoExceptionParameters()
     {
-        foreach (var type in new[] { typeof(EnforcementStartupService), typeof(FirewallServiceWorker) })
+        foreach (var type in new[]
+                 {
+                     typeof(EnforcementStartupService),
+                     typeof(FirewallServiceWorker),
+                     typeof(FirewallDispatchLog),
+                 })
         {
             var logMethods = type.GetMethods(System.Reflection.BindingFlags.Instance |
                 System.Reflection.BindingFlags.NonPublic).Where(method => method.Name.StartsWith("Log", StringComparison.Ordinal));
@@ -890,6 +895,27 @@ public sealed class FirewallServiceDiagnosticTests : IDisposable
             Assert.All(logMethods, method =>
                 Assert.DoesNotContain(method.GetParameters(), parameter => typeof(Exception).IsAssignableFrom(parameter.ParameterType)));
         }
+    }
+
+    [Fact]
+    public void FirewallDispatchLog_RecordsStableMetadataWithoutExceptionOrSensitiveText()
+    {
+        var logger = new CapturingLogger<FirewallDispatchLog>();
+        var log = new FirewallDispatchLog(logger);
+
+        log.Failure(new FirewallDispatchFailure(
+            FirewallCommand.EnableEnforcement,
+            FirewallDispatchFailureKind.Coded,
+            "EnableApplyFailed"));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Error, entry.Level);
+        Assert.Contains("[FW_COMMAND_FAILED]", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("EnableEnforcement", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("EnableApplyFailed", entry.Message, StringComparison.Ordinal);
+        Assert.Null(entry.Exception);
+        Assert.False(ContainsSecret(entry.Message));
+        Assert.False(ContainsSecret(entry.StableState));
     }
 
     // Handing an exception to the logger is how a path or a SID reaches the event log: native
