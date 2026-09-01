@@ -103,7 +103,6 @@ installer packages. CodeQL run `32789591166` passed its C# and Actions analyses.
 
 ## Remaining gates
 
-- green CI and CodeQL after this validation-only follow-up is merged;
 - independent human EN/FR/ES presentation review remains recommended; the project owner has reviewed
   the French flow interactively, while EN/ES have automated layout/resource and smoke coverage;
 - native Arm64 privileged WFP/SCM/trust/IPC/session qualification when suitable hardware is available;
