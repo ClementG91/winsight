@@ -1,5 +1,7 @@
 ## Unreleased
 
+## 0.12.0 - 2026-09-01
+
 A review of the audit response itself, which found one defect the response had introduced and two
 places where it had stopped short.
 

@@ -18,7 +18,7 @@
 
     -NetworkLogon is a separate, fail-closed pass for a real network logon token. Run it remotely
     from a second isolated control machine through WinRM. It requires the Network SID, rejects the
-    Interactive SID, and expects the pipe to be unavailable (exit 3). The elevated target-side
+    Interactive SID, and expects the pipe to be unavailable (exit 11). The elevated target-side
     observer in the VM qualification kit proves the service PID and command line are unchanged;
     hardened Windows correctly denies those SCM/WMI observations to this network-only account.
 
@@ -150,8 +150,8 @@ if ($NetworkLogon) {
 
     $networkRun = Invoke-Current $cli
     Write-Host ('  network:    {0}' -f $networkRun.Raw)
-    Write-Check 'network logon receives the unavailable exit code' ($networkRun.ExitCode -eq 3) `
-        'exit 3' $networkRun.ExitCode
+    Write-Check 'network logon receives the unavailable exit code' ($networkRun.ExitCode -eq 11) `
+        'exit 11' $networkRun.ExitCode
     Write-Check 'network logon cannot reach the authenticated pipe' `
         ($networkRun.Available -eq 'false') 'serviceAvailable=false' $networkRun.Raw
     Write-Check 'network logon reports ServiceUnavailable' `

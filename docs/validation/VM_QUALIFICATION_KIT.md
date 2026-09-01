@@ -1198,7 +1198,25 @@ Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex -Networ
 New-LocalUser -Name $NetworkProbeUser -Password $NetworkProbePassword `
     -Description 'Disposable account for Network Logon qualification' | Out-Null
 Add-LocalGroupMember -Group $RemoteManagementGroup.Name -Member $NetworkProbeUser
-Enable-PSRemoting -SkipNetworkProfileCheck -Force
+
+# Do not use Enable-PSRemoting here. On current workgroup Windows builds it can create
+# LocalAccountTokenFilterPolicy, which weakens the boundary this gate is meant to prove.
+$WinRmService = Get-Service WinRM
+$OriginalWinRmStartMode = $WinRmService.StartType
+$OriginalWinRmWasRunning = $WinRmService.Status -eq 'Running'
+$TokenFilterPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+$TokenFilterProperty = 'LocalAccountTokenFilterPolicy'
+$OriginalTokenFilter = Get-ItemProperty -LiteralPath $TokenFilterPath `
+    -Name $TokenFilterProperty -ErrorAction SilentlyContinue
+if ($null -ne $OriginalTokenFilter) {
+    throw 'LocalAccountTokenFilterPolicy already exists; this VM is not a clean qualification baseline.'
+}
+Set-Service WinRM -StartupType Manual
+Start-Service WinRM
+if ($null -ne (Get-ItemProperty -LiteralPath $TokenFilterPath `
+        -Name $TokenFilterProperty -ErrorAction SilentlyContinue)) {
+    throw 'Starting WinRM unexpectedly created LocalAccountTokenFilterPolicy.'
+}
 
 $RootSddlPath = 'WSMan:\localhost\Service\RootSDDL'
 $OriginalRootSddl = [string](Get-Item -LiteralPath $RootSddlPath).Value
@@ -1336,6 +1354,12 @@ Remove-LocalUser -Name $NetworkProbeUser
 Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex `
     -NetworkCategory $OriginalNetworkCategory
 Restart-Service WinRM -Force
+if (-not $OriginalWinRmWasRunning) { Stop-Service WinRM -Force }
+Set-Service WinRM -StartupType $OriginalWinRmStartMode
+if ($null -ne (Get-ItemProperty -LiteralPath $TokenFilterPath `
+        -Name $TokenFilterProperty -ErrorAction SilentlyContinue)) {
+    throw 'Cleanup failed: LocalAccountTokenFilterPolicy was created.'
+}
 ```
 
 Then return to the guest's elevated console:

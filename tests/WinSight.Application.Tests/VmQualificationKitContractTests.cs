@@ -1,4 +1,5 @@
 using Xunit;
+using CliContract = WinSight.Application.CliContract;
 
 namespace WinSight.Application.Tests;
 
@@ -77,7 +78,10 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("[switch]$NetworkLogon", script, StringComparison.Ordinal);
         Assert.Contains("'S-1-5-2'", script, StringComparison.Ordinal);
         Assert.Contains("'S-1-5-4'", script, StringComparison.Ordinal);
-        Assert.Contains("$networkRun.ExitCode -eq 3", script, StringComparison.Ordinal);
+        Assert.Contains(
+            $"$networkRun.ExitCode -eq {CliContract.ServiceUnavailable}",
+            script,
+            StringComparison.Ordinal);
         Assert.Contains("$networkRun.Available -eq 'false'", script, StringComparison.Ordinal);
         Assert.Contains("$networkRun.Outcome -eq 'ServiceUnavailable'", script, StringComparison.Ordinal);
         Assert.Contains("$networkRun.Mutation -eq 'none'", script, StringComparison.Ordinal);
