@@ -11,11 +11,14 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
+| Published v0.12.0 supply chain and x64 installer smoke | PASS: 6/6 checksums, 8/8 provenance/SBOM attestations, x64/Arm64 PE identity, x64 install/MCP/EN-FR-ES smoke/uninstall and zero residue | `b1c46ee` / tag `v0.12.0` | release `33497585184` PASS | [record](2026-09-01-v0.12.0-published-release.md) |
 | v0.12.0 installer, WFP/SCM, trust, local/Network IPC, ETW recovery and final cleanup | PASS: 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer, ETW orphan/SCM/Ctrl+C recovery | `dbaded1` | CI `33416259797` + CodeQL `33416257089` PASS on the exact candidate | [record](2026-09-01-x64-qualification-dbaded1.md) |
 | Dashboard settings layout, EN/FR/ES smoke, installer and Windows-security posture | PASS: exact ZIP/dashboard hashes, 4 equal 244 px buttons in 2-by-2 layout, centred local-analysis badge | `3912d67` | CI `32789592412` + CodeQL `32789591166` PASS on successor `8230aa9` | [record](2026-08-25-ui-windows-posture-3912d67.md) |
 | ETW lifecycle, WFP/SCM, trust, local/Network IPC, installer and final cleanup | PASS: 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | `8486155` | CI `32664937545` + CodeQL `32664935397` PASS on successor `eed27a1`; local artifact hashes recorded | [record](2026-08-23-x64-qualification-8486155.md) |
 
-The `dbaded1` campaign is the current complete v0.12.0 native-x64 qualification. The `3912d67`
+The published-release record closes the checksum, attestation and x64 installer-smoke gate for the
+actual v0.12.0 downloads. The `dbaded1` campaign is the current complete v0.12.0 native-x64
+privileged-runtime qualification. The `3912d67`
 record qualifies its earlier dashboard/package surface only; it deliberately does not
 claim that privileged WFP/SCM gates were rerun. The `8486155` campaign exercised the current dynamic
 WFP/SCM and ETW surfaces, exact protected-path trust,
