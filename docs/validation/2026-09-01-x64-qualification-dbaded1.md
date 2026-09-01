@@ -84,5 +84,7 @@ Release tests, strict formatting, a zero-warning Release build, and the NuGet vu
   WFP/SCM/trust/IPC/session behavior remains `NOT_RUN` until suitable isolated hardware is
   available.
 - x64-on-Arm64 application-identity behavior remains `NOT_RUN` for the same hardware reason.
-- Published v0.12.0 release assets require their own checksum, provenance, installer and smoke
-  verification; this record qualifies the CI candidate, not bytes that have not yet been published.
+- Published v0.12.0 release assets were subsequently verified separately for checksums, provenance,
+  SBOM attestations, architecture, x64 installation and EN/FR/ES smoke. See
+  [`2026-09-01-v0.12.0-published-release.md`](2026-09-01-v0.12.0-published-release.md). This record
+  continues to qualify the earlier privileged CI candidate rather than claiming identical bytes.

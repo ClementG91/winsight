@@ -5,7 +5,7 @@ for one commit or package does not qualify different executable bytes.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **The v0.12.0 CI candidate is production-ready under the documented unsigned-distribution policy.** Exact candidate `dbaded1` passed CI, installer, WFP/SCM, trust, local/Network IPC, ETW recovery and final cleanup. Published release assets still require their separate post-publication verification. |
+| **x64** | **The published v0.12.0 release is production-ready under the documented unsigned-distribution policy.** Exact candidate `dbaded1` passed CI, installer, WFP/SCM, trust, local/Network IPC, ETW recovery and final cleanup; the published downloads separately passed checksum, attestation, architecture and installer-smoke verification. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
@@ -35,6 +35,16 @@ Logon gate are recorded in
 [`validation/2026-09-01-x64-qualification-dbaded1.md`](validation/2026-09-01-x64-qualification-dbaded1.md).
 This statement qualifies the named CI candidate. It does not pre-qualify differently hashed release
 assets or privileged Arm64 behavior.
+
+## Published v0.12.0 verification
+
+Release workflow `33497585184` passed and published tag `v0.12.0` from main commit
+`b1c46eef53dbdc33d8da5498c6fae3a74bcad027`. All six downloaded artifacts matched their published
+SHA-256 files. SLSA provenance and SPDX 2.2 attestation verification passed for both ZIPs and both
+installers. Extracted x64 and Arm64 executables had their expected PE identities, and the downloaded
+x64 setup passed installation, exact version, MCP, EN/FR/ES dashboard smoke, uninstall and
+no-residue checks in the native Windows 11 VM. The exact hashes and method are recorded in
+[`validation/2026-09-01-v0.12.0-published-release.md`](validation/2026-09-01-v0.12.0-published-release.md).
 
 ## Last fully qualified x64 runtime baseline
 
@@ -93,9 +103,7 @@ installer packages. CodeQL run `32789591166` passed its C# and Actions analyses.
 
 ## Remaining gates
 
-- green CI and CodeQL after the validation-only follow-up is merged, followed by separate
-  checksum, provenance, installer and smoke verification of the published release artifacts because
-  CI and release packages are not bit-for-bit interchangeable;
+- green CI and CodeQL after this validation-only follow-up is merged;
 - independent human EN/FR/ES presentation review remains recommended; the project owner has reviewed
   the French flow interactively, while EN/ES have automated layout/resource and smoke coverage;
 - native Arm64 privileged WFP/SCM/trust/IPC/session qualification when suitable hardware is available;
