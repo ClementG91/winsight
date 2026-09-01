@@ -176,7 +176,7 @@ unit tests do not qualify this feature for production.
 Verify a download in PowerShell:
 
 ```powershell
-$artifact = "winsight-v0.11.6-win-x64-setup.exe"
+$artifact = "winsight-v0.12.1-win-x64-setup.exe"
 $line = [IO.File]::ReadAllText("$artifact.sha256").TrimEnd("`r", "`n")
 $match = [regex]::Match($line, '^(?<hash>[0-9a-f]{64})  (?<name>[^\\/]+)$')
 if (-not $match.Success -or $match.Groups['name'].Value -cne $artifact) {
@@ -196,10 +196,10 @@ protect integrity and provenance, but they are not a substitute for Authenticode
 
 ```powershell
 # Per-user, silent, no automatic launch
-./winsight-v0.11.6-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+./winsight-v0.12.1-win-x64-setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 
 # Explicit language: english, french, or spanish
-./winsight-v0.11.6-win-x64-setup.exe /LANG=french
+./winsight-v0.12.1-win-x64-setup.exe /LANG=french
 ```
 
 Use the architecture-specific artifact in deployment tooling. Do not redistribute

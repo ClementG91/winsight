@@ -40,10 +40,10 @@ dotnet test winsight.sln -c Release --no-build
 The full release candidate can be reproduced with:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.11.6 -Architectures x64 -DisableSignature
+./scripts/Build-Release.ps1 -Version 0.12.1 -Architectures x64 -DisableSignature
 ./scripts/Test-Installer.ps1 `
-  -InstallerPath out/release/winsight-v0.11.6-win-x64-setup.exe `
-  -Version 0.11.6 -Architecture x64
+  -InstallerPath out/release/winsight-v0.12.1-win-x64-setup.exe `
+  -Version 0.12.1 -Architecture x64
 ```
 
 Developer workstations build and exercise x64 only. Native Arm64 build, full tests, packaging and

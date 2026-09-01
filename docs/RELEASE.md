@@ -53,7 +53,7 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-Every public release to date, through v0.11.6, is unsigned. The signed
+Every public release to date, through v0.12.1, is unsigned. The signed
 Authenticode production chain has never been exercised end to end. SignPath Foundation declined the
 free-program application on 2026-07-29 because the project does not yet have sufficient public
 adoption and independent visibility.
@@ -190,7 +190,11 @@ The v0.12.0 native-x64 candidate `dbaded1` has a candidate-bound VM record cover
 WFP/SCM, trust, local/Network IPC, ETW/session recovery and final cleanup. Exact CI `33416259797`
 and CodeQL `33416257089` passed, including native Arm64 build/test/package/installer. The earlier
 dashboard candidate `3912d67` separately passed Windows 11 VM layout, posture and EN/FR/ES smoke
-checks. An independent EN/FR/ES presentation review
+checks. Release workflow `33497585184` then published v0.12.0; all six downloaded assets matched
+their checksum files, provenance/SBOM verification passed, and the published x64 installer passed
+install, MCP, EN/FR/ES smoke, uninstall and no-residue checks. See
+[`validation/2026-09-01-v0.12.0-published-release.md`](validation/2026-09-01-v0.12.0-published-release.md).
+An independent EN/FR/ES presentation review
 remains recommended; the French flow has project-owner review and all languages have automated
 resource/layout and smoke coverage. Privileged Arm64 and x64-on-Arm64 identity remain hardware-bound
 gates for Arm64 production claims. The Authenticode result must match the explicit repository

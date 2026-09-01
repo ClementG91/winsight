@@ -37,6 +37,8 @@
   <data name="FlaggedOnlyTooltip" xml:space="preserve"><value>Hides normal items to reduce noise.</value></data>
   <data name="StartAnalysis" xml:space="preserve"><value>Start analysis</value></data>
   <data name="StartAnalysisAutomation" xml:space="preserve"><value>Start the selected security analysis</value></data>
+  <data name="RefreshAnalysis" xml:space="preserve"><value>Refresh analysis</value></data>
+  <data name="RefreshAnalysisAutomation" xml:space="preserve"><value>Refresh the selected security analysis</value></data>
   <data name="OpenWindowsTool" xml:space="preserve"><value>Open Windows tool</value></data>
   <data name="OpenStartupSettings" xml:space="preserve"><value>Open Startup apps</value></data>
   <data name="OpenPrivacySettings" xml:space="preserve"><value>Open privacy settings</value></data>
@@ -52,6 +54,8 @@
   <data name="ReadySummary" xml:space="preserve"><value>Ready. Select an analysis, then click Start.</value></data>
   <data name="RunThisAnalysis" xml:space="preserve"><value>Run “{0}” to display its own results.</value></data>
   <data name="NoAnalysisForTool" xml:space="preserve"><value>No result from another category is shown here. Start this check or run the overview.</value></data>
+  <data name="NoOverviewResults" xml:space="preserve"><value>Run the overview once to reuse its results in every included category.</value></data>
+  <data name="NotIncludedInOverview" xml:space="preserve"><value>This specialized check is not included in the overview. Run it once to display and retain its results.</value></data>
   <data name="ReportPickerAutomation" xml:space="preserve"><value>Displayed report</value></data>
   <data name="ResultsAutomation" xml:space="preserve"><value>Security results</value></data>
   <data name="PriorityHeader" xml:space="preserve"><value>Priority</value></data>
@@ -139,7 +143,7 @@
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Overview</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>The recommended one-click check</value></data>
-  <data name="ToolOverviewDescription" xml:space="preserve"><value>Checks the main signals: startup items, camera/microphone, connections, DNS, extensions, hosts and certificates.</value></data>
+  <data name="ToolOverviewDescription" xml:space="preserve"><value>Runs 10 recommended checks: startup items, antivirus, connections, DNS, extensions, hosts, certificates, input hooks, code integrity and system hijacks.</value></data>
   <data name="ToolOverviewGuidance" xml:space="preserve"><value>Start with “Needs attention” rows. An alert is a clue: check the name, location and publisher before taking action.</value></data>
   <data name="ToolPersistenceLabel" xml:space="preserve"><value>Automatic startup</value></data>
   <data name="ToolPersistenceShort" xml:space="preserve"><value>What starts with Windows</value></data>

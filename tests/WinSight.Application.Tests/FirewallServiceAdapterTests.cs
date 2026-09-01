@@ -64,6 +64,24 @@ public sealed class FirewallServiceAdapterTests
     }
 
     [Fact]
+    public void BuildReport_FlaggedOnly_OmitsHealthyStatusAndSettledPolicies()
+    {
+        var seen = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);
+        var view = new FirewallServiceView(
+            ServiceAvailable: true,
+            OutboundFirewallMode.AuditOnly,
+            EnforcementEnabled: false,
+            [new AppFirewallPolicy(@"C:\apps\ruled.exe", OutboundAction.Allow)],
+            [new PendingOutboundApp(@"C:\apps\unknown.exe", "1.2.3.4:443", seen, seen, 1)]);
+
+        var report = FirewallServiceAdapter.BuildReport(view, flaggedOnly: true);
+
+        var pending = Assert.Single(report.Items);
+        Assert.Equal("pending", pending.Fields["kind"]);
+        Assert.Equal(Severity.Notable, pending.Severity);
+    }
+
+    [Fact]
     public void BuildReport_PendingApp_CarriesTheEvidenceADecisionNeeds()
     {
         var first = new DateTimeOffset(2026, 7, 16, 12, 0, 0, TimeSpan.Zero);

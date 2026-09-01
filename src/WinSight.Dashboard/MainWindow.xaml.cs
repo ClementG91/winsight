@@ -25,9 +25,9 @@ public partial class MainWindow : Window, IDisposable
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ToolStripItem _openTrayItem;
     private readonly Forms.ToolStripItem _exitTrayItem;
-    private IReadOnlyList<ToolReport> _reports = [];
+    private readonly DashboardReportCache _reportCache = new();
     private IReadOnlyList<ToolReport> _visibleReports = [];
-    private string? _lastScanCommand;
+    private string? _progressCommand;
     private FirewallServiceView? _latestFirewallView;
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
@@ -525,7 +525,6 @@ public partial class MainWindow : Window, IDisposable
         SetScanningState(tool, scanning: true);
         ResultsGrid.ItemsSource = null;
         _visibleReports = [];
-        _lastScanCommand = null;
         ExportButton.IsEnabled = false;
         CopyButton.IsEnabled = false;
         OpenLocationButton.IsEnabled = false;
@@ -540,26 +539,27 @@ public partial class MainWindow : Window, IDisposable
                 // the service is not installed this degrades to "unavailable".
                 var view = await _firewallGateway.GetViewAsync(cancellation.Token);
                 _latestFirewallView = view;
-                _reports = [FirewallServiceAdapter.BuildReport(view)];
+                StoreFirewallReports(view);
             }
             else if (tool.Command == "all")
             {
                 var progress = new Progress<ScanProgress>(UpdateProgress);
-                _reports = await Task.Run(
+                var reports = await Task.Run(
                     () => Adapters.RunOverview(flaggedOnly, progress, cancellationToken: cancellation.Token),
                     cancellation.Token);
+                _reportCache.StoreOverview(reports, flaggedOnly);
             }
             else
             {
-                _reports = await Task.Run(
-                    () => (IReadOnlyList<ToolReport>)[Adapters.Run(
+                var report = await Task.Run(
+                    () => Adapters.Run(
                         tool.Command,
                         flaggedOnly,
-                        cancellationToken: cancellation.Token)],
+                        cancellationToken: cancellation.Token),
                     cancellation.Token);
+                _reportCache.Store(report, flaggedOnly);
             }
 
-            _lastScanCommand = tool.Command;
             ShowToolContext(tool);
             ScanProgressBar.IsIndeterminate = false;
             ScanProgressBar.Value = 100;
@@ -567,22 +567,19 @@ public partial class MainWindow : Window, IDisposable
         }
         catch (OperationCanceledException)
         {
-            _reports = [];
-            _lastScanCommand = null;
+            ShowToolContext(tool);
             SummaryText.Text = Text["ScanCancelledSummary"];
             ProgressText.Text = Text["ProgressCancelled"];
         }
         catch (UnauthorizedAccessException)
         {
-            _reports = [];
-            _lastScanCommand = null;
+            ShowToolContext(tool);
             SummaryText.Text = Text["InsufficientSummary"];
             ProgressText.Text = Text["ProgressInsufficient"];
         }
         catch (Exception ex)
         {
-            _reports = [];
-            _lastScanCommand = null;
+            ShowToolContext(tool);
             SummaryText.Text = Text.Format("ScanFailed", ex.Message);
             ProgressText.Text = Text["UnexpectedError"];
         }
@@ -604,7 +601,13 @@ public partial class MainWindow : Window, IDisposable
         FlaggedOnly.IsEnabled = !scanning;
         LanguagePicker.IsEnabled = !scanning;
         SettingsButton.IsEnabled = !scanning;
-        ProgressPanel.Visibility = scanning || _reports.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (scanning)
+        {
+            _progressCommand = tool.Command;
+        }
+        ProgressPanel.Visibility = scanning || string.Equals(_progressCommand, tool.Command, StringComparison.OrdinalIgnoreCase)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
         // Cancel is offered for every scan, not only the overview. The single longest scan in the
         // product is `modules` - measured at 9 991 modules across 155 processes - and it was the one
         // an operator could not stop, while the business layer had accepted a cancellation token all
@@ -651,6 +654,14 @@ public partial class MainWindow : Window, IDisposable
         }
     }
 
+    private void FlaggedOnly_Changed(object sender, RoutedEventArgs e)
+    {
+        if (!_initializing && ToolPicker.SelectedItem is DashboardTool tool)
+        {
+            ShowToolContext(tool);
+        }
+    }
+
     private void LanguagePicker_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_initializing || LanguagePicker.SelectedItem is not UiLanguage language)
@@ -681,7 +692,15 @@ public partial class MainWindow : Window, IDisposable
     private void ShowToolContext(DashboardTool tool)
     {
         ShowToolExplanation(tool);
-        var selection = DashboardReportRouter.Select(tool, _lastScanCommand, _reports);
+        var selection = _reportCache.Select(tool, FlaggedOnly.IsChecked == true);
+        ProgressPanel.Visibility = string.Equals(_progressCommand, tool.Command, StringComparison.OrdinalIgnoreCase)
+                                   && (_scanCancellation is not null || selection.Available)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        ScanButton.Content = Text[selection.Available ? "RefreshAnalysis" : "StartAnalysis"];
+        System.Windows.Automation.AutomationProperties.SetName(
+            ScanButton,
+            Text[selection.Available ? "RefreshAnalysisAutomation" : "StartAnalysisAutomation"]);
 
         // The interactive firewall controls appear for the firewall tool once a status has
         // been read (a scan happened). They stay visible even when the service is
@@ -699,7 +718,13 @@ public partial class MainWindow : Window, IDisposable
             _visibleReports = [];
             ResultsGrid.ItemsSource = null;
             SummaryText.Text = Text.Format("RunThisAnalysis", tool.Label);
-            SelectedFindingText.Text = Text["NoAnalysisForTool"];
+            SelectedFindingText.Text = tool.Command switch
+            {
+                "all" => Text["NoOverviewResults"],
+                _ when Adapters.OverviewCommands.Contains(tool.Command, StringComparer.OrdinalIgnoreCase) =>
+                    Text["NoAnalysisForTool"],
+                _ => Text["NotIncludedInOverview"],
+            };
             CopyButton.IsEnabled = false;
             OpenLocationButton.IsEnabled = false;
             ExportButton.IsEnabled = false;
@@ -1036,13 +1061,20 @@ public partial class MainWindow : Window, IDisposable
     {
         var view = await _firewallGateway.GetViewAsync(CancellationToken.None);
         _latestFirewallView = view;
-        _reports = [FirewallServiceAdapter.BuildReport(view)];
-        _lastScanCommand = FirewallServiceAdapter.ReportTool;
+        StoreFirewallReports(view);
         if (ToolPicker.SelectedItem is DashboardTool tool && tool.Command == FirewallServiceAdapter.ReportTool)
         {
             ShowToolContext(tool);
         }
         return view;
+    }
+
+    private void StoreFirewallReports(FirewallServiceView view)
+    {
+        // One authenticated IPC read supplies both presentations. Toggling the display filter must
+        // neither perform a hidden network-control operation nor make the controls disappear.
+        _reportCache.Store(FirewallServiceAdapter.BuildReport(view, flaggedOnly: false), flaggedOnly: false);
+        _reportCache.Store(FirewallServiceAdapter.BuildReport(view, flaggedOnly: true), flaggedOnly: true);
     }
 
     private void UpdateFirewallEnableControl(FirewallServiceView? view)
@@ -1120,8 +1152,8 @@ public partial class MainWindow : Window, IDisposable
         TryUserAction(
             () =>
             {
-                _reports = [Adapters.Run(AlertsCommand, flaggedOnly: false)];
-                _lastScanCommand = AlertsCommand;
+                _reportCache.Store(Adapters.Run(AlertsCommand, flaggedOnly: false), flaggedOnly: false);
+                FlaggedOnly.IsChecked = false;
                 // Assigning the selection only refreshes the grid when it actually changes, so the
                 // context is shown explicitly for the case where Alerts was already the open tool.
                 ToolPicker.SelectedItem = alertsTool;

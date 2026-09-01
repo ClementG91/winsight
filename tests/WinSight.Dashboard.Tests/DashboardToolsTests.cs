@@ -65,47 +65,56 @@ public sealed class DashboardWindowsActionsTests
     }
 }
 
-[Collection(LocalizationCollection.Name)]
-public sealed class DashboardReportRouterTests
+public sealed class DashboardReportCacheTests
 {
-    private static readonly ToolReport Persistence = new("persistence", "one", []);
-    private static readonly ToolReport Connections = new("connections", "two", []);
+    private static readonly ToolReport Persistence = new("persistence", "startup", []);
+    private static readonly ToolReport Connections = new("connections", "network", []);
+    private static readonly ToolReport Firewall = new("firewall", "firewall", []);
 
     [Fact]
-    public void OverviewScan_FeedsOverviewAndOnlyTheSelectedCategory()
+    public void IndividualScan_DoesNotDiscardOverviewOrItsCategories()
     {
-        var reports = new[] { Persistence, Connections };
+        var cache = new DashboardReportCache();
+        cache.StoreOverview([Persistence, Connections], flaggedOnly: true);
+        cache.Store(Firewall, flaggedOnly: true);
 
-        var overview = DashboardReportRouter.Select(DashboardTools.ForCommand("all")!, "all", reports);
-        var network = DashboardReportRouter.Select(DashboardTools.ForCommand("net")!, "all", reports);
+        var overview = cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: true);
+        var persistence = cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: true);
+        var firewall = cache.Select(DashboardTools.ForCommand("firewall")!, flaggedOnly: true);
 
-        Assert.True(overview.Available);
-        Assert.True(overview.Categorize);
-        Assert.Equal(reports, overview.Reports);
-        Assert.False(network.Categorize);
-        Assert.Equal([Connections], network.Reports);
+        Assert.Equal([Persistence, Connections], overview.Reports);
+        Assert.Equal([Persistence], persistence.Reports);
+        Assert.Equal([Firewall], firewall.Reports);
     }
 
     [Fact]
-    public void CategoryWithoutReport_DoesNotReuseAnotherCategory()
+    public void RefreshingIncludedCategory_UpdatesOverviewWithoutDiscardingOtherReports()
     {
-        var selection = DashboardReportRouter.Select(
-            DashboardTools.ForCommand("net")!,
-            "persistence",
-            [Persistence]);
+        var refreshedPersistence = Persistence with { Summary = "refreshed" };
+        var cache = new DashboardReportCache();
+        cache.StoreOverview([Persistence, Connections], flaggedOnly: true);
 
-        Assert.False(selection.Available);
-        Assert.Empty(selection.Reports);
+        cache.Store(refreshedPersistence, flaggedOnly: true);
+
+        Assert.Equal(
+            [refreshedPersistence, Connections],
+            cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: true).Reports);
     }
 
     [Fact]
-    public void Overview_DoesNotMisrepresentASingleScanAsACompleteOverview()
+    public void FilterModes_HaveIndependentHonestCaches()
     {
-        var selection = DashboardReportRouter.Select(
-            DashboardTools.ForCommand("all")!,
-            "persistence",
-            [Persistence]);
+        var allPersistence = Persistence with { Summary = "all items" };
+        var cache = new DashboardReportCache();
+        cache.StoreOverview([Persistence], flaggedOnly: true);
+        cache.Store(allPersistence, flaggedOnly: false);
 
-        Assert.False(selection.Available);
+        Assert.Equal(
+            [Persistence],
+            cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: true).Reports);
+        Assert.Equal(
+            [allPersistence],
+            cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: false).Reports);
+        Assert.False(cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: false).Available);
     }
 }

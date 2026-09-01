@@ -22,8 +22,8 @@ public static class FirewallServiceAdapter
     /// </summary>
     public static IFirewallPostureReader CreatePostureReader() => new FirewallPostureReader(CreateGateway());
 
-    /// <summary>Maps a service view into a report: one status line plus one line per policy.</summary>
-    public static ToolReport BuildReport(FirewallServiceView view)
+    /// <summary>Maps a service view into a report, optionally retaining only actionable rows.</summary>
+    public static ToolReport BuildReport(FirewallServiceView view, bool flaggedOnly = false)
     {
         ArgumentNullException.ThrowIfNull(view);
         var builder = new ToolReport.Builder(ReportTool);
@@ -31,19 +31,22 @@ public static class FirewallServiceAdapter
         var statusNotable = !view.ServiceAvailable
             || view.EffectiveState == FirewallEnforcementState.Degraded
             || view.UnrecordedApps > 0;
-        builder.Add(
-            statusNotable ? Severity.Notable : Severity.Info,
-            "service",
-            view.ServiceAvailable ? view.EffectiveState.ToString() : "Unavailable",
-            new Dictionary<string, string?>
-            {
-                ["kind"] = "status",
-                ["available"] = view.ServiceAvailable.ToString(),
-                ["mode"] = view.Mode.ToString(),
-                ["enforcement"] = view.EnforcementEnabled.ToString(),
-                ["effectiveState"] = view.EffectiveState.ToString(),
-                ["unrecorded"] = view.UnrecordedApps.ToString(System.Globalization.CultureInfo.InvariantCulture),
-            });
+        if (!flaggedOnly || statusNotable)
+        {
+            builder.Add(
+                statusNotable ? Severity.Notable : Severity.Info,
+                "service",
+                view.ServiceAvailable ? view.EffectiveState.ToString() : "Unavailable",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "status",
+                    ["available"] = view.ServiceAvailable.ToString(),
+                    ["mode"] = view.Mode.ToString(),
+                    ["enforcement"] = view.EnforcementEnabled.ToString(),
+                    ["effectiveState"] = view.EffectiveState.ToString(),
+                    ["unrecorded"] = view.UnrecordedApps.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                });
+        }
 
         // An app that reached the network with nobody having ruled on it is the one thing here that
         // genuinely wants a human, so it is Notable: it survives the "only what needs attention"
@@ -65,7 +68,9 @@ public static class FirewallServiceAdapter
                 });
         }
 
-        foreach (var policy in view.Policies.OrderBy(p => p.ExecutablePath, StringComparer.OrdinalIgnoreCase))
+        foreach (var policy in view.Policies
+                     .Where(_ => !flaggedOnly)
+                     .OrderBy(p => p.ExecutablePath, StringComparer.OrdinalIgnoreCase))
         {
             builder.Add(
                 Severity.Info,

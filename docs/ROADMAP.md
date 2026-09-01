@@ -38,12 +38,13 @@ Deliberate constraints, chosen to avoid building an EDR nobody asked for:
 Persistence scanner, camera and mic monitor, connection and DNS monitors, unified dashboard, shared
 signature and reputation helper.
 
-### Phase 2 - outbound firewall *(shipped; v0.12.0 x64 candidate qualified)*
+### Phase 2 - outbound firewall *(shipped; published v0.12.0 x64 qualified)*
 
 Per-application outbound control on WFP: an unprivileged dashboard driving a privileged LocalSystem
 service over authenticated local IPC. Opt-in enforcement that persists and survives reboot.
 The v0.12.0 candidate passed dynamic WFP/SCM, trust, local and Network Logon IPC, service/ETW
-recovery, installer lifecycle and cleanup on isolated native-x64 VMs; see
+recovery, installer lifecycle and cleanup on isolated native-x64 VMs. The published x64 artifacts
+then passed checksum, provenance/SBOM, installer, MCP, EN/FR/ES smoke and no-residue verification; see
 [`validation/`](validation/README.md). Native Arm64 privileged behavior remains a separate
 hardware-bound gate.
 
