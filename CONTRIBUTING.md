@@ -59,6 +59,8 @@ published MCP tool remains read-only and non-destructive.
 ## Coding standards
 
 - Follow `.editorconfig` and the existing style; `TreatWarningsAsErrors` is on.
+- Write repository documentation in English. Product translations belong only in localization
+  resources and installer language files; do not embed localized UI labels in documentation.
 - Add tests: pure logic as unit tests, real-system behavior as integration tests.
 - Native interop stays behind an interface with a managed fallback where practical.
 - Architecture-specific code needs native x64 and Arm64 coverage or a documented,

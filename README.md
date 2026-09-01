@@ -51,10 +51,10 @@ traffic at the kernel filtering layer.
 
 | Tool | Objective-See equivalent | What it tells you |
 |---|---|---|
-| **Persistence scanner** | KnockKnock | 26 autostart surfaces, catalog-aware Authenticode verdicts, command-line triage for signed interpreters handed someone else's payload, optional VirusTotal enrichment |
+| **Persistence scanner** | KnockKnock | 27 autostart surfaces, catalog-aware Authenticode verdicts, command-line triage for signed interpreters handed someone else's payload, optional VirusTotal enrichment |
 | **Outbound firewall** | LuLu | Per-application block/allow enforced through the Windows Filtering Platform; audit-only until you arm it |
 | **Guardian** | BlockBlock | Live tray alert the moment a new startup item appears, plus reconciliation of what changed while WinSight was not running |
-| **Ransomware detection** | RansomWhere? | Hidden decoy files, rename/delete-burst and entropy-on-write heuristics |
+| **Ransomware detection** | RansomWhere? | Visible machine-varied decoy files, rename/delete-burst and entropy-on-write heuristics |
 | **Camera & mic monitor** | OverSight | Which process turned the webcam or microphone on |
 | **Connections & DNS** | Netiquette, DNSMonitor | Live outbound connections and DNS queries, attributed to processes |
 | **Signature verification** | What's Your Sign? | Authenticode verdicts with catalog fallback, used by every tool |
@@ -77,7 +77,9 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
 - **Dashboard** - a WPF desktop and tray application, in **English, French and Spanish**. Every check
   explains what it observes and what an alert means.
 - **Command line** - 18 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
-  notable, so it drops straight into a scheduled task:
+  notable, so it drops straight into a scheduled task. `--json` emits a versioned envelope -
+  `{ "schemaVersion": 1, "generatedAt": ..., "reports": [...] }` - so a stored report says when it
+  was true and a consumer can tell which contract produced it:
 
   ```
   winsight [persistence|av|net|dns|all]   run checks (default: all)
@@ -182,7 +184,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | Runtime candidate `8486155` passed the complete native VM security campaign; exact dashboard/package candidate `3912d67` passed Windows 11 VM layout, posture and EN/FR/ES smoke checks; successor `8230aa9` passed CI `32789592412` and CodeQL `32789591166` |
+| **x64** | v0.12.0 candidate `dbaded1` passed the complete native VM security campaign and exact CI `33416259797`; CodeQL `33416257089` also passed |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 > **CodeQL runs through GitHub's default setup, not a workflow in this repository.** The run IDs
@@ -194,14 +196,16 @@ each run bound to the commit and CI run that built it:
 
 | Gate | Result | Record |
 |---|---|---|
+| Current v0.12.0 x64 installer, ETW, WFP/SCM, trust, local/Network IPC and cleanup | PASS | [record](docs/validation/2026-09-01-x64-qualification-dbaded1.md) |
 | WFP enforcement, SCM, rollback, per-app scoping | 25 checks, 0 failures | [record](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md) |
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
-| Current x64 ETW, WFP/SCM, trust, local/Network IPC, installer and cleanup | 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | [record](docs/validation/2026-08-23-x64-qualification-8486155.md) |
+| Historical v0.11.6 x64 ETW, WFP/SCM, trust, local/Network IPC, installer and cleanup | 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | [record](docs/validation/2026-08-23-x64-qualification-8486155.md) |
 | Exact dashboard settings layout, posture interpretation, installer and EN/FR/ES smoke | PASS | [record](docs/validation/2026-08-25-ui-windows-posture-3912d67.md) |
 
-Each record qualifies its exact candidate. The 2026-08-23 campaign closes the former IPC-path,
-Network Logon, host-control and current WFP/SCM/session gaps on native x64. The 2026-08-25 record
+Each record qualifies its exact candidate. The 2026-09-01 campaign qualifies the current v0.12.0
+native-x64 candidate. The 2026-08-23 campaign closed the former IPC-path, Network Logon and
+host-control gaps; the 2026-08-25 record
 qualifies only the changed dashboard/package surface and does not pretend to rerun those privileged
 gates. Native Arm64 privileged gates, x64-on-Arm64 identity and independent EN/FR/ES review remain
 open; the latter is recommended rather than a technical publication gate.
@@ -240,7 +244,11 @@ dotnet run --project src/WinSight.Dashboard
 To reproduce the full release payload, including SBOM, installer and signing stage:
 
 ```powershell
-./scripts/Build-Release.ps1 -Version 0.11.6 -Architectures x64 -DisableSignature
+[xml]$props = Get-Content Directory.Build.props
+./scripts/Build-Release.ps1 `
+  -Version $props.Project.PropertyGroup.Version `
+  -Architectures x64 `
+  -DisableSignature
 ```
 
 The build script restores the pinned Microsoft SBOM tool and installs the pinned Inno Setup compiler

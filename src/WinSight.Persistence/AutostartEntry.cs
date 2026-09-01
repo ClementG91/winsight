@@ -31,10 +31,19 @@ public enum AutostartVector
     SecurityProvider,
     JustInTimeDebugger,
     PowerShellProfile,
+    ProfilerInjection,
     // Still not enumerated, named here rather than left implicit: Winsock LSP catalog entries
     // (their DLL path lives inside a packed binary blob), shell extension handlers,
     // Winlogon\Notify (which modern Windows no longer executes), Group Policy scripts and Office
     // add-ins.
+    //
+    // BITS transfer jobs (T1197) are a real surface and are deliberately declared here rather than
+    // half-implemented. A job's notify command line is reachable only through the
+    // IBackgroundCopyManager COM interfaces, enumerating other users' jobs requires elevation, and
+    // neither the interop nor the elevated path can be exercised on a development machine without
+    // creating BITS jobs on it. Shipping untested COM interop that reaches a privileged enumeration
+    // is worse than saying it is not covered - and saying so is what lets somebody decide whether
+    // they need it.
     // Note: installed shim databases (.sdb) are intentionally NOT enumerated here: a .sdb is
     // never Authenticode-signed, so the signature model would flag every legitimate shim as
     // "unsigned/suspicious" (a guaranteed false positive). Revisit only with an info-only,
@@ -134,12 +143,37 @@ public sealed record AutostartEntry(
     /// character <c>U</c>). An unresolvable autostart command is rare, and each one is exactly the
     /// case where no signature verdict exists to speak for the entry.
     /// </remarks>
-    public bool IsSuspicious =>
-        Status is PersistenceStatus.FileMissing
-            or PersistenceStatus.Unsigned
-            or PersistenceStatus.InvalidSignature
-            or PersistenceStatus.AccessDenied
-        || ImageStatus is ImageResolutionStatus.Unresolved
+    public bool IsSuspicious => IsUnverified || IsAdverse;
+
+    /// <summary>
+    /// True when the entry's check could not complete: the target is not on disk, could not be
+    /// opened, or the command names nothing resolvable. Nothing is known about it either way.
+    /// </summary>
+    /// <remarks>
+    /// <b>Split out because these are not findings.</b> They were reported at the same weight as an
+    /// unsigned DLL in an IFEO Debugger value, and an orphaned registration left by an OEM
+    /// uninstaller is far more common than a hijack - which made this the dominant source of noise
+    /// in the product. The distinction is the one the rest of the codebase already draws between
+    /// "I looked and found nothing" and "I could not look"; it simply had nowhere to land.
+    ///
+    /// Still surfaced, still worth reading, and deliberately not counted as something to examine.
+    /// </remarks>
+    public bool IsUnverified =>
+        Status is PersistenceStatus.FileMissing or PersistenceStatus.AccessDenied
+        || ImageStatus is ImageResolutionStatus.Unresolved;
+
+    /// <summary>
+    /// True when the check completed and what it found is adverse: an unsigned or untrusted image,
+    /// trust resting on a root any account can install, or a signed interpreter handed somebody
+    /// else's payload.
+    /// </summary>
+    public bool IsAdverse =>
+        Status is PersistenceStatus.Unsigned or PersistenceStatus.InvalidSignature
+        // A validly signed DLL is still a finding when it is registered to load into LSASS, the
+        // print spooler, the logon UI, or every process on the machine. Those surfaces are empty or
+        // Microsoft-only on an ordinary machine, and somebody else's code on one of them is how an
+        // attacker with a signing certificate reaches a process they could not otherwise touch.
+        || PrivilegedSurfaceTriage.IsForeignCodeInAPrivilegedHost(this)
         // "Signed and trusted" is worth no more than the root it chains to, and WinVerifyTrust
         // consults CurrentUser\Root - a store any account writes with no elevation. An implant
         // signed beneath a root imported that way read SignatureValid here, which defeated the

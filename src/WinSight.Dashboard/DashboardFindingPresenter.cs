@@ -366,8 +366,59 @@ public static class DashboardFindingPresenter
         {
             "Antivirus" => Antivirus(item, text),
             "Controlled Folder Access" => ControlledFolderAccess(item, text),
+            { } protection => Protection(item, text, protection),
             _ => new FindingPresentation(item.Title, item.Detail),
         };
+
+    /// <summary>
+    /// One kernel or boot protection, in the operator's language.
+    /// </summary>
+    /// <remarks>
+    /// <b>The regression this closes.</b> Only Antivirus and Controlled Folder Access were handled.
+    /// The other five - driver signature enforcement, test signing, memory integrity, Secure Boot and
+    /// the kernel debugger - fell through to <c>item.Detail</c>, which is the English source string.
+    /// <c>integrity</c> is in the default scan, so a French operator read a title spelled
+    /// <c>test-signing</c> followed by an English sentence, on the one check that reframes every
+    /// other kernel finding. The resource files were faultless; nothing connected the triage's
+    /// vocabulary to them.
+    ///
+    /// <b>Why the state and not just the concern.</b> A protection reaches the same verdict by
+    /// different routes: HVCI is a hardening gap both when it is not running and when it is in audit
+    /// mode, and "it reads as enabled while enforcing nothing" is the whole point of the second one.
+    /// Keying the sentence on the concern alone would have translated the finding by discarding it.
+    ///
+    /// <c>IntegrityLocalizationTests</c> walks every state the triage can produce and fails the
+    /// build on any without a key, which is the part that stops this recurring.
+    /// </remarks>
+    private static FindingPresentation Protection(
+        ReportItem item, LocalizationManager text, string protection)
+    {
+        var title = text.GetOrFallback(IntegrityTitleKey(protection), item.Title);
+        var state = Field(item, "state");
+        var detail = state is null
+            ? item.Detail
+            : text.GetOrFallback(IntegrityDetailKey(protection, state), item.Detail);
+        return new FindingPresentation(title, detail);
+    }
+
+    /// <summary>
+    /// The resource key naming a protection: <c>secure-boot</c> becomes
+    /// <c>IntegrityProtectionSecureBoot</c>.
+    /// </summary>
+    internal static string IntegrityTitleKey(string protection) =>
+        "IntegrityProtection" + Pascal(protection);
+
+    /// <summary>
+    /// The resource key explaining one sub-case: (<c>memory-integrity</c>, <c>audit</c>) becomes
+    /// <c>IntegrityStateMemoryIntegrityAudit</c>.
+    /// </summary>
+    internal static string IntegrityDetailKey(string protection, string state) =>
+        "IntegrityState" + Pascal(protection) + Pascal(state);
+
+    private static string Pascal(string identifier) =>
+        string.Concat(identifier
+            .Split('-', StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => char.ToUpperInvariant(part[0]) + part[1..].ToLowerInvariant()));
 
     private static FindingPresentation Antivirus(ReportItem item, LocalizationManager text)
     {

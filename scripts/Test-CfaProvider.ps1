@@ -102,6 +102,11 @@ $script:MaximumFixtureCharacters = 1048576
 $script:MaximumOperatingSystemFactCharacters = 256
 $script:LiveTimeoutMilliseconds = $TestCaptureTimeoutMilliseconds
 
+# The one contract version this script knows how to read. Bumping the CLI's schemaVersion without
+# updating this is meant to fail here: a validator that silently accepts a shape it was not written
+# against certifies nothing.
+$script:SupportedSchemaVersion = 1
+
 function Fail-Contract([string]$Message) {
     throw [System.InvalidOperationException]::new($Message)
 }
@@ -1045,33 +1050,74 @@ try {
     $probeResult = Get-Input $InputJsonPath $CliPath
     if ($probeResult.ExitCode -notin @(0, 1)) { Fail-Contract 'CLI exit code is not a documented report exit' }
     if (-not [string]::IsNullOrEmpty($probeResult.StdErr)) { Fail-Contract 'CLI wrote an unexpected stderr diagnostic' }
-    if ($probeResult.StdOut -notmatch '^\s*\[') { Fail-Contract 'CLI stdout is not a JSON report array' }
+    if ($probeResult.StdOut -notmatch '^\s*\{') { Fail-Contract 'CLI stdout is not a JSON report envelope' }
     Assert-NoDuplicateJsonMembers $probeResult.StdOut 'CLI stdout'
-    try {
-        $reports = @($probeResult.StdOut | ConvertFrom-Json)
-        # Windows PowerShell 5.1 preserves a JSON root array as one array object here,
-        # whereas newer PowerShell versions enumerate it. Normalize both behaviors.
-        if ($reports.Count -eq 1 -and $reports[0] -is [System.Array]) { $reports = @($reports[0]) }
-    }
+    try { $envelope = $probeResult.StdOut | ConvertFrom-Json }
     catch { Fail-Contract 'CLI stdout is malformed JSON' }
+    # The envelope is checked before anything inside it. A validator that reads the reports first and
+    # the version afterwards has already trusted a shape it has not confirmed it understands.
+    Assert-ExactProperties -Object $envelope -Expected @('schemaVersion', 'generatedAt', 'reports') -Name 'report envelope'
+    if ($envelope.schemaVersion -isnot [long] -and $envelope.schemaVersion -isnot [int]) {
+        Fail-Contract 'report envelope schemaVersion must be an integer'
+    }
+    # Refusing a version this script was not written against is the entire reason the version exists.
+    # Accepting an unknown one and hoping the shape still fits is how a contract validator ends up
+    # certifying a report it misread.
+    if ([int]$envelope.schemaVersion -ne $script:SupportedSchemaVersion) {
+        Fail-Contract 'report envelope schemaVersion is not the version this contract validates'
+    }
+    # ConvertFrom-Json coerces an ISO-8601 string into [datetime] on both Windows PowerShell 5.1 and
+    # PowerShell 7, so the value arrives already parsed and asserting it is a [string] would fail on
+    # a correct report. Accepting either form keeps the check on what matters - that it is a real
+    # instant and not a placeholder - rather than on which type the parser chose to hand back.
+    $generatedAt = [datetimeoffset]::MinValue
+    if ($envelope.generatedAt -is [datetime]) {
+        $generatedAt = [datetimeoffset]::new($envelope.generatedAt)
+    }
+    elseif ($envelope.generatedAt -is [string]) {
+        if (-not [datetimeoffset]::TryParse(
+                $envelope.generatedAt, [cultureinfo]::InvariantCulture,
+                [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$generatedAt)) {
+            Fail-Contract 'report envelope generatedAt is not a round-trip timestamp'
+        }
+    }
+    else {
+        Fail-Contract 'report envelope generatedAt is not a timestamp'
+    }
+    if ($generatedAt -eq [datetimeoffset]::MinValue) {
+        Fail-Contract 'report envelope generatedAt is a placeholder rather than a scan time'
+    }
+    $reports = @($envelope.reports)
+    # Windows PowerShell 5.1 preserves a JSON array as one array object here, whereas newer
+    # PowerShell versions enumerate it. Normalize both behaviors.
+    if ($reports.Count -eq 1 -and $reports[0] -is [System.Array]) { $reports = @($reports[0]) }
     if ($reports.Count -ne 1) { Fail-Contract 'CLI output must contain exactly one integrity report' }
     $report = $reports[0]
-    Assert-ExactProperties -Object $report -Expected @('tool', 'summary', 'items', 'notableCount') -Name 'integrity report'
+    Assert-ExactProperties -Object $report -Expected @('tool', 'summary', 'items', 'notableCount', 'unverifiedCount') -Name 'integrity report'
     if ($report.tool -cne 'integrity') { Fail-Contract 'report tool is not integrity' }
     Assert-String $report.summary 'report summary'
     $items = @($report.items)
     if ($items.Count -eq 1 -and $items[0] -is [System.Array]) { $items = @($items[0]) }
     $reportedNotableCount = Get-NonNegativeCount $report.notableCount 'notableCount'
+    $reportedUnverifiedCount = Get-NonNegativeCount $report.unverifiedCount 'unverifiedCount'
     $actualNotableCount = 0
+    $actualUnverifiedCount = 0
     foreach ($item in $items) {
         if ($null -eq $item -or @($item.PSObject.Properties | ForEach-Object { $_.Name }) -cnotcontains 'severity') {
             Fail-Contract 'report item is missing severity'
         }
-        Assert-ClosedValue -Value $item.severity -Allowed @('info', 'notable') -Name 'report item severity'
+        # 'unverified' is a reading, not a finding: a protection whose state the kernel would not
+        # report. It is counted separately and must never reach the notable count, because that is
+        # what the process exit code is derived from.
+        Assert-ClosedValue -Value $item.severity -Allowed @('info', 'notable', 'unverified') -Name 'report item severity'
         if ($item.severity -ceq 'notable') { $actualNotableCount++ }
+        if ($item.severity -ceq 'unverified') { $actualUnverifiedCount++ }
     }
     if ($reportedNotableCount -ne $actualNotableCount) {
         Fail-Contract 'notableCount contradicts report item severities'
+    }
+    if ($reportedUnverifiedCount -ne $actualUnverifiedCount) {
+        Fail-Contract 'unverifiedCount contradicts report item severities'
     }
     $cfaItems = @($items | Where-Object {
             if ($null -eq $_.fields) { return $false }

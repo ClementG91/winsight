@@ -103,6 +103,37 @@ public sealed class FirewallControlPresenterTests
         Assert.Equal(expected, FirewallControlPresenter.EnableEnforcementMessageKey(result));
 
     [Fact]
+    public void EnableControl_ObservedActiveState_UsesAnInertActiveLabel()
+    {
+        var state = FirewallControlPresenter.EnableControl(
+            serviceAvailable: true,
+            enforcementEnabled: true,
+            FirewallEnforcementState.Active);
+
+        Assert.Equal("FirewallEnforcementActiveLabel", state.LabelKey);
+        Assert.False(state.IsEnabled);
+    }
+
+    [Theory]
+    [InlineData(false, false, FirewallEnforcementState.AuditOnly)]
+    [InlineData(true, false, FirewallEnforcementState.AuditOnly)]
+    [InlineData(true, true, FirewallEnforcementState.Degraded)]
+    [InlineData(true, false, FirewallEnforcementState.Active)]
+    public void EnableControl_AnythingShortOfObservedActive_RemainsRetryable(
+        bool serviceAvailable,
+        bool enforcementEnabled,
+        FirewallEnforcementState effectiveState)
+    {
+        var state = FirewallControlPresenter.EnableControl(
+            serviceAvailable,
+            enforcementEnabled,
+            effectiveState);
+
+        Assert.Equal("FirewallEnableEnforcement", state.LabelKey);
+        Assert.True(state.IsEnabled);
+    }
+
+    [Fact]
     public void OutcomeMessageKey_AppliedBlockWithoutEnforcement_SignalsNotEnforced() =>
         Assert.Equal(
             "FirewallActionAppliedNotEnforced",

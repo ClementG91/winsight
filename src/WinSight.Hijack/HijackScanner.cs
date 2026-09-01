@@ -147,7 +147,8 @@ public sealed class HijackScanner(
     IWritabilityProbe? probe = null,
     IKnownDllSource? knownDlls = null,
     Func<string, PeImportSet>? readImports = null,
-    Func<string, bool>? fileExists = null)
+    Func<string, bool>? fileExists = null,
+    ISideBySideStore? sideBySideStore = null)
 {
     private readonly IServiceRegistry _services = services ?? new RegistryServiceSource();
     private readonly IMachinePath _machinePath = machinePath ?? new RegistryMachinePath();
@@ -155,6 +156,7 @@ public sealed class HijackScanner(
     private readonly IKnownDllSource _knownDlls = knownDlls ?? new RegistryKnownDllSource();
     private readonly Func<string, PeImportSet> _readImports = readImports ?? PeImports.ReadFile;
     private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
+    private readonly ISideBySideStore? _sideBySideStore = sideBySideStore;
     private readonly HijackTriage _triage = new(probe);
 
     public IReadOnlyList<HijackFinding> Scan(CancellationToken cancellationToken = default)
@@ -177,12 +179,17 @@ public sealed class HijackScanner(
         // Writability is a fact about a directory, not about the service that named it, and the
         // search orders of ~90 services overlap almost entirely. Asking once per directory keeps
         // the probe count proportional to the machine rather than to the service list.
+        // One store per scan: the answers it gives are facts about the machine, and the index it
+        // builds is meant to be built once rather than once per service. Injectable so a test can
+        // exercise the rule without walking the real WinSxS tree, which is the difference between a
+        // suite that runs in milliseconds and one that runs in minutes.
+        var sideBySide = _sideBySideStore ?? new SideBySideStore(windows);
         var plantable = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
         bool CanPlantIn(string directory)
         {
             if (!plantable.TryGetValue(directory, out var writable))
             {
-                writable = Directory.Exists(directory)
+                writable = AutomaticFileAccess.IsLocal(directory) && Directory.Exists(directory)
                     && _probe.CanCreate(Path.Combine(directory, "winsight-probe.dll"));
                 plantable[directory] = writable;
             }
@@ -212,7 +219,7 @@ public sealed class HijackScanner(
                 findings.Add(writable);
             }
             var importAssessment = AssessImports(
-                service, directory, system, windows, pathDirectories, known, CanPlantIn);
+                service, directory, system, windows, pathDirectories, known, CanPlantIn, sideBySide);
             findings.AddRange(importAssessment.Findings);
             unreadableItems += importAssessment.UnreadableItems;
         }
@@ -273,9 +280,12 @@ public sealed class HijackScanner(
         string windows,
         IReadOnlyList<string> pathDirectories,
         IReadOnlySet<string> known,
-        Func<string, bool> canPlantIn)
+        Func<string, bool> canPlantIn,
+        ISideBySideStore sideBySide)
     {
-        if (ExecutablePath(service.CommandLine) is not { } image || !_fileExists(image))
+        if (ExecutablePath(service.CommandLine) is not { } image
+            || !AutomaticFileAccess.IsLocal(image)
+            || !_fileExists(image))
         {
             return ([], 0);
         }
@@ -289,8 +299,28 @@ public sealed class HijackScanner(
             return ([], 0);
         }
 
-        var order = DllSearchOrder.For(directory, system, windows, pathDirectories);
-        return (PhantomDllRule.Find(imports, order, known, _fileExists, canPlantIn)
+        // The bitness the PE parse already established decides which directory "the system
+        // directory" means. A 32-bit process is served SysWOW64 by the file-system redirector, so
+        // searching System32 for it reported the ordinary case as a phantom import.
+        var systemForImage = DllSearchOrder.SystemDirectoryFor(
+            imports.Is64Bit ?? true, system, windows);
+        var order = DllSearchOrder.For(directory, systemForImage, windows, pathDirectories);
+        var unresolvable = 0;
+        return (PhantomDllRule.Find(
+                imports, order, known, _fileExists, canPlantIn,
+                dll =>
+                {
+                    // Null means the store could not be searched. That is a gap in the observation,
+                    // and this codebase never turns one into an accusation: the import is skipped
+                    // and counted, not reported.
+                    var inStore = sideBySide.Contains(dll);
+                    if (inStore is null)
+                    {
+                        unresolvable++;
+                        return true;
+                    }
+                    return inStore.Value;
+                })
             .Select(phantom => new HijackFinding(
                 HijackKind.PhantomImport,
                 $"{service.Name}:{phantom.Dll}",
@@ -300,7 +330,7 @@ public sealed class HijackScanner(
                 phantom.PlantableAt is null ? HijackExposure.Latent : HijackExposure.Exploitable,
                 [phantom.Dll],
                 phantom.PlantableAt))
-            .ToList(), 0);
+            .ToList(), unresolvable);
     }
 
     /// <summary>

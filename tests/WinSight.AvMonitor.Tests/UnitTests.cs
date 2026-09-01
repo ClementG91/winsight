@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using WinSight.AvMonitor;
 using Xunit;
 
@@ -62,6 +63,64 @@ public sealed class CapabilityAccessReaderIntegrationTests
 
 public sealed class CapabilityAccessReaderTests
 {
+    [Fact]
+    public void ReadWithCoverage_ParsesPackagedAndDesktopConsentStoreEntries()
+    {
+        var testRoot = $@"Software\WinSight.Tests\CapabilityAccessReader\{Guid.NewGuid():N}";
+        var now = DateTime.UtcNow;
+        var stopped = now.AddMinutes(1);
+
+        try
+        {
+            using (var packaged = Registry.CurrentUser.CreateSubKey(
+                       $@"{testRoot}\webcam\Contoso.Camera_123"))
+            {
+                Assert.NotNull(packaged);
+                packaged.SetValue("LastUsedTimeStart", now.ToFileTimeUtc(), RegistryValueKind.QWord);
+            }
+
+            using (var desktop = Registry.CurrentUser.CreateSubKey(
+                       $@"{testRoot}\microphone\NonPackaged\C:#Tools#Recorder.exe"))
+            {
+                Assert.NotNull(desktop);
+                desktop.SetValue("LastUsedTimeStart", now.ToFileTimeUtc(), RegistryValueKind.QWord);
+                desktop.SetValue("LastUsedTimeStop", stopped.ToFileTimeUtc(), RegistryValueKind.QWord);
+            }
+
+            var snapshot = new CapabilityAccessReader(testRoot).ReadWithCoverage();
+
+            Assert.Equal(2, snapshot.Items.Count);
+            Assert.Equal(0, snapshot.UnreadableSources);
+            Assert.Equal(0, snapshot.UnreadableItems);
+
+            var camera = Assert.Single(snapshot.Items, item => item.Kind == DeviceKind.Webcam);
+            Assert.Equal("Contoso.Camera_123", camera.App);
+            Assert.True(camera.Packaged);
+            Assert.True(camera.Active);
+            Assert.Equal(now, camera.LastStart);
+            Assert.Null(camera.LastStop);
+
+            var microphone = Assert.Single(
+                snapshot.Items,
+                item => item.Kind == DeviceKind.Microphone);
+            Assert.Equal(@"C:\Tools\Recorder.exe", microphone.App);
+            Assert.False(microphone.Packaged);
+            Assert.False(microphone.Active);
+            Assert.Equal(now, microphone.LastStart);
+            Assert.Equal(stopped, microphone.LastStop);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(testRoot, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Fact]
+    public void Constructor_RejectsAnUnboundRegistryPath()
+    {
+        Assert.Throws<ArgumentException>(() => new CapabilityAccessReader(" "));
+    }
+
     [Fact]
     public void DecodeExePath_RestoresBackslashes()
     {

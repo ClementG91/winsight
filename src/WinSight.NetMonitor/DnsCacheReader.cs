@@ -12,6 +12,12 @@ namespace WinSight.NetMonitor;
 /// </summary>
 public sealed class DnsCacheReader
 {
+    /// <summary>
+    /// Ceiling on one WMI enumeration. Matches ControlledFolderAccessReader, which is the only
+    /// caller in the product that bounded its query before this.
+    /// </summary>
+    private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(5);
+
     public IReadOnlyList<DnsRecord> Read() => ReadWithCoverage().Items;
 
     public AcquisitionSnapshot<DnsRecord> ReadWithCoverage()
@@ -22,8 +28,19 @@ public sealed class DnsCacheReader
         try
         {
             var scope = new ManagementScope(@"\\.\root\StandardCimv2");
+            // Bounded like the Controlled Folder Access reader already bounds its own queries. A
+            // stuck WMI provider otherwise hangs this command for ever, and the cancellation check
+            // inside the loop below cannot help: the block happens inside the enumeration itself,
+            // before a single object is yielded.
             using var searcher = new ManagementObjectSearcher(
-                scope, new ObjectQuery("SELECT Name, Type, Data, TimeToLive FROM MSFT_DNSClientCache"));
+                scope,
+                new ObjectQuery("SELECT Name, Type, Data, TimeToLive FROM MSFT_DNSClientCache"),
+                new System.Management.EnumerationOptions
+                {
+                    Timeout = QueryTimeout,
+                    ReturnImmediately = false,
+                    Rewindable = false,
+                });
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results = searcher.Get();

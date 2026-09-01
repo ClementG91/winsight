@@ -169,13 +169,34 @@ internal sealed class EtwSessionLifecycle
     /// Opens a session handle. Internal and injectable so ordinary tests never touch the real ETW
     /// namespace.
     /// </summary>
+    /// <summary>
+    /// Buffer size, in megabytes, for a WinSight ETW session.
+    /// </summary>
+    /// <remarks>
+    /// <b>Nothing set this.</b> The three sessions ran on TraceEvent's defaults while subscribing
+    /// to the busiest providers on the machine: the attribution watcher takes Process, Registry and
+    /// FileIOInit, which is every registry operation and every file open, decoded in a managed
+    /// callback. A session whose buffers cannot keep up does not fail - it drops events and
+    /// increments a counter nobody was reading, which for an attribution index means the write that
+    /// mattered is simply absent and nothing says so.
+    ///
+    /// Sixty-four megabytes is what the volume of those providers warrants, and it is paid only
+    /// while a live watch is actually running.
+    /// </remarks>
+    internal const int SessionBufferMegabytes = 64;
+
     internal IEtwSessionHandle Open(EtwSessionProfile profile)
     {
         _ = ReclaimProvenOrphans(profile);
         var name = BuildCurrentName(profile);
-        return _runtime.Create(
+        var handle = _runtime.Create(
             name,
             TraceEventSessionOptions.Create | TraceEventSessionOptions.NoRestartOnCreate);
+        if (handle.NativeSession is { } session)
+        {
+            session.BufferSizeMB = SessionBufferMegabytes;
+        }
+        return handle;
     }
 
     internal string BuildCurrentName(EtwSessionProfile profile) =>

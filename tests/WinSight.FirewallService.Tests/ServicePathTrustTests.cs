@@ -303,4 +303,58 @@ public sealed class WindowsServicePathTrustInspectorTests
             ? throw new System.Security.Principal.IdentityNotMappedException("synthetic")
             : "S-1-5-80-956008885";
     }
+
+    /// <summary>
+    /// A grant spelled with the generic bits is still dangerous.
+    /// </summary>
+    /// <remarks>
+    /// <b>The hole this closes.</b> Every test above tests a specific right against a mask read
+    /// straight out of the DACL, and .NET returns that mask exactly as stored - it does not apply
+    /// the object's generic mapping. <c>GENERIC_ALL</c> is <c>0x10000000</c> and shares no bit with
+    /// WriteData, Delete, ChangePermissions or TakeOwnership, so a path component granting Users
+    /// <c>(GA)</c> mapped to <c>None</c> and the component was trusted. That is a path an
+    /// unprivileged account fully controls, accepted by the check whose entire job is to refuse
+    /// exactly that - and the service loads its policy from it as SYSTEM.
+    /// </remarks>
+    [Theory]
+    [InlineData(0x10000000u, true)]
+    [InlineData(0x10000000u, false)]
+    [InlineData(0x40000000u, true)]
+    [InlineData(0x40000000u, false)]
+    public void AGenericGrantIsDecodedAsDangerous(uint generic, bool isDirectory) =>
+        Assert.NotEqual(
+            DangerousPathAccess.None,
+            ServicePathRights.Map(unchecked((FileSystemRights)(int)generic), isDirectory));
+
+    /// <summary>
+    /// GENERIC_ALL must decode to the rights that let a principal replace or re-permission the
+    /// component, not merely to the write bit.
+    /// </summary>
+    [Fact]
+    public void GenericAllDecodesToReplacementAndOwnershipRights()
+    {
+        var mapped = ServicePathRights.Map(
+            unchecked((FileSystemRights)0x10000000), isDirectory: false);
+
+        Assert.True(mapped.HasFlag(DangerousPathAccess.WriteData));
+        Assert.True(mapped.HasFlag(DangerousPathAccess.Delete));
+        Assert.True(mapped.HasFlag(DangerousPathAccess.ChangePermissions));
+        Assert.True(mapped.HasFlag(DangerousPathAccess.TakeOwnership));
+    }
+
+    /// <summary>
+    /// Expansion must not invent danger. A generic read or execute grant stays harmless, or no path
+    /// on a stock machine could ever be trusted - which is the failure mode that made the composite
+    /// Modify/FullControl probe wrong in the first place.
+    /// </summary>
+    [Theory]
+    [InlineData(0x80000000u)]
+    [InlineData(0x20000000u)]
+    public void AGenericReadOrExecuteGrantIsStillHarmless(uint generic)
+    {
+        var rights = unchecked((FileSystemRights)(int)generic);
+
+        Assert.Equal(DangerousPathAccess.None, ServicePathRights.Map(rights, isDirectory: true));
+        Assert.Equal(DangerousPathAccess.None, ServicePathRights.Map(rights, isDirectory: false));
+    }
 }

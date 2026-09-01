@@ -283,6 +283,23 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
             // Authentication and admission intentionally execute before the first await.
             // A rejected peer is closed synchronously, keeping instance count bounded.
             var capability = _authorise(server);
+
+            // A caller with no capability at all is closed here, before any lane is entered.
+            // It used to fall into the read lane and travel the whole path - a read of up to five
+            // seconds, the dispatch, the write - only to be refused at the end. That is one of the
+            // four read slots held for five seconds by a caller who was never going to be answered,
+            // and it is available to anyone who can open the pipe. The read/mutate split itself is
+            // correct; this is the case that fell through it.
+            if (capability == FirewallCallerCapability.None)
+            {
+                DisposeAcceptedServer(
+                    server,
+                    fatalConnectionFailure,
+                    activeConnections,
+                    activeConnectionsSync);
+                return Task.CompletedTask;
+            }
+
             lane = capability == FirewallCallerCapability.MutateMachinePolicy
                 ? _mutationAdmission
                 : _readAdmission;
@@ -582,9 +599,21 @@ public sealed class NamedPipeFirewallServer : IFirewallServiceListener, IFirewal
             });
             return capability;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+        catch (Exception)
         {
             // Fail closed: if the client identity cannot be established, deny.
+            //
+            // Every exception, not a list of three. The list said "fail closed" and did not do it:
+            // WindowsPrincipal.IsInRole(SecurityIdentifier) raises SecurityException when
+            // CheckTokenMembership fails, and reading identity.Groups raises Win32Exception - neither
+            // was caught, so either one escaped into ProcessAcceptedConnection, which classifies any
+            // throw there as a fatal connection failure. The accept loop then stops the host, and
+            // because the WFP session is dynamic, BFE destroys every filter the service owned.
+            //
+            // This is the same defect FirewallRequestDispatcher was hardened against one layer down,
+            // where a long comment describes exactly this failure. Authorisation sits above that
+            // hardening and kept its narrow list. Denying is the only correct answer here whatever
+            // went wrong, so there is nothing an enumeration of types can buy.
             return FirewallCallerCapability.None;
         }
     }

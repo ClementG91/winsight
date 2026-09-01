@@ -7,10 +7,11 @@ alert. The watcher is user-mode (it watches the user's own directories, no eleva
 is covered by real-`FileSystemWatcher` functional tests plus a live end-to-end test on the installed
 build. What remains is elevation-gated: naming the *process* responsible, and *stopping* the write.
 
-**Protection is opt-in, deliberately.** This is the only WinSight feature that *writes* into the
-operator's personal folders (everything else only reads), so nothing is planted until they tick
-"Ransomware protection". Decoys are hidden, swept on start if an earlier run died without cleaning
-up, and removed when the toggle is cleared or WinSight closes.
+**Protection is opt-in, deliberately.** This is the only WinSight feature that plants persistent
+files in the operator's personal folders, so nothing is planted until they tick "Ransomware
+protection". (Separately, the hijack scanner creates and immediately removes a uniquely named
+writability probe in each directory it assesses.) Decoys are visible, swept on start if an earlier
+run died without cleaning up, and removed when the toggle is cleared or WinSight closes.
 
 ## Goal
 
@@ -22,7 +23,7 @@ separately-validated shell.**
 
 ## The two signals
 
-1. **Canary / decoy files.** Plant hidden decoy files in the directories ransomware sweeps
+1. **Canary / decoy files.** Plant visible, machine-varied decoy files in the directories ransomware sweeps
    (Documents, Desktop, Pictures, …). A decoy has *no legitimate reason to change*, so a single
    touch is a high-confidence signal that fires immediately.
 2. **Behavioral burst.** Ransomware's tell is volume and speed. Count recent suspicious file
@@ -59,7 +60,7 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
 
 1. **Heuristics core.** ✅ Done. `ShannonEntropy` and `RansomwareBurstDetector`, described above -
    pure, clock-injected, fully unit-tested, no I/O.
-2. **Canary manager + file watcher.** ✅ Done. `CanaryManager` plants hidden decoys in the
+2. **Canary manager + file watcher.** ✅ Done. `CanaryManager` plants visible decoys in the
    protected directories and answers `IsCanary`; `RansomwareSignalClassifier` (pure) maps a change to
    a signal; `RansomwareFileWatcher` runs a `FileSystemWatcher` over the dirs, classifies each change,
    and feeds the burst detector; `RansomwareMonitor` wires them and removes the decoys on dispose. A
@@ -105,7 +106,7 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
   alert rather than one per file, and `RansomwareMonitor` re-arms it immediately afterwards so the
   next wave still alerts - bounded state, but never a permanently silent detector.
 - **Alerts are subject to the OS, not just to us.** Windows suppresses tray balloons under Focus
-  Assist / "Ne pas déranger" (including its automatic full-screen rule), and throttles an app that
+  Assist (including its automatic full-screen rule), and throttles an app that
   posts many toasts in quick succession. Both are Windows behaviours WinSight cannot override, and
   both look exactly like "the alert is broken" when testing by hand - check the notification centre
   and the Focus Assist state before concluding a detection failed. Because of this, every detection

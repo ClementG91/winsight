@@ -3,12 +3,30 @@ using System.Security.AccessControl;
 using System.Security.Principal;
 using Microsoft.Win32.SafeHandles;
 
+using WinSight.Core;
+
 namespace WinSight.FirewallService;
 
 public enum PathTrustCode
 {
     Trusted, InvalidPath, OutsideProgramData, MissingComponent, ReparsePoint,
     UntrustedOwner, WritableByUnprivilegedPrincipal, IdentityChanged, InspectionFailed,
+
+    /// <summary>
+    /// The path is not on local storage: a UNC share, a device-namespace path, or a mapped network
+    /// drive.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this is its own refusal and not merely an invalid path.</b> The whole inspection asks
+    /// Windows who owns each component and what its ACL grants. On a remote path those answers come
+    /// from the server, and a server an attacker controls reports whatever ACL makes the check pass.
+    /// The trust decision would then be the attacker's to make.
+    ///
+    /// Walking there is itself the second problem: the service runs as SYSTEM, and touching a UNC
+    /// path makes it authenticate to that host as the machine account - a coercion primitive handed
+    /// out for free by a check whose only purpose is caution.
+    /// </remarks>
+    NotOnLocalStorage,
 }
 
 [Flags]
@@ -41,6 +59,13 @@ public static class ServicePathRights
     /// </remarks>
     public static DangerousPathAccess Map(FileSystemRights rights, bool isDirectory)
     {
+        // An ACE may express its grant with the generic bits, which Windows resolves through the
+        // object's generic mapping at access-check time and .NET hands back unresolved. A component
+        // granting Users GENERIC_ALL shares no bit with WriteData or Delete, so every test below
+        // read None and the path was trusted - a path an unprivileged account fully controls,
+        // accepted by the check whose entire job is to refuse exactly that.
+        rights = GenericFileRights.Expand(rights);
+
         var result = DangerousPathAccess.None;
         // 0x2 — WriteData (file: overwrite) / CreateFiles (directory: plant → DLL side-load). Both dangerous.
         if ((rights & FileSystemRights.WriteData) != 0)
@@ -97,6 +122,7 @@ public sealed record PathTrustDecision(bool IsTrusted, PathTrustCode Code, strin
         PathTrustCode.ReparsePoint => "A path component is a reparse point.",
         PathTrustCode.UntrustedOwner => "A path component has an untrusted owner.",
         PathTrustCode.WritableByUnprivilegedPrincipal => "A path component is writable by an unprivileged principal.",
+        PathTrustCode.NotOnLocalStorage => "The path is not on local storage.",
         PathTrustCode.IdentityChanged => "A path component changed after inspection.",
         _ => "The path trust inspection could not be completed.",
     });
@@ -289,6 +315,13 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
         try
         {
             var canonical = _metadata.Canonicalize(path);
+            // Refused before a single component is opened. Everything below asks the filesystem who
+            // owns a path and what its ACL grants; on a remote path the answers come from the
+            // server, so an attacker who controls it also controls this decision. And reaching a
+            // UNC path at all makes a SYSTEM service authenticate to that host as the machine
+            // account, which is a coercion primitive this check would be handing out for free.
+            if (!IsOnLocalStorage(canonical))
+                return Denied(canonical, PathTrustCode.NotOnLocalStorage);
             var components = _metadata.ExistingComponents(canonical);
             if (!components.Contains(canonical, StringComparer.OrdinalIgnoreCase))
                 return Denied(canonical, PathTrustCode.MissingComponent);
@@ -316,6 +349,43 @@ public sealed class WindowsServicePathTrustInspector : IServicePathTrustInspecto
         catch (ArgumentException) { return Denied(string.Empty, PathTrustCode.InvalidPath); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SystemException)
         { return Denied(string.Empty, PathTrustCode.InspectionFailed); }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="canonical"/> names something on this machine's own storage.
+    /// </summary>
+    /// <remarks>
+    /// The syntactic half is decisive: a path beginning <c>\\</c> is a UNC share or a
+    /// device-namespace path, and one that is not rooted cannot be reasoned about at all.
+    ///
+    /// The drive-type half denies only when Windows positively reports the root as a network drive.
+    /// A mapped drive is not a supported location for a service image anyway - the SCM resolves the
+    /// image long before the network exists - so this is defence in depth, and an unreadable or
+    /// unrecognised root must not be turned into a service that refuses to start.
+    /// </remarks>
+    internal static bool IsOnLocalStorage(string? canonical)
+    {
+        if (string.IsNullOrWhiteSpace(canonical) || !Path.IsPathRooted(canonical))
+        {
+            return false;
+        }
+        if (canonical.StartsWith(@"\\", StringComparison.Ordinal)
+            || canonical.StartsWith("//", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        try
+        {
+            var root = Path.GetPathRoot(canonical);
+            return string.IsNullOrEmpty(root)
+                || new DriveInfo(root).DriveType != DriveType.Network;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException
+                                     or UnauthorizedAccessException or SystemException)
+        {
+            // Not proof of anything. The syntactic test above already refused the case that matters.
+            return true;
+        }
     }
 
     private static bool IsLeafParent(string componentPath, string? leafParent) =>

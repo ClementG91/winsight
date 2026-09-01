@@ -217,6 +217,25 @@ public sealed class LocalizationTests
     }
 
     [Theory]
+    [InlineData("en", "Filtering active")]
+    [InlineData("fr", "Filtrage actif")]
+    [InlineData("es", "Filtrado activo")]
+    public void FirewallActiveControlLabel_IsShortAndLocalized(string culture, string expected)
+    {
+        var localization = LocalizationManager.Instance;
+        var original = localization.CurrentCode;
+        try
+        {
+            localization.SetCulture(culture);
+            Assert.Equal(expected, localization["FirewallEnforcementActiveLabel"]);
+        }
+        finally
+        {
+            localization.SetCulture(original);
+        }
+    }
+
+    [Theory]
     [InlineData(
         "en",
         "Turn off outbound filtering and lift every WinSight block? The machine returns to audit-only.",

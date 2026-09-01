@@ -1,5 +1,7 @@
 using System.Text;
 
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>The outcome of mapping an autostart command to an on-disk image.</summary>
@@ -215,6 +217,11 @@ public static class CommandLine
             return new(null, null, ImageResolutionStatus.Unresolved);
         }
 
+        if (!AutomaticFileAccess.IsLocal(full))
+        {
+            return new(null, full, ImageResolutionStatus.Unresolved);
+        }
+
         try
         {
             var attributes = File.GetAttributes(full);
@@ -292,7 +299,8 @@ public static class CommandLine
                 candidate.Append(' ');
             }
             candidate.Append(parts[i]);
-            if (File.Exists(candidate.ToString()))
+            if (AutomaticFileAccess.IsLocal(candidate.ToString())
+                && File.Exists(candidate.ToString()))
             {
                 return candidate.ToString();
             }

@@ -317,8 +317,8 @@ public static partial class FirewallServiceInstaller
     private const uint ServiceConfigServiceSidInfo = 5;
     private const uint ServiceConfigRequiredPrivilegesInfo = 6;
     private const uint ServiceSidTypeUnrestricted = 1;
-    private const int ScActionNone = 0;
     private const int ScActionRestart = 1;
+    internal const uint RecoveryResetPeriodSeconds = 3_600;
     private const uint ServiceNoChange = 0xFFFFFFFF;
     internal const uint ServiceControlStop = 0x00000001;
     internal const uint ServiceStopped = 0x00000001;
@@ -371,6 +371,32 @@ public static partial class FirewallServiceInstaller
     internal static string RequiredPrivilegesMultiString() =>
         "SeChangeNotifyPrivilege\0SeImpersonatePrivilege\0SeSystemProfilePrivilege\0\0";
 
+    internal static ScAction[] RecoveryActions() =>
+    [
+        new ScAction { Type = ScActionRestart, DelayMilliseconds = 5_000 },
+        new ScAction { Type = ScActionRestart, DelayMilliseconds = 30_000 },
+        new ScAction { Type = ScActionRestart, DelayMilliseconds = 60_000 },
+    ];
+
+    /// <summary>
+    /// Applies the service's own security profile: SID type, required privileges and failure
+    /// actions.
+    /// </summary>
+    /// <remarks>
+    /// <b>What is deliberately not here.</b> No <c>SetServiceObjectSecurity</c> call, so the service
+    /// keeps the SCM's default DACL: reconfiguring or stopping it requires administrator, and
+    /// nothing beyond that. The service SID is unrestricted and the process is not protected.
+    ///
+    /// That is a defensible position for a tool with no kernel driver - an administrator who wants
+    /// this service stopped can stop it, and WinSight reports the resulting state honestly rather
+    /// than resisting - but it was left to be inferred from a document that is otherwise careful
+    /// about privilege boundaries. It is now stated in docs/THREAT_MODEL.md.
+    ///
+    /// A tighter DACL and a restricted service SID are both worth having and are both changes to a
+    /// live SYSTEM service that cannot be exercised outside the VM campaign: getting either wrong
+    /// leaves a service an administrator cannot manage, which is a worse outcome than the one being
+    /// fixed. They belong to a qualification run.
+    /// </remarks>
     internal static void ConfigureSecurityProfile(IntPtr service)
     {
         var sid = new ServiceSidInfo { ServiceSidType = ServiceSidTypeUnrestricted };
@@ -398,12 +424,12 @@ public static partial class FirewallServiceInstaller
         var actionsPtr = Marshal.AllocHGlobal(actionSize * 3);
         try
         {
-            var actions = new[]
-            {
-                new ScAction { Type = ScActionRestart, DelayMilliseconds = 5_000 },
-                new ScAction { Type = ScActionRestart, DelayMilliseconds = 30_000 },
-                new ScAction { Type = ScActionNone, DelayMilliseconds = 0 },
-            };
+            // The SCM repeats the LAST action for every failure beyond the array, so making the
+            // third a restart is what turns recovery from "twice, then give up" into "for ever,
+            // once a minute". It used to be SC_ACTION_NONE. Combined with a 24-hour reset period
+            // that handed an unprivileged squatter the machine: take the pipe name, let the service
+            // fail three times over 35 seconds, and outbound enforcement stays off for a day.
+            var actions = RecoveryActions();
             for (var index = 0; index < actions.Length; index++)
             {
                 Marshal.StructureToPtr(
@@ -411,7 +437,10 @@ public static partial class FirewallServiceInstaller
             }
             var failureActions = new ServiceFailureActions
             {
-                ResetPeriodSeconds = 86_400,
+                // An hour, not a day. The count decides which delay the next failure gets, so a
+                // long window meant a service that failed once at boot and then ran perfectly was
+                // still treated as a repeat offender the following evening.
+                ResetPeriodSeconds = RecoveryResetPeriodSeconds,
                 ActionCount = (uint)actions.Length,
                 Actions = actionsPtr,
             };
@@ -587,6 +616,7 @@ public static class ServicePathTrustDiagnosticCodes
     public const string WritableByUnprivileged = "[FW_INSTALL_PATH_WRITABLE_BY_UNPRIVILEGED]";
     public const string IdentityChanged = "[FW_INSTALL_PATH_IDENTITY_CHANGED]";
     public const string InspectionFailed = "[FW_INSTALL_PATH_INSPECTION_FAILED]";
+    public const string NotOnLocalStorage = "[FW_INSTALL_PATH_NOT_LOCAL]";
 
     public static string ForInstallDenial(PathTrustCode code) => code switch
     {
@@ -598,6 +628,9 @@ public static class ServicePathTrustDiagnosticCodes
         PathTrustCode.WritableByUnprivilegedPrincipal => WritableByUnprivileged,
         PathTrustCode.IdentityChanged => IdentityChanged,
         PathTrustCode.InspectionFailed => InspectionFailed,
+        // Its own token: "the inspection failed" would say the check broke, when it in fact
+        // refused, and an operator reading a log needs to know which.
+        PathTrustCode.NotOnLocalStorage => NotOnLocalStorage,
         PathTrustCode.Trusted => InspectionFailed,
         _ => InspectionFailed,
     };

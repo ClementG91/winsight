@@ -1,4 +1,3 @@
-using System.Text;
 
 using WinSight.Core;
 
@@ -121,69 +120,12 @@ public static class KernelDriverTriage
     /// The common name from an X.500 certificate subject, or null when there is none.
     /// </summary>
     /// <remarks>
-    /// The whole point of reading the subject is to compare the common name *entire*, so
-    /// this stops at the attribute boundary rather than matching loosely: quoted values
-    /// may contain the comma that otherwise ends an attribute, and a backslash escapes
-    /// the character after it. <c>CN=</c> is only honoured where an attribute may start,
-    /// so a subject such as <c>O=ACN=Ltd</c> cannot smuggle one in.
+    /// The careful parsing moved to <see cref="CertificateSubject"/> when a second scan needed the
+    /// same question asked the same way. This forwards, so every caller and every test here is
+    /// unchanged, and there is exactly one implementation to be right.
     /// </remarks>
-    public static string? SignerCommonName(string? subject)
-    {
-        if (string.IsNullOrWhiteSpace(subject))
-        {
-            return null;
-        }
-
-        var start = AttributeStart(subject);
-        if (start < 0)
-        {
-            return null;
-        }
-
-        var value = new StringBuilder();
-        var index = start;
-        var quoted = index < subject.Length && subject[index] == '"';
-        if (quoted)
-        {
-            index++;
-        }
-        for (; index < subject.Length; index++)
-        {
-            var character = subject[index];
-            if (character == '\\' && index + 1 < subject.Length)
-            {
-                value.Append(subject[++index]);
-                continue;
-            }
-            if (quoted ? character == '"' : character is ',' or '+')
-            {
-                break;
-            }
-            value.Append(character);
-        }
-        return value.ToString().Trim() is { Length: > 0 } commonName ? commonName : null;
-    }
-
-    /// <summary>Index just past the first <c>CN=</c> that genuinely starts an attribute.</summary>
-    private static int AttributeStart(string subject)
-    {
-        const string marker = "CN=";
-        for (var search = 0; search <= subject.Length - marker.Length;)
-        {
-            var found = subject.IndexOf(marker, search, StringComparison.OrdinalIgnoreCase);
-            if (found < 0)
-            {
-                return -1;
-            }
-            var preceding = subject[..found].AsSpan().TrimEnd();
-            if (preceding.IsEmpty || preceding[^1] is ',' or '+')
-            {
-                return found + marker.Length;
-            }
-            search = found + marker.Length;
-        }
-        return -1;
-    }
+    public static string? SignerCommonName(string? subject) =>
+        CertificateSubject.CommonName(subject);
 
     /// <summary>
     /// Whether <paramref name="path"/> sits inside <paramref name="directory"/>. The

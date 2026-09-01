@@ -11,6 +11,8 @@ namespace WinSight.Application;
 /// </summary>
 public static class FirewallControlPresenter
 {
+    public readonly record struct EnableControlState(string LabelKey, bool IsEnabled);
+
     /// <summary>True when the report item describes a per-application policy (not the status line).</summary>
     public static bool IsPolicyRow(ReportItem item)
     {
@@ -82,6 +84,24 @@ public static class FirewallControlPresenter
     /// </summary>
     public static string EnableEnforcementMessageKey(FirewallMutationResult result) =>
         EnableEnforcementMessageKey(result, FirewallEnforcementState.Degraded);
+
+    /// <summary>
+    /// Presentation of the machine-wide arming control. Per-application allow/block actions remain
+    /// available independently; only the global enable action becomes inert after the service has
+    /// reported a genuinely active runtime state.
+    /// </summary>
+    public static EnableControlState EnableControl(
+        bool serviceAvailable,
+        bool enforcementEnabled,
+        FirewallEnforcementState effectiveState)
+    {
+        var active = serviceAvailable
+            && enforcementEnabled
+            && effectiveState == FirewallEnforcementState.Active;
+        return active
+            ? new("FirewallEnforcementActiveLabel", IsEnabled: false)
+            : new("FirewallEnableEnforcement", IsEnabled: true);
+    }
 
     /// <summary>
     /// Like <see cref="ResultMessageKey"/>, but a successfully saved BLOCK is reported as

@@ -22,7 +22,14 @@ public sealed class RansomwareMonitor : IDisposable
         RansomwareBurstDetector? detector = null)
     {
         _directories = directories ?? CanaryManager.DefaultDirectories();
-        _watcher = new RansomwareFileWatcher(_directories, _canaries.IsCanary, detector);
+        _watcher = new RansomwareFileWatcher(
+            _directories,
+            _canaries.IsCanary,
+            detector,
+            // A decoy rewritten with its own bytes - a OneDrive placeholder hydrating, a sync
+            // client round-tripping the file - is not a touch. Without this the one signal the
+            // product presents as unambiguous was raised by ordinary cloud storage.
+            canaryIsIntact: _canaries.ContentIsIntact);
         _watcher.Detected += OnWatcherDetected;
     }
 

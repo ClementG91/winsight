@@ -1,7 +1,7 @@
 # WinSight, architecture
 
-Status: accepted and implemented for Phase 1. Phase 2 details live in
-[`WFP_DESIGN.md`](WFP_DESIGN.md).
+Status: accepted and implemented for the current user-mode suite. Privileged outbound-firewall
+details live in [`WFP_DESIGN.md`](WFP_DESIGN.md).
 
 ## Shape
 
@@ -60,7 +60,7 @@ Paths, process names, domains and other forensic values are never rewritten.
   item is verdict-checked via the existing Authenticode path and raised as a tray balloon.
   The 22 enumerators stay the source of truth - watchers only trigger the diff. See
   `docs/GUARDIAN_DESIGN.md`. Phase 4 ransomware behavior is **also implemented** (user-mode,
-  opt-in): hidden decoy files plus rename/delete-burst and entropy-on-write heuristics over a
+  opt-in): visible machine-varied decoy files plus rename/delete-burst and entropy-on-write heuristics over a
   `FileSystemWatcher`, with the same pure-core/thin-watcher split. See `docs/RANSOMWARE_DESIGN.md`.
   Both stop at detect-and-alert: *blocking* the write, and *naming the process* responsible, need a
   **minifilter** (`FltRegisterFilter`) / WFP callout **driver** or an elevated ETW provider →

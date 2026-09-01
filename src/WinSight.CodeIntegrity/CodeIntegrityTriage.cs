@@ -26,7 +26,18 @@ public enum IntegrityConcern
 /// <param name="Name">Stable identifier for the JSON contract.</param>
 /// <param name="Concern">How much attention it deserves.</param>
 /// <param name="Detail">Plain explanation of what this state means in practice.</param>
-public sealed record IntegrityFinding(string Name, IntegrityConcern Concern, string Detail);
+/// <param name="Name">Stable identifier for the protection, e.g. <c>secure-boot</c>.</param>
+/// <param name="Concern">How the state should be read.</param>
+/// <param name="State">
+/// Stable identifier for this particular sub-case, e.g. <c>audit</c>. A protection can reach the
+/// same concern by different routes - HVCI is <see cref="IntegrityConcern.Hardening"/> both when it
+/// is off and when it is in audit mode - and those are not the same sentence. The pair
+/// (<paramref name="Name"/>, <paramref name="State"/>) is what a presentation layer keys on to say
+/// this in the operator's language; <paramref name="Detail"/> is the English source text.
+/// </param>
+/// <param name="Detail">The explanation, in English.</param>
+public sealed record IntegrityFinding(
+    string Name, IntegrityConcern Concern, string State, string Detail);
 
 /// <summary>
 /// Reads a machine's enforcement posture and says what it means. Pure, so the judgements can be
@@ -65,7 +76,8 @@ public static class CodeIntegrityTriage
             findings.Add(new IntegrityFinding(
                 "kernel-debug-mode",
                 IntegrityConcern.Weakened,
-                "Kernel debug mode is permitted, which relaxes what the kernel will load and lets a "
+"permitted",
+                                "Kernel debug mode is permitted, which relaxes what the kernel will load and lets a "
                     + "debugger read and change kernel memory."));
         }
         if (state.OptionsRead && state.Has(CodeIntegrityOptions.UserModeEnabled))
@@ -73,7 +85,8 @@ public static class CodeIntegrityTriage
             findings.Add(new IntegrityFinding(
                 "user-mode-code-integrity",
                 IntegrityConcern.Healthy,
-                "Application code integrity (WDAC) is enforced as well as driver signing."));
+"enforced",
+                                "Application code integrity (WDAC) is enforced as well as driver signing."));
         }
         return findings;
     }
@@ -83,17 +96,20 @@ public static class CodeIntegrityTriage
             ? new IntegrityFinding(
                 "driver-signature-enforcement",
                 IntegrityConcern.Unreadable,
-                "The kernel did not report its code-integrity options, so driver signing enforcement "
+"unreadable",
+                                "The kernel did not report its code-integrity options, so driver signing enforcement "
                     + "is undetermined — not the same as off.")
             : state.Has(CodeIntegrityOptions.Enabled)
                 ? new IntegrityFinding(
                     "driver-signature-enforcement",
                     IntegrityConcern.Healthy,
-                    "Driver signature enforcement is on: the kernel refuses unsigned drivers.")
+"enforced",
+                                        "Driver signature enforcement is on: the kernel refuses unsigned drivers.")
                 : new IntegrityFinding(
                     "driver-signature-enforcement",
                     IntegrityConcern.Weakened,
-                    "Driver signature enforcement is OFF: the kernel will load unsigned drivers. Any "
+"off",
+                                        "Driver signature enforcement is OFF: the kernel will load unsigned drivers. Any "
                         + "unsigned driver reported elsewhere should be read in that light.");
 
     private static IntegrityFinding TestSigning(CodeIntegrityState state) =>
@@ -101,18 +117,21 @@ public static class CodeIntegrityTriage
             ? new IntegrityFinding(
                 "test-signing",
                 IntegrityConcern.Unreadable,
-                "Whether test signing is enabled could not be established.")
+"unreadable",
+                                "Whether test signing is enabled could not be established.")
             : state.Has(CodeIntegrityOptions.TestSign)
                 ? new IntegrityFinding(
                     "test-signing",
                     IntegrityConcern.Weakened,
-                    "TEST SIGNING is enabled: this machine will load a driver signed by anyone, "
+"on",
+                                        "TEST SIGNING is enabled: this machine will load a driver signed by anyone, "
                         + "including a certificate an attacker generated. Unless you are developing "
                         + "drivers, this should be off.")
                 : new IntegrityFinding(
                     "test-signing",
                     IntegrityConcern.Healthy,
-                    "Test signing is off, so a driver must carry a signature Windows trusts.");
+"off",
+                                        "Test signing is off, so a driver must carry a signature Windows trusts.");
 
     private static IntegrityFinding MemoryIntegrity(CodeIntegrityState state)
     {
@@ -121,13 +140,15 @@ public static class CodeIntegrityTriage
             return new IntegrityFinding(
                 "memory-integrity",
                 IntegrityConcern.Unreadable,
-                "Whether memory integrity is running could not be established.");
+"unreadable",
+                                "Whether memory integrity is running could not be established.");
         }
         if (!state.Has(CodeIntegrityOptions.HypervisorEnforced))
         {
             return new IntegrityFinding(
                 "memory-integrity",
                 IntegrityConcern.Hardening,
+                "off",
                 "Memory integrity (HVCI) is not running. It is off on many healthy machines, but with "
                     + "it on, a driver-signing bypass alone is not enough to run code in the kernel.");
         }
@@ -137,14 +158,20 @@ public static class CodeIntegrityTriage
             ? new IntegrityFinding(
                 "memory-integrity",
                 IntegrityConcern.Hardening,
+                "audit",
                 "Memory integrity (HVCI) is in AUDIT mode: violations are logged but still allowed. "
                     + "It reads as enabled while enforcing nothing.")
-            : new IntegrityFinding(
-                "memory-integrity",
-                IntegrityConcern.Healthy,
-                state.Has(CodeIntegrityOptions.HypervisorStrictMode)
-                    ? "Memory integrity (HVCI) is enforcing, in strict mode."
-                    : "Memory integrity (HVCI) is enforcing.");
+            : state.Has(CodeIntegrityOptions.HypervisorStrictMode)
+                ? new IntegrityFinding(
+                    "memory-integrity",
+                    IntegrityConcern.Healthy,
+                    "strict",
+                    "Memory integrity (HVCI) is enforcing, in strict mode.")
+                : new IntegrityFinding(
+                    "memory-integrity",
+                    IntegrityConcern.Healthy,
+                    "enforcing",
+                    "Memory integrity (HVCI) is enforcing.");
     }
 
     private static IntegrityFinding SecureBoot(CodeIntegrityState state) => state.SecureBoot switch
@@ -152,16 +179,19 @@ public static class CodeIntegrityTriage
         ProtectionReading.On => new IntegrityFinding(
             "secure-boot",
             IntegrityConcern.Healthy,
-            "Secure Boot is on: the firmware verifies the boot chain before Windows starts."),
+"on",
+                        "Secure Boot is on: the firmware verifies the boot chain before Windows starts."),
         ProtectionReading.Off => new IntegrityFinding(
             "secure-boot",
             IntegrityConcern.Hardening,
-            "Secure Boot is off, so nothing verifies the boot chain before Windows starts. Often "
+"off",
+                        "Secure Boot is off, so nothing verifies the boot chain before Windows starts. Often "
                 + "disabled deliberately for dual-boot; if you did not turn it off, find out who did."),
         _ => new IntegrityFinding(
             "secure-boot",
             IntegrityConcern.Unreadable,
-            "Secure Boot state could not be read — on a BIOS/CSM machine it does not exist at all."),
+"unreadable",
+                        "Secure Boot state could not be read — on a BIOS/CSM machine it does not exist at all."),
     };
 
     private static IntegrityFinding KernelDebugger(CodeIntegrityState state) => state.KernelDebugger switch
@@ -169,16 +199,19 @@ public static class CodeIntegrityTriage
         ProtectionReading.On => new IntegrityFinding(
             "kernel-debugger",
             IntegrityConcern.Weakened,
-            "A kernel debugger is attached and active. Whoever controls it can read and change "
+"attached",
+                        "A kernel debugger is attached and active. Whoever controls it can read and change "
                 + "anything in kernel memory, including every protection above."),
         ProtectionReading.Off => new IntegrityFinding(
             "kernel-debugger",
             IntegrityConcern.Healthy,
-            "No kernel debugger is attached."),
+"absent",
+                        "No kernel debugger is attached."),
         _ => new IntegrityFinding(
             "kernel-debugger",
             IntegrityConcern.Unreadable,
-            "Whether a kernel debugger is attached could not be established."),
+"unreadable",
+                        "Whether a kernel debugger is attached could not be established."),
     };
 
     /// <summary>

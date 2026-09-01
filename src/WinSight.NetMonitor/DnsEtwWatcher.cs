@@ -20,6 +20,17 @@ public sealed class DnsEtwWatcher
     private const string DnsProvider = "Microsoft-Windows-DNS-Client";
 
     /// <summary>
+    /// The keyword covering the client's query events, which is the only half of this provider the
+    /// watcher reads.
+    /// </summary>
+    /// <remarks>
+    /// Without a mask the provider is enabled for every keyword at Verbose, so the session carries
+    /// the whole manifest's worth of events for the handful this watcher looks at - and each one is
+    /// decoded and searched by field name in a managed callback before being discarded.
+    /// </remarks>
+    private const ulong DnsQueryKeyword = 0x1;
+
+    /// <summary>
     /// Opens the ETW session and invokes <paramref name="onEvent"/> for each DNS query
     /// until cancelled. Blocking; run on its own thread. Throws
     /// UnauthorizedAccessException when not elevated.
@@ -43,7 +54,15 @@ public sealed class DnsEtwWatcher
         });
         token.ThrowIfCancellationRequested();
 
-        session.EnableProvider(DnsProvider);
+        // The provider was enabled with no level and no keyword mask, which means Verbose and
+        // every keyword: the DNS client provider then emits its entire dynamic event set, each one
+        // decoded from its manifest and searched by field name. Only the query events are read, so
+        // the rest is pure cost on the busiest callback the product runs. Informational level and
+        // the query keyword ask for what is actually consumed.
+        session.EnableProvider(
+            DnsProvider,
+            Microsoft.Diagnostics.Tracing.TraceEventLevel.Informational,
+            DnsQueryKeyword);
         token.ThrowIfCancellationRequested();
         session.Source.Dynamic.All += data =>
         {

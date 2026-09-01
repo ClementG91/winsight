@@ -21,6 +21,20 @@ public sealed record PeImportSet(IReadOnlyList<string> Imports, IReadOnlyList<st
     /// <summary>False when the file could not be read or its PE structure was invalid.</summary>
     public bool IsReadable { get; init; } = true;
 
+    /// <summary>
+    /// Whether the image is 64-bit, from the optional header's magic. Null when unread.
+    /// </summary>
+    /// <remarks>
+    /// <b>It was parsed and thrown away.</b> The parser has to read this value anyway - the data
+    /// directory sits at a different offset in the two optional-header shapes - and the scan then
+    /// searched <c>System32</c> for every binary regardless. A 32-bit process does not search
+    /// <c>System32</c>: the file-system redirector sends it to <c>SysWOW64</c>. So every 32-bit
+    /// auto-start service importing a DLL that ships only in <c>SysWOW64</c> was reported as having
+    /// a phantom import - a confident accusation against a SYSTEM service, produced by a fact the
+    /// parser already had in hand.
+    /// </remarks>
+    public bool? Is64Bit { get; init; }
+
     public bool IsEmpty => Imports.Count == 0 && DelayImports.Count == 0;
 }
 
@@ -120,6 +134,8 @@ public static class PeImports
             Pe32Plus => (optional + 108u, optional + 112u),
             _ => (0u, 0u),
         };
+        // Carried out of the parse rather than discarded: the search order depends on it.
+        var is64Bit = magic == Pe32Plus;
         if (directoryBase == 0 || !TryU32(image, countOffset, out var directoryCount))
         {
             return PeImportSet.Unreadable;
@@ -139,8 +155,8 @@ public static class PeImports
             DelayDescriptorSize, DelayDescriptorNameOffset, delayLoad: true);
 
         return imports.Count == 0 && delayImports.Count == 0
-            ? PeImportSet.Empty
-            : new PeImportSet(imports, delayImports);
+            ? PeImportSet.Empty with { Is64Bit = is64Bit }
+            : new PeImportSet(imports, delayImports) { Is64Bit = is64Bit };
     }
 
     private readonly record struct Section(uint VirtualAddress, uint VirtualSize, uint RawAddress, uint RawSize);

@@ -265,7 +265,7 @@ public sealed class CanaryManagerTests
 
             // Simulate a run that died without disposing: the decoys are still on disk and the
             // manager that planted them is gone, so only the manifest identifies them.
-            var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest);
+            var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest, new byte[32]);
 
             Assert.Equal(planted.Count, removed);
             Assert.All(planted, path => Assert.False(File.Exists(path)));
@@ -275,6 +275,35 @@ public sealed class CanaryManagerTests
         finally
         {
             File.Delete(manifest);
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void RemoveOrphans_RejectsManifestPathsThatWereNotExpectedCanaries()
+    {
+        var dir = TempDir();
+        var outside = Path.Combine(Path.GetTempPath(), $"wsg-real-{Guid.NewGuid():N}.txt");
+        var manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt");
+        try
+        {
+            var inside = Path.Combine(dir, "my-real-spreadsheet.xlsx");
+            File.WriteAllText(inside, "user data");
+            File.WriteAllText(outside, "user data");
+            File.WriteAllLines(manifest, new[] { inside, outside, @"..\relative.txt" });
+
+            var removed = CanaryManager.RemoveOrphans(
+                new[] { dir }, manifest, new byte[32]);
+
+            Assert.Equal(0, removed);
+            Assert.True(File.Exists(inside));
+            Assert.True(File.Exists(outside));
+            Assert.False(File.Exists(manifest));
+        }
+        finally
+        {
+            File.Delete(manifest);
+            File.Delete(outside);
             Directory.Delete(dir, recursive: true);
         }
     }
@@ -291,8 +320,10 @@ public sealed class CanaryManagerTests
         try
         {
             var legacy = Path.Combine(dir, $"WinSightGuard_{Guid.NewGuid():N}.xlsx");
-            File.WriteAllText(legacy, "leftover");
+            File.WriteAllText(legacy, CanaryIdentity.LegacyContent);
             File.SetAttributes(legacy, FileAttributes.Hidden);
+            var lookalike = Path.Combine(dir, $"WinSightGuard_{Guid.NewGuid():N}.xlsx");
+            File.WriteAllText(lookalike, "real user data");
             var userFile = Path.Combine(dir, "my-real-spreadsheet.xlsx");
             File.WriteAllText(userFile, "user data");
 
@@ -300,6 +331,7 @@ public sealed class CanaryManagerTests
 
             Assert.Equal(1, removed);
             Assert.False(File.Exists(legacy));
+            Assert.True(File.Exists(lookalike));
             Assert.True(File.Exists(userFile));
         }
         finally
@@ -380,6 +412,68 @@ public sealed class RansomwareFileWatcherTests
             Directory.Delete(dir, recursive: true);
         }
     }
+    /// <summary>
+    /// A directory that was never watched is counted, not dropped.
+    /// </summary>
+    /// <remarks>
+    /// It was silently skipped. A caller comparing what it asked for against what is watched could
+    /// have inferred the difference; nothing did, and the difference is exactly the set of folders
+    /// nobody is observing - on the detector whose entire promise is that "I could not see" is never
+    /// reported as "nothing there".
+    /// </remarks>
+    [Fact]
+    public void ADirectoryThatCannotBeWatchedIsCountedRatherThanDropped()
+    {
+        var absent = Path.Combine(Path.GetTempPath(), $"winsight-absent-{Guid.NewGuid():N}");
+        using var watcher = new RansomwareFileWatcher([absent], _ => false);
+
+        watcher.Start();
+
+        Assert.Equal(0, watcher.WatchedDirectoryCount);
+        Assert.Equal(1, watcher.UnwatchableDirectoryCount);
+        Assert.True(watcher.CoverageIsIncomplete);
+    }
+
+    /// <summary>
+    /// A watch that overflows and cannot be re-armed stops counting as live.
+    /// </summary>
+    /// <remarks>
+    /// The re-arm in the error handler is best-effort, and when it fails the watcher stayed in the
+    /// list, dead, still counted. The dashboard reported the directory as watched while it had been
+    /// blind since the first burst - the same silent false negative this class was rebuilt to
+    /// remove, one level up.
+    /// </remarks>
+    [Fact]
+    public void AWatchOnADeletedDirectoryStopsCountingAsLive()
+    {
+        var directory = TempDir();
+        var watcher = new RansomwareFileWatcher([directory], _ => false);
+        try
+        {
+            watcher.Start();
+            Assert.Equal(1, watcher.WatchedDirectoryCount);
+
+            Directory.Delete(directory, recursive: true);
+
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (watcher.WatchedDirectoryCount != 0 && DateTime.UtcNow < deadline)
+            {
+                Thread.Sleep(50);
+            }
+
+            Assert.Equal(0, watcher.WatchedDirectoryCount);
+            Assert.Equal(1, watcher.LostWatchCount);
+            Assert.True(watcher.CoverageIsIncomplete);
+        }
+        finally
+        {
+            watcher.Dispose();
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
 }
 
 public sealed class RansomwareMonitorTests
@@ -425,7 +519,11 @@ public sealed class RansomwareMonitorTests
         var detections = new System.Collections.Concurrent.ConcurrentQueue<RansomwareDetectedEventArgs>();
         var first = new ManualResetEventSlim(false);
         var second = new ManualResetEventSlim(false);
-        var monitor = new RansomwareMonitor(new[] { dir });
+        // No cooldown, because this test is about re-arming: the two waves are milliseconds apart
+        // and the default thirty-second quiet period would suppress the second one, which is the
+        // cooldown working rather than the latch failing. The cooldown has its own tests.
+        var monitor = new RansomwareMonitor(
+            new[] { dir }, new RansomwareBurstDetector(cooldown: TimeSpan.Zero));
         monitor.Detected += (_, e) =>
         {
             detections.Enqueue(e);

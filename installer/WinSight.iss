@@ -86,6 +86,17 @@ Name: "{autodesktop}\WinSight"; Filename: "{app}\winsight-dashboard.exe"; Workin
 [Run]
 Filename: "{app}\winsight-dashboard.exe"; Parameters: "--language {code:GetDashboardLanguage}"; Description: "{cm:LaunchDashboard}"; Flags: nowait postinstall skipifsilent
 
+; Uninstall removed the installation directory and left the ransomware decoys where they were
+; planted: up to eighteen files across Documents, Desktop, Pictures, Videos, Music and Downloads,
+; deliberately named to be unrecognisable. That property is what makes them work as decoys and what
+; makes them impossible for the user to pick out afterwards - and because those folders follow the
+; OneDrive redirection, they had synchronised to the cloud as well.
+;
+; This runs the sweep the product already performs at startup. runhidden because an uninstall should
+; not flash a console; skipifdoesntexist because a partially removed install must still uninstall.
+[UninstallRun]
+Filename: "{app}\winsight.exe"; Parameters: "remove-decoys"; Flags: runhidden skipifdoesntexist; RunOnceId: "RemoveDecoys"
+
 [Code]
 function GetDashboardLanguage(Param: String): String;
 begin

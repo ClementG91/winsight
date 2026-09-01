@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 
+using WinSight.Core;
+
 namespace WinSight.Ransomware;
 
 /// <summary>Raised once when ransomware-like activity is detected (a touched canary, or a burst).</summary>
@@ -56,6 +58,7 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     private readonly IReadOnlyList<string> _directories;
     private readonly Func<string?, bool> _isCanary;
+    private readonly Func<string?, bool>? _canaryIsIntact;
     private readonly Func<string?, bool> _looksEncrypted;
     private readonly RansomwareBurstDetector _detector;
     private readonly Func<DateTimeOffset> _clock;
@@ -63,7 +66,9 @@ public sealed class RansomwareFileWatcher : IDisposable
     private readonly Lock _gate = new();
     private readonly BlockingCollection<PendingChange> _pending =
         new(new ConcurrentQueue<PendingChange>(), MaxQueuedChanges);
+    private readonly ConcurrentDictionary<FileSystemWatcher, byte> _lost = new();
     private Thread? _worker;
+    private int _unwatchable;
     private int _overflows;
     private int _dropped;
     private bool _started;
@@ -76,10 +81,12 @@ public sealed class RansomwareFileWatcher : IDisposable
         Func<string?, bool> isCanary,
         RansomwareBurstDetector? detector = null,
         Func<DateTimeOffset>? clock = null,
-        Func<string?, bool>? looksEncrypted = null)
+        Func<string?, bool>? looksEncrypted = null,
+        Func<string?, bool>? canaryIsIntact = null)
     {
         _directories = directories ?? throw new ArgumentNullException(nameof(directories));
         _isCanary = isCanary ?? throw new ArgumentNullException(nameof(isCanary));
+        _canaryIsIntact = canaryIsIntact;
         _detector = detector ?? new RansomwareBurstDetector();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
         _looksEncrypted = looksEncrypted ?? RansomwareEntropySampler.LooksEncrypted;
@@ -88,11 +95,40 @@ public sealed class RansomwareFileWatcher : IDisposable
     /// <summary>The burst detector, exposed so the operator can acknowledge (Reset) after responding.</summary>
     public RansomwareBurstDetector Detector => _detector;
 
-    /// <summary>How many directories are actively watched. Zero until <see cref="Start"/>.</summary>
+    /// <summary>
+    /// How many directories are actively watched, right now. Zero until <see cref="Start"/>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this subtracts.</b> An overflow tears the watch down, and the handler re-arms it. When
+    /// the re-arm fails - the directory was removed, the volume went away - the watcher stays in the
+    /// list, dead. This property counted it, so the dashboard reported "3 directories watched" while
+    /// one of them had been blind since the first burst. That is the failure this whole class was
+    /// rebuilt around, reintroduced one level up: a coverage hole presented as coverage.
+    ///
+    /// A watcher is counted out the first time its re-arm fails and never counted again, so a
+    /// directory that keeps overflowing does not drive the number negative.
+    /// </remarks>
     public int WatchedDirectoryCount
     {
-        get { lock (_gate) { return _watchers.Count; } }
+        get { lock (_gate) { return Math.Max(0, _watchers.Count - _lost.Count); } }
     }
+
+    /// <summary>
+    /// Directories that were asked for but never watched at all: absent when the watch started, or
+    /// refused by Windows.
+    /// </summary>
+    /// <remarks>
+    /// Silently dropped before. A caller comparing what it asked for against
+    /// <see cref="WatchedDirectoryCount"/> could infer the difference; nothing did, and the
+    /// difference is precisely the set of folders nobody is watching.
+    /// </remarks>
+    public int UnwatchableDirectoryCount => Volatile.Read(ref _unwatchable);
+
+    /// <summary>
+    /// Watches that overflowed and could not be re-armed. Each one is a directory that stopped being
+    /// observed at some point and has not resumed.
+    /// </summary>
+    public int LostWatchCount => _lost.Count;
 
     /// <summary>
     /// Times Windows reported that it dropped changes because the watch buffer overran. Non-zero
@@ -104,8 +140,19 @@ public sealed class RansomwareFileWatcher : IDisposable
     /// <summary>Changes discarded because the internal queue was full. Same reasoning as above.</summary>
     public int DroppedChangeCount => Volatile.Read(ref _dropped);
 
-    /// <summary>True when any observation was lost, from either cause.</summary>
-    public bool CoverageIsIncomplete => OverflowCount > 0 || DroppedChangeCount > 0;
+    /// <summary>
+    /// True when any observation was lost, from any cause: a buffer overrun, a full queue, a watch
+    /// that could not be re-armed, or a directory that was never watched in the first place.
+    /// </summary>
+    /// <remarks>
+    /// The last two were missing. A watch list that silently shrank read as complete coverage, which
+    /// is the one thing this class promises never to do.
+    /// </remarks>
+    public bool CoverageIsIncomplete =>
+        OverflowCount > 0
+        || DroppedChangeCount > 0
+        || LostWatchCount > 0
+        || UnwatchableDirectoryCount > 0;
 
     public void Start()
     {
@@ -123,6 +170,12 @@ public sealed class RansomwareFileWatcher : IDisposable
                 if (watcher is not null)
                 {
                     _watchers.Add(watcher);
+                }
+                else
+                {
+                    // Counted rather than dropped. A folder that could not be watched is a folder
+                    // nobody is watching, and the caller has no other way to learn that.
+                    _unwatchable++;
                 }
             }
 
@@ -147,7 +200,9 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     private FileSystemWatcher? TryCreate(string directory)
     {
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        if (string.IsNullOrWhiteSpace(directory)
+            || !AutomaticFileAccess.IsLocal(directory)
+            || !Directory.Exists(directory))
         {
             return null;
         }
@@ -193,14 +248,19 @@ public sealed class RansomwareFileWatcher : IDisposable
             {
                 watcher.EnableRaisingEvents = false;
                 watcher.EnableRaisingEvents = true;
+                // Observed again, so it stops counting against the live total. The overflow count
+                // keeps the record that something was missed in between.
+                _lost.TryRemove(watcher, out _);
             }
             catch (Exception ex) when (ex is IOException
                                          or ObjectDisposedException
                                          or UnauthorizedAccessException
                                          or System.Security.SecurityException)
             {
-                // The directory is gone or the watcher is disposed; the overflow count already
-                // records that coverage is incomplete.
+                // The directory is gone or the watcher is disposed. The overflow count records that
+                // coverage was incomplete at some point; this records that it still is, so
+                // WatchedDirectoryCount stops claiming a dead watch as live.
+                _lost.TryAdd(watcher, 0);
             }
         }
     }
@@ -213,9 +273,22 @@ public sealed class RansomwareFileWatcher : IDisposable
     {
         // A rename reports the decoy as the OLD path, so that is what identifies a touched canary.
         var identity = e is RenamedEventArgs renamed ? renamed.OldFullPath : e.FullPath;
-        if (!_pending.TryAdd(new PendingChange(e.ChangeType, identity, e.FullPath)))
+        try
         {
-            Interlocked.Increment(ref _dropped);
+            if (!_pending.TryAdd(new PendingChange(e.ChangeType, identity, e.FullPath)))
+            {
+                Interlocked.Increment(ref _dropped);
+            }
+        }
+        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+        {
+            // Windows delivers this on a thread pool thread, and an unhandled exception there ends
+            // the process. Disposal completes the queue and then disposes it after a bounded join,
+            // so a callback still in flight when that join expires - a slow consumer, an entropy
+            // read on a network file - would arrive at a disposed collection and take the dashboard
+            // down during an ordinary shutdown. The change is already lost at that point; losing it
+            // quietly is the correct outcome, and the count below is deliberately not incremented
+            // because the watch is ending rather than falling behind.
         }
     }
 
@@ -239,6 +312,19 @@ public sealed class RansomwareFileWatcher : IDisposable
         try
         {
             var isCanary = _isCanary(change.IdentityPath);
+
+            // A decoy rewritten with exactly its own bytes has not been touched in any sense that
+            // matters. The decoy directories follow the OneDrive redirection on purpose and
+            // LastWrite is in the notify filter, so a placeholder hydration or any synchronisation
+            // client rewriting the file raised the one signal this product presents as unambiguous.
+            // A rename or a delete is never an identical rewrite, so only a change is qualified.
+            if (isCanary
+                && change.ChangeType == WatcherChangeTypes.Changed
+                && _canaryIsIntact is not null
+                && _canaryIsIntact(change.IdentityPath))
+            {
+                return;
+            }
 
             // Only score content for a create/change of an ordinary file; the sampler's own
             // extension gate then skips formats that are compressed by design.

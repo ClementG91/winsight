@@ -15,6 +15,16 @@ namespace WinSight.Presence.Tests;
 /// </remarks>
 public sealed class SystemLogWakeSourceTests
 {
+    private const string ResumeXml = """
+        <Event xmlns="http://schemas.microsoft.com/win/2004/08/events/event">
+          <EventData>
+            <Data Name="SleepTime">2026-08-28T20:15:00.0000000Z</Data>
+            <Data Name="WakeSourceType">5</Data>
+            <Data Name="WakeSourceText">USB Keyboard</Data>
+          </EventData>
+        </Event>
+        """;
+
     /// <summary>
     /// <see cref="IWakeEventSource.Enumerate"/> promises never to throw. This holds the real reader
     /// to it, whatever state this machine's System log is in.
@@ -26,12 +36,57 @@ public sealed class SystemLogWakeSourceTests
 
         var wakes = source.Enumerate(PresenceScanner.DefaultMax).ToList();
 
-        // Never "empty and fine": an empty timeline is only allowed alongside an explicit admission
-        // that the log was unreadable, or a machine that genuinely has never resumed from sleep.
-        Assert.True(
-            wakes.Count > 0 || source.Unreadable || wakes.Count == 0,
-            "the source must report a timeline or admit it could not read one");
+        // A partially returned timeline must not also claim that the source was wholly unreadable.
+        Assert.False(source.Unreadable && wakes.Count > 0);
         Assert.All(wakes, wake => Assert.NotEqual(default, wake.WokeUtc));
+    }
+
+    [Fact]
+    public void ParseXml_ReadsTheLocaleIndependentResumePayload()
+    {
+        var woke = new DateTime(2026, 8, 28, 20, 20, 0, DateTimeKind.Utc);
+
+        var record = SystemLogWakeSource.ParseXml(ResumeXml, woke);
+
+        Assert.NotNull(record);
+        Assert.Equal(new DateTimeOffset(woke), record.WokeUtc);
+        Assert.Equal(
+            DateTimeOffset.Parse("2026-08-28T20:15:00Z"),
+            record.SleptUtc);
+        Assert.Equal(WakeCause.PhysicalInput, record.Cause);
+        Assert.Equal("USB Keyboard", record.Source);
+        Assert.Equal(TimeSpan.FromMinutes(5), record.Asleep);
+        Assert.True(record.IndicatesPresence);
+    }
+
+    [Fact]
+    public void ParseXml_RejectsMalformedXmlAndMissingEventTime()
+    {
+        Assert.Null(SystemLogWakeSource.ParseXml("<Event>", DateTime.UtcNow));
+        Assert.Null(SystemLogWakeSource.ParseXml(ResumeXml, timeCreated: null));
+    }
+
+    [Fact]
+    public void ParseXml_TreatsUnknownOrInvalidFieldsConservatively()
+    {
+        const string xml = """
+            <Event>
+              <EventData>
+                <Data Name="SleepTime">not-a-time</Data>
+                <Data Name="WakeSourceType">not-a-number</Data>
+                <Data Name="WakeSourceText">   </Data>
+              </EventData>
+            </Event>
+            """;
+
+        var record = SystemLogWakeSource.ParseXml(xml, DateTime.UtcNow);
+
+        Assert.NotNull(record);
+        Assert.Null(record.SleptUtc);
+        Assert.Equal(WakeCause.Unknown, record.Cause);
+        Assert.Null(record.Source);
+        Assert.Null(record.Asleep);
+        Assert.False(record.IndicatesPresence);
     }
 
     [Fact]

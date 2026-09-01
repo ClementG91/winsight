@@ -55,6 +55,11 @@ public sealed class WinSightMcpTools(
         bool includeSensitive = false,
         [Description("Maximum evidence items returned, from 1 to 200.")]
         int maxItems = 50,
+        [Description(
+            "Index of the first evidence item to return. Use with maxItems to read a large report "
+            + "in pages: when a report comes back truncated, ask again with offset set to the "
+            + "previous offset plus returnedItemCount.")]
+        int offset = 0,
         CancellationToken cancellationToken = default)
     {
         var command = McpScanners.Command(scanner);
@@ -74,6 +79,7 @@ public sealed class WinSightMcpTools(
             includeEvidence,
             includeSensitive,
             maxItems,
+            offset,
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -101,6 +107,8 @@ public sealed class WinSightMcpTools(
         bool includeSensitive = false,
         [Description("Maximum evidence items returned, from 1 to 200.")]
         int maxItems = 50,
+        [Description("Index of the first evidence item to return, for reading a large report in pages.")]
+        int offset = 0,
         CancellationToken cancellationToken = default)
     {
         // Windows pids are positive; 0 is the System Idle Process, which has no image to inspect.
@@ -110,7 +118,7 @@ public sealed class WinSightMcpTools(
             throw new McpException("A process id must be greater than zero.");
         }
 
-        ValidateDisclosure(includeEvidence, includeSensitive, maxItems);
+        ValidateDisclosure(includeEvidence, includeSensitive, maxItems, offset);
 
         // Routed through the same failure mapping as the scanners rather than left bare. The pivot
         // runs a process list, a module read and a connection sweep, so it can hit exactly the
@@ -120,7 +128,8 @@ public sealed class WinSightMcpTools(
             async () => [await scans.RunProcessAsync(pid, cancellationToken).ConfigureAwait(false)],
             includeEvidence,
             includeSensitive,
-            maxItems).ConfigureAwait(false);
+            maxItems,
+            offset).ConfigureAwait(false);
     }
 
     [McpServerTool(
@@ -148,6 +157,8 @@ public sealed class WinSightMcpTools(
         bool includeSensitive = false,
         [Description("Maximum evidence items returned per scanner, from 1 to 200.")]
         int maxItemsPerScanner = 25,
+        [Description("Index of the first evidence item to return per scanner, for reading in pages.")]
+        int offset = 0,
         CancellationToken cancellationToken = default) =>
         RunAndProjectAsync(
             scanner: null,
@@ -155,6 +166,7 @@ public sealed class WinSightMcpTools(
             includeEvidence,
             includeSensitive,
             maxItemsPerScanner,
+            offset,
             cancellationToken);
 
     [McpServerTool(
@@ -177,6 +189,8 @@ public sealed class WinSightMcpTools(
         bool includeSensitive = false,
         [Description("Maximum recorded detections returned, from 1 to 200.")]
         int maxItems = 50,
+        [Description("Index of the first recorded detection to return, for reading in pages.")]
+        int offset = 0,
         CancellationToken cancellationToken = default) =>
         // Goes through the same projector as the scanners, so the journal inherits the identical privacy
         // model — profile paths redacted unless the server was launched with sensitive evidence enabled.
@@ -188,6 +202,7 @@ public sealed class WinSightMcpTools(
             includeEvidence,
             includeSensitive,
             maxItems,
+            offset,
             cancellationToken);
 
     [McpServerTool(
@@ -229,11 +244,16 @@ public sealed class WinSightMcpTools(
             maxItems);
     }
 
-    private void ValidateDisclosure(bool includeEvidence, bool includeSensitive, int maxItems)
+    private void ValidateDisclosure(
+        bool includeEvidence, bool includeSensitive, int maxItems, int offset = 0)
     {
         if (maxItems is < 1 or > 200)
         {
             throw new McpException("Evidence limit must be between 1 and 200 items.");
+        }
+        if (offset < 0)
+        {
+            throw new McpException("The evidence offset cannot be negative.");
         }
         if (includeSensitive && !includeEvidence)
         {
@@ -252,15 +272,17 @@ public sealed class WinSightMcpTools(
         bool includeEvidence,
         bool includeSensitive,
         int maxItems,
+        int offset,
         CancellationToken cancellationToken)
     {
-        ValidateDisclosure(includeEvidence, includeSensitive, maxItems);
+        ValidateDisclosure(includeEvidence, includeSensitive, maxItems, offset);
 
         return await ProjectAsync(
             () => scans.RunAsync(scanner, flaggedOnly, cancellationToken),
             includeEvidence,
             includeSensitive,
-            maxItems).ConfigureAwait(false);
+            maxItems,
+            offset).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -276,7 +298,8 @@ public sealed class WinSightMcpTools(
         Func<Task<IReadOnlyList<ToolReport>>> acquire,
         bool includeEvidence,
         bool includeSensitive,
-        int maxItems)
+        int maxItems,
+        int offset = 0)
     {
         try
         {
@@ -286,7 +309,8 @@ public sealed class WinSightMcpTools(
                 includeEvidence,
                 includeSensitive,
                 security.AllowSensitiveEvidence,
-                maxItems);
+                maxItems,
+                offset);
         }
         catch (UnauthorizedAccessException)
         {

@@ -202,18 +202,52 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 }
 
 /// <summary>
-/// The Winlogon Shell/Userinit hooks, the processes the OS launches at logon.
+/// The Winlogon logon hooks: the programs the OS launches around sign-in.
 /// Defaults are explorer.exe and userinit.exe; malware appends its own comma-
 /// separated payload here, so any EXTRA command beyond the default is notable.
-/// Covers HKLM (machine-wide) AND HKCU, a per-user Shell/Userinit override is a
-/// quieter, no-admin variant of the same hijack.
+/// Covers HKLM (machine-wide) AND HKCU, a per-user override is a quieter,
+/// no-admin variant of the same hijack. See <c>Values</c> for which values are
+/// read and which are deliberately not.
 /// </summary>
 public sealed class WinlogonEnumerator : IAutostartEnumerator
 {
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
-    private static readonly string[] Values = { "Shell", "Userinit" };
 
-    public string Surface => "Winlogon Shell/Userinit";
+    /// <summary>
+    /// The Winlogon values that name something Windows still executes.
+    /// </summary>
+    /// <remarks>
+    /// <b>What was missing.</b> Only Shell and Userinit were read, and the surface was described as
+    /// if those were the whole of it. Three more values on the same key launch a program at logon
+    /// and were invisible to the scan:
+    ///
+    /// <list type="bullet">
+    /// <item><c>Taskman</c> - Winlogon launches this instead of Task Manager. An operator pressing
+    /// Ctrl+Shift+Esc runs whatever it names, which is both persistence and a way to stop somebody
+    /// looking at the process list.</item>
+    /// <item><c>AppSetup</c> - userinit runs it at every logon, before the shell.</item>
+    /// <item><c>UIHost</c> - the logon UI host, launched as SYSTEM before anybody signs in.</item>
+    /// </list>
+    ///
+    /// <c>GinaDLL</c> is read for the opposite reason to the others: modern Windows does not
+    /// execute it, so nothing legitimate sets it, and its mere presence on a supported machine is
+    /// the finding. Reading a value the OS ignores is normally noise; reading one that should not
+    /// exist at all is not.
+    ///
+    /// <b>Deliberately still absent.</b> <c>Notify</c> and <c>VmApplet</c> are legacy in the same
+    /// way but are set by real software that predates Vista, so enumerating them adds findings an
+    /// operator cannot act on.
+    /// </remarks>
+    private static readonly string[] Values =
+        ["Shell", "Userinit", "Taskman", "AppSetup", "UIHost", "GinaDLL"];
+
+    /// <summary>
+    /// The values this enumerator reads. Public because it is a claim about coverage, and a claim
+    /// about coverage that nothing can check is the kind this project keeps finding wrong.
+    /// </summary>
+    public static IReadOnlyList<string> ExecutedValues => Values;
+
+    public string Surface => "Winlogon logon hooks";
 
     public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = new[]
     {

@@ -10,12 +10,12 @@ public sealed class ServiceAvailabilityTests
 {
     /// <summary>
     /// A clean exit tells the Service Control Manager the stop was intentional, and
-    /// SERVICE_FAILURE_ACTIONS - configured with restarts at 5 s and 30 s - is only consulted when a
-    /// service terminates with an error.
+    /// SERVICE_FAILURE_ACTIONS - configured with restarts at 5 s, 30 s and then every 60 s - is only
+    /// consulted when a service terminates with an error.
     /// </summary>
     /// <remarks>
-    /// So neither recovery path ran: the SCM saw nothing to recover from, and the hard-exit watchdog
-    /// is a background thread a normal process exit removes before its eight seconds elapse. The
+    /// So the recovery path did not run: the SCM saw nothing to recover from, and the hard-exit
+    /// watchdog is a background thread a normal process exit removes before its eight seconds. The
     /// concrete case is pipe squatting - a caller owning the pipe name before the service starts
     /// makes FIRST_PIPE_INSTANCE creation fail after the startup service has already applied the
     /// filters, so the squatter gets "filters applied, then immediately removed", in a loop, without

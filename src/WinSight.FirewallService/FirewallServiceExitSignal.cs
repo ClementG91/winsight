@@ -8,10 +8,10 @@ namespace WinSight.FirewallService;
 /// <b>Why the exit code decides whether recovery happens at all.</b> On endpoint loss the worker
 /// calls <c>StopApplication</c>, the host returns normally and the process exited 0. The Service
 /// Control Manager reads that as a clean, intentional stop, and
-/// <c>SERVICE_FAILURE_ACTIONS</c> - configured with restarts at 5 s and 30 s - is only consulted
-/// when a service terminates with an error. So the two recovery paths the design provides never
-/// ran: the SCM saw nothing to recover from, and the hard-exit watchdog is a background thread that
-/// a normal process exit removes before its eight seconds elapse.
+/// <c>SERVICE_FAILURE_ACTIONS</c> - configured with restarts at 5 s, 30 s and then every 60 s - is
+/// only consulted when a service terminates with an error. So the recovery path never ran: the SCM
+/// saw nothing to recover from, and the hard-exit watchdog is a background thread that a normal
+/// process exit removes before its eight seconds elapse.
 ///
 /// The concrete consequence is the pipe-squatting case. A caller that owns the pipe name before the
 /// service starts makes <c>FIRST_PIPE_INSTANCE</c> creation fail after

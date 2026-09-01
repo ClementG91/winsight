@@ -51,6 +51,7 @@ public sealed class PersistenceScanner
             new SecurityProvidersEnumerator(),
             new JustInTimeDebuggerEnumerator(),
             new PowerShellProfileEnumerator(),
+            new ProfilerInjectionEnumerator(),
         };
 
     /// <summary>

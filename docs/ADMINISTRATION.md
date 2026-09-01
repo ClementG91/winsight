@@ -49,11 +49,13 @@ It starts in **audit-only**. Nothing is filtered until someone arms it deliberat
 
 Registration also applies a checked SCM profile: an unrestricted service SID, only
 `SeChangeNotifyPrivilege`, `SeImpersonatePrivilege` and `SeSystemProfilePrivilege`, and recovery
-actions of restart after 5 seconds, restart after 30 seconds, then no action, reset after 24 hours.
-Recovery applies to non-crash failures too. A configuration failure rolls registration back instead
-of leaving a partially hardened LocalSystem service. WinSight keeps the SCM's standard service DACL:
-ordinary authenticated users may query it but cannot start, stop, delete or reconfigure it. It does
-not claim protected-service status; that Windows model requires a compatible signed-service chain.
+actions of restart after 5 seconds, restart after 30 seconds, then restart after 60 seconds. The SCM
+repeats that final 60-second action for subsequent failures and resets the failure count after one
+hour. Recovery applies to non-crash failures too. A configuration failure rolls registration back
+instead of leaving a partially hardened LocalSystem service. WinSight keeps the SCM's standard
+service DACL: ordinary authenticated users may query it but cannot start, stop, delete or
+reconfigure it. It does not claim protected-service status; that Windows model requires a
+compatible signed-service chain.
 
 ### Verify what it is actually doing
 

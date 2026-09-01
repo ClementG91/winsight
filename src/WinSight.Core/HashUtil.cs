@@ -10,7 +10,7 @@ public static class HashUtil
     {
         try
         {
-            if (!File.Exists(path))
+            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
             {
                 return null;
             }

@@ -183,9 +183,10 @@ process ids or display names, which are transient or ambiguous.
   `-SkipEnforcement` skips WFP arming only: in the VM it still installs/starts the candidate, then
   stops and uninstalls it and requires SCM error 1060. It is not a machine-read-only mode. The skip
   path requires exactly 17 checks and the full path 35. Both paths verify the installed service SID,
-  required-privilege allowlist and failure-recovery actions through `QueryServiceConfig2W`, without
-  parsing localized `sc.exe` output. The full path stops the service while
-  a real block is active, proves dynamic-session removal and restored connectivity, restarts it and
+  required-privilege allowlist and the 5-second/30-second/60-second-repeat, one-hour-reset recovery
+  profile through `QueryServiceConfig2W`, without parsing localized `sc.exe` output. The full path
+  stops the service while a real block is active, proves dynamic-session removal and restored
+  connectivity, restarts it and
   proves persisted intent is reapplied before rollback. The normal non-privileged
   `ContractSelfTest` passes 26/26; its deliberate lifecycle-order negative control exits 1. The
   former 14/14 and the first local report based on it are invalid and non-qualifying. The

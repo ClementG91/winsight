@@ -325,23 +325,35 @@ static async Task<int> RunHostAsync()
     // Shared by the observer that fills it and the dispatcher that serves and prunes it.
     builder.Services.AddSingleton<PendingOutboundLog>();
     builder.Services.AddSingleton<IOutboundConnectionWatcher, OutboundConnectionWatcher>();
+    builder.Services.AddSingleton<FirewallDispatchLog>();
 
     builder.Services.AddSingleton(sp => new FirewallRequestDispatcher(
         sp.GetRequiredService<FirewallPolicyStore>(),
         sp.GetRequiredService<IFirewallMutationAuthority>(),
-        sp.GetRequiredService<PendingOutboundLog>()));
+        sp.GetRequiredService<PendingOutboundLog>(),
+        sp.GetRequiredService<FirewallDispatchLog>().Failure));
     builder.Services.AddSingleton(sp => new FirewallConnectionHandler(
         sp.GetRequiredService<FirewallRequestDispatcher>()));
     builder.Services.AddSingleton<IFirewallServiceListener>(sp => new NamedPipeFirewallServer(
         sp.GetRequiredService<FirewallConnectionHandler>()));
 
+    // The pipe worker is registered FIRST, and the startup service waits on its readiness before
+    // installing a single filter. Hosted services start in registration order, and with the old
+    // order filters were applied before the listener had even tried to claim its name: an
+    // unprivileged caller holding \\.\pipe\WinSightFirewall made that claim fail, the host
+    // stopped, and BFE - the session being dynamic - destroyed everything just installed. The
+    // squatter got a loop of "filters applied, then immediately removed", which is worse than never
+    // arming because the machine spent each interval believing it was protected.
+    builder.Services.AddFirewallServiceWorker();
     // Startup always reconciles native truth: Enforcement rebuilds and verifies the exact
     // enabled-block set, while AuditOnly removes every orphaned WinSight-owned object.
-    builder.Services.AddHostedService<EnforcementStartupService>();
+    builder.Services.AddHostedService(sp => new EnforcementStartupService(
+        sp.GetRequiredService<EnforcementCoordinator>(),
+        sp.GetRequiredService<ILogger<EnforcementStartupService>>(),
+        sp.GetRequiredService<IFirewallServiceListener>() as IFirewallServiceReadiness));
     // Observation is reporting only and runs whatever the mode: telling the operator what reached
     // the network is worth as much in audit-only, where it is the only thing the tool can do.
     builder.Services.AddHostedService<OutboundObserverService>();
-    builder.Services.AddFirewallServiceWorker();
 
     // Disposed, and disposed asynchronously. RunAsync starts and stops the host but never disposes
     // it, so the singletons it owns were being left to process exit: EnforcementCoordinator holds a
@@ -353,6 +365,10 @@ static async Task<int> RunHostAsync()
     // a service provider refuses to dispose a singleton that implements only IAsyncDisposable from a
     // synchronous Dispose(), which is exactly what EnforcementCoordinator now is.
     var host = builder.Build();
+    // Capture the exit signal while the provider is alive. The host owns that provider and
+    // DisposeAsync tears it down; resolving the signal afterwards races normal service shutdown
+    // and turns an otherwise successful SCM recovery into an unhandled ObjectDisposedException.
+    var exitSignal = host.Services.GetRequiredService<FirewallServiceExitSignal>();
     try
     {
         await host.RunAsync().ConfigureAwait(false);
@@ -373,5 +389,5 @@ static async Task<int> RunHostAsync()
     // Non-zero when the endpoint was lost, so the Service Control Manager runs the failure actions
     // the installer configured. Exiting 0 told it the stop was intentional and nothing ever
     // restarted a service whose pipe had been squatted or had faulted.
-    return host.Services.GetRequiredService<FirewallServiceExitSignal>().ExitCode;
+    return exitSignal.ExitCode;
 }

@@ -1,6 +1,34 @@
 namespace WinSight.Firewall;
 
 /// <summary>
+/// Optional contract for privileged transition exceptions that carry a stable, non-sensitive
+/// diagnostic code. The dispatcher validates the code before exposing it to its local observer;
+/// exception messages and native details never leave the failure boundary.
+/// </summary>
+public interface IFirewallFailureCode
+{
+    string Code { get; }
+}
+
+public enum FirewallDispatchFailureKind
+{
+    Coded,
+    Native,
+    StorageTrust,
+    Unauthorized,
+    Io,
+    InvalidOperation,
+    Configuration,
+    Unexpected,
+}
+
+/// <summary>Sanitized local diagnostic for a command that collapsed to InternalFailure.</summary>
+public readonly record struct FirewallDispatchFailure(
+    FirewallCommand Command,
+    FirewallDispatchFailureKind Kind,
+    string? Code = null);
+
+/// <summary>
 /// Executes a validated <see cref="FirewallCommandRequest"/> against the durable policy
 /// store and the outbound engine, producing a <see cref="FirewallCommandResponse"/>. It
 /// is the only place that turns a request into an effect, so the named-pipe host stays a
@@ -23,6 +51,7 @@ public sealed class FirewallRequestDispatcher
     private readonly FirewallPolicyStore _store;
     private readonly IFirewallMutationAuthority _authority;
     private readonly PendingOutboundLog _pending;
+    private readonly Action<FirewallDispatchFailure>? _failureObserver;
 
     /// <param name="pending">
     /// The apps observed reaching the network with no policy. Optional because a host that does
@@ -32,11 +61,13 @@ public sealed class FirewallRequestDispatcher
     public FirewallRequestDispatcher(
         FirewallPolicyStore store,
         IFirewallMutationAuthority authority,
-        PendingOutboundLog? pending = null)
+        PendingOutboundLog? pending = null,
+        Action<FirewallDispatchFailure>? failureObserver = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _authority = authority ?? throw new ArgumentNullException(nameof(authority));
         _pending = pending ?? new PendingOutboundLog();
+        _failureObserver = failureObserver;
     }
 
     public async Task<FirewallCommandResponse> DispatchAsync(
@@ -77,7 +108,7 @@ public sealed class FirewallRequestDispatcher
         {
             throw;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // No exception detail crosses the wire: the caller learns only that the
             // command could not be completed.
@@ -96,9 +127,58 @@ public sealed class FirewallRequestDispatcher
             // A dispatch failure is a fact about one command. Whether the endpoint itself is
             // still sound is a separate question, decided by the transport, and no enumeration
             // of exception types written in advance can be trusted to keep the two apart.
+            ObserveFailure(request.Command, ex);
             return Failure(request, FirewallProtocolError.InternalFailure);
         }
     }
+
+    private void ObserveFailure(FirewallCommand command, Exception exception)
+    {
+        if (_failureObserver is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _failureObserver(ClassifyFailure(command, exception));
+        }
+        catch (Exception)
+        {
+            // Diagnostics are strictly best-effort. A failing logger must never change the IPC
+            // response, escape into the listener, or tear down the dynamic WFP session.
+        }
+    }
+
+    internal static FirewallDispatchFailure ClassifyFailure(
+        FirewallCommand command,
+        Exception exception)
+    {
+        if (exception is IFirewallFailureCode coded && StableFailureCode(coded.Code) is { } code)
+        {
+            return new(command, FirewallDispatchFailureKind.Coded, code);
+        }
+
+        var failure = exception.GetBaseException();
+        var kind = failure switch
+        {
+            System.ComponentModel.Win32Exception => FirewallDispatchFailureKind.Native,
+            FirewallStorageTrustException => FirewallDispatchFailureKind.StorageTrust,
+            UnauthorizedAccessException or System.Security.SecurityException =>
+                FirewallDispatchFailureKind.Unauthorized,
+            IOException => FirewallDispatchFailureKind.Io,
+            InvalidOperationException => FirewallDispatchFailureKind.InvalidOperation,
+            ArgumentException => FirewallDispatchFailureKind.Configuration,
+            _ => FirewallDispatchFailureKind.Unexpected,
+        };
+        return new(command, kind);
+    }
+
+    private static string? StableFailureCode(string? code) =>
+        code is { Length: > 0 and <= 64 }
+        && code.All(character => char.IsAsciiLetterOrDigit(character) || character == '_')
+            ? code
+            : null;
 
     private static bool IsMutation(FirewallCommand command) => command is
         FirewallCommand.UpsertPolicy or FirewallCommand.RemovePolicy or

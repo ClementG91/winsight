@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using WinSight.Attribution;
 using WinSight.AvMonitor;
 using WinSight.Browser;
@@ -179,14 +181,30 @@ public static class Adapters
         var entries = scan.Entries;
 
         // Opt-in VirusTotal enrichment for the flagged, resolvable items only.
+        //
+        // Ordered most adverse first, because the enricher looks up at most four distinct files and
+        // takes them in the order given. Unordered, those four went to whichever entries the
+        // enumerator reached first - so an unsigned DLL in an IFEO Debugger value could lose its
+        // lookup to four orphaned registrations whose only fault is that their target is missing.
         var vt = VirusTotalEnricher.Lookup(
-            entries.Where(e => e.IsSuspicious && e.ImagePath is not null).Select(e => e.ImagePath!),
+            entries.Where(e => e.IsSuspicious && e.ImagePath is not null)
+                .OrderByDescending(e => e.Abuse != InterpreterAbuse.None)
+                .ThenByDescending(e => e.IsAdverse)
+                .Select(e => e.ImagePath!),
             allowNetworkLookups,
             cancellationToken);
 
         var b = new ToolReport.Builder("persistence");
-        foreach (var e in entries.Where(e => !flaggedOnly || e.IsSuspicious)
-                     .OrderByDescending(e => e.IsSuspicious).ThenBy(e => e.Vector))
+        // --flagged means "only noteworthy items", so it now shows what was checked and found
+        // adverse - not what could not be checked. An orphaned OEM registration used to sit in that
+        // list beside a live IFEO hijack, which is what made the list too long to read.
+        //
+        // The coverage signal is not lost: the summary line names the unverified count, and a full
+        // scan still shows every one of them at their own severity. Moving them out of this view is
+        // what makes the view worth having; naming them in the header is what keeps the scan honest.
+        foreach (var e in entries.Where(e => !flaggedOnly || e.IsAdverse)
+                     .OrderByDescending(e => e.IsAdverse).ThenByDescending(e => e.IsUnverified)
+                     .ThenBy(e => e.Vector))
         {
             var report = e.ImagePath is not null && vt.TryGetValue(e.ImagePath, out var v) ? v : null;
             // The whole command line must not become the detail. The MCP projector withholds
@@ -199,18 +217,30 @@ public static class Adapters
             var displayedPath = e.ImagePath ?? e.ExpectedImagePath ?? CommandHead(e.Command);
             var verdict = report is not null
                 ? $"VT {report.Malicious}/{report.Total}"
-                : PersistenceStatusLabel(e.Status, e.Signature.Anchor);
+                : PersistenceStatusLabel(e.Status, e.Signature.Anchor, e.Signature.Revocation);
             // The command-line reason has to ride beside the signature verdict rather than replace
             // it, because the pair is the finding: "signature valid" alone reads as an all-clear on
             // exactly the entries this rule exists to catch. The raw command line stays in the
             // fields below rather than moving into the detail, so MCP's existing rule — command
             // text is withheld unless the operator opened the sensitive gate — keeps governing it.
             var abuse = InterpreterAbuseTriage.Describe(e.Abuse);
-            var detail = abuse is null
-                ? $"{displayedPath}  [{verdict}]"
-                : $"{displayedPath}  [{verdict}; {abuse}]";
+            // A valid signature that is nonetheless flagged has to say why on the same line. Without
+            // this the entry reads "signature valid" beside a [!] mark, which is the most confusing
+            // thing a report can do: it looks like the tool contradicting itself rather than making
+            // a point about where the code is registered to load.
+            var privileged = PrivilegedSurfaceTriage.IsForeignCodeInAPrivilegedHost(e)
+                ? $"third-party code loaded by {PrivilegedHostLabel(e.Vector)}"
+                : null;
+            var reasons = string.Join("; ", new[] { verdict, abuse, privileged }
+                .Where(reason => !string.IsNullOrEmpty(reason)));
+            var detail = $"{displayedPath}  [{reasons}]";
             b.Add(
-                e.IsSuspicious ? Severity.Notable : Severity.Info,
+                // Three levels, not two. An entry whose target could not be checked is Unverified:
+                // present in the report, absent from the "worth examining" count, and not a reason
+                // for a scheduled task to exit non-zero.
+                e.IsAdverse ? Severity.Notable
+                    : e.IsUnverified ? Severity.Unverified
+                    : Severity.Info,
                 $"{e.Vector}/{e.Name}",
                 detail,
                 new Dictionary<string, string?>
@@ -232,6 +262,12 @@ public static class Adapters
                     // null-valued fields, so a clean entry costs nothing on the wire.
                     ["commandLineConcern"] = e.Abuse == InterpreterAbuse.None ? null : e.Abuse.ToString(),
                     ["signer"] = e.Signature.Signer,
+                    // Null rather than "Unspecified" when nothing was established, so a consumer
+                    // tests for the key's presence and the MCP projector drops it from a clean
+                    // entry rather than paying for a word that means "no answer".
+                    ["revocation"] = e.Signature.Revocation == RevocationStanding.Unspecified
+                        ? null
+                        : e.Signature.Revocation.ToString(),
                     ["vtMalicious"] = report?.Malicious.ToString(),
                     ["vtTotal"] = report?.Total.ToString(),
                     ["vtLink"] = report?.Permalink,
@@ -241,7 +277,50 @@ public static class Adapters
             b,
             entries.Where(entry => entry.ImageStatus == ImageResolutionStatus.Present)
                 .Select(entry => entry.Signature));
+        AddPersistenceCoverageFinding(b, scan.Coverage);
         return b.Build(PersistenceSummary(entries, scan.Coverage));
+    }
+
+    /// <summary>
+    /// Surfaces the scan was not allowed to read, as a finding rather than only as a clause in the
+    /// summary line.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the clause was not enough.</b> Persistence was the one scanner of eleven that reported
+    /// its coverage gap only through <c>Summary</c>. The CLI and the MCP server print that string,
+    /// so both saw it - but the dashboard replaces <c>SummaryText</c> with its own "N results, M to
+    /// examine" line, and the clause went with it. The audience that lost it is precisely the
+    /// non-technical one, on the scanner where the difference between "there is nothing there" and
+    /// "I could not look" is measured at 210 items on a real machine.
+    ///
+    /// Emitting a finding puts it in the results grid, where no presentation layer can drop it, and
+    /// makes persistence behave like the ten scanners beside it.
+    ///
+    /// It is Unverified rather than Notable: an unelevated scan is not a finding about the machine,
+    /// and making it drive the exit code would mean every scheduled task without elevation reports
+    /// failure for ever.
+    /// </remarks>
+    internal static void AddPersistenceCoverageFinding(
+        ToolReport.Builder builder, PersistenceCoverage coverage)
+    {
+        if (!coverage.IsPartial)
+        {
+            return;
+        }
+        var surfaces = string.Join(", ", coverage.UnreadableSurfaces.Distinct().Order(StringComparer.Ordinal));
+        builder.Add(
+            Severity.Unverified,
+            "autostart surfaces not readable",
+            coverage.UnreadableLocations > 0
+                ? $"{coverage.UnreadableLocations} location(s) could not be read ({surfaces}); "
+                    + "run elevated to cover them"
+                : $"surface(s) could not be read ({surfaces}); run elevated to cover them",
+            new Dictionary<string, string?>
+            {
+                ["unreadableLocations"] = coverage.UnreadableLocations.ToString(
+                    CultureInfo.InvariantCulture),
+                ["unreadableSurfaces"] = surfaces,
+            });
     }
 
     /// <summary>
@@ -257,7 +336,16 @@ public static class Adapters
     internal static string PersistenceSummary(
         IReadOnlyList<AutostartEntry> entries, PersistenceCoverage coverage)
     {
-        var line = $"{entries.Count} autostart item(s), {entries.Count(e => e.IsSuspicious)} flagged";
+        // Flagged counts what was checked and found adverse. Entries whose check could not complete
+        // are named separately: reporting an orphaned OEM registration as "flagged" alongside a live
+        // IFEO hijack is what made this number stop meaning anything.
+        var adverse = entries.Count(e => e.IsAdverse);
+        var unverified = entries.Count(e => e.IsUnverified);
+        var line = $"{entries.Count} autostart item(s), {adverse} flagged";
+        if (unverified > 0)
+        {
+            line += $", {unverified} unverified";
+        }
         if (!coverage.IsPartial)
         {
             return line;
@@ -304,13 +392,34 @@ public static class Adapters
         return head.Length <= MaxHeadLength ? head : head[..MaxHeadLength] + "…";
     }
 
+    /// <summary>The process an entry on a privileged surface is loaded into, in plain words.</summary>
+    private static string PrivilegedHostLabel(AutostartVector vector) => vector switch
+    {
+        AutostartVector.AppInitDll => "every process that links user32",
+        AutostartVector.AppCertDll => "every process that is created",
+        AutostartVector.LsaPackage or AutostartVector.SecurityProvider => "LSASS",
+        AutostartVector.CredentialProvider => "the logon UI, as SYSTEM, before sign-in",
+        AutostartVector.PrintMonitor or AutostartVector.PrintProvider =>
+            "the print spooler, as SYSTEM",
+        AutostartVector.TimeProvider => "the time service",
+        AutostartVector.BootExecute => "the session manager, before Windows starts",
+        AutostartVector.NetshHelper => "netsh, typically elevated",
+        AutostartVector.Winlogon => "Winlogon",
+        AutostartVector.WmiSubscription => "WMI, as SYSTEM",
+        AutostartVector.ProfilerInjection => "the CLR, into managed processes",
+        _ => "a privileged process",
+    };
+
     private static string PersistenceStatusLabel(
         PersistenceStatus status,
-        SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified) => status switch
+        SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified,
+        RevocationStanding revocation = RevocationStanding.Unspecified) => status switch
         {
             PersistenceStatus.FileMissing => "file missing, signature not checked",
             PersistenceStatus.SignatureValid when anchor == SignatureTrustAnchor.UserInstalledRoot =>
                 "signature valid ONLY through a user-installed root",
+            PersistenceStatus.SignatureValid when revocation == RevocationStanding.Revoked =>
+                "signature valid but the certificate is REVOKED",
             PersistenceStatus.SignatureValid => "signature valid",
             PersistenceStatus.Unsigned => "unsigned",
             PersistenceStatus.InvalidSignature => "invalid signature",
@@ -1054,13 +1163,21 @@ public static class Adapters
                 continue;
             }
             b.Add(
-                isNotable ? Severity.Notable : Severity.Info,
+                isNotable ? Severity.Notable
+                    // A protection whose state the kernel would not report is the same kind of thing
+                    // as an autostart entry whose target is not on disk: nothing is known either way.
+                    : finding.Concern is IntegrityConcern.Unreadable ? Severity.Unverified
+                    : Severity.Info,
                 finding.Name,
                 finding.Detail,
                 new Dictionary<string, string?>
                 {
                     ["protection"] = finding.Name,
                     ["concern"] = finding.Concern.ToString(),
+                    // The sub-case, not just the verdict. HVCI is a hardening gap both when it is off
+                    // and when it is in audit mode, and those are not the same sentence - the
+                    // dashboard needs the distinction to say either of them in French.
+                    ["state"] = finding.State,
                 });
         }
 
@@ -1542,15 +1659,36 @@ public static class Adapters
         bool allowNetworkLookups = true,
         CancellationToken cancellationToken = default)
     {
-        var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
+        var monitor = new ConnectionMonitor(SharedVerifier);
+        var connections = monitor.Snapshot(cancellationToken);
 
-        // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections.
+        // Opt-in VirusTotal enrichment for the owning binaries of noteworthy connections. Ordered
+        // most adverse first for the same reason as the persistence scan: the enricher looks up at
+        // most four distinct files, in the order given. An unsigned binary holding a live connection
+        // to an off-box address is the one worth spending a lookup on.
         var vt = VirusTotalEnricher.Lookup(
-            connections.Where(c => c.Noteworthy && c.ImagePath is not null).Select(c => c.ImagePath!),
+            connections.Where(c => c.Noteworthy && c.ImagePath is not null)
+                .OrderByDescending(c => c.Signature.State is SignatureState.Unsigned
+                    or SignatureState.SignedUntrusted)
+                .ThenByDescending(c => c.External)
+                .Select(c => c.ImagePath!),
             allowNetworkLookups,
             cancellationToken);
 
         var b = new ToolReport.Builder("connections");
+        if (monitor.UsedNetstatFallback)
+        {
+            // Said out loud, like every other scanner says what it could not read. The fallback
+            // re-derives the table by parsing a text rendering of it, which is a materially weaker
+            // acquisition than the structured API - and the report used to present both as the same
+            // answer.
+            b.Add(
+                Severity.Unverified,
+                "connection table read indirectly",
+                "the native connection API was unavailable, so this list was parsed from netstat "
+                    + "output; process attribution is unchanged but the acquisition is weaker",
+                new Dictionary<string, string?> { ["acquisition"] = "NetstatFallback" });
+        }
         foreach (var c in connections.Where(c => !flaggedOnly || c.Noteworthy)
                      .OrderByDescending(c => c.Noteworthy).ThenByDescending(c => c.External))
         {

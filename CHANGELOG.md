@@ -1,5 +1,208 @@
 ## Unreleased
 
+## 0.12.0 - 2026-09-01
+
+A review of the audit response itself, which found one defect the response had introduced and two
+places where it had stopped short.
+
+**A file that aged out of the window went on being counted.** The fix for the burst detector's
+unbounded window discarded duplicate observations, and when the oldest entry was the only one naming
+its path it was moved to the end of the queue so its distinct count would not be lost. That broke
+the invariant everything else in the class rests on - the window is in ascending time order, and
+expiry stops at the first entry still inside it - so a rotated entry sat behind newer ones, expiry
+never reached it, and it counted as a distinct file indefinitely. The burst threshold was then
+reached with one fewer real file than it claims to require, in the one detector that must not cry
+wolf. Every existing test used a single timestamp, so expiry never ran and the ordering was never
+exercised. A duplicate is now removed where it lies rather than rotated, and a second latent case -
+retiring a path the bookkeeping no longer held wrote a count of -1, inflating the very number the
+threshold is compared against - is closed with it.
+
+**The two largest additions had never run.** Per-class coverage, rather than the per-assembly gate,
+is what showed it: an assembly stays comfortably above the bar while a file added inside it does
+not execute. The service-environment half of profiler injection - the stealthiest form of the
+vector, and the one living under a key no test can write to without installing a service - had no
+coverage at all; its block parsing is now separated from the registry walk and driven directly.
+The side-by-side store's give-up behaviour had never executed either, and everything about that
+class turns on it: an index that did not finish must answer "unknown", never "absent", because
+answering "absent" from a partial index puts the phantom-import false positive straight back, on
+precisely the machines whose store was too large to index.
+
+**The coverage gate was extended to everything except the dashboard.** Its assembly-wide number is
+53%, because a thousand lines of WPF code-behind sit at zero - so omitting the library avoided an
+inconvenient figure and stopped anyone measuring the part of it that is ordinary logic. The script's
+own rule already said to name the untestable files instead, which is now done. What that exposed:
+the presenter every operator actually reads sat at 70%, with six tool arms never executed once - the
+same six written because they had been rendering raw English into the French and Spanish dashboards,
+among them the sentence about a driver that is unsigned and can see every keystroke. That fix had
+never been verified in either language it was written for. Presenter 70% to 93%, dashboard logic
+88.4%, and the gate now covers twenty-one libraries rather than twenty.
+
+---
+
+Response to a second third-party static audit, this one of `7c9ec93`. As before every finding was
+re-derived from the source before anything changed, and the measurements below were taken on a real
+machine rather than assumed.
+
+**Two checks that failed open.**
+
+- An ACE may express its grant with the generic bits, which Windows resolves through the object's
+  generic mapping at access-check time and .NET hands back unresolved. `GENERIC_ALL` is
+  `0x10000000` and shares no bit with `WriteData` or `Delete`, so two checks that tested specific
+  rights against a raw mask read "nothing dangerous here": the SYSTEM service trusted a policy path
+  an unprivileged account fully controls, and the hijack scan reported a plantable directory as
+  safe. Neither spelling is exotic - `icacls /grant Users:(F)` and an SDDL `GA` both produce one,
+  and an attacker who can set an ACL can choose the spelling the checker does not read.
+- The service's path-trust inspection walked UNC and device paths. On a remote path the owner and
+  ACL it reasons about come from the server, so an attacker controlling it also controlled the
+  decision - and reaching the path made a SYSTEM service authenticate to that host as the machine
+  account. Anything not on local storage is now refused before a single component is opened.
+
+**Detection the scan was not doing.**
+
+- .NET profiler injection was not enumerated at all. The CLR loads an arbitrary DLL into a managed
+  process when `COR_ENABLE_PROFILING=1` and a profiler is named; all three registry locations that
+  survive a reboot are now read, including the per-service `Environment` block that puts a DLL
+  inside one chosen SYSTEM process and touches nothing else. The detector follows Microsoft's
+  current contract: activation without the required profiler GUID is not reported, while the
+  `CORECLR_*`/`DOTNET_*` prefixes and x86, x64, ARM32 and ARM64 path overrides are covered instead
+  of only the historical generic `COR_*` path.
+- Winlogon was reading two of its five executable values. `Taskman` is the pointed one: Winlogon
+  runs it instead of Task Manager, so a single value is both persistence and a way to stop somebody
+  looking at the process list.
+- Input-filter driver resolution now refuses UNC and unsupported object-manager paths before any
+  filesystem probe, so a registry-controlled service image cannot make a no-network scan
+  authenticate to a remote host or verify an unrelated file under its working directory.
+- Automatic file inspection is local-only across signature verification, hashing, persistence,
+  hijack probes and real-time watchers. UNC/device paths and mapped network drives remain reportable
+  evidence but are never opened implicitly, preventing attacker-controlled registry data from
+  coercing SMB authentication during a scan.
+- Chromium manifests can no longer turn `default_locale` into a path traversal or UNC read;
+  locale directories accept only Chromium's bounded locale-token alphabet, and browser roots are
+  checked as local before enumeration. Manifest and translation JSON files are capped at 1 MiB
+  before allocation/parsing, so a local extension cannot exhaust the scanner with one file.
+- A validly signed third-party DLL registered into LSASS, the print spooler, the logon UI or every
+  process that links user32 was reported as routine, because its signature was fine. Those twelve
+  surfaces are empty or Microsoft-only on an ordinary machine - the flagged count on this desktop
+  did not move when the rule was added - which is exactly what makes them worth reading.
+
+**Two dashboard regressions.** Persistence was the one scanner of eleven reporting its coverage gap
+only through `Summary`, and the dashboard replaces that line with its own, so the clause vanished
+for the audience least able to infer it. And five of seven integrity sub-cases fell through to the
+English source string: a French operator read a title spelled `test-signing` on the check that
+reframes every other kernel finding. Both now fail the build if they recur.
+
+**A contract that had no version.** `--json` emitted a bare array, so adding `unverifiedCount`
+broke `Test-CfaProvider.ps1` against the live CLI while its fixtures kept passing. It now carries
+`schemaVersion` and `generatedAt`, and all four readers check the version before the contents.
+
+**Coverage the gate was not measuring.** The engine list named ten libraries and stopped - the ten
+already above the bar. NetMonitor sat at 63%, Attribution at 66% and InputHooks at 78% while every
+run printed "all engine libraries are at or above 80%". Every detection library is now held to the
+floor, with the live-ETW capture files named as explicit exclusions the gate fails on if they stop
+matching a real file, and the gated numbers printed beside the raw table so the output cannot look
+like it is lying.
+
+**Work that was being wasted.**
+
+- The burst detector rebuilt its distinct-file set on every observation, so the cost of a burst grew
+  with its square - slowest during mass encryption, the one event it exists to catch. It is now
+  constant-time per event and bounded before it fires, not only after.
+- The reputation budget hashed every candidate before using four of the digests, spent those four on
+  whatever the enumerator reached first, and asked again on every scan. It now hashes lazily, takes
+  the callers' most-adverse-first order, and caches by content hash for thirty minutes.
+- The writability probe created and deleted a real file once per candidate rather than once per
+  directory - a few hundred writes into Program Files per scan.
+- The catalog verifier acquired a context and re-read a catalog's certificate per file. Now once per
+  batch, verified in parallel. Measured honestly: no difference on this machine, because the catalog
+  path is a fallback and that set is small here.
+
+**Two ways a report could mislead.** Both file watchers counted a watch that Windows had torn down
+as still live, and the persistence watcher had no overflow handler at all - the exact failure the
+ransomware watcher was rebuilt around, three files away. And `--watch` was accepted globally but
+honoured by four verbs, so `winsight persistence --watch` ran a one-shot scan and exited.
+
+**MCP evidence is paged.** `maxItems` capped a response at 200 items with no way to ask for the
+rest, so on a 4538-item persistence scan a model was told evidence existed and given no way to
+reach it. Responses are also bounded by size now, because a finding's fields hold registry values
+whose length the machine decides. The bound walks Unicode scalars rather than UTF-16 code units, so
+truncation cannot split a surrogate pair and turn attacker-chosen evidence into invalid JSON. The
+response-size budget is global across an overview: after one report consumes it, later reports can
+no longer each force one additional oversized finding through.
+
+The packaged MCP smoke test now correlates JSON-RPC responses by request id and tolerates only real
+protocol notifications between them. It no longer mistakes an asynchronous notification for a tool
+result, while server errors are emitted with their complete JSON payload instead of surfacing as a
+missing PowerShell property.
+
+The current documentation no longer inherits the previous v0.11.6 VM verdict for the changed
+v0.12.0 candidate, calls visible ransomware decoys hidden, or omits the hijack scanner's documented
+temporary writability probe from the list of filesystem writes.
+Repository documentation is now consistently written in English. Localized UI examples were
+rephrased instead of embedding translated labels; the product's localization resources are
+unchanged. The VM qualification bootstrap now also reconstructs the artifact name from the bound
+`ArtifactKind` after elevation and S1 restore instead of silently labelling release evidence as a
+CI artifact.
+
+**Two more detection surfaces, and one declared gap.** The managed half of profiler injection - a
+type instantiated as a process's `AppDomainManager` before any application code runs - was missing
+while the native half was covered. `GinaDLL` is now read for the opposite reason to the other
+Winlogon values: modern Windows does not execute it, so nothing legitimate sets it and its presence
+is itself the finding. BITS transfer jobs are named in the list of known gaps rather than
+half-implemented: the job's notify command line is reachable only through COM, enumerating other
+users' jobs needs elevation, and shipping untested interop into a privileged enumeration is worse
+than saying it is not covered.
+
+**The DLL search order ignored bitness and side-by-side.** A 32-bit process is served SysWOW64 by
+the file-system redirector, and the scan searched System32 for every binary regardless - so every
+32-bit auto-start service importing a DLL that ships only in SysWOW64 was reported as carrying a
+phantom import. The bitness was read during the PE parse and thrown away. Separately, "no directory
+in the search order holds this file" was read as "the loader cannot find it", which reported every
+service linked against a Visual C++ or MFC redistributable the same way. Both are confident
+accusations against ordinary software, at scale, from a SYSTEM-service scanner.
+
+**Ransomware signal quality.** Six formats that arrive in bulk during ordinary work were missing
+from the compressed-by-design list, and a git object store under Documents produced the same signal
+as mass encryption. A real attack looked like a false positive repeating, because the latch is reset
+as soon as the caller has notified - there is now a cooldown, and the bursts it suppresses are
+counted rather than dropped. And the one signal the product presents as unambiguous, a touched
+decoy, was raised by any OneDrive placeholder hydration: a decoy's content is deterministic, so
+"rewritten with the same bytes" is now distinguishable from "modified". Uninstall left up to
+eighteen deliberately unrecognisable files in the user's folders, synchronised to their cloud; it
+now runs the sweep the product already performs at startup. That sweep no longer trusts arbitrary
+paths from its per-user manifest: only seed-derived decoy names in the declared protected folders
+are eligible, legacy-name lookalikes must contain the exact legacy payload, and its count includes
+only files it actually removed.
+
+**A status read could hold up an administrator.** Reading the firewall status took the same lock
+every mutation takes and performed a full path-trust inspection and WFP verification under it -
+work an unprivileged reader could repeat in a loop to delay an elevated emergency disable. And a
+verification that had exceeded its deadline made the next read fail immediately, which downgrades
+the machine to Degraded until the next explicit transition: a slow native read was reported as a
+firewall that had stopped filtering.
+
+**Accessibility.** The palette is seven hard-coded colours, so Windows' high-contrast mode - the
+setting people with low vision actually use - changed nothing at all. It is followed now, live.
+
+**Also.** The ETW sessions ran on default buffers while subscribing to Process, Registry and
+FileIOInit, and the DNS provider was enabled for every keyword at Verbose. `--watch` was accepted on
+verbs that silently ignored it. The netstat fallback exposed no coverage flag. Generic access bits
+were not decoded, so an ACE granting `GENERIC_ALL` read as granting nothing dangerous in two
+different checks. UNC paths were walked by the SYSTEM service's path-trust inspection. A caller with
+no capability held a read slot for five seconds. A policy on a mapped drive claimed to block
+something and did not.
+
+**Named because they were wrong or unactionable.** The suspicion that the `actions/attest` SHA
+carried a version comment copied from `actions/attest-build-provenance` was checked against the tag
+API: both actions genuinely are at v4.2.2 and both pins match. Three changes are deliberately left
+for a VM qualification run rather than shipped unverified - exempting loopback from the outbound
+block, a tighter service DACL, and a restricted service SID - because each is a change to a live
+SYSTEM service that this project's own rules forbid exercising on a development machine, and each
+fails in a direction worse than the defect. The reasoning sits next to the code in every case.
+
+---
+
+The rest of this section is the response to the previous audit, which ships in the same version.
+
 Response to a third-party static audit of `38f06c7` (v0.11.6). Every one of its 38 findings was
 re-derived from the source before anything was changed; the three it got wrong or overstated are
 named below alongside the rest.
@@ -135,7 +338,7 @@ nothing documented.
   integrity, Secure Boot and ransomware folder protection are now described as independent
   controls; a disabled CFA result remains notable when Defender reports the documented mode `0`.
 - Made a successful VirusTotal key save close the modal and report the outcome in the main window,
-  corrected the French action to "Enregistrer en toute sécurité", and separated the local-analysis
+  corrected the French save action, and separated the local-analysis
   status dot from translated text so the badge is geometrically centred in every language. The
   resizable settings dialog now separates provider and confirmation actions into two responsive
   rows, preventing translated labels or larger text from clipping the primary action.
@@ -2067,7 +2270,7 @@ down to the minimum window size. Everything here is detect-and-alert and user-mo
 needs a signed kernel driver. Local-only, no telemetry.
 
 ### Ransomware protection moved to the header as a real-time toggle
-- It used to be a lone checkbox at the bottom of the "Que voulez-vous vérifier ?" sidebar, wedged
+- It used to be a lone checkbox at the bottom of the scan-selection sidebar, wedged
   under the scan button among on-demand controls. That framed the single most consequential switch in
   the app - the only feature that *writes* to disk (decoy files), and a persistent background
   protection rather than a one-shot scan - as a minor scan option.
@@ -2121,8 +2324,8 @@ needs a signed kernel driver. Local-only, no telemetry.
   guidance panel is pushed off-screen. Verified on a real machine before reverting it.
 
 ### The alert journal is now readable from the dashboard, not just from disk
-- Journalling a detection that only a text editor can read solves half the problem. "Alertes
-  récentes" is a normal entry in the tool catalog, so the same list, filter, detail pane and JSON
+- Journalling a detection that only a text editor can read solves half the problem. The recent-alerts
+  view is a normal entry in the tool catalog, so the same list, filter, detail pane and JSON
   export that every other check uses now work on WinSight's own detection history - this is how an
   operator sees an alert raised while they were away from the screen.
 - Every row is `Notable`, because everything in the journal is by definition something WinSight
@@ -2137,8 +2340,8 @@ needs a signed kernel driver. Local-only, no telemetry.
 
 ### Detections are journalled locally, so a suppressed balloon no longer loses them
 - Live testing made the weakness concrete: a detection's only visible output was a tray balloon, and
-  Windows is free to drop those - Focus Assist ("Ne pas déranger", including its automatic
-  full-screen rule) suppresses them, and the shell throttles an app posting several toasts quickly.
+  Windows is free to drop those - Focus Assist, including its automatic full-screen rule,
+  suppresses them, and the shell throttles an app posting several toasts quickly.
   Both are indistinguishable from "nothing was detected", and a security tool must not depend on a
   single channel the OS may silently discard.
 - `AlertJournal` (in `WinSight.Application`) appends every Guardian and ransomware detection to

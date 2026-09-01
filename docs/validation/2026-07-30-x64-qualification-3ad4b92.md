@@ -76,7 +76,8 @@ Network SID `S-1-5-2` present and Interactive SID `S-1-5-4` absent, but this did
 literal protocol and is correctly recorded as `NOT_RUN`.
 
 The subsequent correction requires WinRM from a second isolated control machine and verifies the
-token SIDs, exit 3, `ServiceUnavailable`, no mutation, and unchanged service PID/path.
+token SIDs, the documented `ServiceUnavailable` exit code, no mutation, and unchanged service
+PID/path. That code was 3 for this historical candidate; current candidates use 11.
 
 ### Snapshot authority mismatch
 

@@ -53,7 +53,7 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-Every public release to date, through v0.11.5, is unsigned. The signed
+Every public release to date, through v0.11.6, is unsigned. The signed
 Authenticode production chain has never been exercised end to end. SignPath Foundation declined the
 free-program application on 2026-07-29 because the project does not yet have sufficient public
 adoption and independent visibility.
@@ -186,12 +186,11 @@ What this does **not** defend against: a compromise of the GitHub account or of 
 certificate itself. Provenance proves *which workflow built it*, not that the workflow was
 trustworthy at the time.
 
-The native-x64 runtime candidate has a candidate-bound VM record covering installer, WFP/SCM,
-trust, local/Network IPC and ETW/session recovery. Successor CI `32664937545` and CodeQL
-`32664935397` passed, including native Arm64 build/test/package/installer. Exact dashboard/package
-candidate `3912d67` separately passed Windows 11 VM layout, posture and EN/FR/ES smoke checks;
-successor `8230aa9` passed CI `32789592412` and CodeQL `32789591166`, including native Arm64
-build/test/package/installer. An independent EN/FR/ES presentation review
+The v0.12.0 native-x64 candidate `dbaded1` has a candidate-bound VM record covering installer,
+WFP/SCM, trust, local/Network IPC, ETW/session recovery and final cleanup. Exact CI `33416259797`
+and CodeQL `33416257089` passed, including native Arm64 build/test/package/installer. The earlier
+dashboard candidate `3912d67` separately passed Windows 11 VM layout, posture and EN/FR/ES smoke
+checks. An independent EN/FR/ES presentation review
 remains recommended; the French flow has project-owner review and all languages have automated
 resource/layout and smoke coverage. Privileged Arm64 and x64-on-Arm64 identity remain hardware-bound
 gates for Arm64 production claims. The Authenticode result must match the explicit repository

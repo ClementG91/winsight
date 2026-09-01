@@ -1,5 +1,7 @@
 using Microsoft.Win32;
 
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>
@@ -183,7 +185,7 @@ public sealed class PowerShellProfileEnumerator : IAutostartEnumerator
             bool exists;
             try
             {
-                exists = File.Exists(path);
+                exists = AutomaticFileAccess.IsLocal(path) && File.Exists(path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

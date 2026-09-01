@@ -24,7 +24,14 @@ public static class ReportRenderer
         writer.WriteLine($"== {report.Tool} == {report.Summary}");
         foreach (var item in report.Items)
         {
-            var mark = item.Severity == Severity.Notable ? "[!]" : "[ ]";
+            // Three marks, because two made "the check could not run" indistinguishable from a
+            // finding. [?] reads as a question, which is what an unverified item is.
+            var mark = item.Severity switch
+            {
+                Severity.Notable => "[!]",
+                Severity.Unverified => "[?]",
+                _ => "[ ]",
+            };
             writer.WriteLine($"  {mark} {item.Title}");
             if (item.Detail.Length > 0)
             {
@@ -33,6 +40,13 @@ public static class ReportRenderer
         }
     }
 
+    /// <summary>
+    /// Writes the reports as the versioned JSON contract.
+    /// </summary>
+    /// <remarks>
+    /// The envelope, rather than a bare array: see <see cref="ReportEnvelope"/> for why a contract
+    /// consumed by four independent readers needs to be able to say which version produced it.
+    /// </remarks>
     public static void RenderJson(IReadOnlyList<ToolReport> reports, TextWriter writer) =>
-        writer.WriteLine(JsonSerializer.Serialize(reports, JsonOptions));
+        writer.WriteLine(JsonSerializer.Serialize(ReportEnvelope.For(reports), JsonOptions));
 }

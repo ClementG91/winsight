@@ -1,3 +1,5 @@
+using WinSight.Core;
+
 namespace WinSight.Hijack;
 
 /// <summary>What kind of pre-emption a finding describes.</summary>
@@ -98,7 +100,7 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
         // is no longer whether someone could plant it.
         foreach (var candidate in candidates)
         {
-            if (File.Exists(candidate))
+            if (AutomaticFileAccess.IsLocal(candidate) && File.Exists(candidate))
             {
                 return new HijackFinding(
                     HijackKind.UnquotedServicePath, service, commandLine!,
@@ -132,7 +134,9 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
     /// </remarks>
     public HijackFinding? AssessServiceDirectory(string service, string? directory)
     {
-        if (string.IsNullOrWhiteSpace(directory) || !Directory.Exists(directory))
+        if (string.IsNullOrWhiteSpace(directory)
+            || !AutomaticFileAccess.IsLocal(directory)
+            || !Directory.Exists(directory))
         {
             return null;
         }
@@ -163,7 +167,7 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
             return null;
         }
 
-        if (Directory.Exists(directory))
+        if (AutomaticFileAccess.IsLocal(directory) && Directory.Exists(directory))
         {
             return _probe.CanCreate(Path.Combine(directory, "winsight-probe.dll"))
                 ? new HijackFinding(
@@ -176,6 +180,7 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
         // a directory needs the same write access in the same parent, so the parent is what to ask.
         var parent = Path.GetDirectoryName(directory.TrimEnd('\\'));
         return !string.IsNullOrEmpty(parent)
+               && AutomaticFileAccess.IsLocal(parent)
                && Directory.Exists(parent)
                && _probe.CanCreate(Path.Combine(parent, "winsight-probe.tmp"))
             ? new HijackFinding(

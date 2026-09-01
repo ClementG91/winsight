@@ -99,14 +99,25 @@ function Get-CanonicalMutationFixture {
     return Get-Content -LiteralPath (Join-Path $fixtureRoot 'green-protecting.json') -Raw | ConvertFrom-Json
 }
 
+# The mutation helpers read and rewrite the report inside the versioned envelope. They deliberately
+# preserve schemaVersion and generatedAt from the fixture rather than restamping: a mutation is a
+# statement about one field of one report, and a helper that also rewrote the envelope would make
+# every mutation case quietly depend on the envelope being correct too.
+function Get-MutationEnvelope([object]$Fixture) {
+    return $Fixture.stdout | ConvertFrom-Json
+}
+
 function Get-MutationReport([object]$Fixture) {
-    $reports = @($Fixture.stdout | ConvertFrom-Json)
+    $envelope = Get-MutationEnvelope $Fixture
+    $reports = @($envelope.reports)
     if ($reports.Count -eq 1 -and $reports[0] -is [System.Array]) { $reports = @($reports[0]) }
     return $reports[0]
 }
 
 function Set-MutationReport([object]$Fixture, [object]$Report) {
-    $Fixture.stdout = ConvertTo-Json -InputObject @($Report) -Compress -Depth 8
+    $envelope = Get-MutationEnvelope $Fixture
+    $envelope.reports = @($Report)
+    $Fixture.stdout = ConvertTo-Json -InputObject $envelope -Compress -Depth 10
 }
 
 function Get-MutationItem([object]$Report, [string]$Protection) {
@@ -124,7 +135,7 @@ using System.Threading;
 
 public static class CfaProviderTestCli
 {
-    private const string Report = "[{\"tool\":\"integrity\",\"summary\":\"ok\",\"items\":[{\"severity\":\"info\",\"title\":\"Antivirus protection (Windows Security Center)\",\"detail\":\"fixture antivirus evidence\",\"fields\":{\"protection\":\"Antivirus\",\"concern\":\"Protected\",\"reading\":\"Available\",\"registeredAntivirus\":\"Microsoft Defender\",\"activeAntivirus\":\"Microsoft Defender\",\"activeAntivirusCount\":\"1\",\"onAntivirus\":\"Microsoft Defender\",\"onAntivirusCount\":\"1\",\"registeredAntivirusCount\":\"1\",\"offAntivirusCount\":\"0\",\"snoozedAntivirusCount\":\"0\",\"expiredAntivirusCount\":\"0\",\"activityUnknownAntivirusCount\":\"0\",\"signatureUnknownAntivirusCount\":\"0\",\"hasActiveNonMicrosoftAntivirus\":\"False\",\"antivirusProduct.0.name\":\"Microsoft Defender\",\"antivirusProduct.0.activity\":\"On\",\"antivirusProduct.0.signature\":\"UpToDate\",\"antivirusProduct.0.rawActivity\":\"0\",\"antivirusProduct.0.rawSignature\":\"1\",\"antivirusProduct.0.legacyRawProductState\":\"0\"}},{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"protecting\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"Protecting\",\"runtimeSupportsProtection\":\"True\",\"amRunningMode\":\"Normal\",\"antivirusEnabled\":\"True\",\"realTimeProtectionEnabled\":\"True\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Available\",\"antivirusConcern\":\"Protected\",\"protectedThirdPartyAntivirus\":null,\"onThirdPartyAntivirus\":null,\"onAntivirus\":\"Microsoft Defender\",\"activityUnknownAntivirus\":null}}],\"notableCount\":0}]";
+    private const string Report = "{\"schemaVersion\":1,\"generatedAt\":\"2026-01-01T00:00:00.0000000+00:00\",\"reports\":[{\"tool\":\"integrity\",\"summary\":\"ok\",\"items\":[{\"severity\":\"info\",\"title\":\"Antivirus protection (Windows Security Center)\",\"detail\":\"fixture antivirus evidence\",\"fields\":{\"protection\":\"Antivirus\",\"concern\":\"Protected\",\"reading\":\"Available\",\"registeredAntivirus\":\"Microsoft Defender\",\"activeAntivirus\":\"Microsoft Defender\",\"activeAntivirusCount\":\"1\",\"onAntivirus\":\"Microsoft Defender\",\"onAntivirusCount\":\"1\",\"registeredAntivirusCount\":\"1\",\"offAntivirusCount\":\"0\",\"snoozedAntivirusCount\":\"0\",\"expiredAntivirusCount\":\"0\",\"activityUnknownAntivirusCount\":\"0\",\"signatureUnknownAntivirusCount\":\"0\",\"hasActiveNonMicrosoftAntivirus\":\"False\",\"antivirusProduct.0.name\":\"Microsoft Defender\",\"antivirusProduct.0.activity\":\"On\",\"antivirusProduct.0.signature\":\"UpToDate\",\"antivirusProduct.0.rawActivity\":\"0\",\"antivirusProduct.0.rawSignature\":\"1\",\"antivirusProduct.0.legacyRawProductState\":\"0\"}},{\"severity\":\"info\",\"title\":\"Controlled Folder Access (ransomware shield)\",\"detail\":\"protecting\",\"fields\":{\"protection\":\"Controlled Folder Access\",\"state\":\"Enabled\",\"rawStateValue\":\"1\",\"concern\":\"Protecting\",\"runtimeSupportsProtection\":\"True\",\"amRunningMode\":\"Normal\",\"antivirusEnabled\":\"True\",\"realTimeProtectionEnabled\":\"True\",\"protectedFolders\":\"0\",\"allowedApplicationsVisibility\":\"Visible\",\"settingsDeepLink\":\"windowsdefender://RansomwareProtection\",\"securityCenterReading\":\"Available\",\"antivirusConcern\":\"Protected\",\"protectedThirdPartyAntivirus\":null,\"onThirdPartyAntivirus\":null,\"onAntivirus\":\"Microsoft Defender\",\"activityUnknownAntivirus\":null}}],\"notableCount\":0,\"unverifiedCount\":0}]}";
 
     public static int Main(string[] args)
     {

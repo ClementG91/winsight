@@ -44,6 +44,26 @@ public static partial class WfpProvisioning
     // FWPM_CONDITION_ALE_APP_ID: matches the connecting application's binary.
     internal static readonly Guid AleAppIdCondition = new("d78e1e87-8644-4ea5-9437-d809ecefc971");
 
+    // Two properties of this filter shape that the UI now states outright, because neither is
+    // obvious and both change what an operator should expect:
+    //
+    //   Blocking is at ALE_AUTH_CONNECT only. Nothing is posted on ALE_FLOW_ESTABLISHED or
+    //   ALE_ENDPOINT_CLOSURE, so blocking an application does not interrupt connections it already
+    //   has open - the block takes effect at its next connect.
+    //
+    //   The only condition is ALE_APP_ID, with nothing on FLAG_IS_LOOPBACK, so the application's
+    //   own local traffic is filtered too. That can break communication between components of one
+    //   application, which is a surprising way for a "block outbound" rule to behave.
+    //
+    // Exempting loopback means a second filter condition (FWPM_CONDITION_FLAGS matched with
+    // FWP_MATCH_FLAGS_NONE_SET against FWP_CONDITION_FLAG_IS_LOOPBACK) and a matching change to
+    // the exact-inventory verification, which is the code that decides whether the machine reports
+    // Active or Degraded. Neither can be exercised outside the VM campaign - creating WFP filters
+    // on a development machine is forbidden by this project's own qualification rules - and getting
+    // the verification subtly wrong would leave every machine reporting Degraded for ever. It is
+    // deliberately left for a qualification run rather than shipped unverified; until then the
+    // behaviour is stated where the operator decides.
+
     private const string ProviderName = "WinSight";
     private const string ProviderDescription = "WinSight-owned outbound firewall provider.";
     private const string SublayerName = "WinSight outbound";
@@ -72,12 +92,15 @@ public static partial class WfpProvisioning
     /// deliberate choice not to attempt to outrank the Windows Firewall's own sublayer: WinSight
     /// blocks what the operator asked to block and has no business overruling the system firewall.
     ///
-    /// <b>Unverified on hardware.</b> Sublayer arbitration cannot be exercised from a unit test and
-    /// this change has not been through the VM campaign; it moves the sublayer off the floor, which
-    /// is strictly better than where it was, and the effective ordering should be confirmed with
-    /// <c>netsh wfp show state</c> during the next qualification run.
+    /// BFE does not promise to preserve the requested value verbatim. Microsoft's provider sample
+    /// uses <c>0x8000</c> specifically as a middle weight and documents that BFE assigns the closest
+    /// available value. Native VM qualification observed the expected adjacent value
+    /// <c>0x8001</c>. Exact-shape verification therefore accepts a bounded neighbourhood around the
+    /// request while still rejecting the old floor weight and any materially different arbitration
+    /// position.
     /// </remarks>
     private const ushort SublayerWeight = 0x8000;
+    private const ushort SublayerWeightMaximumDrift = 0x1000;
 
     private const uint RpcCAuthnWinNt = 10;
     private const uint FwpmSessionFlagDynamic = 0x00000001;
@@ -637,10 +660,10 @@ public static partial class WfpProvisioning
             var sublayer = Marshal.PtrToStructure<FwpmSublayer0>(pointer);
             return sublayer.SubLayerKey == SublayerKey
                 && sublayer.Flags == 0
-                // The weight is part of the shape now that it is meaningful: a sublayer left at the
-                // floor by an earlier version must read as not-exact so it is rebuilt rather than
-                // silently kept.
-                && sublayer.Weight == SublayerWeight
+                // BFE assigns the closest available value rather than guaranteeing the requested
+                // weight verbatim. Keep the meaningful arbitration band exact enough to rebuild an
+                // old floor-weight sublayer without rejecting a healthy BFE-adjusted value.
+                && SublayerWeightIsAcceptable(sublayer.Weight)
                 && sublayer.ProviderKey != IntPtr.Zero
                 && Marshal.PtrToStructure<Guid>(sublayer.ProviderKey) == ProviderKey;
         }
@@ -768,6 +791,14 @@ public static partial class WfpProvisioning
     /// </summary>
     internal static bool FilterFlagsAreClean(uint flags) => (flags & ~FwpmFilterFlagIndexed) == 0;
 
+    /// <summary>
+    /// True when BFE kept the sublayer in the intended middle-high arbitration band. The bounded
+    /// drift accommodates its documented closest-available assignment while 4,096 occupied
+    /// neighbouring weights would already be an abnormal state worth rebuilding and reporting.
+    /// </summary>
+    internal static bool SublayerWeightIsAcceptable(ushort actualWeight) =>
+        Math.Abs((int)actualWeight - SublayerWeight) <= SublayerWeightMaximumDrift;
+
     private static void DeleteAllOwnedFilters(IntPtr engine)
     {
         foreach (var filter in EnumerateOwnedFilters(engine))
@@ -836,7 +867,22 @@ public static partial class WfpProvisioning
                 Action = new FwpmAction0 { Type = action, FilterOrCalloutKey = Guid.Empty },
             };
             var result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
-            if (result is not 0 and not FwpEAlreadyExists)
+            if (result == FwpEAlreadyExists)
+            {
+                // Not success. A filter already carrying this key is not necessarily the filter
+                // being installed: it can hold different conditions or the opposite action - an old
+                // PERMIT where a BLOCK is wanted. Accepting it meant the reconciler believed it had
+                // installed what it asked for, and the verification, which enumerates by key, then
+                // found a filter and agreed.
+                //
+                // Reconciliation is exact and deletes before it adds, so reaching this at all means
+                // something survived that delete. Replacing it is what makes the installed filter
+                // the intended one; this runs inside the provisioning transaction, so a failure
+                // still aborts the whole change rather than leaving a hole.
+                DeleteFilter(engine, filterKey);
+                result = NativeMethods.FwpmFilterAdd0(engine, ref filter, IntPtr.Zero, out _);
+            }
+            if (result != 0)
             {
                 throw new Win32Exception((int)result);
             }

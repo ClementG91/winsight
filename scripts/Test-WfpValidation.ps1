@@ -241,7 +241,7 @@ public static class WinSightServiceProfileInspector
             if (size < Marshal.SizeOf(typeof(ServiceFailureActions))) return false;
             ServiceFailureActions actions = (ServiceFailureActions)Marshal.PtrToStructure(
                 buffer, typeof(ServiceFailureActions));
-            if (actions.ResetPeriodSeconds != 86400U || actions.ActionCount != 3U) return false;
+            if (actions.ResetPeriodSeconds != 3600U || actions.ActionCount != 3U) return false;
             int actionSize = Marshal.SizeOf(typeof(ScAction));
             if (!Inside(buffer, size, actions.Actions, checked(actionSize * 3))) return false;
             ScAction first = ReadAction(actions.Actions, actionSize, 0);
@@ -249,7 +249,7 @@ public static class WinSightServiceProfileInspector
             ScAction third = ReadAction(actions.Actions, actionSize, 2);
             return first.Type == 1 && first.DelayMilliseconds == 5000U
                 && second.Type == 1 && second.DelayMilliseconds == 30000U
-                && third.Type == 0 && third.DelayMilliseconds == 0U;
+                && third.Type == 1 && third.DelayMilliseconds == 60000U;
         }
         finally { Marshal.FreeHGlobal(buffer); }
     }
@@ -493,7 +493,7 @@ function Invoke-WfpValidationWorkflow($Operations, [switch]$SkipEnforcement) {
     if (-not (Check-Step 'SCM binds the canonical candidate and run verb' $binding 'exact case-sensitive quoted candidate plus run')) { return Stop-Workflow 'SCM registration does not bind the requested candidate exactly.' }
     $profileCapture = Capture-Decision $Operations.SecurityProfile ([bool])
     $profile = $profileCapture.Valid -and [bool]$profileCapture.Value
-    if (-not (Check-Step 'SCM security and recovery profile is exact' $profile 'service SID unrestricted; exact three privileges; restart 5s/30s/none; 24h reset; non-crash failures enabled')) { return Stop-Workflow 'SCM security or recovery profile does not match the qualified baseline.' }
+    if (-not (Check-Step 'SCM security and recovery profile is exact' $profile 'service SID unrestricted; exact three privileges; restart 5s/30s/60s indefinitely; 1h reset; non-crash failures enabled')) { return Stop-Workflow 'SCM security or recovery profile does not match the qualified baseline.' }
     $startCapture = Capture-Decision $Operations.Start ([NativeResult])
     $runningCapture = Capture-Decision $Operations.PollRunning ([bool])
     $running = $startCapture.Valid -and $runningCapture.Valid -and
@@ -1411,7 +1411,7 @@ function Invoke-ContractSelfTest([bool]$negativeControl) {
         $profile = Find-HostExpectationIndex $profilePlan 'InspectServiceProfile' $profilePlan.Paths.Service
         $profilePlan.Expectations[$profile].Results = @($false)
         $profileTail = New-Object System.Collections.ArrayList
-        Add-OutputExpectation $profileTail '  [FAIL] SCM security and recovery profile is exact: service SID unrestricted; exact three privileges; restart 5s/30s/none; 24h reset; non-crash failures enabled'
+        Add-OutputExpectation $profileTail '  [FAIL] SCM security and recovery profile is exact: service SID unrestricted; exact three privileges; restart 5s/30s/60s indefinitely; 1h reset; non-crash failures enabled'
         Add-HostExpectation $profileTail 'RemoveDirectory' $profilePlan.Paths.Directory @() @()
         Add-OutputExpectation $profileTail 'STOP: SCM security or recovery profile does not match the qualified baseline.'
         Set-ScriptedPlanTail $profilePlan $profile @($profileTail) 7 $false $true 1

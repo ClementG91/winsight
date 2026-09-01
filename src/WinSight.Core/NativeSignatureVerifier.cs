@@ -78,13 +78,23 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     // the native check could not run (both defer to the catalog fallback).
     private static SignatureVerdict? VerifyEmbedded(string path)
     {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return SignatureVerdict.Missing;
+        }
+        if (!AutomaticFileAccess.IsLocal(path))
+        {
+            return SignatureVerdict.Unknown;
+        }
+        if (!File.Exists(path))
         {
             return SignatureVerdict.Missing;
         }
         try
         {
-            var state = MapResult((uint)WinVerifyTrustFile(path));
+            var result = (uint)WinVerifyTrustFile(path);
+            var state = MapResult(result);
+            var revocation = MapRevocation(result);
             return state switch
             {
                 SignatureState.SignedTrusted => new SignatureVerdict(
@@ -96,8 +106,13 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                     // where its trust came from.
                     UserInstalledRoots.TrustsAUserInstalledRoot(path)
                         ? SignatureTrustAnchor.UserInstalledRoot
-                        : SignatureTrustAnchor.MachineRoot),
-                SignatureState.SignedUntrusted => new SignatureVerdict(SignatureState.SignedUntrusted, SignerOf(path)),
+                        : SignatureTrustAnchor.MachineRoot,
+                    revocation),
+                SignatureState.SignedUntrusted => new SignatureVerdict(
+                    SignatureState.SignedUntrusted,
+                    SignerOf(path),
+                    SignatureTrustAnchor.Unspecified,
+                    revocation),
                 // No embedded signature. Before the catalog, ask whether this file belongs to an
                 // installed MSIX package: those are signed once as a package, so their executables
                 // carry no embedded signature and appear in no catalog. Without this the chain ran
@@ -141,6 +156,29 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         0x80092013 => SignatureState.SignedTrusted,      // CRYPT_E_REVOCATION_OFFLINE
         0x800B0100 => null,                              // TRUST_E_NOSIGNATURE -> try catalog
         _ => null,                                       // unknown -> try catalog
+    };
+
+    /// <summary>
+    /// What the same result code says about revocation.
+    /// </summary>
+    /// <remarks>
+    /// The information was already in hand and discarded. <see cref="MapResult"/> deliberately maps
+    /// the three "could not check" codes to trusted - refusing to trust ordinary signed software on
+    /// every offline machine would be a false accusation - and in doing so it erased the difference
+    /// between "revocation was checked" and "revocation could not be". A stolen signing certificate
+    /// produces exactly the second, for months, and the report said "signature valid" either way.
+    /// </remarks>
+    public static RevocationStanding MapRevocation(uint result) => result switch
+    {
+        0x00000000 => RevocationStanding.NotRevoked,     // checked against the cache, not revoked
+        0x800B010C => RevocationStanding.Revoked,        // CERT_E_REVOKED
+        0x800B010E => RevocationStanding.NotChecked,     // CERT_E_REVOCATION_FAILURE
+        0x80092012 => RevocationStanding.NotChecked,     // CRYPT_E_NO_REVOCATION_CHECK
+        0x80092013 => RevocationStanding.NotChecked,     // CRYPT_E_REVOCATION_OFFLINE
+        // Every other code is a verdict about the signature itself, and says nothing either way
+        // about revocation. Claiming otherwise would put a fact in the report that was never
+        // established.
+        _ => RevocationStanding.Unspecified,
     };
 
     private static string? SignerOf(string path)
@@ -214,6 +252,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         };
         var pFile = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustFileInfo>());
         var pData = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustData>());
+        var closed = false;
         try
         {
             Marshal.StructureToPtr(fileInfo, pFile, false);
@@ -250,11 +289,30 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             data.dwStateAction = WtdStateActionClose;
             Marshal.StructureToPtr(data, pData, true);
             _ = WinVerifyTrust(IntPtr.Zero, ref _actionGenericVerifyV2, pData);
+            closed = true;
 
             return result;
         }
         finally
         {
+            // WinVerifyTrust allocates state on the verify call and frees it on the close call.
+            // Between the two sit two marshalling operations, either of which can throw - and the
+            // close was only reached on the success path, so a throw leaked that state for the life
+            // of the process. Small, and free to fix: the close belongs where the frees are.
+            if (!closed)
+            {
+                try
+                {
+                    var pending = Marshal.PtrToStructure<WinTrustData>(pData);
+                    pending.dwStateAction = WtdStateActionClose;
+                    Marshal.StructureToPtr(pending, pData, true);
+                    _ = WinVerifyTrust(IntPtr.Zero, ref _actionGenericVerifyV2, pData);
+                }
+                catch (Exception ex) when (ex is ArgumentException or MissingMethodException)
+                {
+                    // Best effort: the original failure is what the caller needs to see.
+                }
+            }
             Marshal.DestroyStructure<WinTrustFileInfo>(pFile);
             Marshal.FreeHGlobal(pFile);
             Marshal.FreeHGlobal(pData);

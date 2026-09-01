@@ -1,74 +1,74 @@
-# Qualification WinSight sur VM vierge
+# WinSight qualification on a clean VM
 
-Ce protocole qualifie un commit, un run CI, deux artefacts et une architecture native exacts. Il
-échoue fermé : valeur générique, fichier ambigu, hash manquant, script modifié, inventaire ETW
-illisible ou preuve non exportée signifie **STOP / résultat rouge**.
+This protocol qualifies one exact commit, CI run, pair of artifacts, and native architecture. It
+fails closed: a placeholder value, ambiguous file, missing hash, modified script, unreadable ETW
+inventory, or unexported evidence means **STOP / RED**.
 
 > [!CAUTION]
-> Exécuter les phases privilégiées uniquement dans une VM isolée et jetable. Ne jamais installer le
-> service, modifier WFP ou arrêter une session ETW sur le poste de développement.
+> Run privileged phases only in an isolated, disposable VM. Never install the service, modify WFP,
+> or stop an ETW session on the development workstation.
 
-## 0. Ne pas confondre version, tag et candidat
+## 0. Do not confuse version, tag, and candidate
 
-Le rapport VM du 29 juillet 2026 a testé le commit de `main`
-`a9fd4fbf783a3aabfca3682b9509be5d7330abcb`, run CI `30451063612`. Les fichiers indiquaient
-0.10.5, mais ce commit est distinct du tag historique `v0.10.5` (`51c8417...`). Ce candidat a exposé
-le crash ETW `0x800705AA`; aucun des deux ne constitue le candidat corrigé.
+The VM report from 29 July 2026 tested `main` commit
+`a9fd4fbf783a3aabfca3682b9509be5d7330abcb`, built by CI run `30451063612`. Its files reported
+version 0.10.5, but that commit differs from the historical `v0.10.5` tag (`51c8417...`). That
+candidate exposed the `0x800705AA` ETW crash; neither identity denotes the corrected candidate.
 
-## 1. Lier l’identité et la conservation des preuves
+## 1. Bind identity and preserve evidence
 
-Renseigner les valeurs du nouveau run CI réussi :
+Enter the values from the new successful CI run:
 
 ```powershell
 $Repo = 'ClementG91/winsight'
-$CandidateSha = '<SHA complet de 40 caractères>'
-# 'release' pour qualifier le binaire publié, 'ci' pour qualifier un commit avant publication.
-# Voir « Quel artefact qualifier » en section 2 : les deux ne sont pas interchangeables.
+$CandidateSha = '<full 40-character SHA>'
+# 'release' qualifies the published binary; 'ci' qualifies a pre-publication commit.
+# See "Which artifact to qualify" in section 2: they are not interchangeable.
 $ArtifactKind = 'release'
-$RunId = '<id du run réussi correspondant à ArtifactKind>'
-$ProductVersion = '<version produit>'
-$ExpectedZipSha256 = '<SHA-256 du ZIP portable>'
-$ExpectedInstallerSha256 = '<SHA-256 du setup>'
+$RunId = '<id of successful run corresponding to ArtifactKind>'
+$ProductVersion = '<product version>'
+$ExpectedZipSha256 = '<SHA-256 of the portable ZIP>'
+$ExpectedInstallerSha256 = '<SHA-256 of the installer>'
 $RequireSigned = $false
 $AcceptUnsignedDistribution = $true
 $ExpectedPublisher = $null
 
-# Volume monté hors du snapshot de la VM ou partage réseau durable.
+# Volume mounted outside the VM snapshot, or durable network storage.
 $EvidenceRoot = 'E:\WinSight-Evidence'
 $EvidenceStorageOutsideSnapshot = $true
 ```
 
-Contrôles obligatoires :
+Mandatory checks:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'CandidateSha non lié.' }
-if ($Repo -cne 'ClementG91/winsight') { throw 'Dépôt non lié.' }
-if ([string]$RunId -notmatch '^[0-9]+$') { throw 'RunId non lié.' }
-if ($ArtifactKind -cnotin @('release', 'ci')) { throw 'ArtifactKind non lié.' }
+if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'CandidateSha is not bound.' }
+if ($Repo -cne 'ClementG91/winsight') { throw 'Repository is not bound.' }
+if ([string]$RunId -notmatch '^[0-9]+$') { throw 'RunId is not bound.' }
+if ($ArtifactKind -cnotin @('release', 'ci')) { throw 'ArtifactKind is not bound.' }
 if ($ProductVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$') {
-    throw 'ProductVersion non lié.'
+    throw 'ProductVersion is not bound.'
 }
-if ($ExpectedZipSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Hash ZIP non lié.' }
+if ($ExpectedZipSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ZIP hash is not bound.' }
 if ($ExpectedInstallerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
-    throw 'Hash setup non lié.'
+    throw 'Installer hash is not bound.'
 }
-if (-not $EvidenceStorageOutsideSnapshot) { throw 'Les preuves ne survivront pas au restore.' }
+if (-not $EvidenceStorageOutsideSnapshot) { throw 'Evidence will not survive the restore.' }
 $SystemVolumeRoot = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
 $EvidenceFullPath = [IO.Path]::GetFullPath($EvidenceRoot)
 if ([string]::Equals(
         [IO.Path]::GetPathRoot($EvidenceFullPath),
         $SystemVolumeRoot,
         [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'EvidenceRoot doit être hors du volume restauré avec la VM.'
+    throw 'EvidenceRoot must be outside the volume restored with the VM.'
 }
 if ($RequireSigned -and [string]::IsNullOrWhiteSpace($ExpectedPublisher)) {
-    throw 'ExpectedPublisher exact requis pour le candidat signé.'
+    throw 'An exact ExpectedPublisher is required for a signed candidate.'
 }
 if (-not $RequireSigned -and -not $AcceptUnsignedDistribution) {
-    throw 'La politique Authenticode doit être choisie explicitement.'
+    throw 'The Authenticode policy must be chosen explicitly.'
 }
 
 New-Item -ItemType Directory -Force $EvidenceRoot | Out-Null
@@ -77,75 +77,79 @@ $evidenceProbe = Join-Path $EvidenceRoot 'write-test.tmp'
 Remove-Item -LiteralPath $evidenceProbe -Force
 ```
 
-Tout transcript doit commencer par le SHA, le run, les deux hashes, l’architecture native, le nom du
-snapshot et l’heure UTC. Avant chaque restauration de snapshot, fermer le transcript, générer son
-manifest SHA-256 sur ce stockage externe et vérifier depuis l’hyperviseur qu’il est exporté.
+Every transcript must begin with the SHA, run ID, both hashes, native architecture, snapshot name,
+and UTC time. Before each snapshot restore, close the transcript, generate its SHA-256 manifest on
+external storage, and verify from the hypervisor that the evidence was exported.
 
-## 2. Snapshot S0 et prérequis
+## 2. S0 snapshot and prerequisites
 
-Les snapshots ne sont jamais créés ni restaurés depuis l’invité. `VBoxManage` est un outil de
-l’hôte VirtualBox ; son absence dans la VM est normale.
+Snapshots are never created or restored from inside the guest. `VBoxManage` is a VirtualBox host
+tool; its absence from the VM is expected.
 
-### HOTE UNIQUEMENT - créer et prouver S0
+### HOST ONLY — create and prove S0
 
-Éteindre proprement la VM vierge, puis exécuter sur l’hôte. Pour Hyper-V, VMware ou un autre
-hyperviseur, utiliser l’opération équivalente et conserver une preuve hote donnant le nom de la VM,
-le nom/identifiant du snapshot, l’état éteint, la commande, le code de sortie et l’heure UTC.
+Shut down the clean VM gracefully, then run the following on the host. For Hyper-V, VMware, or
+another hypervisor, use the equivalent operation and retain host evidence containing the VM name,
+snapshot name/identifier, powered-off state, command, exit code, and UTC time.
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$VmName = '<nom exact de la VM>'
+$VmName = '<exact VM name>'
 $SnapshotName = 'S0-clean-before-winsight'
-$HostEvidenceRoot = '<répertoire hôte hors du disque de la VM>'
+$HostEvidenceRoot = '<host directory outside the VM disk>'
 $VBoxManage = Join-Path (
     [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) `
     'Oracle\VirtualBox\VBoxManage.exe'
 
 if (-not (Test-Path -LiteralPath $VBoxManage -PathType Leaf)) {
-    throw "VBoxManage.exe absent sur l'hôte."
+    throw 'VBoxManage.exe is missing on the host.'
 }
 if ((Get-AuthenticodeSignature -LiteralPath $VBoxManage).Status -ne 'Valid') {
-    throw 'Signature de VBoxManage.exe invalide.'
+    throw 'VBoxManage.exe has an invalid signature.'
 }
 New-Item -ItemType Directory -Force $HostEvidenceRoot | Out-Null
 $before = @(& $VBoxManage showvminfo $VmName --machinereadable 2>&1)
 if ($LASTEXITCODE -ne 0 -or ($before -join "`n") -notmatch 'VMState="poweroff"') {
-    throw 'La VM doit être éteinte avant le snapshot.'
+    throw 'The VM must be turned off before the snapshot.'
 }
 @(& $VBoxManage snapshot $VmName take $SnapshotName 2>&1) | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'Création S0 échouée.' }
-$snapshotInfo = @(
-    & $VBoxManage snapshot $VmName showvminfo $SnapshotName --machinereadable 2>&1)
-if ($LASTEXITCODE -ne 0) { throw 'Lecture de la preuve S0 échouée.' }
+if ($LASTEXITCODE -ne 0) { throw 'S0 creation failed.' }
+$snapshotInfo = @(& $VBoxManage snapshot $VmName showvminfo $SnapshotName 2>&1)
+if ($LASTEXITCODE -ne 0) { throw 'Reading S0 evidence failed.' }
+$machineInfo = @(& $VBoxManage showvminfo $VmName --machinereadable 2>&1)
+if ($LASTEXITCODE -ne 0) { throw 'Reading VM configuration failed.' }
 $record = Join-Path $HostEvidenceRoot "$SnapshotName.txt"
 @(
     "utc=$([DateTime]::UtcNow.ToString('O'))"
     "vm=$VmName"
     "snapshot=$SnapshotName"
     'operation=take'
+    '--- snapshot ---'
     $snapshotInfo
+    '--- vm ---'
+    $machineInfo
 ) | Set-Content -LiteralPath $record
 Get-FileHash -LiteralPath $record -Algorithm SHA256
 ```
 
-Copier ou exposer ce fichier et son hash sous
-`$EvidenceRoot\host-snapshots\S0-clean-before-winsight.txt`. Sans cette preuve hote, classer S0
-`NOT_RUN` et arrêter la qualification ; ne jamais tenter `VBoxManage` dans l’invité.
+Copy or expose this file and its hash at
+`$EvidenceRoot\host-snapshots\S0-clean-before-winsight.txt`. Without this host evidence, classify S0
+as `NOT_RUN` and stop qualification; never attempt to run `VBoxManage` in the guest.
 
-### INVITE - vérifier S0 puis installer les prérequis
+### GUEST — verify S0 and install prerequisites
 
 ```powershell
 $S0HostRecord = Join-Path $EvidenceRoot 'host-snapshots\S0-clean-before-winsight.txt'
 if (-not (Test-Path -LiteralPath $S0HostRecord -PathType Leaf)) {
-    throw 'STOP: preuve hote S0 absente; snapshot NOT_RUN.'
+    throw 'STOP: S0 host evidence is missing; snapshot is NOT_RUN.'
 }
 Get-FileHash -LiteralPath $S0HostRecord -Algorithm SHA256
 ```
 
-Le shell de qualification doit être le Windows PowerShell natif lancé avec `-NoProfile`. Depuis le
-premier shell non élevé, installer les prérequis puis relancer immédiatement le shell exact :
+The qualification shell must be native Windows PowerShell launched with `-NoProfile`. From the
+first non-elevated shell, install the prerequisites, then immediately relaunch the exact shell:
 
 ```powershell
 winget install --id Git.Git --source winget --accept-package-agreements --accept-source-agreements
@@ -154,14 +158,14 @@ winget install --id GitHub.cli --source winget --accept-package-agreements --acc
 $NativeSystemDirectory = [Environment]::SystemDirectory
 $NativePowerShellExe = Join-Path $NativeSystemDirectory 'WindowsPowerShell\v1.0\powershell.exe'
 if (-not (Test-Path -LiteralPath $NativePowerShellExe -PathType Leaf)) {
-    throw 'Windows PowerShell natif absent.'
+    throw 'Native Windows PowerShell is missing.'
 }
 Start-Process -FilePath $NativePowerShellExe -ArgumentList @('-NoProfile', '-NoExit')
 exit
 ```
 
-Dans ce nouveau shell `-NoProfile`, établir tous les chemins critiques depuis les API OS et vérifier
-les signatures avant usage. Aucune valeur `SystemRoot` ou résolution PATH n’entre dans la frontière :
+In this new `-NoProfile` shell, derive every critical path from OS APIs and verify signatures before
+use. Neither a `SystemRoot` value nor `PATH` resolution crosses the trust boundary:
 
 ```powershell
 $NativeSystemDirectory = [Environment]::SystemDirectory
@@ -174,16 +178,16 @@ $GitExe = Join-Path $ProgramFilesRoot 'Git\cmd\git.exe'
 $GhExe = Join-Path $ProgramFilesRoot 'GitHub CLI\gh.exe'
 
 foreach ($tool in @($NativePowerShellExe, $ScExe, $CurlExe, $GitExe, $GhExe)) {
-    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Outil exact absent : $tool" }
+    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Exact tool is missing: $tool" }
     if ((Get-AuthenticodeSignature -LiteralPath $tool).Status -ne 'Valid') {
-        throw "Signature Authenticode outil invalide : $tool"
+        throw "Tool has an invalid Authenticode signature: $tool"
     }
 }
 & $GhExe auth login --hostname github.com --git-protocol https --web
-if ($LASTEXITCODE -ne 0) { throw 'Authentification gh impossible.' }
+if ($LASTEXITCODE -ne 0) { throw 'gh authentication failed.' }
 ```
 
-Déterminer l’architecture matérielle avec CIM, pas avec l’architecture du processus :
+Determine hardware architecture with CIM, not from the process architecture:
 
 ```powershell
 $cpuArchitectures = @(
@@ -191,43 +195,42 @@ $cpuArchitectures = @(
         ForEach-Object { [int]$_.Architecture } |
         Sort-Object -Unique
 )
-if ($cpuArchitectures.Count -ne 1) { throw 'Architecture native ambiguë.' }
+if ($cpuArchitectures.Count -ne 1) { throw 'Ambiguous native architecture.' }
 $NativeArchitecture = switch ($cpuArchitectures[0]) {
     9 { 'x64' }
     12 { 'arm64' }
-    default { throw "Architecture native non supportée : $($cpuArchitectures[0])." }
+    default { throw "Native architecture not supported: $($cpuArchitectures[0])." }
 }
 $ArtifactName = switch ($ArtifactKind) {
     'release' { "release-$NativeArchitecture" }
     'ci'      { "winsight-win-$NativeArchitecture" }
-    default   { throw "ArtifactKind non lié : '$ArtifactKind'." }
+    default   { throw "Unbound ArtifactKind: '$ArtifactKind'." }
 }
 "native=$NativeArchitecture process=$env:PROCESSOR_ARCHITECTURE kind=$ArtifactKind artifact=$ArtifactName"
 ```
 
-### Quel artefact qualifier, et pourquoi ce n'est pas indifférent
+### Which artifact to qualify, and why the choice matters
 
-`ci.yml` et `release.yml` compilent et empaquettent séparément, et le packaging n'est pas
-reproductible bit à bit : mesuré sur le candidat `3c8066f9`, le ZIP CI vaut
-`C6D28EEB…` et le ZIP publié `CEC7D469…`. Chacun est cohérent avec son propre `.sha256`, mais
-**qualifier l'un ne qualifie pas l'autre**.
+`ci.yml` and `release.yml` build and package separately, and packaging is not bit-for-bit
+reproducible: on candidate `3c8066f9`, the CI ZIP was `C6D28EEB…` while the published ZIP was
+`CEC7D469…`. Each matched its own `.sha256`, but **qualifying one does not qualify the other**.
 
-- `$ArtifactKind = 'release'` lie `$RunId` au run `release.yml` du tag et récupère
-  `release-<arch>`. Le job `publish` republie ces fichiers tels quels
-  (`files: release-assets/*`), donc l'artefact qualifié est **octet pour octet celui que
-  l'utilisateur télécharge**. C'est le seul mode qui produit une preuve sur le binaire distribué.
-- `$ArtifactKind = 'ci'` lie `$RunId` à un run `ci.yml`. Utile pour qualifier un commit avant
-  publication ; ne dit rien sur les fichiers de la release.
+- `$ArtifactKind = 'release'` binds `$RunId` to the tag's `release.yml` run and retrieves
+  `release-<arch>`. The `publish` job republishes those exact files (`files: release-assets/*`), so
+  the qualified artifact is **byte-for-byte what the user downloads**. This is the only mode that
+  produces evidence about the distributed binary.
+- `$ArtifactKind = 'ci'` binds `$RunId` to a `ci.yml` run. It is useful for qualifying a commit
+  before publication, but makes no claim about release assets.
 
-Un rapport doit énoncer son `ArtifactKind`. Un rapport qui ne le dit pas laisse le lecteur
-supposer la portée la plus large, qui est justement celle qu'il n'a peut-être pas.
+A report must state its `ArtifactKind`. Omitting it invites the reader to assume the broadest scope,
+which may be precisely the scope the evidence does not cover.
 
-Pour un test x64 émulé sur Arm64, utiliser un dossier de preuves et un intitulé séparés. Ne jamais
-modifier `$NativeArchitecture` pour faire passer l’artefact x64 comme preuve Arm64 native.
+For an x64-on-Arm64 emulation test, use a separate evidence directory and title. Never change
+`$NativeArchitecture` to present an x64 artifact as native Arm64 evidence.
 
-## 3. Télécharger sans exécuter, puis établir la racine protégée
+## 3. Download without executing, then establish the protected root
 
-Télécharger d’abord dans une zone non approuvée. Aucun binaire candidat n’est exécuté à ce stade :
+Download into an untrusted landing area first. No candidate binary is executed at this stage:
 
 ```powershell
 $SystemVolumeRoot = [IO.Path]::GetPathRoot([Environment]::SystemDirectory)
@@ -235,69 +238,69 @@ $LandingRoot = Join-Path $SystemVolumeRoot 'WinSight-Qualification-Landing'
 New-Item -ItemType Directory -Force $LandingRoot | Out-Null
 
 $run = & $GhExe api "repos/$Repo/actions/runs/$RunId" | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'Lecture du run CI impossible.' }
+if ($LASTEXITCODE -ne 0) { throw 'Reading the CI run failed.' }
 if ($run.head_sha -cne $CandidateSha -or $run.conclusion -cne 'success') {
-    throw 'Le run CI ne correspond pas au candidat réussi.'
+    throw 'The CI run does not match the successful candidate.'
 }
 & $GhExe run download $RunId --repo $Repo -n $ArtifactName -D $LandingRoot
-if ($LASTEXITCODE -ne 0) { throw 'Téléchargement artefact impossible.' }
+if ($LASTEXITCODE -ne 0) { throw 'Artifact download failed.' }
 
 $portableZips = @(Get-ChildItem -LiteralPath $LandingRoot -Recurse -File -Filter 'winsight-*-win-*.zip')
 $installers = @(Get-ChildItem -LiteralPath $LandingRoot -Recurse -File -Filter 'winsight-*-setup.exe')
-if ($portableZips.Count -ne 1) { throw "ZIP portable : cardinalité $($portableZips.Count)." }
-if ($installers.Count -ne 1) { throw "Setup : cardinalité $($installers.Count)." }
+if ($portableZips.Count -ne 1) { throw "Portable ZIP cardinality: $($portableZips.Count)." }
+if ($installers.Count -ne 1) { throw "Setup: cardinality $($installers.Count)." }
 if ((Get-FileHash $portableZips[0].FullName -Algorithm SHA256).Hash -cne
-    $ExpectedZipSha256.ToUpperInvariant()) { throw 'Hash ZIP incorrect dans landing.' }
+    $ExpectedZipSha256.ToUpperInvariant()) { throw 'ZIP hash mismatch in landing area.' }
 if ((Get-FileHash $installers[0].FullName -Algorithm SHA256).Hash -cne
-    $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Hash setup incorrect dans landing.' }
+    $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Installer hash mismatch in landing area.' }
 ```
 
-Ouvrir la console élevée depuis le shell exact, sans profil :
+Open an elevated console from the exact shell, without a profile:
 
 ```powershell
 Start-Process -FilePath $NativePowerShellExe -Verb RunAs `
     -ArgumentList @('-NoProfile', '-NoExit')
 ```
 
-`Start-Process -Verb RunAs` ne transporte pas les variables PowerShell. Dans cette nouvelle console,
-exécuter intégralement le bootstrap suivant en ressaisissant **les mêmes valeurs exactes** que dans la
-section 1. Ne jamais remplacer ce bloc par des variables héritées, un profil ou une commande résolue
-depuis `PATH` :
+`Start-Process -Verb RunAs` does not carry PowerShell variables across elevation. In the new
+console, execute the following bootstrap in full, re-entering **the same exact values** used in
+section 1. Never replace this block with inherited variables, a profile, or a command resolved from
+`PATH`:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $Repo = 'ClementG91/winsight'
-$CandidateSha = '<même SHA complet de 40 caractères>'
-$ArtifactKind = '<même valeur : release ou ci>'
-$RunId = '<même id du run réussi>'
-$ProductVersion = '<même version produit>'
-$ExpectedZipSha256 = '<même SHA-256 du ZIP portable>'
-$ExpectedInstallerSha256 = '<même SHA-256 du setup>'
+$CandidateSha = '<same full 40-character SHA>'
+$ArtifactKind = '<same value: release or ci>'
+$RunId = '<same successful run id>'
+$ProductVersion = '<same product version>'
+$ExpectedZipSha256 = '<same SHA-256 of the portable ZIP>'
+$ExpectedInstallerSha256 = '<same SHA-256 of the setup>'
 $RequireSigned = $false
 $AcceptUnsignedDistribution = $true
 $ExpectedPublisher = $null
 $EvidenceRoot = 'E:\WinSight-Evidence'
 $EvidenceStorageOutsideSnapshot = $true
 
-if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'CandidateSha non lié.' }
-if ($Repo -cne 'ClementG91/winsight') { throw 'Dépôt non lié.' }
-if ([string]$RunId -notmatch '^[0-9]+$') { throw 'RunId non lié.' }
-if ($ArtifactKind -cnotin @('release', 'ci')) { throw 'ArtifactKind non lié.' }
+if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$') { throw 'CandidateSha is not bound.' }
+if ($Repo -cne 'ClementG91/winsight') { throw 'Repository is not bound.' }
+if ([string]$RunId -notmatch '^[0-9]+$') { throw 'RunId is not bound.' }
+if ($ArtifactKind -cnotin @('release', 'ci')) { throw 'ArtifactKind is not bound.' }
 if ($ProductVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$') {
-    throw 'ProductVersion non lié.'
+    throw 'ProductVersion is not bound.'
 }
-if ($ExpectedZipSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Hash ZIP non lié.' }
+if ($ExpectedZipSha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'ZIP hash is not bound.' }
 if ($ExpectedInstallerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
-    throw 'Hash setup non lié.'
+    throw 'Installer hash is not bound.'
 }
-if (-not $EvidenceStorageOutsideSnapshot) { throw 'Les preuves ne survivront pas au restore.' }
+if (-not $EvidenceStorageOutsideSnapshot) { throw 'Evidence will not survive the restore.' }
 if ($RequireSigned -and [string]::IsNullOrWhiteSpace($ExpectedPublisher)) {
-    throw 'ExpectedPublisher exact requis pour le candidat signé.'
+    throw 'An exact ExpectedPublisher is required for a signed candidate.'
 }
 if (-not $RequireSigned -and -not $AcceptUnsignedDistribution) {
-    throw 'La politique Authenticode doit être choisie explicitement.'
+    throw 'The Authenticode policy must be chosen explicitly.'
 }
 
 $NativeSystemDirectory = [Environment]::SystemDirectory
@@ -311,9 +314,9 @@ $GitExe = Join-Path $ProgramFilesRoot 'Git\cmd\git.exe'
 $GhExe = Join-Path $ProgramFilesRoot 'GitHub CLI\gh.exe'
 
 foreach ($tool in @($NativePowerShellExe, $ScExe, $CurlExe, $GitExe, $GhExe)) {
-    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Outil exact absent : $tool" }
+    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) { throw "Exact tool is missing: $tool" }
     if ((Get-AuthenticodeSignature -LiteralPath $tool).Status -ne 'Valid') {
-        throw "Signature Authenticode outil invalide : $tool"
+        throw "Tool has an invalid Authenticode signature: $tool"
     }
 }
 
@@ -322,23 +325,27 @@ $cpuArchitectures = @(
         ForEach-Object { [int]$_.Architecture } |
         Sort-Object -Unique
 )
-if ($cpuArchitectures.Count -ne 1) { throw 'Architecture native ambiguë après élévation.' }
+if ($cpuArchitectures.Count -ne 1) { throw 'Ambiguous native architecture after elevation.' }
 $NativeArchitecture = switch ($cpuArchitectures[0]) {
     9 { 'x64' }
     12 { 'arm64' }
-    default { throw "Architecture native non supportée : $($cpuArchitectures[0])." }
+    default { throw "Native architecture not supported: $($cpuArchitectures[0])." }
 }
-$ArtifactName = "winsight-win-$NativeArchitecture"
+$ArtifactName = switch ($ArtifactKind) {
+    'release' { "release-$NativeArchitecture" }
+    'ci'      { "winsight-win-$NativeArchitecture" }
+    default   { throw "Unbound ArtifactKind after elevation: '$ArtifactKind'." }
+}
 
 $EvidenceFullPath = [IO.Path]::GetFullPath($EvidenceRoot)
 if ([string]::Equals(
         [IO.Path]::GetPathRoot($EvidenceFullPath),
         $SystemVolumeRoot,
         [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'EvidenceRoot doit être hors du volume restauré avec la VM.'
+    throw 'EvidenceRoot must be outside the volume restored with the VM.'
 }
 if (-not (Test-Path -LiteralPath $EvidenceRoot -PathType Container)) {
-    throw 'EvidenceRoot externe non remonté dans la console élevée.'
+    throw 'External EvidenceRoot is not mounted in the elevated console.'
 }
 $evidenceProbe = Join-Path $EvidenceRoot 'elevated-write-test.tmp'
 [IO.File]::WriteAllText($evidenceProbe, 'external-evidence')
@@ -349,17 +356,17 @@ $portableZips = @(
     Get-ChildItem -LiteralPath $LandingRoot -Recurse -File -Filter 'winsight-*-win-*.zip')
 $installers = @(
     Get-ChildItem -LiteralPath $LandingRoot -Recurse -File -Filter 'winsight-*-setup.exe')
-if ($portableZips.Count -ne 1) { throw "ZIP portable : cardinalité $($portableZips.Count)." }
-if ($installers.Count -ne 1) { throw "Setup : cardinalité $($installers.Count)." }
+if ($portableZips.Count -ne 1) { throw "Portable ZIP cardinality: $($portableZips.Count)." }
+if ($installers.Count -ne 1) { throw "Setup: cardinality $($installers.Count)." }
 if ((Get-FileHash $portableZips[0].FullName -Algorithm SHA256).Hash -cne
-    $ExpectedZipSha256.ToUpperInvariant()) { throw 'Hash ZIP incorrect après élévation.' }
+    $ExpectedZipSha256.ToUpperInvariant()) { throw 'ZIP hash mismatch after elevation.' }
 if ((Get-FileHash $installers[0].FullName -Algorithm SHA256).Hash -cne
-    $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Hash setup incorrect après élévation.' }
+    $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Installer hash mismatch after elevation.' }
 ```
 
-Seulement après ce bootstrap, construire la racine protégée sous le véritable `Program Files`,
-cloner les scripts du commit exact avec le Git absolu signé, puis recopier et re-hasher les
-artefacts avant toute extraction :
+Only after this bootstrap may you create the protected root under the real `Program Files`, clone
+the exact commit with the absolute signed Git executable, and copy and re-hash the artifacts before
+extraction:
 
 ```powershell
 $ProtectedRoot = Join-Path $ProgramFilesRoot 'WinSight-Qualification'
@@ -367,7 +374,7 @@ $ProtectedArtifactRoot = Join-Path $ProtectedRoot 'artifacts'
 $ProtectedPayloadRoot = Join-Path $ProtectedRoot 'payload'
 $ProtectedSourceRoot = Join-Path $ProtectedRoot 'source'
 if (Test-Path -LiteralPath $ProtectedRoot) {
-    throw 'La racine protégée doit être absente sur le snapshot propre.'
+    throw 'The protected root must be absent on the clean snapshot.'
 }
 New-Item -ItemType Directory -Path @($ProtectedArtifactRoot, $ProtectedPayloadRoot) | Out-Null
 
@@ -376,57 +383,57 @@ $ProtectedInstaller = Join-Path $ProtectedArtifactRoot $installers[0].Name
 Copy-Item -LiteralPath $portableZips[0].FullName -Destination $ProtectedZip -Force
 Copy-Item -LiteralPath $installers[0].FullName -Destination $ProtectedInstaller -Force
 if ((Get-FileHash $ProtectedZip -Algorithm SHA256).Hash -cne
-    $ExpectedZipSha256.ToUpperInvariant()) { throw 'ZIP protégé différent.' }
+    $ExpectedZipSha256.ToUpperInvariant()) { throw 'Protected ZIP hash mismatch.' }
 if ((Get-FileHash $ProtectedInstaller -Algorithm SHA256).Hash -cne
-    $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Setup protégé différent.' }
+    $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Protected installer hash mismatch.' }
 
 & $GitExe clone "https://github.com/$Repo.git" $ProtectedSourceRoot
-if ($LASTEXITCODE -ne 0) { throw 'Clone candidat impossible.' }
+if ($LASTEXITCODE -ne 0) { throw 'Candidate clone failed.' }
 & $GitExe -C $ProtectedSourceRoot checkout --detach $CandidateSha
-if ($LASTEXITCODE -ne 0) { throw 'Checkout candidat impossible.' }
+if ($LASTEXITCODE -ne 0) { throw 'Candidate checkout failed.' }
 $sourceHead = & $GitExe -C $ProtectedSourceRoot rev-parse HEAD
-if ($LASTEXITCODE -ne 0) { throw 'rev-parse candidat impossible.' }
-if ($sourceHead -cne $CandidateSha) { throw 'Scripts non liés au candidat.' }
+if ($LASTEXITCODE -ne 0) { throw 'Candidate rev-parse failed.' }
+if ($sourceHead -cne $CandidateSha) { throw 'Scripts are not bound to the candidate.' }
 
-# Recheck immédiat du ZIP protégé avant extraction protégée.
+# Recheck the protected ZIP immediately before protected extraction.
 if ((Get-FileHash $ProtectedZip -Algorithm SHA256).Hash -cne
-    $ExpectedZipSha256.ToUpperInvariant()) { throw 'ZIP modifié avant extraction.' }
+    $ExpectedZipSha256.ToUpperInvariant()) { throw 'ZIP modified before extraction.' }
 Expand-Archive -LiteralPath $ProtectedZip -DestinationPath $ProtectedPayloadRoot -Force
 ```
 
-Le ZIP Actions peut être plat. Découvrir exactement un `winsight.exe`, puis les deux EXE sœurs :
+The Actions ZIP may be flat. Discover exactly one `winsight.exe`, then its two sibling EXEs:
 
 ```powershell
 $cliCandidates = @(Get-ChildItem $ProtectedPayloadRoot -Recurse -File -Filter 'winsight.exe')
-if ($cliCandidates.Count -ne 1) { throw "winsight.exe : cardinalité $($cliCandidates.Count)." }
+if ($cliCandidates.Count -ne 1) { throw "winsight.exe cardinality: $($cliCandidates.Count)." }
 $PackageRoot = $cliCandidates[0].Directory.FullName
 $Cli = Join-Path $PackageRoot 'winsight.exe'
 $Dashboard = Join-Path $PackageRoot 'winsight-dashboard.exe'
 $Service = Join-Path $PackageRoot 'winsight-firewall-service.exe'
 $CandidateExecutables = @($Cli, $Dashboard, $Service)
 foreach ($path in $CandidateExecutables) {
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "EXE absent : $path" }
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "EXE is missing: $path" }
 }
 ```
 
-Avant la première exécution, utiliser le `Test-PeArchitecture.ps1` du clone exact protégé sur les
-trois EXE. Un seul mismatch arrête le protocole :
+Before the first execution, run `Test-PeArchitecture.ps1` from the exact protected clone against
+all three EXEs. Any mismatch stops the protocol:
 
 ```powershell
 $PeScript = Join-Path $ProtectedSourceRoot 'scripts\Test-PeArchitecture.ps1'
 $protectedStatus = @(& $GitExe -C $ProtectedSourceRoot status --porcelain)
 if ($LASTEXITCODE -ne 0 -or $protectedStatus.Count -ne 0) {
-    throw 'Le clone protégé a été modifié avant le contrôle PE.'
+    throw 'The protected clone was modified before the PE check.'
 }
 foreach ($path in $CandidateExecutables) {
     & $NativePowerShellExe `
         -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -File $PeScript -Path $path -Architecture $NativeArchitecture
-    if ($LASTEXITCODE -ne 0) { throw "PE architecture incorrecte : $path" }
+    if ($LASTEXITCODE -ne 0) { throw "PE architecture mismatch: $path" }
 }
 ```
 
-Établir les manifests protégés des trois EXE et de chaque script/module qui sera exécuté :
+Create protected manifests for the three EXEs and every script/module that will be executed:
 
 ```powershell
 $ValidationFiles = @(
@@ -451,31 +458,31 @@ $CandidateHash.GetEnumerator() | Sort-Object Name |
 function Assert-CandidateFiles {
     foreach ($entry in $CandidateHash.GetEnumerator()) {
         if ((Get-FileHash -LiteralPath $entry.Key -Algorithm SHA256).Hash -cne $entry.Value) {
-            throw "Candidat/script protégé modifié : $($entry.Key)"
+            throw "Protected candidate/script was modified: $($entry.Key)"
         }
     }
     if ((Get-FileHash $ProtectedZip -Algorithm SHA256).Hash -cne
-        $ExpectedZipSha256.ToUpperInvariant()) { throw 'ZIP protégé modifié.' }
+        $ExpectedZipSha256.ToUpperInvariant()) { throw 'Protected ZIP modified.' }
     if ((Get-FileHash $ProtectedInstaller -Algorithm SHA256).Hash -cne
-        $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Setup protégé modifié.' }
+        $ExpectedInstallerSha256.ToUpperInvariant()) { throw 'Protected installer was modified.' }
 }
 ```
 
-Appeler `Assert-CandidateFiles` **immédiatement avant chaque** `Start-Process`, import de module,
-commande WinSight, installation SCM, WFP ou installateur.
+Call `Assert-CandidateFiles` **immediately before every** `Start-Process`, module import, WinSight
+command, SCM installation, WFP operation, or installer execution.
 
-## 4. Authenticode et installateur
+## 4. Authenticode and installer
 
-Le 29 juillet 2026, SignPath Foundation a refusé la demande gratuite faute de signaux publics
-d’adoption suffisants. La politique courante est donc explicitement
-`$RequireSigned=$false` / `$AcceptUnsignedDistribution=$true`. Ce choix autorise une distribution
-non signée clairement annoncée ; il ne transforme ni les hashes ni les attestations en identité
-d’éditeur Windows. Les quatre cibles doivent être exactement `NotSigned`, sans signataire ni
-timestamp. Toute autre erreur de signature est rouge.
+On 29 July 2026, SignPath Foundation declined the free-program application because the project did
+not yet show sufficient public adoption. The current policy is therefore explicit:
+`$RequireSigned=$false` / `$AcceptUnsignedDistribution=$true`. This permits a clearly disclosed
+unsigned distribution; hashes and attestations still do not provide a Windows publisher identity.
+All four targets must be exactly `NotSigned`, with no signer or timestamp. Any other signature error
+is RED.
 
-Le chemin signé reste disponible pour un futur certificat. Avec `$RequireSigned=$true`, le setup et
-les trois EXE portables doivent tous être `Valid`, timestampés et avoir exactement le même Subject
-`$ExpectedPublisher` :
+The signed path remains available for a future certificate. With `$RequireSigned=$true`, the setup
+and all three portable EXEs must be `Valid`, timestamped, and carry exactly the same
+`$ExpectedPublisher` subject:
 
 ```powershell
 function Assert-ExpectedSignature([string]$Path) {
@@ -484,7 +491,7 @@ function Assert-ExpectedSignature([string]$Path) {
         $null -eq $signature.SignerCertificate -or
         $signature.SignerCertificate.Subject -cne $ExpectedPublisher -or
         $null -eq $signature.TimeStamperCertificate) {
-        throw "Signature éditeur/timestamp invalide : $Path"
+        throw "Invalid publisher/timestamp signature: $Path"
     }
 }
 
@@ -499,7 +506,7 @@ else {
         if ($sig.Status -ne 'NotSigned' -or
             $null -ne $sig.SignerCertificate -or
             $null -ne $sig.TimeStamperCertificate) {
-            throw "État non signé inattendu : $($_) status=$($sig.Status)"
+            throw "Unexpected unsigned state: $($_) status=$($sig.Status)"
         }
         $signer = if ($null -eq $sig.SignerCertificate) { '<none>' }
             else { $sig.SignerCertificate.Subject }
@@ -510,23 +517,32 @@ else {
 }
 ```
 
-Valider ensuite le rapport read-only. `integrity` exit 1 signifie « résultat notable », pas crash :
+Then validate the read-only report. An `integrity` exit code of 1 means "findings present", not a
+crash:
 
 ```powershell
 Assert-CandidateFiles
 $integrityPath = Join-Path $EvidenceRoot 'integrity.json'
 & $Cli integrity --json > $integrityPath
 $integrityExit = $LASTEXITCODE
-if ($integrityExit -notin @(0, 1)) { throw "integrity exit inattendu : $integrityExit" }
-$integrity = @(Get-Content $integrityPath -Raw | ConvertFrom-Json)
+if ($integrityExit -notin @(0, 1)) { throw "Unexpected integrity exit: $integrityExit" }
+$envelope = Get-Content $integrityPath -Raw | ConvertFrom-Json
+# Verify the envelope before its contents: accepting an unknown version and merely hoping its shape
+# matches would certify a report the protocol did not understand.
+if ($envelope.schemaVersion -ne 1 -or $null -eq $envelope.generatedAt) {
+    throw 'JSON envelope is missing or has an unexpected version.'
+}
+$integrity = @($envelope.reports)
 if ($integrity.Count -ne 1 -or $integrity[0].tool -cne 'integrity' -or
-    $null -eq $integrity[0].items -or $null -eq $integrity[0].notableCount) {
-    throw 'Contrat JSON integrity invalide.'
+    $null -eq $integrity[0].items -or $null -eq $integrity[0].notableCount -or
+    $null -eq $integrity[0].unverifiedCount) {
+    throw 'JSON integrity contract invalid.'
 }
 ```
 
-Le script exact protégé vérifie aussi l’architecture native, le setup et les trois EXE **installés**.
-En mode signé, il exige `Valid`, timestamp non nul et publisher exact commun :
+The exact protected script also verifies native architecture, the installer, and all three
+**installed** EXEs. In signed mode it requires `Valid`, a non-zero timestamp, and one exact common
+publisher:
 
 ```powershell
 Assert-CandidateFiles
@@ -544,23 +560,23 @@ if ($RequireSigned) {
     $installerArguments += '-RequireSigned'
 }
 & $NativePowerShellExe @installerArguments
-if ($LASTEXITCODE -ne 0) { throw 'Cycle installateur invalide.' }
+if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle failed.' }
 ```
 
-## 5. Continuité après restauration
+## 5. Continuity across restores
 
-Sceller les preuves des sections 1 à 4 sur `$EvidenceRoot`. Fermer la VM, puis restaurer
-`S0-clean-before-winsight` **depuis l’hôte uniquement**. Exemple VirtualBox, dans le même shell hôte
-protégé que la section 2 :
+Seal evidence from sections 1 through 4 under `$EvidenceRoot`. Shut down the VM, then restore
+`S0-clean-before-winsight` **from the host only**. VirtualBox example, from the same protected host
+shell used in section 2:
 
 ```powershell
 $SnapshotName = 'S0-clean-before-winsight'
 @(& $VBoxManage snapshot $VmName restore $SnapshotName 2>&1) | Out-Host
-if ($LASTEXITCODE -ne 0) { throw 'Restore S0 échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Restore S0 failed.' }
 $restoredInfo = @(& $VBoxManage showvminfo $VmName --machinereadable 2>&1)
 if ($LASTEXITCODE -ne 0 -or
     ($restoredInfo -join "`n") -notmatch 'CurrentSnapshotName="S0-clean-before-winsight"') {
-    throw 'Restore S0 non prouvé.'
+    throw 'Restore S0 not proven.'
 }
 $restoreRecord = Join-Path $HostEvidenceRoot 'restore-S0-clean-before-winsight.txt'
 @(
@@ -573,36 +589,35 @@ $restoreRecord = Join-Path $HostEvidenceRoot 'restore-S0-clean-before-winsight.t
 Get-FileHash -LiteralPath $restoreRecord -Algorithm SHA256
 ```
 
-Exporter cette preuve hote vers `$EvidenceRoot\host-restores\` avant de redémarrer la VM. Si
-l’hyperviseur ou son enregistrement n’est pas disponible depuis l’hôte, la restauration est
-`NOT_RUN` ; l’agent dans l’invité ne doit ni inventer la preuve ni poursuivre comme si le disque
-avait été restauré. La restauration efface les prérequis, variables, téléchargements et la racine
-protégée : ne pas continuer avec des chemins imaginés.
+Export this host evidence to `$EvidenceRoot\host-restores\` before restarting the VM. If the
+hypervisor or its record is unavailable from the host, the restore is `NOT_RUN`; an agent inside the
+guest must neither invent evidence nor continue as if the disk had been restored. A restore removes
+the prerequisites, variables, downloads, and protected root: do not continue with assumed paths.
 
-Après restore :
+After the restore:
 
-1. remonter `$EvidenceRoot`, vérifier son manifest depuis l’extérieur et vérifier la preuve hote
-   `restore-S0-clean-before-winsight.txt` ;
-2. réinitialiser explicitement toutes les variables de la section 1 ;
-3. réinstaller Git/gh, se réauthentifier et recalculer `$NativeArchitecture` ;
-4. répéter intégralement les sections 3 et 4 depuis le même run/hashes, y compris le bootstrap
-   exécutable de toute nouvelle console élevée ;
-5. comparer le nouveau `protected-candidate.sha256` au manifest exporté ;
-6. éteindre la VM et créer seulement alors `S1-candidate-protected` depuis l’hôte, avec la même
-   procédure `take` + `showvminfo` + hash que S0.
+1. remount `$EvidenceRoot`, verify it from outside the snapshot, and verify the host evidence
+   `restore-S0-clean-before-winsight.txt`;
+2. explicitly reset every variable from section 1;
+3. reinstall Git/gh, reauthenticate, and recalculate `$NativeArchitecture`;
+4. repeat sections 3 and 4 in full using the same run and hashes, including the executable bootstrap
+   in every new elevated console;
+5. compare the new `protected-candidate.sha256` with the exported manifest;
+6. shut down the VM and only then create `S1-candidate-protected` from the host, using the same
+   `take` + `showvminfo` + hash procedure used for S0.
 
-Chaque section privilégiée suivante fait restaurer `S1` par l’hôte, exige la preuve hote
-`operation=restore`, puis ouvre dans l’invité le Windows PowerShell natif avec
-`-NoProfile`, ressaisit les valeurs exactes de la section 1 puis exécute uniquement le bootstrap de
-reprise ci-dessous. Le bootstrap de création de la section 3 ne doit jamais être rejoué sur `S1` :
-il exige à juste titre une racine absente et sert seulement à construire le snapshot.
+Every privileged section below restores `S1` from the host, requires host evidence containing
+`operation=restore`, opens native Windows PowerShell in the guest with `-NoProfile`, re-enters the
+exact section 1 values, and executes only the recovery bootstrap below. Never replay section 3's
+creation bootstrap on `S1`: it correctly requires an absent root and exists only to build the
+snapshot.
 
-### Bootstrap de reprise S1
+### S1 recovery bootstrap
 
-Ce bloc ne clone, ne télécharge et n’extrait rien. Il reconstruit le contexte PowerShell perdu au
-restore depuis l’état protégé de `S1`, puis compare chacun des dix fichiers exécutables au manifeste
-SHA-256 scellé hors snapshot. Toute entrée supplémentaire, manquante, dupliquée, hors de
-`ProtectedRoot`, non canonique ou modifiée invalide le snapshot.
+This block does not clone, download, or extract anything. It reconstructs the PowerShell context
+lost during restore from S1's protected state, then compares all 11 protected candidate/script
+files with the SHA-256 manifest sealed outside the snapshot. Any extra, missing, duplicate,
+out-of-root, non-canonical, or modified entry invalidates the snapshot.
 
 ```powershell
 # S1-RESUME-BOOTSTRAP
@@ -610,6 +625,7 @@ function Initialize-WinSightS1QualificationContext {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$CandidateSha,
+        [Parameter(Mandatory)][ValidateSet('release', 'ci')][string]$ArtifactKind,
         [Parameter(Mandatory)][string]$ExpectedZipSha256,
         [Parameter(Mandatory)][string]$ExpectedInstallerSha256,
         [Parameter(Mandatory)][string]$EvidenceRoot
@@ -618,7 +634,7 @@ function Initialize-WinSightS1QualificationContext {
     if ($CandidateSha -notmatch '^[0-9a-fA-F]{40}$' -or
         $ExpectedZipSha256 -notmatch '^[0-9a-fA-F]{64}$' -or
         $ExpectedInstallerSha256 -notmatch '^[0-9a-fA-F]{64}$') {
-        throw 'Identité S1 non liée.'
+        throw 'Unbound S1 identity.'
     }
 
     $NativeSystemDirectory = [Environment]::SystemDirectory
@@ -633,7 +649,7 @@ function Initialize-WinSightS1QualificationContext {
     foreach ($tool in @($NativePowerShellExe, $ScExe, $CurlExe, $GitExe)) {
         if (-not (Test-Path -LiteralPath $tool -PathType Leaf) -or
             (Get-AuthenticodeSignature -LiteralPath $tool).Status -ne 'Valid') {
-            throw "Outil S1 absent ou non signé : $tool"
+            throw "S1 tool is missing or not signed: $tool"
         }
     }
     $evidenceFullPath = [IO.Path]::GetFullPath($EvidenceRoot)
@@ -642,7 +658,7 @@ function Initialize-WinSightS1QualificationContext {
             [IO.Path]::GetPathRoot($evidenceFullPath),
             $SystemVolumeRoot,
             [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'EvidenceRoot S1 absent ou situé sur le volume restauré.'
+        throw 'S1 EvidenceRoot is missing or located on the restored volume.'
     }
 
     $cpuArchitectures = @(
@@ -650,13 +666,16 @@ function Initialize-WinSightS1QualificationContext {
             ForEach-Object { [int]$_.Architecture } |
             Sort-Object -Unique
     )
-    if ($cpuArchitectures.Count -ne 1) { throw 'Architecture S1 ambiguë.' }
+    if ($cpuArchitectures.Count -ne 1) { throw 'S1 architecture is ambiguous.' }
     $NativeArchitecture = switch ($cpuArchitectures[0]) {
         9 { 'x64' }
         12 { 'arm64' }
-        default { throw "Architecture S1 non supportée : $($cpuArchitectures[0])." }
+        default { throw "Unsupported S1 architecture: $($cpuArchitectures[0])." }
     }
-    $ArtifactName = "winsight-win-$NativeArchitecture"
+    $ArtifactName = switch ($ArtifactKind) {
+        'release' { "release-$NativeArchitecture" }
+        'ci'      { "winsight-win-$NativeArchitecture" }
+    }
 
     $ProtectedRoot = Join-Path $ProgramFilesRoot 'WinSight-Qualification'
     $ProtectedArtifactRoot = Join-Path $ProtectedRoot 'artifacts'
@@ -665,7 +684,7 @@ function Initialize-WinSightS1QualificationContext {
     foreach ($directory in @(
         $ProtectedRoot, $ProtectedArtifactRoot, $ProtectedPayloadRoot, $ProtectedSourceRoot)) {
         if (-not (Test-Path -LiteralPath $directory -PathType Container)) {
-            throw "Répertoire protégé S1 absent : $directory"
+            throw "Protected S1 directory is missing: $directory"
         }
     }
 
@@ -674,7 +693,7 @@ function Initialize-WinSightS1QualificationContext {
     $protectedInstallers = @(
         Get-ChildItem -LiteralPath $ProtectedArtifactRoot -File -Filter 'winsight-*-setup.exe')
     if ($protectedZips.Count -ne 1 -or $protectedInstallers.Count -ne 1) {
-        throw 'Cardinalité ZIP/setup S1 invalide.'
+        throw 'Invalid S1 ZIP/installer cardinality.'
     }
     $ProtectedZip = $protectedZips[0].FullName
     $ProtectedInstaller = $protectedInstallers[0].FullName
@@ -682,12 +701,12 @@ function Initialize-WinSightS1QualificationContext {
         $ExpectedZipSha256.ToUpperInvariant() -or
         (Get-FileHash -LiteralPath $ProtectedInstaller -Algorithm SHA256).Hash -cne
         $ExpectedInstallerSha256.ToUpperInvariant()) {
-        throw 'Hash ZIP/setup S1 invalide.'
+        throw 'Invalid S1 ZIP/installer hash.'
     }
 
     $cliCandidates = @(
         Get-ChildItem -LiteralPath $ProtectedPayloadRoot -Recurse -File -Filter 'winsight.exe')
-    if ($cliCandidates.Count -ne 1) { throw 'Cardinalité winsight.exe S1 invalide.' }
+    if ($cliCandidates.Count -ne 1) { throw 'Invalid S1 winsight.exe cardinality.' }
     $PackageRoot = $cliCandidates[0].Directory.FullName
     $Cli = Join-Path $PackageRoot 'winsight.exe'
     $Dashboard = Join-Path $PackageRoot 'winsight-dashboard.exe'
@@ -708,25 +727,25 @@ function Initialize-WinSightS1QualificationContext {
         $CandidateExecutables + $ValidationFiles |
             ForEach-Object { (Resolve-Path -LiteralPath $_ -ErrorAction Stop).Path })
     if ($ExpectedCandidatePaths.Count -ne 11) {
-        throw "Le set candidat S1 doit contenir 11 fichiers, pas $($ExpectedCandidatePaths.Count)."
+        throw "The S1 candidate set must contain 11 files, not $($ExpectedCandidatePaths.Count)."
     }
 
     $resolvedProtectedRoot = (Resolve-Path -LiteralPath $ProtectedRoot).Path.TrimEnd('\')
     $protectedPrefix = $resolvedProtectedRoot + '\'
     foreach ($path in $ExpectedCandidatePaths) {
         if (-not $path.StartsWith($protectedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Chemin candidat hors ProtectedRoot : $path"
+            throw "Candidate path is outside ProtectedRoot: $path"
         }
     }
 
     $sourceHead = @(& $GitExe -C $ProtectedSourceRoot rev-parse HEAD)
     if ($LASTEXITCODE -ne 0 -or $sourceHead.Count -ne 1 -or
         $sourceHead[0] -cne $CandidateSha) {
-        throw 'HEAD source S1 différent du candidat.'
+        throw 'S1 source HEAD differs from the candidate.'
     }
     $sourceStatus = @(& $GitExe -C $ProtectedSourceRoot status --porcelain)
     if ($LASTEXITCODE -ne 0 -or $sourceStatus.Count -ne 0) {
-        throw 'Source protégée S1 modifiée.'
+        throw 'Protected S1 source was modified.'
     }
 
     $manifestPath = Join-Path $EvidenceRoot 'protected-candidate.sha256'
@@ -734,13 +753,13 @@ function Initialize-WinSightS1QualificationContext {
         Get-Content -LiteralPath $manifestPath -ErrorAction Stop |
             Where-Object { $_.Length -gt 0 })
     if ($manifestLines.Count -ne 11) {
-        throw "Le manifest S1 doit contenir 11 entrées, pas $($manifestLines.Count)."
+        throw "The manifest S1 must contain 11 entries, not $($manifestLines.Count)."
     }
 
     $CandidateHash = @{}
     foreach ($line in $manifestLines) {
         if ($line -cnotmatch '^(?<hash>[0-9A-F]{64}) \*(?<path>.+)$') {
-            throw 'Entrée manifest S1 non canonique.'
+            throw 'S1 manifest entry is non-canonical.'
         }
         $manifestPathValue = (Resolve-Path -LiteralPath $Matches.path -ErrorAction Stop).Path
         if ($manifestPathValue -cne $Matches.path -or
@@ -748,11 +767,11 @@ function Initialize-WinSightS1QualificationContext {
                 $protectedPrefix, [StringComparison]::OrdinalIgnoreCase) -or
             $ExpectedCandidatePaths -notcontains $manifestPathValue -or
             $CandidateHash.ContainsKey($manifestPathValue)) {
-            throw "Chemin manifest S1 inattendu ou dupliqué : $manifestPathValue"
+            throw "Unexpected or duplicated S1 manifest path: $manifestPathValue"
         }
         $actualHash = (Get-FileHash -LiteralPath $manifestPathValue -Algorithm SHA256).Hash
         if ($actualHash -cne $Matches.hash) {
-            throw "Hash manifest S1 différent : $manifestPathValue"
+            throw "S1 manifest hash mismatch: $manifestPathValue"
         }
         $CandidateHash[$manifestPathValue] = $Matches.hash
     }
@@ -760,7 +779,7 @@ function Initialize-WinSightS1QualificationContext {
         @($ExpectedCandidatePaths | Where-Object {
             -not $CandidateHash.ContainsKey($_)
         }).Count -ne 0) {
-        throw 'Le manifest S1 ne couvre pas exactement le set candidat.'
+        throw 'The S1 manifest does not cover the candidate set exactly.'
     }
 
     [pscustomobject]@{
@@ -786,6 +805,7 @@ function Initialize-WinSightS1QualificationContext {
 
 $S1 = Initialize-WinSightS1QualificationContext `
     -CandidateSha $CandidateSha `
+    -ArtifactKind $ArtifactKind `
     -ExpectedZipSha256 $ExpectedZipSha256 `
     -ExpectedInstallerSha256 $ExpectedInstallerSha256 `
     -EvidenceRoot $EvidenceRoot
@@ -796,14 +816,14 @@ foreach ($property in $S1.PSObject.Properties) {
 function Assert-CandidateFiles {
     foreach ($entry in $CandidateHash.GetEnumerator()) {
         if ((Get-FileHash -LiteralPath $entry.Key -Algorithm SHA256).Hash -cne $entry.Value) {
-            throw "Candidat/script protégé modifié : $($entry.Key)"
+            throw "Protected candidate/script was modified: $($entry.Key)"
         }
     }
     if ((Get-FileHash -LiteralPath $ProtectedZip -Algorithm SHA256).Hash -cne
         $ExpectedZipSha256.ToUpperInvariant() -or
         (Get-FileHash -LiteralPath $ProtectedInstaller -Algorithm SHA256).Hash -cne
         $ExpectedInstallerSha256.ToUpperInvariant()) {
-        throw 'ZIP/setup protégé modifié après reprise S1.'
+        throw 'Protected ZIP/setup modified after S1 recovery.'
     }
 }
 
@@ -812,22 +832,21 @@ $PeScript = Join-Path $ProtectedSourceRoot 'scripts\Test-PeArchitecture.ps1'
 foreach ($path in $CandidateExecutables) {
     & $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
         -File $PeScript -Path $path -Architecture $NativeArchitecture
-    if ($LASTEXITCODE -ne 0) { throw "Architecture PE S1 incorrecte : $path" }
+    if ($LASTEXITCODE -ne 0) { throw "S1 PE architecture mismatch: $path" }
 }
 $EtwModule = Join-Path $ProtectedSourceRoot 'scripts\WinSightEtwValidation.psm1'
 Import-Module $EtwModule -Force
 ```
 
-Après chaque restore `S1`, conserver le transcript de ce bootstrap sous un nom de phase unique dans
-`$EvidenceRoot`. Une restauration qui ne repasse pas ce bloc est `NOT_RUN`, jamais PASS.
+After every `S1` restore, retain this bootstrap's transcript under a unique phase name in
+`$EvidenceRoot`. A restore that does not complete this block is `NOT_RUN`, never PASS.
 
-## 6. Inventaire et récupération ETW native
+## 6. Native ETW inventory and recovery
 
-Le module du clone exact ne reprend que l'erreur transitoire Windows `0x800705AA`
-(`-2147020696`) : au plus huit tentatives, espacées de 250 ms. Tout autre code non nul échoue dès
-la première tentative, et l'épuisement des huit tentatives échoue également. Il accepte les sorties
-tabulaires, multi-colonnes ou localisées de l'outil, mais ne retourne que les tokens canoniques
-fermés legacy/v2 :
+The exact cloned module retries only the transient Windows error `0x800705AA` (`-2147020696`): at
+most eight attempts, 250 ms apart. Any other non-zero code fails on the first attempt, and exhausting
+all eight attempts also fails. It accepts tabular, multi-column, or localized tool output, but
+returns only closed canonical legacy/v2 tokens:
 
 ```powershell
 Assert-CandidateFiles
@@ -837,12 +856,13 @@ $EtwGateStart = Get-Date
 Start-Transcript (Join-Path $EvidenceRoot 'etw-resilience.txt') -Force
 $before = @(Get-WinSightEtwSessionNames)
 $before | Set-Content (Join-Path $EvidenceRoot 'etw-before.txt')
-if ($before.Count -ne 0) { throw 'Snapshot ETW non propre.' }
+if ($before.Count -ne 0) { throw 'ETW snapshot is not clean.' }
 ```
 
-### Dashboard Attribution
+### Dashboard attribution
 
-Le dashboard n’a pas de mutex single-instance. La console élevée transmet son token aux processus :
+The dashboard has no single-instance mutex. The elevated console passes its token to child
+processes:
 
 ```powershell
 Assert-CandidateFiles
@@ -853,24 +873,24 @@ Start-Sleep -Seconds 15
 
 function Get-AttributionSession([Diagnostics.Process]$Process) {
     $Process.Refresh()
-    if ($Process.HasExited) { throw "Dashboard $($Process.Id) arrêté." }
+    if ($Process.HasExited) { throw "Dashboard $($Process.Id) stopped." }
     Get-WinSightEtwSessionForProcess -Family Attribution -ProcessId $Process.Id
 }
 $sessionOne = Get-AttributionSession $dashboardOne
 $sessionTwo = Get-AttributionSession $dashboardTwo
 ```
 
-Fermer la fenêtre du premier avec **X** : le processus capturé et `$sessionOne` doivent rester.
-Ensuite seulement, forcer **ce Process capturé** :
+Close the first window with **X**: the captured process and `$sessionOne` must remain. Only then
+force-stop **that captured process**:
 
 ```powershell
 $dashboardOne.Refresh()
-if ($dashboardOne.HasExited) { throw 'X a quitté le dashboard au lieu de le masquer.' }
-if ((Get-WinSightEtwSessionNames) -notcontains $sessionOne) { throw 'Session tray absente.' }
+if ($dashboardOne.HasExited) { throw 'X exited the dashboard instead of hiding it.' }
+if ((Get-WinSightEtwSessionNames) -notcontains $sessionOne) { throw 'Tray session is missing.' }
 Stop-Process -InputObject $dashboardOne -Force
 Start-Sleep -Seconds 2
 if ((Get-WinSightEtwSessionNames) -notcontains $sessionOne) {
-    throw "Le kill ne laisse pas l’orphelin attendu : résultat inconclusif."
+    throw 'The kill did not leave the expected orphan: result is inconclusive.'
 }
 
 Assert-CandidateFiles
@@ -881,62 +901,62 @@ $dashboardTwo.Refresh()
 if ($dashboardTwo.HasExited -or
     (Get-WinSightEtwSessionNames) -contains $sessionOne -or
     (Get-WinSightEtwSessionNames) -notcontains $sessionTwo) {
-    throw 'Récupération orpheline ou préservation live échouée.'
+    throw 'Orphan recovery or live-session preservation failed.'
 }
 ```
 
-Répéter deux cycles kill/relaunch avec les objets `Process` capturés. Le compte ne doit jamais
-dépasser le nombre de dashboards vivants. Terminer les survivants par le menu tray **Exit**, attendre
-leur `HasExited`, puis exiger aucune session Attribution.
+Repeat two kill/relaunch cycles using captured `Process` objects. The session count must never exceed
+the number of live dashboards. Close survivors through the tray **Exit** command, wait for
+`HasExited`, then require zero attribution sessions.
 
 ### DNS
 
-Lancer et conserver l’objet du processus CLI, puis utiliser exclusivement cet objet :
+Launch and retain the CLI process object, then use that object exclusively:
 
 ```powershell
 Assert-CandidateFiles
 $dnsOne = Start-Process -FilePath $Cli -ArgumentList @('dns', '--watch') -PassThru
 Start-Sleep -Seconds 10
 $dnsOne.Refresh()
-if ($dnsOne.HasExited) { throw "Le watcher DNS initial a quitté avec $($dnsOne.ExitCode)." }
+if ($dnsOne.HasExited) { throw "The original DNS watcher exited with $($dnsOne.ExitCode)." }
 $dnsSession = Get-WinSightEtwSessionForProcess -Family DNS -ProcessId $dnsOne.Id
 Stop-Process -InputObject $dnsOne -Force
 if ((Get-WinSightEtwSessionNames) -notcontains $dnsSession) {
-    throw 'Orphelin DNS attendu absent.'
+    throw 'Expected DNS orphan is missing.'
 }
 
 Assert-CandidateFiles
 $dnsTwo = Start-Process -FilePath $Cli -ArgumentList @('dns', '--watch') -PassThru
 Start-Sleep -Seconds 10
 $dnsTwo.Refresh()
-if ($dnsTwo.HasExited) { throw "Le watcher DNS relancé a quitté avec $($dnsTwo.ExitCode)." }
+if ($dnsTwo.HasExited) { throw "The restarted DNS watcher exited with $($dnsTwo.ExitCode)." }
 $dnsTwoSession = Get-WinSightEtwSessionForProcess -Family DNS -ProcessId $dnsTwo.Id
 if ((Get-WinSightEtwSessionNames) -contains $dnsSession) {
-    throw 'Ancien orphelin supprimé mais nouveau watcher/session DNS absent ou ambigu.'
+    throw 'The previous DNS orphan remains after the replacement watcher started.'
 }
 ```
 
-Envoyer Ctrl+C dans la console de `$dnsTwo`; ne pas le remplacer par un kill pour la preuve de
-fermeture normale. Puis exiger une sortie bornée, exit 0 et absence de la session capturée :
+Send Ctrl+C to `$dnsTwo`'s console; do not replace it with a kill when proving graceful shutdown.
+Then require bounded output, exit 0, and absence of the captured session:
 
 ```powershell
-if (-not $dnsTwo.WaitForExit(30000)) { throw 'dnsTwo ne sort pas sous 30 secondes après Ctrl+C.' }
-if ($dnsTwo.ExitCode -ne 0) { throw "dnsTwo exit inattendu : $($dnsTwo.ExitCode)." }
+if (-not $dnsTwo.WaitForExit(30000)) { throw 'dnsTwo did not exit within 30 seconds after Ctrl+C.' }
+if ($dnsTwo.ExitCode -ne 0) { throw "Unexpected dnsTwo exit: $($dnsTwo.ExitCode)." }
 if ((Get-WinSightEtwSessionNames) -contains $dnsTwoSession) {
-    throw 'La fermeture normale DNS laisse sa session ETW.'
+    throw 'Graceful DNS shutdown left its ETW session behind.'
 }
 ```
 
-### Outbound du service
+### Outbound service
 
-Restaurer `S1`. Installer et démarrer explicitement en AuditOnly/WFP vide :
+Restore `S1`. Explicitly install and start in AuditOnly mode with empty WFP state:
 
 ```powershell
 Assert-CandidateFiles
 & $Service install
-if ($LASTEXITCODE -ne 0) { throw 'Install service échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Install service failed.' }
 & $ScExe start WinSightFirewall
-if ($LASTEXITCODE -ne 0) { throw 'Start service échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Start service failed.' }
 
 $deadline = (Get-Date).AddSeconds(30)
 do {
@@ -944,7 +964,7 @@ do {
     if ($svc.State -eq 'Running' -and $svc.ProcessId -gt 0) { break }
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
-if ($svc.State -ne 'Running') { throw 'Service non Running.' }
+if ($svc.State -ne 'Running') { throw 'Service not running.' }
 
 Assert-CandidateFiles
 $mode = @(& $Service enforce-status); $modeExit = $LASTEXITCODE
@@ -956,35 +976,36 @@ if ($modeExit -ne 0 -or ($mode -join "`n") -notmatch 'mode: AuditOnly\.' -or
     $wfpExit -ne 0 -or
     ($wfp -join "`n") -notmatch 'provider: absent, sublayer: absent, permit-filter: absent' -or
     $ipcExit -ne 0 -or ($ipc -join "`n") -notmatch 'serviceAvailable=true') {
-    throw 'Précondition AuditOnly/WFP/IPC invalide.'
+    throw 'Precondition AuditOnly/WFP/IPC invalid.'
 }
 ```
 
-Rebinder le PID immédiatement avant le kill : CIM doit toujours porter le même PID, `Get-Process`
-doit réussir et son chemin canonique doit être exactement `$Service`.
+Rebind the PID immediately before the kill: CIM must still report the same PID, `Get-Process` must
+succeed, and its canonical path must equal `$Service` exactly.
 
 ```powershell
 $svcNow = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'"
 if ($svcNow.State -ne 'Running' -or $svcNow.ProcessId -ne $svc.ProcessId) {
-    throw 'PID SCM modifié avant rebind.'
+    throw 'The SCM service PID changed before rebinding.'
 }
 $serviceProcess = Get-Process -Id ([int]$svcNow.ProcessId) -ErrorAction Stop
 $canonicalOwnerPath = (Resolve-Path -LiteralPath $serviceProcess.Path).Path
 $canonicalServicePath = (Resolve-Path -LiteralPath $Service).Path
-if ($canonicalOwnerPath -cne $canonicalServicePath) { throw 'PID SCM ne pointe pas sur le candidat.' }
+if ($canonicalOwnerPath -cne $canonicalServicePath) { throw 'PID SCM does not point at the candidate.' }
 $oldOutbound = Get-WinSightEtwSessionForProcess `
     -Family Outbound -ProcessId $serviceProcess.Id
 
-# Dernier rebind sans autre opération entre vérification et kill.
+# Final rebind with no intervening operation between verification and kill.
 $svcKill = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'"
 if ($svcKill.ProcessId -ne $serviceProcess.Id -or
     (Resolve-Path -LiteralPath (Get-Process -Id $serviceProcess.Id -ErrorAction Stop).Path).Path -cne
-    $canonicalServicePath) { throw 'PID/path changé avant kill.' }
+    $canonicalServicePath) { throw 'PID/path changed before kill.' }
 Stop-Process -InputObject $serviceProcess -Force
 ```
 
-Attendre SCM Stopped, exiger l’orphelin, redémarrer, exiger un nouveau PID/session, l’ancien absent,
-AuditOnly/WFP vide/IPC disponible et `curl.exe` System32 HTTP 200. Puis stop/uninstall :
+Wait for SCM to report Stopped, require the orphan, restart, require a new PID/session and absence of
+the old one, AuditOnly with empty WFP state, available IPC, and HTTP 200 through System32
+`curl.exe`. Then stop and uninstall:
 
 ```powershell
 $deadline = (Get-Date).AddSeconds(30)
@@ -993,14 +1014,14 @@ do {
     if ($svc.State -eq 'Stopped') { break }
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
-if ($svc.State -ne 'Stopped') { throw "SCM n’a pas observé le kill." }
+if ($svc.State -ne 'Stopped') { throw 'SCM did not observe the kill.' }
 if ((Get-WinSightEtwSessionNames) -notcontains $oldOutbound) {
-    throw 'Orphelin Outbound attendu absent : run inconclusif.'
+    throw 'Expected outbound orphan is missing: run is inconclusive.'
 }
 
 Assert-CandidateFiles
 & $ScExe start WinSightFirewall
-if ($LASTEXITCODE -ne 0) { throw 'Restart service échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Restart service failed.' }
 $deadline = (Get-Date).AddSeconds(30)
 do {
     $svcNew = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'"
@@ -1010,13 +1031,13 @@ do {
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
 if ($svcNew.State -ne 'Running' -or $svcNew.ProcessId -eq $serviceProcess.Id) {
-    throw 'Service non redémarré sous un nouveau PID.'
+    throw 'Service not restarted under a new PID.'
 }
 Start-Sleep -Seconds 10
 $newOutbound = Get-WinSightEtwSessionForProcess `
     -Family Outbound -ProcessId ([int]$svcNew.ProcessId)
 if ((Get-WinSightEtwSessionNames) -contains $oldOutbound) {
-    throw 'Récupération Outbound ou nouvelle session incorrecte.'
+    throw 'Outbound recovery or the new session is incorrect.'
 }
 
 Assert-CandidateFiles
@@ -1033,7 +1054,7 @@ if ($modeExit -ne 0 -or ($mode -join "`n") -notmatch 'mode: AuditOnly\.' -or
     ($wfp -join "`n") -notmatch 'provider: absent, sublayer: absent, permit-filter: absent' -or
     $ipcExit -ne 0 -or ($ipc -join "`n") -notmatch 'serviceAvailable=true' -or
     $httpExit -ne 0 -or $http -ne '200') {
-    throw 'AuditOnly/WFP/IPC/connectivité invalide après restart.'
+    throw 'AuditOnly/WFP/IPC/connectivity state is invalid after restart.'
 }
 
 & $ScExe stop WinSightFirewall | Out-Host
@@ -1043,79 +1064,80 @@ do {
     if ($svcNew.State -eq 'Stopped') { break }
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
-if ($svcNew.State -ne 'Stopped') { throw 'Service non arrêté après récupération.' }
+if ($svcNew.State -ne 'Stopped') { throw 'Service not stopped after recovery.' }
 Assert-CandidateFiles
 & $Service uninstall
-if ($LASTEXITCODE -ne 0) { throw 'Uninstall service échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'Uninstall service failed.' }
 & $ScExe query WinSightFirewall 2>&1 | Out-Host
-if ($LASTEXITCODE -ne 1060) { throw 'SCM absence 1060 non prouvée.' }
+if ($LASTEXITCODE -ne 1060) { throw 'SCM error 1060 absence is not proven.' }
 Start-Sleep -Seconds 3
 $outboundAfter = @(Get-WinSightEtwSessionNames |
     Where-Object { $_ -cmatch '^WinSight-Outbound-(v2-)?' })
-if ($outboundAfter.Count -ne 0) { throw 'Session Outbound persistante/inattendue.' }
+if ($outboundAfter.Count -ne 0) { throw 'Unexpected persistent outbound session.' }
 ```
 
-Le bloc intermédiaire restart/réassertions doit être transcrit en entier ; toute omission est
-`NOT_RUN`, pas PASS.
+The intermediate restart/reassertion block must be transcribed in full; any omission is `NOT_RUN`,
+not PASS.
 
-Le scénario legacy PID-only natif reste **NOT_RUN externe** dans ce kit : le fabriquer avec une
-commande `logman` arbitraire ne prouverait pas le chemin TraceEvent legacy réel. Il exige une fixture
-séparée, allowlistée et liée au candidat. Ne pas saturer le quota ETW pour le simuler.
+The native legacy PID-only scenario remains **externally NOT_RUN** in this kit: fabricating it with
+an arbitrary `logman` command would not exercise the real TraceEvent legacy path. It requires a
+separate allowlisted fixture bound to the candidate. Do not exhaust the ETW quota to simulate it.
 
-Terminer le gate avec le helper du module. Sa lecture du journal Application est `-ErrorAction Stop`;
-toute exception de lecture interrompt le run, elle ne peut jamais devenir « zéro crash » :
+Finish the gate with the module helper. Its Application log read uses `-ErrorAction Stop`; any read
+exception aborts the run and can never become "zero crashes":
 
 ```powershell
 Assert-WinSightEtwSessionsAbsent
 $crashes = @(Get-WinSightRuntimeCrashEvents -StartTime $EtwGateStart)
-if ($crashes.Count -ne 0) { throw 'Crash .NET Runtime WinSight pendant le gate ETW.' }
+if ($crashes.Count -ne 0) { throw 'WinSight .NET Runtime crash occurred during the ETW gate.' }
 Stop-Transcript
 ```
 
-## 7. Gates WFP, trust et IPC
+## 7. WFP, trust, and IPC gates
 
-Restaurer `S1` avant chaque famille et appeler `Assert-CandidateFiles` avant chaque EXE/script.
+Restore `S1` before each family and call `Assert-CandidateFiles` before every EXE/script.
 
 ```powershell
 $wfpScript = Join-Path $PackageRoot 'Test-WfpValidation.ps1'
 Assert-CandidateFiles
-& $wfpScript -ContractSelfTest                   # attendu 26/26, exit 0
-if ($LASTEXITCODE -ne 0) { throw 'ContractSelfTest échoué.' }
+& $wfpScript -ContractSelfTest                   # expected 26/26, exit 0
+if ($LASTEXITCODE -ne 0) { throw 'Contract SelfTest failed.' }
 Assert-CandidateFiles
-& $wfpScript -ContractSelfTest -ContractNegativeControl # attendu 26/1, exit 1
-if ($LASTEXITCODE -ne 1) { throw 'NegativeControl non rouge exact.' }
+& $wfpScript -ContractSelfTest -ContractNegativeControl # expected 26/1, exit 1
+if ($LASTEXITCODE -ne 1) { throw 'NegativeControl did not produce the exact RED result.' }
 Assert-CandidateFiles
-& $wfpScript -ServicePath $Service -SkipEnforcement     # attendu 17/17
-if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 17/17 échoué.' }
+& $wfpScript -ServicePath $Service -SkipEnforcement     # expected 17/17
+if ($LASTEXITCODE -ne 0) { throw 'Pre-arm 17/17 failed.' }
 ```
 
-Éteindre la VM et faire créer `S2-before-WFP` par l’hôte avec sa preuve `take` scellée. Redémarrer
-seulement après export de cette preuve hote, puis exécuter le full WFP : attendu 35/35, profil SCM
-exact (SID de service, trois privilèges requis et actions de reprise), curl cible
-200→000, contrôle 200, arrêt armé avec disparition dynamique et retour 200, restart avec retour du
-blocage 000 et contrôle 200, rollback AuditOnly, WFP vide, connectivité restaurée, SCM 1060. Toute
-restauration S2 après échec est également une opération hôte qui exige sa propre preuve
-`operation=restore`. Ensuite trust : attendu 13/13 sans skip, avec un vrai compte standard pour
+Shut down the VM and have the host create `S2-before-WFP` with sealed `take` evidence. Restart only
+after exporting that host evidence, then run the full WFP gate: expected 35/35, exact SCM profile
+(service SID, three required privileges, restart after 5 seconds, restart after 30 seconds, repeated
+restart after 60 seconds, and a one-hour failure-count reset), target curl 200→000, control curl
+200, armed stop with dynamic removal and return to 200, restart with blocking back at 000 while the
+control remains 200, AuditOnly rollback, empty WFP state, restored connectivity, and SCM 1060. Any
+S2 restore after failure is also a host operation requiring its own `operation=restore` evidence.
+Then run trust: expected 13/13 with no skip and a real standard account supplied to
 `-HostileAccount`.
 
 ```powershell
 Assert-CandidateFiles
 & $wfpScript -ServicePath $Service
-if ($LASTEXITCODE -ne 0) { throw 'Full WFP 35/35 échoué; restaurer S2.' }
+if ($LASTEXITCODE -ne 0) { throw 'Full WFP 35/35 failed; restore S2.' }
 Assert-CandidateFiles
 & (Join-Path $PackageRoot 'Test-TrustBoundary.ps1') -ServicePath $Service `
-    -HostileAccount '<compte standard dédié>'
-if ($LASTEXITCODE -ne 0) { throw 'Trust 13/13 échoué.' }
+    -HostileAccount '<dedicated standard account>'
+if ($LASTEXITCODE -ne 0) { throw 'Trust 13/13 failed.' }
 ```
 
-Le gate IPC final part d’un restore `S1` et fournit sa propre séquence complète :
+The final IPC gate starts from an `S1` restore and provides its own complete sequence:
 
 ```powershell
 Assert-CandidateFiles
 & $Service install
-if ($LASTEXITCODE -ne 0) { throw 'IPC install échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'IPC install failed.' }
 & $ScExe start WinSightFirewall
-if ($LASTEXITCODE -ne 0) { throw 'IPC start échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'IPC start failed.' }
 $deadline = (Get-Date).AddSeconds(30)
 do {
     $ipcService = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'"
@@ -1123,49 +1145,49 @@ do {
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
 if ($ipcService.State -ne 'Running' -or $ipcService.ProcessId -le 0) {
-    throw 'IPC service non Running.'
+    throw 'IPC service not Running.'
 }
 Assert-CandidateFiles
 $mode = @(& $Service enforce-status)
 if ($LASTEXITCODE -ne 0 -or ($mode -join "`n") -notmatch 'mode: AuditOnly\.') {
-    throw 'IPC service non AuditOnly.'
+    throw 'IPC service not AuditOnly.'
 }
 Assert-CandidateFiles
 $wfp = @(& $Service wfp-status)
 if ($LASTEXITCODE -ne 0 -or
     ($wfp -join "`n") -notmatch 'provider: absent, sublayer: absent, permit-filter: absent') {
-    throw 'IPC WFP non vide.'
+    throw 'IPC WFP state is not empty.'
 }
 & (Join-Path $PackageRoot 'Test-IpcBoundary.ps1') -CliPath $Cli -ServicePath $Service
-if ($LASTEXITCODE -ne 0) { throw 'IPC 7/7 échoué.' }
-# Elevated doit être CanMutate; restricted CanReadOnly/Unauthorized.
-# ReadableMutateSkipped n’est pas un PASS AuditOnly.
+if ($LASTEXITCODE -ne 0) { throw 'IPC 7/7 failed.' }
+# Elevated must be CanMutate; restricted must be CanReadOnly/Unauthorized.
+# ReadableMutateSkipped is not an AuditOnly PASS.
 ```
 
-### Network Logon - seconde machine de controle obligatoire
+### Network Logon — mandatory second control machine
 
-Un processus local fabriqué avec `LOGON32_LOGON_NETWORK` n’est pas un substitut fiable. La preuve
-littérale doit venir d’une vraie seconde machine de controle, sur le même réseau privé isolé, par
-WinRM. Une boucle WinRM vers la même VM n’est pas acceptée. En l’absence de seconde machine, classer
-ce gate `NOT_RUN`.
+A local process created with `LOGON32_LOGON_NETWORK` is not a reliable substitute. Literal evidence
+must come through WinRM from a real second control machine on the same isolated private network. A
+WinRM loop back to the same VM is not accepted. Without a second machine, classify this gate as
+`NOT_RUN`.
 
-En workgroup, `Negotiate` n’autorise par défaut que le compte Administrateur intégré. Il ne peut donc
-pas qualifier ce scénario avec un compte local standard. Utiliser un listener HTTPS éphémère et
-`Basic` **uniquement sur TLS**, avec un certificat serveur éphémère explicitement approuvé par la
-machine de controle. Ne jamais activer `AllowUnencrypted`, ne jamais désactiver
-`LocalAccountTokenFilterPolicy`, ne jamais employer `TrustedHosts` pour contourner cette limite.
+In a workgroup, `Negotiate` permits only the built-in Administrator by default, so it cannot qualify
+this scenario with a standard local account. Use a temporary HTTPS listener and `Basic`
+**only over TLS**, with an ephemeral server certificate explicitly trusted by the control machine.
+Never enable `AllowUnencrypted`, disable `LocalAccountTokenFilterPolicy`, or use `TrustedHosts` to
+bypass this limit.
 
-Dans l’invité cible S1 jetable, depuis Windows PowerShell élevé, affecter des adresses statiques au
-réseau host-only, vérifier que son profil est `Private`, puis créer le compte standard. Le compte ne
-doit appartenir qu’à `Users` et `Remote Management Users` (SID localisé `S-1-5-32-580`) :
+In the disposable S1 target guest, from elevated Windows PowerShell, assign static addresses on the
+host-only network, verify its profile is `Private`, then create the standard account. The account
+must belong only to `Users` and `Remote Management Users` (localized from SID `S-1-5-32-580`):
 
 ```powershell
-$TargetAddress = '<IPv4 host-only exacte de la cible>'
-$ControlAddress = '<IPv4 host-only exacte du contrôle>'
+$TargetAddress = '<exact host-only IPv4 address of target>'
+$ControlAddress = '<exact host-only IPv4 address of control>'
 $NetworkProbeUser = 'WinSightNetworkProbe'
-$ControlEvidenceRoot = '<stockage de preuves hors snapshot, visible par les deux VM>'
+$ControlEvidenceRoot = '<evidence storage outside snapshots, visible to both VMs>'
 $CertificatePath = Join-Path $ControlEvidenceRoot 'winrm-network-probe.cer'
-$NetworkProbePassword = Read-Host 'Mot de passe jetable et aléatoire' -AsSecureString
+$NetworkProbePassword = Read-Host 'Disposable random password' -AsSecureString
 $RemoteManagementGroup = Get-LocalGroup -SID 'S-1-5-32-580'
 
 $TargetInterface = Get-NetIPAddress -AddressFamily IPv4 -IPAddress $TargetAddress -ErrorAction Stop
@@ -1174,14 +1196,32 @@ $OriginalNetworkCategory = (Get-NetConnectionProfile `
 Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex -NetworkCategory Private
 
 New-LocalUser -Name $NetworkProbeUser -Password $NetworkProbePassword `
-    -Description 'Compte jetable pour qualification Network Logon' | Out-Null
+    -Description 'Disposable account for Network Logon qualification' | Out-Null
 Add-LocalGroupMember -Group $RemoteManagementGroup.Name -Member $NetworkProbeUser
-Enable-PSRemoting -SkipNetworkProfileCheck -Force
+
+# Do not use Enable-PSRemoting here. On current workgroup Windows builds it can create
+# LocalAccountTokenFilterPolicy, which weakens the boundary this gate is meant to prove.
+$WinRmService = Get-Service WinRM
+$OriginalWinRmStartMode = $WinRmService.StartType
+$OriginalWinRmWasRunning = $WinRmService.Status -eq 'Running'
+$TokenFilterPath = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+$TokenFilterProperty = 'LocalAccountTokenFilterPolicy'
+$OriginalTokenFilter = Get-ItemProperty -LiteralPath $TokenFilterPath `
+    -Name $TokenFilterProperty -ErrorAction SilentlyContinue
+if ($null -ne $OriginalTokenFilter) {
+    throw 'LocalAccountTokenFilterPolicy already exists; this VM is not a clean qualification baseline.'
+}
+Set-Service WinRM -StartupType Manual
+Start-Service WinRM
+if ($null -ne (Get-ItemProperty -LiteralPath $TokenFilterPath `
+        -Name $TokenFilterProperty -ErrorAction SilentlyContinue)) {
+    throw 'Starting WinRM unexpectedly created LocalAccountTokenFilterPolicy.'
+}
 
 $RootSddlPath = 'WSMan:\localhost\Service\RootSDDL'
 $OriginalRootSddl = [string](Get-Item -LiteralPath $RootSddlPath).Value
 if ($OriginalRootSddl -notmatch [regex]::Escape('(A;;GR;;;RM)')) {
-    if ($OriginalRootSddl -notmatch 'S:') { throw 'RootSDDL inattendu : SACL absente.' }
+    if ($OriginalRootSddl -notmatch 'S:') { throw 'Unexpected RootSDDL: SACL is missing.' }
     $NetworkRootSddl = $OriginalRootSddl -replace 'S:', '(A;;GR;;;RM)S:'
     Set-Item -LiteralPath $RootSddlPath -Value $NetworkRootSddl -Force
 }
@@ -1205,10 +1245,11 @@ New-NetFirewallRule -DisplayName $WinRmFirewallRule -Direction Inbound -Action A
 Restart-Service WinRM -Force
 ```
 
-SCM et WMI refusent normalement leurs informations au compte Network standard. La preuve est donc
-scindée sans affaiblir les ACL : la sonde distante fait 7 contrôles sur son propre jeton et le
-contrat IPC; l’observateur élevé fourni fait 3 contrôles indépendants sur le service cible. Toujours
-dans la console élevée de la cible, armer l’observateur avant la connexion distante :
+SCM and WMI normally deny their information to the standard Network account. The evidence is
+therefore split without weakening ACLs: the remote probe performs 7 checks against its own token and
+the IPC contract, while the supplied elevated observer performs 3 independent checks against the
+target service. In the target's elevated console, always arm the observer before the remote
+connection:
 
 ```powershell
 $ObserverReady = Join-Path $ControlEvidenceRoot 'network-observer-ready.json'
@@ -1225,18 +1266,18 @@ $deadline = (Get-Date).AddSeconds(30)
 while (-not (Test-Path $ObserverReady) -and (Get-Date) -lt $deadline) {
     Start-Sleep -Milliseconds 250
 }
-if (-not (Test-Path $ObserverReady)) { throw 'Observateur Network non armé.' }
+if (-not (Test-Path $ObserverReady)) { throw 'The network observer did not arm.' }
 ```
 
-Sur la seconde machine, ouvrir Windows PowerShell élevé avec `-NoProfile`. Importer seulement le
-certificat public éphémère, employer le nom SAM local simple avec `Basic`, exécuter le script avec
-Windows PowerShell natif et `ExecutionPolicy Bypass`, puis restaurer la configuration cliente dans
-un `finally` :
+On the second machine, open elevated Windows PowerShell with `-NoProfile`. Import only the ephemeral
+public certificate, use the simple local SAM name with `Basic`, execute the script with native
+Windows PowerShell and `ExecutionPolicy Bypass`, then restore client configuration in a `finally`
+block:
 
 ```powershell
-$GuestAddress = '<IPv4 host-only exacte de la cible>'
+$GuestAddress = '<exact host-only IPv4 address of target>'
 $GuestPackageRoot = 'C:\Program Files\WinSight-Qualification\payload'
-$ControlEvidenceRoot = '<même stockage de preuves hors snapshot>'
+$ControlEvidenceRoot = '<same evidence storage outside snapshots>'
 $CertificatePath = Join-Path $ControlEvidenceRoot 'winrm-network-probe.cer'
 $CompletionSignal = Join-Path $ControlEvidenceRoot 'network-probe-complete.signal'
 $credential = Get-Credential 'WinSightNetworkProbe'
@@ -1276,31 +1317,31 @@ $networkText = @($networkResult.Output) -join [Environment]::NewLine
 $networkText | Set-Content (Join-Path $ControlEvidenceRoot 'ipc-network-logon.txt')
 if ($networkResult.ExitCode -ne 0 -or
     $networkText -notmatch [regex]::Escape('Result: 7 checks, 0 failure(s).')) {
-    throw 'Network Logon 7/7 échoué.'
+    throw 'Network Logon 7/7 failed.'
 }
 foreach ($required in @('S-1-5-2=true', 'S-1-5-4=false', 'serviceAvailable=false',
         'outcome=ServiceUnavailable', 'mutation=none')) {
     if ($networkText -notmatch [regex]::Escape($required)) {
-        throw "Preuve Network Logon absente : $required"
+        throw "Network Logon evidence is missing: $required"
     }
 }
 ```
 
-Revenir sur la cible, attendre l’observateur et exiger son résultat 3/3. Le gate combiné est 10/10,
-mais les deux preuves restent distinctes et attribuées à leurs jetons respectifs :
+Return to the target, wait for the observer, and require its 3/3 result. The combined gate is 10/10,
+but the two evidence sets remain distinct and attributed to their respective tokens:
 
 ```powershell
 $ObserverJob | Wait-Job -Timeout 330 | Receive-Job
-if ($ObserverJob.State -ne 'Completed') { throw 'Observateur Network non terminé.' }
+if ($ObserverJob.State -ne 'Completed') { throw 'Network observer not completed.' }
 $ObserverEvidence = Get-Content -LiteralPath $ObserverResult -Raw | ConvertFrom-Json
 if ($ObserverEvidence.Result -ne 'PASS' -or $ObserverEvidence.Checks -ne '3/3') {
-    throw 'Observateur cible 3/3 échoué.'
+    throw 'Target observer 3/3 failed.'
 }
 Write-Host 'Result: 3 checks, 0 failure(s).'
 ```
 
-Après export des preuves, supprimer le listener, le certificat, la règle, le compte et restaurer les
-valeurs mémorisées. La restauration S1 finale reste la preuve autoritaire qu’aucun état ne persiste :
+After exporting evidence, remove the listener, certificate, rule, and account, and restore the
+saved values. The final S1 restore remains the authoritative proof that no state persists:
 
 ```powershell
 Remove-WSManInstance -ResourceURI 'winrm/config/Listener' `
@@ -1313,9 +1354,15 @@ Remove-LocalUser -Name $NetworkProbeUser
 Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex `
     -NetworkCategory $OriginalNetworkCategory
 Restart-Service WinRM -Force
+if (-not $OriginalWinRmWasRunning) { Stop-Service WinRM -Force }
+Set-Service WinRM -StartupType $OriginalWinRmStartMode
+if ($null -ne (Get-ItemProperty -LiteralPath $TokenFilterPath `
+        -Name $TokenFilterProperty -ErrorAction SilentlyContinue)) {
+    throw 'Cleanup failed: LocalAccountTokenFilterPolicy was created.'
+}
 ```
 
-Revenir ensuite dans la console élevée de l’invité :
+Then return to the guest's elevated console:
 
 ```powershell
 & $ScExe stop WinSightFirewall | Out-Host
@@ -1325,23 +1372,23 @@ do {
     if ($ipcService.State -eq 'Stopped') { break }
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
-if ($ipcService.State -ne 'Stopped') { throw 'IPC service non Stopped.' }
+if ($ipcService.State -ne 'Stopped') { throw 'IPC service is not stopped.' }
 Assert-CandidateFiles
 & $Service uninstall
-if ($LASTEXITCODE -ne 0) { throw 'IPC uninstall échoué.' }
+if ($LASTEXITCODE -ne 0) { throw 'IPC uninstall failed.' }
 & $ScExe query WinSightFirewall 2>&1 | Out-Host
-if ($LASTEXITCODE -ne 1060) { throw 'IPC cleanup SCM 1060 non prouvé.' }
+if ($LASTEXITCODE -ne 1060) { throw 'IPC cleanup SCM 1060 not proven.' }
 Assert-WinSightEtwSessionsAbsent
 ```
 
-Les résultats elevated/restricted du script, l’administrateur filtré UAC et le Network Logon distant
-sont quatre preuves séparées. Un token ne prouve pas les autres.
+The script's elevated/restricted results, the UAC-filtered administrator, and the remote Network
+Logon are four separate evidence sets. One token does not prove the others.
 
-## 8. Sceller, exporter, restaurer
+## 8. Seal, export, and restore
 
-Le dossier externe doit contenir pour chaque phase : SHA/run, hashes artefacts, architecture native
-et process, snapshot, commandes/exits/comptes, manifests candidat/scripts, signatures/timestamp,
-inventaires ETW/SCM/WFP avant/après, connectivité, tokens et actions humaines.
+For every phase, the external directory must contain: SHA/run, artifact hashes, native and process
+architectures, snapshot, commands/exits/accounts, candidate/script manifests, signatures/timestamps,
+before/after ETW/SCM/WFP inventories, connectivity, tokens, and human actions.
 
 ```powershell
 $manifest = Join-Path $EvidenceRoot 'MANIFEST.sha256.txt'
@@ -1353,11 +1400,11 @@ Get-ChildItem $EvidenceRoot -Recurse -File |
     Set-Content $manifest
 ```
 
-Exporter/sceller hors VM **avant** de restaurer `S0`. Vérifier le manifest sur l’hôte, puis seulement
-restaurer. Un nettoyage manuel après état incertain ne transforme jamais un run rouge en PASS.
+Export and seal outside the VM **before** restoring `S0`. Verify the manifest on the host, and only
+then restore. Manual cleanup after uncertain state never turns a RED run into PASS.
 
-x64, Arm64 natif et x64 émulé sur Arm64 sont trois preuves distinctes. Tant que CI/CodeQL/package
-exacts, variantes natives/session et revue humaine EN/FR/ES ne sont pas enregistrés,
-`production_ready` reste faux. L’absence d’Authenticode est une limitation de distribution acceptée
-et visible (`Unknown publisher`), pas une preuve de sécurité ; la réactiver ultérieurement exige de
-repasser intégralement le chemin signé.
+x64, native Arm64, and x64 emulated on Arm64 are three distinct evidence scopes. Until the exact CI,
+CodeQL, package, native/session variants, and human EN/FR/ES review are recorded,
+`production_ready` remains false. Missing Authenticode is an accepted and visible distribution
+limitation (`Unknown publisher`), not evidence of safety; enabling it later requires rerunning the
+entire signed path.

@@ -51,6 +51,17 @@ if (command != "process" && CliContract.ExtraVerbs(args, command) is { Count: > 
     return CliContract.UsageError;
 }
 
+// An option this verb cannot honour is a usage error too. `persistence --watch` used to run a
+// one-shot scan and exit, so an operator who asked to be told when something changed got a snapshot
+// and no indication that the word they typed had been dropped.
+if (CliContract.FirstUnsupportedOption(args, command) is { } unsupportedOption)
+{
+    Console.Error.WriteLine(
+        $"'{unsupportedOption}' is not supported by '{command}' — it works with "
+        + $"{CliContract.WatchableVerbList}");
+    return CliContract.UsageError;
+}
+
 // MCP owns stdout completely: no banner or CLI renderer may run in this mode.
 if (command == "mcp")
 {
@@ -70,6 +81,23 @@ if (command == "attribution" && args.Contains("--watch"))
 if (command == "dns" && args.Contains("--watch"))
 {
     return Adapters.WatchDns();
+}
+
+// Sweeps the ransomware decoys out of the operator's folders. Called by the uninstaller, which had
+// no way to do it: the installer removed its own directory and left up to eighteen files in
+// Documents, Desktop, Pictures, Videos, Music and Downloads - deliberately named to be
+// unrecognisable, which is what makes them work and what makes them impossible for the user to
+// identify afterwards. Because the folders follow the OneDrive redirection, they had also
+// synchronised to the cloud.
+//
+// It is the sweep the product already performs at startup, exposed so uninstall can run it. Absent
+// from the help catalogue: it is a lifecycle command, not a scanner.
+if (command == "remove-decoys")
+{
+    var removed = WinSight.Ransomware.CanaryManager.RemoveOrphans(
+        WinSight.Ransomware.CanaryManager.DefaultDirectories());
+    Console.WriteLine($"removed {removed} decoy file(s)");
+    return CliContract.Clean;
 }
 
 // Undocumented diagnostic, like the dashboard's --smoke-test: reports what the authenticated

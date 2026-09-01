@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 using Xunit;
 
 namespace WinSight.Browser.Tests;
@@ -87,6 +89,26 @@ public sealed class ExtensionScannerTests : IDisposable
     }
 
     [Fact]
+    public void SnapshotWithCoverage_OversizedManifest_IsRejectedBeforeParsing()
+    {
+        var extensionsDir = Path.Combine(_tempRoot, "Extensions");
+        var versionDir = Path.Combine(extensionsDir, "oversized", "1.0.0");
+        Directory.CreateDirectory(versionDir);
+        File.WriteAllText(
+            Path.Combine(versionDir, "manifest.json"),
+            new string(' ', 1024 * 1024 + 1));
+
+        var snapshot = new ExtensionScanner(
+        [
+            new ExtensionScanner.Root("TestBrowser", extensionsDir),
+        ]).SnapshotWithCoverage();
+
+        Assert.Empty(snapshot.Items);
+        Assert.Equal(1, snapshot.UnreadableItems);
+        Assert.False(snapshot.IsComplete);
+    }
+
+    [Fact]
     public void Snapshot_UsesIdWhenNameIsMissing_AndMergesOptionalPermissions()
     {
         var extDir = Path.Combine(_tempRoot, "Extensions", "extension-id", "1.0.0");
@@ -159,6 +181,32 @@ public sealed class ExtensionScannerTests : IDisposable
         var extension = Assert.Single(scanner.Snapshot());
 
         Assert.Equal("__MSG_extensionName__", extension.Name);
+    }
+
+    [Theory]
+    [InlineData(@"\\server\share")]
+    [InlineData(@"..\..\outside")]
+    [InlineData(@"C:\outside")]
+    [InlineData("https://example.test")]
+    public void Snapshot_APathShapedLocaleIsNeverFollowed(string locale)
+    {
+        var extensionsDir = Path.Combine(_tempRoot, "Extensions");
+        var versionDir = Path.Combine(extensionsDir, "hostile-locale", "1.0.0");
+        Directory.CreateDirectory(versionDir);
+        File.WriteAllText(
+            Path.Combine(versionDir, "manifest.json"),
+            JsonSerializer.Serialize(new
+            {
+                name = "__MSG_extensionName__",
+                default_locale = locale,
+            }));
+
+        var scanner = new ExtensionScanner(
+        [
+            new ExtensionScanner.Root("TestBrowser", extensionsDir),
+        ]);
+
+        Assert.Equal("__MSG_extensionName__", Assert.Single(scanner.Snapshot()).Name);
     }
 
     [Fact]

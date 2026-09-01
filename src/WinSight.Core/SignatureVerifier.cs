@@ -30,7 +30,15 @@ public sealed class SignatureVerifier : ISignatureVerifier
     public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return SignatureVerdict.Missing;
+        }
+        if (!AutomaticFileAccess.IsLocal(path))
+        {
+            return SignatureVerdict.Unknown;
+        }
+        if (!File.Exists(path))
         {
             return SignatureVerdict.Missing;
         }

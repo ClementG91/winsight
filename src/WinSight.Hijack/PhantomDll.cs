@@ -30,6 +30,35 @@ public sealed record PhantomImport(string Dll, bool DelayLoaded, string? Plantab
 /// </remarks>
 public static class DllSearchOrder
 {
+    /// <summary>
+    /// The directory a process of this bitness actually reaches when it searches "the system
+    /// directory".
+    /// </summary>
+    /// <remarks>
+    /// <b>The redirector is not optional.</b> A 32-bit process on 64-bit Windows that opens
+    /// <c>%WINDIR%\System32\x.dll</c> is silently served <c>%WINDIR%\SysWOW64\x.dll</c>. The scan
+    /// searched System32 for every binary regardless of its bitness, so a 32-bit service importing
+    /// a DLL that ships only in SysWOW64 - which is the ordinary case for the 32-bit half of
+    /// anything - had that import declared phantom. The bitness was read during the PE parse and
+    /// thrown away.
+    ///
+    /// On 32-bit Windows there is no SysWOW64 and <paramref name="systemDirectory"/> is already
+    /// right, so the substitution only happens where the redirector exists.
+    /// </remarks>
+    public static string SystemDirectoryFor(
+        bool is64Bit, string systemDirectory, string windowsDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(systemDirectory);
+        ArgumentException.ThrowIfNullOrWhiteSpace(windowsDirectory);
+
+        if (is64Bit)
+        {
+            return systemDirectory;
+        }
+        var wow = Path.Combine(windowsDirectory, "SysWOW64");
+        return Directory.Exists(wow) ? wow : systemDirectory;
+    }
+
     public static IReadOnlyList<string> For(
         string applicationDirectory,
         string systemDirectory,
@@ -112,12 +141,26 @@ public static class PhantomDllRule
     /// Asked for a directory in the search order. Null means writability is not assessed, and every
     /// finding is reported with no plant location rather than a guessed one.
     /// </param>
+    /// <param name="resolvedElsewhere">
+    /// Asked for an import no directory in the search order answered, before it is called phantom.
+    /// True means the loader can still find it by a route this rule does not model - side-by-side
+    /// redirection through an activation context, which is how the Visual C++ and MFC/ATL
+    /// redistributables are resolved.
+    /// </param>
+    /// <remarks>
+    /// <b>Why the extra question exists.</b> "No file answers this name in the search order" is not
+    /// the same statement as "the loader cannot find it". A binary whose manifest binds a
+    /// side-by-side assembly resolves those imports out of the WinSxS store, which appears in no
+    /// search path. Without this the scan reported every VC-redistributable-linked service as
+    /// carrying phantom imports - a confident accusation, at scale, against ordinary software.
+    /// </remarks>
     public static IReadOnlyList<PhantomImport> Find(
         PeImportSet imports,
         IReadOnlyList<string> searchOrder,
         IReadOnlySet<string> knownDlls,
         Func<string, bool> fileExists,
-        Func<string, bool>? canPlantIn = null)
+        Func<string, bool>? canPlantIn = null,
+        Func<string, bool>? resolvedElsewhere = null)
     {
         ArgumentNullException.ThrowIfNull(imports);
         ArgumentNullException.ThrowIfNull(searchOrder);
@@ -138,6 +181,13 @@ public static class PhantomDllRule
                 continue;
             }
             if (searchOrder.Any(directory => fileExists(Path.Combine(directory, dll))))
+            {
+                continue;
+            }
+            // Asked only for names the search order could not answer, so the cost is proportional
+            // to the findings rather than to the imports - which on a service with 130 imports is
+            // the difference between a few lookups and a hundred and thirty.
+            if (resolvedElsewhere is not null && resolvedElsewhere(dll))
             {
                 continue;
             }

@@ -109,7 +109,11 @@ public sealed class RansomwareBurstDetectorTests
     [Fact]
     public void Reset_ReArmsForALaterBurst()
     {
-        var detector = new RansomwareBurstDetector(threshold: 2, window: TimeSpan.FromSeconds(1));
+        // The cooldown is explicit here rather than left at its default: this test is about the
+        // latch, and a detector that stays quiet for thirty seconds after firing would otherwise
+        // make it look like Reset had stopped working. The cooldown itself is covered separately.
+        var detector = new RansomwareBurstDetector(
+            threshold: 2, window: TimeSpan.FromSeconds(1), cooldown: TimeSpan.FromSeconds(1));
         detector.Observe(RansomwareSignalKind.Rename, T0);
         Assert.True(detector.Observe(RansomwareSignalKind.Rename, T0.AddMilliseconds(100)));
 

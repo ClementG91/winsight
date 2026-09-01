@@ -64,7 +64,11 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     }
 
     public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
-        VerifyMany([path], cancellationToken).TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
+        // Unknown, not Missing. The inner verifier not answering for a path says nothing about
+        // whether the file exists, and Missing is the stronger claim: "the file is not there"
+        // rather than "the batch produced no verdict". The rest of this codebase draws that
+        // distinction carefully, and it was inverted at the two places a lookup could miss.
+        VerifyMany([path], cancellationToken).TryGetValue(path, out var v) ? v : SignatureVerdict.Unknown;
 
     public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
         IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
@@ -86,12 +90,17 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
         };
         Parallel.ForEach(
-            paths.Distinct(StringComparer.OrdinalIgnoreCase),
+            paths.Where(AutomaticFileAccess.IsLocal).Distinct(StringComparer.OrdinalIgnoreCase),
             options,
             path => fingerprints[path] = Fingerprint(path));
 
         foreach (var path in paths)
         {
+            if (!AutomaticFileAccess.IsLocal(path))
+            {
+                results[path] = SignatureVerdict.Unknown;
+                continue;
+            }
             var observedFingerprint = fingerprints.TryGetValue(path, out var f) ? f : Fingerprint(path);
             if (TryGetCached(path, observedFingerprint, out var verdict))
             {
@@ -109,7 +118,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             var fresh = _inner.VerifyMany(misses, cancellationToken);
             foreach (var path in misses)
             {
-                var verdict = fresh.TryGetValue(path, out var v) ? v : SignatureVerdict.Missing;
+                var verdict = fresh.TryGetValue(path, out var v) ? v : SignatureVerdict.Unknown;
                 results[path] = verdict;
                 StoreIfUnchanged(path, verdict, preVerificationFingerprints[path]);
             }
@@ -206,7 +215,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     {
         try
         {
-            if (!File.Exists(path))
+            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
             {
                 return null;
             }

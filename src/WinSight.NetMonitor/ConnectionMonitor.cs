@@ -13,10 +13,26 @@ namespace WinSight.NetMonitor;
 public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
 {
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
+    private int _fellBackToNetstat;
+
+    /// <summary>
+    /// True when the last snapshot could not read the native connection table and parsed
+    /// <c>netstat</c> output instead.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why this has to be visible.</b> The fallback exists because the IP Helper entry points can
+    /// be unavailable, and it re-derives the table by parsing a text rendering of it. That is a
+    /// materially weaker acquisition - column parsing rather than a structured API - and nothing
+    /// exposed which one answered. The report therefore did not distinguish "the native table was
+    /// read" from "the native API failed and text was reparsed", in a product that everywhere else
+    /// reports the limits of its own observation scrupulously.
+    /// </remarks>
+    public bool UsedNetstatFallback => Volatile.Read(ref _fellBackToNetstat) != 0;
 
     public IReadOnlyList<Connection> Snapshot(CancellationToken cancellationToken = default)
     {
-        var rows = ReadTable(cancellationToken);
+        var rows = ReadTable(cancellationToken, out var fellBack);
+        Volatile.Write(ref _fellBackToNetstat, fellBack ? 1 : 0);
 
         // Resolve each owning process once, then verify every distinct image in one batch.
         var byPid = new Dictionary<int, (string Name, string? Path)>();
@@ -27,8 +43,16 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
                 byPid[r.Pid] = ResolveProcess(r.Pid);
             }
         }
+        // Distinct, like ProcessLister and ModuleLister already do. Twenty Chrome tabs are twenty
+        // processes sharing one image: without this, one machine with a browser open produced twenty
+        // WinVerifyTrust calls and twenty content hashes of the same file, serialised.
         var verdicts = _verifier.VerifyMany(
-            byPid.Values.Where(p => p.Path is not null).Select(p => p.Path!).ToList(), cancellationToken);
+            byPid.Values
+                .Where(p => p.Path is not null)
+                .Select(p => p.Path!)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            cancellationToken);
 
         var connections = new List<Connection>(rows.Count);
         foreach (var r in rows)
@@ -47,8 +71,10 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
 
     // Native IP Helper tables, falling back to netstat parsing only if those entry
     // points are unavailable (very old/locked-down Windows).
-    private static IReadOnlyList<NetstatRow> ReadTable(CancellationToken cancellationToken)
+    private static IReadOnlyList<NetstatRow> ReadTable(
+        CancellationToken cancellationToken, out bool fellBack)
     {
+        fellBack = false;
         try
         {
             return NativeConnectionReader.Read();
@@ -56,11 +82,23 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException
                                      or Win32Exception or InvalidDataException)
         {
+            fellBack = true;
             return NetstatParser.Parse(RunNetstat(cancellationToken));
         }
     }
 
-    private static string RunNetstat(CancellationToken cancellationToken)
+    /// <summary>
+    /// The bounded <c>netstat.exe</c> fallback, used only when the native table is unavailable.
+    /// </summary>
+    /// <remarks>
+    /// Internal so it can be tested directly. It is reached at runtime only on "very old or
+    /// locked-down Windows", which is another way of saying it is the one code path in this scan
+    /// that never executes on a developer's machine or in CI - and it is also the path carrying the
+    /// binary-planting defence, the kill-on-cancel registration and the drain-with-timeout that stop
+    /// a hung child holding the scan open. Untested, it would be discovered broken by the one user
+    /// who needs it.
+    /// </remarks>
+    internal static string RunNetstat(CancellationToken cancellationToken)
     {
         try
         {

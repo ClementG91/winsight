@@ -28,6 +28,7 @@ public partial class MainWindow : Window, IDisposable
     private IReadOnlyList<ToolReport> _reports = [];
     private IReadOnlyList<ToolReport> _visibleReports = [];
     private string? _lastScanCommand;
+    private FirewallServiceView? _latestFirewallView;
     private CancellationTokenSource? _scanCancellation;
     private readonly FirewallServiceGateway _firewallGateway = FirewallServiceAdapter.CreateGateway();
     private readonly PersistenceMonitor _guardian = GuardianHost.CreateDefault();
@@ -538,6 +539,7 @@ public partial class MainWindow : Window, IDisposable
                 // Live status over the authenticated pipe (I/O, not a CPU scan). When
                 // the service is not installed this degrades to "unavailable".
                 var view = await _firewallGateway.GetViewAsync(cancellation.Token);
+                _latestFirewallView = view;
                 _reports = [FirewallServiceAdapter.BuildReport(view)];
             }
             else if (tool.Command == "all")
@@ -687,6 +689,10 @@ public partial class MainWindow : Window, IDisposable
         // the "service unavailable" outcome rather than silently doing nothing.
         var showFirewallControls = tool.Command == FirewallServiceAdapter.ReportTool && selection.Available;
         FirewallActionsPanel.Visibility = showFirewallControls ? Visibility.Visible : Visibility.Collapsed;
+        if (showFirewallControls)
+        {
+            UpdateFirewallEnableControl(_latestFirewallView);
+        }
 
         if (!selection.Available)
         {
@@ -713,7 +719,12 @@ public partial class MainWindow : Window, IDisposable
                 ? $"{DashboardTools.ForReport(report.Tool)?.Label ?? report.Tool} · {presentation.Title}"
                 : presentation.Title;
             return new FindingView(
-                item.Severity == Severity.Notable ? Text["NotableSeverity"] : Text["InfoSeverity"],
+                item.Severity switch
+                {
+                    Severity.Notable => Text["NotableSeverity"],
+                    Severity.Unverified => Text["UnverifiedSeverity"],
+                    _ => Text["InfoSeverity"],
+                },
                 title,
                 presentation.Detail,
                 item,
@@ -1024,6 +1035,7 @@ public partial class MainWindow : Window, IDisposable
     private async Task<FirewallServiceView> RefreshFirewallAsync()
     {
         var view = await _firewallGateway.GetViewAsync(CancellationToken.None);
+        _latestFirewallView = view;
         _reports = [FirewallServiceAdapter.BuildReport(view)];
         _lastScanCommand = FirewallServiceAdapter.ReportTool;
         if (ToolPicker.SelectedItem is DashboardTool tool && tool.Command == FirewallServiceAdapter.ReportTool)
@@ -1031,6 +1043,21 @@ public partial class MainWindow : Window, IDisposable
             ShowToolContext(tool);
         }
         return view;
+    }
+
+    private void UpdateFirewallEnableControl(FirewallServiceView? view)
+    {
+        var state = view is null
+            ? FirewallControlPresenter.EnableControl(
+                serviceAvailable: false,
+                enforcementEnabled: false,
+                FirewallEnforcementState.AuditOnly)
+            : FirewallControlPresenter.EnableControl(
+                view.ServiceAvailable,
+                view.EnforcementEnabled,
+                view.EffectiveState);
+        FirewallEnableEnforcementButton.Content = Text[state.LabelKey];
+        FirewallEnableEnforcementButton.IsEnabled = state.IsEnabled;
     }
 
     private void TryUserAction(Action action, string successMessage)
