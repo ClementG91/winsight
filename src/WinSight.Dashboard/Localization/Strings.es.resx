@@ -37,6 +37,8 @@
   <data name="FlaggedOnlyTooltip" xml:space="preserve"><value>Oculta los elementos normales para reducir el ruido.</value></data>
   <data name="StartAnalysis" xml:space="preserve"><value>Iniciar análisis</value></data>
   <data name="StartAnalysisAutomation" xml:space="preserve"><value>Iniciar el análisis de seguridad seleccionado</value></data>
+  <data name="RefreshAnalysis" xml:space="preserve"><value>Actualizar análisis</value></data>
+  <data name="RefreshAnalysisAutomation" xml:space="preserve"><value>Actualizar el análisis de seguridad seleccionado</value></data>
   <data name="OpenWindowsTool" xml:space="preserve"><value>Abrir herramienta de Windows</value></data>
   <data name="OpenStartupSettings" xml:space="preserve"><value>Abrir aplicaciones de inicio</value></data>
   <data name="OpenPrivacySettings" xml:space="preserve"><value>Abrir ajustes de privacidad</value></data>
@@ -52,6 +54,8 @@
   <data name="ReadySummary" xml:space="preserve"><value>Listo. Selecciona un análisis y pulsa Iniciar.</value></data>
   <data name="RunThisAnalysis" xml:space="preserve"><value>Ejecute «{0}» para mostrar sus propios resultados.</value></data>
   <data name="NoAnalysisForTool" xml:space="preserve"><value>Aquí no se muestran resultados de otra categoría. Inicia esta comprobación o la vista general.</value></data>
+  <data name="NoOverviewResults" xml:space="preserve"><value>Ejecuta una vez la vista general para reutilizar sus resultados en cada categoría incluida.</value></data>
+  <data name="NotIncludedInOverview" xml:space="preserve"><value>Este análisis especializado no está incluido en la vista general. Ejecútalo una vez para mostrar y conservar sus resultados.</value></data>
   <data name="ReportPickerAutomation" xml:space="preserve"><value>Informe mostrado</value></data>
   <data name="ResultsAutomation" xml:space="preserve"><value>Resultados de seguridad</value></data>
   <data name="PriorityHeader" xml:space="preserve"><value>Prioridad</value></data>
@@ -136,7 +140,7 @@
 
   <data name="ToolOverviewLabel" xml:space="preserve"><value>Vista general</value></data>
   <data name="ToolOverviewShort" xml:space="preserve"><value>La comprobación recomendada en un clic</value></data>
-  <data name="ToolOverviewDescription" xml:space="preserve"><value>Comprueba las señales principales: inicio automático, cámara/micrófono, conexiones, DNS, extensiones, hosts y certificados.</value></data>
+  <data name="ToolOverviewDescription" xml:space="preserve"><value>Ejecuta 10 comprobaciones recomendadas: inicio automático, antivirus, conexiones, DNS, extensiones, hosts, certificados, dispositivos de entrada, integridad del código y secuestros del sistema.</value></data>
   <data name="ToolOverviewGuidance" xml:space="preserve"><value>Empiece por las filas «Requiere atención». Una alerta es una pista: compruebe el nombre, la ubicación y el editor antes de actuar.</value></data>
   <data name="ToolPersistenceLabel" xml:space="preserve"><value>Inicio automático</value></data>
   <data name="ToolPersistenceShort" xml:space="preserve"><value>Lo que se inicia con Windows</value></data>

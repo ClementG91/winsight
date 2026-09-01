@@ -1,5 +1,17 @@
 ## Unreleased
 
+## 0.12.1 - 2026-09-01
+
+- Dashboard results are now cached independently by analysis and filter mode. Running a specialized
+  check no longer discards overview results, and failed or cancelled refreshes preserve the last
+  successful data.
+- The main content pane now scrolls vertically on constrained Windows work areas, high DPI and
+  enlarged text instead of collapsing the result grid or leaving lower actions unreachable.
+- Analysis actions now distinguish Start from Refresh, progress belongs to the relevant tab, and
+  specialized checks state honestly when they are outside the overview.
+- Release, installation, roadmap and README status now reflect the verified published v0.12.0
+  artifacts rather than stopping at the candidate or v0.11.6 examples.
+
 ## 0.12.0 - 2026-09-01
 
 A review of the audit response itself, which found one defect the response had introduced and two
