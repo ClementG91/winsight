@@ -110,6 +110,7 @@
   <data name="NotableSeverity" xml:space="preserve"><value>Requiere atención</value></data>
   <data name="InfoSeverity" xml:space="preserve"><value>Información</value></data>
   <data name="ResultsSummary" xml:space="preserve"><value>{0} · {1}</value></data>
+  <data name="ResultsCapturedAt" xml:space="preserve"><value>{0} · capturado el {1:g}</value></data>
   <data name="ResultCountSingle" xml:space="preserve"><value>{0} resultado mostrado</value></data>
   <data name="ResultCountPlural" xml:space="preserve"><value>{0} resultados mostrados</value></data>
   <data name="AttentionCountSingle" xml:space="preserve"><value>{0} requiere atención</value></data>

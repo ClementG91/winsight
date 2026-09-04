@@ -319,12 +319,13 @@ evidence.
    status through `FirewallServiceGateway`/`FirewallServiceAdapter`; an unreachable pipe is
    presented as unavailable, never as an unverified SCM installation state. The executable has
    opt-in, elevated `install`/`uninstall` verbs; the per-user setup never installs it. The x64 IPC
-   capability boundary passed 7/7 historically, and current candidate `8486155` passed the renewed
+   capability boundary passed 7/7 historically, and qualified v0.12.0 candidate `dbaded1` passed
    local 7/7 plus real Network Logon 7/7 and observer 3/3 gates. Native Arm64 remains pending.
-2. Done in code and qualified on current native x64. WFP engine/session/provider/sublayer interop
+2. Done in code and qualified for published v0.12.0 native x64. WFP
+   engine/session/provider/sublayer interop
    applies per-application IPv4 and IPv6 block filters after an explicit elevated
    enforcement transition. Production policy is now owned by a crash-cleaned dynamic session;
-   candidate `8486155` passed the renewed 35/35 gate including graceful stop, forced process
+   candidate `dbaded1` passed the renewed 35/35 gate including graceful stop, forced process
    termination, dynamic removal, restart/reapply and uninstall cleanup. Native Arm64 remains
    pending; unit tests alone do not establish native behavior.
 3. Done within the documented user-mode limit. `Ask` is no longer stored as a durable ruling: an

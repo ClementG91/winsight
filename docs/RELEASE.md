@@ -53,7 +53,7 @@ Signing runs inside `Build-Release.ps1`, deliberately **before** archives are co
 **before** any checksum is computed. Signing afterwards would leave every published hash describing
 bytes that no longer exist.
 
-Every public release to date, through v0.12.1, is unsigned. The signed
+Every public release to date, through v0.12.0, is unsigned. The signed
 Authenticode production chain has never been exercised end to end. SignPath Foundation declined the
 free-program application on 2026-07-29 because the project does not yet have sufficient public
 adoption and independent visibility.

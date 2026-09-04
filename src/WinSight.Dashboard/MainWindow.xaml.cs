@@ -266,7 +266,7 @@ public partial class MainWindow : Window, IDisposable
             _trayIcon.ShowBalloonTip(
                 5000,
                 Text["AvBalloonTitle"],
-                $"{AvPresenter.DisplayName(usage)} — {message}",
+                $"{UntrustedDisplayText.Neutralize(AvPresenter.DisplayName(usage))} — {message}",
                 Forms.ToolTipIcon.Warning);
         });
     }
@@ -425,7 +425,8 @@ public partial class MainWindow : Window, IDisposable
             _trayIcon.ShowBalloonTip(
                 10000,
                 Text["RansomwareBalloonTitle"],
-                $"{Text[RansomwarePresenter.AlertMessageKey(e.Kind)]}\n{RansomwarePresenter.Detail(e.Kind, e.Path)}",
+                $"{Text[RansomwarePresenter.AlertMessageKey(e.Kind)]}\n"
+                + UntrustedDisplayText.Neutralize(RansomwarePresenter.Detail(e.Kind, e.Path)),
                 RansomwarePresenter.IsCritical(e.Kind) ? Forms.ToolTipIcon.Error : Forms.ToolTipIcon.Warning);
         });
     }
@@ -480,7 +481,8 @@ public partial class MainWindow : Window, IDisposable
 
         var batch = GuardianAlertBatcher.Describe(_pendingDetections);
         var body = batch.IsSingle
-            ? $"{batch.Single!.Entry.Vector}/{batch.Single.Entry.Name} — "
+            ? $"{batch.Single!.Entry.Vector}/"
+                + UntrustedDisplayText.Neutralize(batch.Single.Entry.Name) + " — "
                 + Text[GuardianAlertBatcher.BalloonMessageKey(batch)]
             : string.Format(
                 System.Globalization.CultureInfo.CurrentCulture,
@@ -529,10 +531,10 @@ public partial class MainWindow : Window, IDisposable
         CopyButton.IsEnabled = false;
         OpenLocationButton.IsEnabled = false;
         SelectedFindingText.Text = string.Empty;
+        var flaggedOnly = FlaggedOnly.IsChecked == true;
 
         try
         {
-            var flaggedOnly = FlaggedOnly.IsChecked == true;
             if (tool.Command == "outbound-firewall")
             {
                 // Live status over the authenticated pipe (I/O, not a CPU scan). When
@@ -567,20 +569,36 @@ public partial class MainWindow : Window, IDisposable
         }
         catch (OperationCanceledException)
         {
+            _reportCache.Remove(tool, flaggedOnly);
+            if (tool.Command == FirewallServiceAdapter.ReportTool)
+            {
+                _latestFirewallView = null;
+            }
             ShowToolContext(tool);
             SummaryText.Text = Text["ScanCancelledSummary"];
             ProgressText.Text = Text["ProgressCancelled"];
         }
         catch (UnauthorizedAccessException)
         {
+            _reportCache.Remove(tool, flaggedOnly);
+            if (tool.Command == FirewallServiceAdapter.ReportTool)
+            {
+                _latestFirewallView = null;
+            }
             ShowToolContext(tool);
             SummaryText.Text = Text["InsufficientSummary"];
             ProgressText.Text = Text["ProgressInsufficient"];
         }
         catch (Exception ex)
         {
+            _reportCache.Remove(tool, flaggedOnly);
+            if (tool.Command == FirewallServiceAdapter.ReportTool)
+            {
+                _latestFirewallView = null;
+            }
             ShowToolContext(tool);
-            SummaryText.Text = Text.Format("ScanFailed", ex.Message);
+            SummaryText.Text = Text.Format(
+                "ScanFailed", UntrustedDisplayText.Neutralize(ex.Message));
             ProgressText.Text = Text["UnexpectedError"];
         }
         finally
@@ -731,10 +749,13 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
-        ShowReports(selection.Reports, selection.Categorize);
+        ShowReports(selection.Reports, selection.Categorize, selection.CapturedAt!.Value);
     }
 
-    private void ShowReports(IReadOnlyList<ToolReport> reports, bool categorize)
+    private void ShowReports(
+        IReadOnlyList<ToolReport> reports,
+        bool categorize,
+        DateTimeOffset capturedAt)
     {
         _visibleReports = reports;
         var findings = reports.SelectMany(report => report.Items.Select(item =>
@@ -750,16 +771,19 @@ public partial class MainWindow : Window, IDisposable
                     Severity.Unverified => Text["UnverifiedSeverity"],
                     _ => Text["InfoSeverity"],
                 },
-                title,
-                presentation.Detail,
+                UntrustedDisplayText.Neutralize(title),
+                UntrustedDisplayText.Neutralize(presentation.Detail),
                 item,
                 FirewallActionPresenter.BlockableExecutable(report.Tool, item));
         })).ToList();
         ResultsGrid.ItemsSource = findings;
-        SummaryText.Text = DashboardResultSummary.Format(
-            Text,
-            findings.Count,
-            reports.Sum(report => report.NotableCount));
+        SummaryText.Text = Text.Format(
+            "ResultsCapturedAt",
+            DashboardResultSummary.Format(
+                Text,
+                findings.Count,
+                reports.Sum(report => report.NotableCount)),
+            capturedAt.ToLocalTime());
         SelectedFindingText.Text = findings.Count == 0
             ? Text["NoItems"]
             : Text["SelectFinding"];
@@ -1027,7 +1051,8 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or TimeoutException or InvalidOperationException)
         {
-            SummaryText.Text = Text.Format("ActionFailed", ex.Message);
+            SummaryText.Text = Text.Format(
+                "ActionFailed", UntrustedDisplayText.Neutralize(ex.Message));
         }
     }
 
@@ -1053,7 +1078,8 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or TimeoutException or InvalidOperationException)
         {
-            SummaryText.Text = Text.Format("ActionFailed", ex.Message);
+            SummaryText.Text = Text.Format(
+                "ActionFailed", UntrustedDisplayText.Neutralize(ex.Message));
         }
     }
 
@@ -1102,7 +1128,8 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception ex) when (ex is Win32Exception or IOException
                                      or UnauthorizedAccessException or ExternalException)
         {
-            SummaryText.Text = Text.Format("ActionFailed", ex.Message);
+            SummaryText.Text = Text.Format(
+                "ActionFailed", UntrustedDisplayText.Neutralize(ex.Message));
         }
     }
 

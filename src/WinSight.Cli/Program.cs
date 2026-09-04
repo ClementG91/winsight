@@ -12,12 +12,12 @@ using WinSight.Reporting;
 // hijack scanner shipped undiscoverable because this comment and --help were updated by
 // hand and the dispatcher was not.
 
-if (args.Contains("--version"))
+if (CliContract.HasOption(args, "--version"))
 {
     Console.WriteLine($"winsight {Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ?? "0.0.0"}");
     return 0;
 }
-if (args.Contains("--help") || args.Contains("-h"))
+if (CliContract.HasOption(args, "--help") || CliContract.HasOption(args, "-h"))
 {
     Console.WriteLine(CliHelp.Text);
     return 0;
@@ -28,17 +28,18 @@ if (args.Contains("--help") || args.Contains("-h"))
 if (CliContract.FirstUnknownOption(args) is { } unknownOption)
 {
     Console.Error.WriteLine(
-        $"unknown option '{unknownOption}' — run `winsight --help` for the full list");
+        $"unknown option '{UntrustedDisplayText.Neutralize(unknownOption)}' — "
+        + "run `winsight --help` for the full list");
     return CliContract.UsageError;
 }
 
-var json = args.Contains("--json");
-var flaggedOnly = args.Contains("--flagged");
+var json = CliContract.HasOption(args, "--json");
+var flaggedOnly = CliContract.HasOption(args, "--flagged");
 // VirusTotal enrichment is opt-in through WINSIGHT_VT_KEY, which means an environment that happens
 // to carry the variable makes an otherwise local scan reach the network - and neither --help nor the
 // README said so on the CLI side. --no-network is the explicit way to refuse, for a scheduled task
 // or an air-gapped run where inheriting the variable would be a surprise.
-var allowNetworkLookups = !args.Contains("--no-network");
+var allowNetworkLookups = !CliContract.HasOption(args, "--no-network");
 var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?? "all";
 
 // A second verb was silently dropped: `winsight persistence extensions` ran a persistence scan and
@@ -47,7 +48,8 @@ var command = args.FirstOrDefault(a => !a.StartsWith('-'))?.ToLowerInvariant() ?
 if (command != "process" && CliContract.ExtraVerbs(args, command) is { Count: > 0 } extraVerbs)
 {
     Console.Error.WriteLine(
-        $"unexpected argument '{extraVerbs[0]}' after '{command}' — run one command at a time");
+        $"unexpected argument '{UntrustedDisplayText.Neutralize(extraVerbs[0])}' after "
+        + $"'{UntrustedDisplayText.Neutralize(command)}' — run one command at a time");
     return CliContract.UsageError;
 }
 
@@ -57,7 +59,8 @@ if (command != "process" && CliContract.ExtraVerbs(args, command) is { Count: > 
 if (CliContract.FirstUnsupportedOption(args, command) is { } unsupportedOption)
 {
     Console.Error.WriteLine(
-        $"'{unsupportedOption}' is not supported by '{command}' — it works with "
+        $"'{UntrustedDisplayText.Neutralize(unsupportedOption)}' is not supported by "
+        + $"'{UntrustedDisplayText.Neutralize(command)}' — it works with "
         + $"{CliContract.WatchableVerbList}");
     return CliContract.UsageError;
 }
@@ -69,16 +72,16 @@ if (command == "mcp")
 }
 
 // Live camera/mic monitor (OverSight-style), long-running, prints transitions.
-if ((command is "av" or "avmonitor") && args.Contains("--watch"))
+if ((command is "av" or "avmonitor") && CliContract.HasOption(args, "--watch"))
 {
     return Adapters.WatchCameraMic();
 }
-if (command == "attribution" && args.Contains("--watch"))
+if (command == "attribution" && CliContract.HasOption(args, "--watch"))
 {
     return Adapters.WatchAttribution();
 }
 
-if (command == "dns" && args.Contains("--watch"))
+if (command == "dns" && CliContract.HasOption(args, "--watch"))
 {
     return Adapters.WatchDns();
 }
@@ -143,7 +146,8 @@ try
 catch (ArgumentOutOfRangeException)
 {
     Console.Error.WriteLine(
-        $"unknown command '{command}' — run `winsight --help` for the full list");
+        $"unknown command '{UntrustedDisplayText.Neutralize(command)}' — "
+        + "run `winsight --help` for the full list");
     return CliContract.UsageError;
 }
 catch (Exception ex) when (ex is not OperationCanceledException)

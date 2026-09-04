@@ -43,6 +43,16 @@ public static class CliContract
     };
 
     /// <summary>
+    /// Whether an option is present, using the same case-insensitive contract as validation.
+    /// </summary>
+    public static bool HasOption(IReadOnlyList<string> args, string option)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentException.ThrowIfNullOrWhiteSpace(option);
+        return args.Any(argument => argument.Equals(option, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// The first argument that is not a known option, or null when they are all recognised.
     /// </summary>
     /// <remarks>

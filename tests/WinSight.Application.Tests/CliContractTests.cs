@@ -64,6 +64,17 @@ public sealed class CliContractTests
         Assert.Null(CliContract.FirstUnknownOption(
             commandLine.Split(' ', StringSplitOptions.RemoveEmptyEntries)));
 
+    [Theory]
+    [InlineData("--JSON", "--json")]
+    [InlineData("--FLAGGED", "--flagged")]
+    [InlineData("--WATCH", "--watch")]
+    [InlineData("--HELP", "--help")]
+    [InlineData("-H", "-h")]
+    [InlineData("--VERSION", "--version")]
+    [InlineData("--NO-NETWORK", "--no-network")]
+    public void ValidatedOptionsAreAlsoAppliedCaseInsensitively(string supplied, string queried) =>
+        Assert.True(CliContract.HasOption(["persistence", supplied], queried));
+
     /// <summary>A bare word is a verb, validated by the dispatcher that owns the catalogue.</summary>
     [Fact]
     public void BareWordsAreNotTreatedAsOptions() =>

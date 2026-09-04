@@ -14,10 +14,11 @@ binaries remain deliberately unsigned and Windows therefore cannot establish a p
 
 ## Qualified v0.12.0 x64 candidate
 
-`Directory.Build.props` now targets v0.12.0 because the candidate replaces the public `--json` bare
-array with a versioned envelope and contains a substantial security and detection delta. Reusing the
-already published v0.11.6 version for different bytes and an incompatible contract would be
-misleading.
+The qualified candidate was versioned v0.12.0 because it replaced the public `--json` bare array
+with a versioned envelope and contained a substantial security and detection delta. Reusing the
+already published v0.11.6 version for different bytes and an incompatible contract would have been
+misleading. The working tree has since advanced to v0.12.1; that does not alter the candidate-bound
+v0.12.0 evidence below.
 
 Exact candidate `dbaded1feac9803d4fa3ffd122036b176ab6d47c` from CI run `33416259797`
 passed the complete native-x64 VM campaign. The campaign covered the installer twice from clean S0,

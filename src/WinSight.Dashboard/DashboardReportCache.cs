@@ -8,30 +8,45 @@ namespace WinSight.Dashboard;
 /// </summary>
 internal sealed class DashboardReportCache
 {
-    private readonly Dictionary<(string Tool, bool FlaggedOnly), ToolReport> _reports = [];
-    private readonly Dictionary<bool, IReadOnlyList<string>> _overviewReportNames = [];
+    private readonly Dictionary<(string Tool, bool FlaggedOnly), CacheEntry> _reports = [];
+    private readonly Dictionary<bool, CacheEntry> _overviews = [];
+    private readonly Func<DateTimeOffset> _utcNow;
+
+    public DashboardReportCache(Func<DateTimeOffset>? utcNow = null)
+    {
+        _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
+    }
 
     public void StoreOverview(IReadOnlyList<ToolReport> reports, bool flaggedOnly)
     {
         ArgumentNullException.ThrowIfNull(reports);
 
-        var names = new List<string>(reports.Count);
+        var capturedAt = _utcNow();
+        var snapshot = reports.ToArray();
+        _overviews[flaggedOnly] = new CacheEntry(snapshot, capturedAt);
+
         foreach (var report in reports)
         {
-            _reports[Key(report.Tool, flaggedOnly)] = report;
-            if (!names.Contains(report.Tool, StringComparer.OrdinalIgnoreCase))
-            {
-                names.Add(report.Tool);
-            }
+            _reports[Key(report.Tool, flaggedOnly)] = new CacheEntry([report], capturedAt);
         }
-
-        _overviewReportNames[flaggedOnly] = names;
     }
 
     public void Store(ToolReport report, bool flaggedOnly)
     {
         ArgumentNullException.ThrowIfNull(report);
-        _reports[Key(report.Tool, flaggedOnly)] = report;
+        _reports[Key(report.Tool, flaggedOnly)] = new CacheEntry([report], _utcNow());
+    }
+
+    public void Remove(DashboardTool tool, bool flaggedOnly)
+    {
+        ArgumentNullException.ThrowIfNull(tool);
+        if (tool.Command.Equals("all", StringComparison.OrdinalIgnoreCase))
+        {
+            _overviews.Remove(flaggedOnly);
+            return;
+        }
+
+        _reports.Remove(Key(tool.ReportName, flaggedOnly));
     }
 
     public DashboardReportSelection Select(DashboardTool tool, bool flaggedOnly)
@@ -40,27 +55,24 @@ internal sealed class DashboardReportCache
 
         if (tool.Command.Equals("all", StringComparison.OrdinalIgnoreCase))
         {
-            if (!_overviewReportNames.TryGetValue(flaggedOnly, out var overviewNames)
-                || overviewNames.Count == 0)
+            if (!_overviews.TryGetValue(flaggedOnly, out var overview)
+                || overview.Reports.Count == 0)
             {
                 return DashboardReportSelection.Unavailable;
             }
 
-            var overview = overviewNames
-                .Select(name => _reports.TryGetValue(Key(name, flaggedOnly), out var report) ? report : null)
-                .Where(report => report is not null)
-                .Cast<ToolReport>()
-                .ToList();
-            return overview.Count == 0
-                ? DashboardReportSelection.Unavailable
-                : new DashboardReportSelection(overview, Categorize: true);
+            return new DashboardReportSelection(
+                overview.Reports, Categorize: true, overview.CapturedAt);
         }
 
         return _reports.TryGetValue(Key(tool.ReportName, flaggedOnly), out var selected)
-            ? new DashboardReportSelection([selected], Categorize: false)
+            ? new DashboardReportSelection(
+                selected.Reports, Categorize: false, selected.CapturedAt)
             : DashboardReportSelection.Unavailable;
     }
 
     private static (string Tool, bool FlaggedOnly) Key(string tool, bool flaggedOnly) =>
         (tool.ToUpperInvariant(), flaggedOnly);
+
+    private sealed record CacheEntry(IReadOnlyList<ToolReport> Reports, DateTimeOffset CapturedAt);
 }

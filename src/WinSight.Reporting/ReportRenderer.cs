@@ -21,7 +21,9 @@ public static class ReportRenderer
 
     public static void RenderText(ToolReport report, TextWriter writer)
     {
-        writer.WriteLine($"== {report.Tool} == {report.Summary}");
+        writer.WriteLine(
+            $"== {UntrustedDisplayText.Neutralize(report.Tool)} == "
+            + UntrustedDisplayText.Neutralize(report.Summary));
         foreach (var item in report.Items)
         {
             // Three marks, because two made "the check could not run" indistinguishable from a
@@ -32,10 +34,10 @@ public static class ReportRenderer
                 Severity.Unverified => "[?]",
                 _ => "[ ]",
             };
-            writer.WriteLine($"  {mark} {item.Title}");
+            writer.WriteLine($"  {mark} {UntrustedDisplayText.Neutralize(item.Title)}");
             if (item.Detail.Length > 0)
             {
-                writer.WriteLine($"        {item.Detail}");
+                writer.WriteLine($"        {UntrustedDisplayText.Neutralize(item.Detail)}");
             }
         }
     }
