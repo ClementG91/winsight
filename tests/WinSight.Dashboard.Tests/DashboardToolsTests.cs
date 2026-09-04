@@ -88,7 +88,7 @@ public sealed class DashboardReportCacheTests
     }
 
     [Fact]
-    public void RefreshingIncludedCategory_UpdatesOverviewWithoutDiscardingOtherReports()
+    public void RefreshingIncludedCategory_DoesNotCreateAMixedAgeOverview()
     {
         var refreshedPersistence = Persistence with { Summary = "refreshed" };
         var cache = new DashboardReportCache();
@@ -97,8 +97,11 @@ public sealed class DashboardReportCacheTests
         cache.Store(refreshedPersistence, flaggedOnly: true);
 
         Assert.Equal(
-            [refreshedPersistence, Connections],
+            [Persistence, Connections],
             cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: true).Reports);
+        Assert.Equal(
+            [refreshedPersistence],
+            cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: true).Reports);
     }
 
     [Fact]
@@ -116,5 +119,39 @@ public sealed class DashboardReportCacheTests
             [allPersistence],
             cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: false).Reports);
         Assert.False(cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: false).Available);
+    }
+
+    [Fact]
+    public void SuccessfulSelectionsExposeWhenTheirSnapshotWasCaptured()
+    {
+        var capturedAt = new DateTimeOffset(2026, 9, 4, 12, 30, 0, TimeSpan.Zero);
+        var cache = new DashboardReportCache(() => capturedAt);
+
+        cache.StoreOverview([Persistence, Connections], flaggedOnly: true);
+
+        Assert.Equal(
+            capturedAt,
+            cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: true).CapturedAt);
+        Assert.Equal(
+            capturedAt,
+            cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: true).CapturedAt);
+    }
+
+    [Fact]
+    public void FailedRefreshCanInvalidateOnlyTheViewThatFailed()
+    {
+        var cache = new DashboardReportCache();
+        cache.StoreOverview([Persistence, Connections], flaggedOnly: true);
+        cache.Store(Firewall, flaggedOnly: true);
+
+        cache.Remove(DashboardTools.ForCommand("firewall")!, flaggedOnly: true);
+
+        Assert.False(cache.Select(DashboardTools.ForCommand("firewall")!, flaggedOnly: true).Available);
+        Assert.True(cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: true).Available);
+
+        cache.Remove(DashboardTools.ForCommand("all")!, flaggedOnly: true);
+
+        Assert.False(cache.Select(DashboardTools.ForCommand("all")!, flaggedOnly: true).Available);
+        Assert.True(cache.Select(DashboardTools.ForCommand("persistence")!, flaggedOnly: true).Available);
     }
 }

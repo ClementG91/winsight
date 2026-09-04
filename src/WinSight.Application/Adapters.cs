@@ -444,7 +444,8 @@ public static class Adapters
         {
             var device = e.Usage.Kind == DeviceKind.Webcam ? "webcam" : "mic";
             var verb = e.Kind == AvEventKind.Activated ? "ON " : "OFF";
-            Console.WriteLine($"  [{verb}] {device}, {e.Usage.App}");
+            Console.WriteLine(
+                $"  [{verb}] {device}, {UntrustedDisplayText.Neutralize(e.Usage.App)}");
         }
     }
 
@@ -483,7 +484,9 @@ public static class Adapters
                     {
                         attributed++;
                         Console.WriteLine(
-                            $"  {Path.GetFileName(observation.ExecutablePath)} (pid {observation.ProcessId})  →  {observation.Target}");
+                            $"  {UntrustedDisplayText.Neutralize(Path.GetFileName(observation.ExecutablePath))} "
+                            + $"(pid {observation.ProcessId})  →  "
+                            + UntrustedDisplayText.Neutralize(observation.Target));
                     },
                     // Printed as well as counted: a watcher that only shows what it managed to
                     // attribute cannot be told apart from one that is missing everything.
@@ -492,14 +495,17 @@ public static class Adapters
                         if (miss.Reason == UnattributedReason.UnknownProcess)
                         {
                             unknownProcess++;
-                            Console.WriteLine($"  [unknown process {miss.ProcessId}]  →  {miss.Target}");
+                            Console.WriteLine(
+                                $"  [unknown process {miss.ProcessId}]  →  "
+                                + UntrustedDisplayText.Neutralize(miss.Target));
                         }
                         else
                         {
                             unresolvedTarget++;
                             Console.WriteLine(miss.Target is null
                                 ? $"  [unannounced key handle, pid {miss.ProcessId}]"
-                                : $"  [untranslatable key, pid {miss.ProcessId}]  →  {miss.Target}");
+                                : $"  [untranslatable key, pid {miss.ProcessId}]  →  "
+                                    + UntrustedDisplayText.Neutralize(miss.Target));
                         }
                     },
                     cts.Token);
@@ -522,7 +528,9 @@ public static class Adapters
         Console.WriteLine("Watching DNS queries (ETW), Ctrl+C to stop.");
         return RunEtwWatch(
             () => new DnsEtwWatcher().Watch(
-                e => Console.WriteLine($"  {e.Type,-5} {e.Name}  (pid {e.ProcessId})"), cts.Token),
+                e => Console.WriteLine(
+                    $"  {e.Type,-5} {UntrustedDisplayText.Neutralize(e.Name)}  (pid {e.ProcessId})"),
+                cts.Token),
             Console.Error,
             cts.Token);
     }

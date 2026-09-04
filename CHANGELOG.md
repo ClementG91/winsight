@@ -1,10 +1,19 @@
 ## Unreleased
 
+- CLI options now use one case-insensitive contract from validation through execution, so spellings
+  such as `--NO-NETWORK`, `--JSON`, `--WATCH` and `--VERSION` can no longer be accepted and then
+  ignored.
+- Human-readable CLI, live-watch, notification and dashboard output now neutralizes terminal
+  controls, embedded line breaks and invisible Unicode formatting in machine-controlled names and
+  paths. The JSON evidence contract remains lossless.
+- Dashboard overview results are immutable point-in-time snapshots rather than a mix of category
+  scans from different times. Cached results show their capture time, and a failed or cancelled
+  refresh clears the affected view instead of presenting old rows beneath a new failure message.
+
 ## 0.12.1 - 2026-09-01
 
 - Dashboard results are now cached independently by analysis and filter mode. Running a specialized
-  check no longer discards overview results, and failed or cancelled refreshes preserve the last
-  successful data.
+  check no longer discards overview results.
 - The main content pane now scrolls vertically on constrained Windows work areas, high DPI and
   enlarged text instead of collapsing the result grid or leaving lower actions unreachable.
 - Analysis actions now distinguish Start from Refresh, progress belongs to the relevant tab, and
