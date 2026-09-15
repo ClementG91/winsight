@@ -116,37 +116,79 @@ public static class CanaryIdentity
         {
             return RandomNumberGenerator.GetBytes(32);
         }
-        try
+
+        // Read, else create atomically (first writer wins), else read the winner. Concurrent first
+        // use (the launch sweep beside restored protection, or two dashboards) used to produce
+        // different seeds, so decoys named from a losing seed were never recognised as expected
+        // paths and could not be cleaned. Transient sharing violations during that race are retried
+        // briefly instead of falling back to a private random seed.
+        const int Attempts = 20;
+        for (var attempt = 0; attempt < Attempts; attempt++)
         {
-            if (File.Exists(path))
+            try
             {
-                var existing = File.ReadAllBytes(path);
-                if (existing.Length == 32)
+                var malformed = false;
+                if (File.Exists(path))
                 {
-                    return existing;
+                    var existing = File.ReadAllBytes(path);
+                    if (existing.Length == 32)
+                    {
+                        return existing;
+                    }
+                    // Names derived from a malformed seed are unrecoverable anyway. Replacing it keeps
+                    // naming stable for future runs; a private random seed each launch would make every
+                    // run's decoys unrecognisable to the next run's cleanup.
+                    malformed = true;
+                }
+
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                var seed = RandomNumberGenerator.GetBytes(32);
+                var temp = $"{path}.{Guid.NewGuid():N}.tmp";
+                try
+                {
+                    File.WriteAllBytes(temp, seed);
+                    File.Move(temp, path, overwrite: malformed);
+                    if (!malformed)
+                    {
+                        return seed;
+                    }
+                    // Re-read: a concurrent creator may have replaced it at the same moment.
+                    continue;
+                }
+                finally
+                {
+                    TryDelete(temp);
                 }
             }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // Another creator won, or held the file for a moment: read again.
+                Thread.Sleep(5 * (attempt + 1));
+            }
+            catch (System.Security.SecurityException)
+            {
+                break;
+            }
         }
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            return RandomNumberGenerator.GetBytes(32);
-        }
-
-        var seed = RandomNumberGenerator.GetBytes(32);
+        // Unpersisted is still unguessable for this run.
+        return RandomNumberGenerator.GetBytes(32);
+    }
+    private static void TryDelete(string path)
+    {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, seed);
+            if (!File.Exists(path))
+            {
+                return;
+            }
+            File.Delete(path);
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
                                      or System.Security.SecurityException)
         {
-            // Unpersisted is still unguessable for this run.
+            // A stray temporary file holds only random bytes.
         }
-        return seed;
     }
 
     /// <summary>Where the decoy seed is kept, beside WinSight's other per-user state.</summary>

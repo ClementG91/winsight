@@ -12,6 +12,12 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class BrowserHelperObjectEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+
+    public bool CanConfirmAbsence => true;
+
+    public int UnreadableLocations => _unreadable;
+
     private const string Path =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects";
 
@@ -26,6 +32,7 @@ public sealed class BrowserHelperObjectEnumerator : IAutostartEnumerator
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
             using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
@@ -36,7 +43,11 @@ public sealed class BrowserHelperObjectEnumerator : IAutostartEnumerator
             }
             foreach (var clsid in root.GetSubKeyNames())
             {
-                if (ClsidResolver.ResolveInprocServer(clsid, view) is { } dll)
+                if (!ClsidResolver.TryResolveInprocServer(clsid, view, out var dll))
+                {
+                    _unreadable++;
+                }
+                else if (dll is not null)
                 {
                     yield return new RawAutostart(
                         AutostartVector.BrowserHelperObject, clsid, $"HKLM\\{Path}\\{clsid} [{view}]", dll);

@@ -12,6 +12,12 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class CredentialProviderEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+
+    public bool CanConfirmAbsence => true;
+
+    public int UnreadableLocations => _unreadable;
+
     private const string Path =
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Authentication\Credential Providers";
 
@@ -25,6 +31,7 @@ public sealed class CredentialProviderEnumerator : IAutostartEnumerator
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
         using var root = baseKey.OpenSubKey(Path);
         if (root is null)
@@ -33,7 +40,11 @@ public sealed class CredentialProviderEnumerator : IAutostartEnumerator
         }
         foreach (var clsid in root.GetSubKeyNames())
         {
-            if (ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry64) is { } dll)
+            if (!ClsidResolver.TryResolveInprocServer(clsid, RegistryView.Registry64, out var dll))
+            {
+                _unreadable++;
+            }
+            else if (dll is not null)
             {
                 yield return new RawAutostart(
                     AutostartVector.CredentialProvider, clsid, $"HKLM\\{Path}\\{clsid}", dll);

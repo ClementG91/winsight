@@ -11,6 +11,8 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private int _unreadable;
 
     public string Surface => "WMI subscriptions";
@@ -55,13 +57,18 @@ public sealed class WmiSubscriptionEnumerator : IAutostartEnumerator
         // docs/DETECTIONS.md as a known gap rather than shipped as noise.
     }
 
+    private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(30);
+
     private List<RawAutostart> Query(string wql, Func<ManagementBaseObject, string?> commandOf)
     {
         var rows = new List<RawAutostart>();
         try
         {
             var scope = new ManagementScope(@"\\.\root\subscription");
-            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery(wql));
+            // WMI's default timeout is infinite. A stalled provider held Guardian's scan (and the scan
+            // lock) forever; a timeout ends as a counted unreadable location instead.
+            using var searcher = new ManagementObjectSearcher(
+                scope, new ObjectQuery(wql), new System.Management.EnumerationOptions { Timeout = QueryTimeout });
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results = searcher.Get();

@@ -64,6 +64,52 @@ public sealed class CapabilityAccessReaderIntegrationTests
 public sealed class CapabilityAccessReaderTests
 {
     [Fact]
+    public void ADeniedAppKeyIsAScopedGapNotAMissingApp()
+    {
+        var testRoot = $@"Software\WinSight.Tests\CapabilityAccessReader\{Guid.NewGuid():N}";
+        var denied = $@"{testRoot}\webcam\Contoso.Denied_123";
+        var current = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+        var rule = new System.Security.AccessControl.RegistryAccessRule(current,
+            System.Security.AccessControl.RegistryRights.ReadKey, System.Security.AccessControl.AccessControlType.Deny);
+        try
+        {
+            using (var visible = Registry.CurrentUser.CreateSubKey($@"{testRoot}\webcam\Contoso.Visible_123"))
+            {
+                visible.SetValue("LastUsedTimeStart", DateTime.UtcNow.ToFileTimeUtc(), RegistryValueKind.QWord);
+            }
+            using (var key = Registry.CurrentUser.CreateSubKey(denied))
+            {
+                key.SetValue("LastUsedTimeStart", DateTime.UtcNow.ToFileTimeUtc(), RegistryValueKind.QWord);
+                // A temporary test key owned by this user; ownership keeps the right to undo it.
+                var security = key.GetAccessControl();
+                security.AddAccessRule(rule);
+                key.SetAccessControl(security);
+            }
+
+            var snapshot = new CapabilityAccessReader(testRoot).ReadWithProvenance();
+
+            Assert.Equal("Contoso.Visible_123", Assert.Single(snapshot.Items).App);
+            var gap = Assert.Single(snapshot.Gaps);
+            Assert.Equal(new CapabilityGap(DeviceKind.Webcam, CapabilityStore.CurrentUser, "Contoso.Denied_123", true), gap);
+            Assert.Equal((0, 1), (snapshot.ToCoverage().UnreadableSources, snapshot.ToCoverage().UnreadableItems));
+        }
+        finally
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(denied,
+                       RegistryKeyPermissionCheck.ReadWriteSubTree, System.Security.AccessControl.RegistryRights.ChangePermissions))
+            {
+                if (key is not null)
+                {
+                    var security = key.GetAccessControl(System.Security.AccessControl.AccessControlSections.Access);
+                    security.RemoveAccessRule(rule);
+                    key.SetAccessControl(security);
+                }
+            }
+            Registry.CurrentUser.DeleteSubKeyTree(testRoot, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Fact]
     public void ReadWithCoverage_ParsesPackagedAndDesktopConsentStoreEntries()
     {
         var testRoot = $@"Software\WinSight.Tests\CapabilityAccessReader\{Guid.NewGuid():N}";
@@ -88,6 +134,9 @@ public sealed class CapabilityAccessReaderTests
             }
 
             var snapshot = new CapabilityAccessReader(testRoot).ReadWithCoverage();
+            var provenance = new CapabilityAccessReader(testRoot).ReadWithProvenance();
+            Assert.True(provenance.IsComplete);
+            Assert.All(provenance.Items, item => Assert.Equal(CapabilityStore.CurrentUser, item.Store));
 
             Assert.Equal(2, snapshot.Items.Count);
             Assert.Equal(0, snapshot.UnreadableSources);

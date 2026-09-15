@@ -50,16 +50,26 @@ public static partial class CliHelp
           winsight drivers                        registered kernel drivers + signature verdicts
           winsight hijack                         services another program could run in place of
           winsight process <pid>                  one process: lineage, modules, connections
+          winsight sign <path>                    one file: Authenticode standing + identification hashes
+          winsight holders <path>                 which processes hold this file open
+          winsight actions                        response-action history (read-only), newest first
+          winsight [suspend|resume|terminate] <pid>  act on a process (needs --confirm)
+          winsight rules                          allow rules in force (read-only)
+          winsight [restore|revoke] <id>          undo a block or an allow (needs --confirm)
           winsight presence                       when this machine woke, and whether anyone was there
           winsight mcp                            local read-only MCP stdio server
-          winsight av --watch                     live camera/mic alerts (Ctrl+C to stop)
+          winsight av --watch                     live camera/mic alerts, naming the process
+          winsight input --watch                  live alerts when a keyboard/mouse tap is installed
           winsight dns --watch                    live DNS queries via ETW (Administrator)
           winsight attribution --watch            who writes autostart entries (Administrator)
 
         Options:
           --flagged     only noteworthy items
+          --unsigned    only items whose file is unsigned or untrusted
+          --nonmicrosoft only items not signed by Microsoft
           --json        machine-readable output (versioned envelope, schemaVersion 1)
           --no-network  never contact VirusTotal, whatever WINSIGHT_VT_KEY is set to
+          --confirm     required by every command that changes something
           --version     print version
           --help, -h    show this help
 

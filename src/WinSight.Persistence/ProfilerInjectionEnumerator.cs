@@ -35,6 +35,8 @@ namespace WinSight.Persistence;
 /// </remarks>
 public sealed class ProfilerInjectionEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string MachineEnvironment =
         @"SYSTEM\CurrentControlSet\Control\Session Manager\Environment";
     private const string UserEnvironment = "Environment";

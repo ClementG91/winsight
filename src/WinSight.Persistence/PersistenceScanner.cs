@@ -75,7 +75,9 @@ public sealed class PersistenceScanner
         // 1. Collect raw autostart records, isolating a failing surface. The token is
         //    checked between surfaces (each is a fast registry/WMI read) and drives the
         //    signature batch below, so a scan can be aborted promptly.
-        var raws = new List<RawAutostart>();
+        var raws = new List<(RawAutostart Entry, string Source)>();
+        var completeSources = new HashSet<string>(StringComparer.Ordinal);
+        var partialSources = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
         var unreadableLocations = 0;
         var unreadableSurfaces = new List<string>();
         foreach (var enumerator in _enumerators)
@@ -83,7 +85,10 @@ public sealed class PersistenceScanner
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                raws.AddRange(enumerator.Enumerate());
+                foreach (var raw in enumerator.Enumerate())
+                {
+                    raws.Add((raw, enumerator.Surface));
+                }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException
                                          or System.Security.SecurityException
@@ -100,14 +105,31 @@ public sealed class PersistenceScanner
             {
                 unreadableLocations += skipped;
                 unreadableSurfaces.Add(enumerator.Surface);
+                if (enumerator.CanConfirmAbsence && enumerator.UnreadableScopes is { Count: > 0 } scopes)
+                {
+                    // Copied: the enumerator reuses its list on the next scan.
+                    partialSources[enumerator.Surface] = scopes.ToArray();
+                }
             }
+            else if (enumerator.CanConfirmAbsence)
+            {
+                completeSources.Add(enumerator.Surface);
+            }
+        }
+        // Multiple providers with the same source label cannot independently prove absence.
+        var shared = _enumerators.GroupBy(e => e.Surface)
+            .Where(group => group.Count() > 1).Select(group => group.Key).ToHashSet(StringComparer.Ordinal);
+        completeSources.ExceptWith(shared);
+        foreach (var surface in shared)
+        {
+            partialSources.Remove(surface);
         }
 
         // 2. Resolve each record's executable, then verify every distinct file through the
         //    in-process WinTrust/catalog verifier. No PowerShell child process or online
         //    revocation lookup is involved.
         var resolved = raws
-            .Select(r => (Raw: r, Resolution: CommandLine.ResolveExecutable(r.Command)))
+            .Select(r => (Raw: r.Entry, r.Source, Resolution: CommandLine.ResolveExecutable(r.Entry.Command)))
             .ToList();
         var verdicts = _verifier.VerifyMany(
             resolved.Where(x => x.Resolution.ImagePath is not null)
@@ -119,7 +141,7 @@ public sealed class PersistenceScanner
         //    into a per-file one.
         var originalNames = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var results = new List<AutostartEntry>(resolved.Count);
-        foreach (var (raw, resolution) in resolved)
+        foreach (var (raw, source, resolution) in resolved)
         {
             var image = resolution.ImagePath;
             var verdict = image is not null && verdicts.TryGetValue(image, out var v)
@@ -134,11 +156,16 @@ public sealed class PersistenceScanner
                 resolution.ExpectedPath,
                 resolution.Status,
                 verdict,
-                OriginalFileNameOf(image, originalNames)));
+                OriginalFileNameOf(image, originalNames))
+            { Source = source });
         }
         return new PersistenceScanResult(
             results,
-            new PersistenceCoverage(unreadableLocations, unreadableSurfaces));
+            new PersistenceCoverage(unreadableLocations, unreadableSurfaces),
+            completeSources)
+        {
+            PartialSources = partialSources,
+        };
     }
 
     /// <summary>
@@ -204,4 +231,31 @@ public sealed record PersistenceCoverage(
 /// <summary>A scan and the honest account of its own coverage.</summary>
 public sealed record PersistenceScanResult(
     IReadOnlyList<AutostartEntry> Entries,
-    PersistenceCoverage Coverage);
+    PersistenceCoverage Coverage,
+    IReadOnlySet<string>? CompleteSources = null)
+{
+    /// <summary>
+    /// Sources that were partly unreadable but attributed every gap to a location scope. Absence is
+    /// confirmed for their identities outside those scopes only.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyCollection<string>>? PartialSources { get; init; }
+
+    /// <summary>Whether this scan proves an identity of this source and location is gone.</summary>
+    internal bool ConfirmsAbsence(string source, string location)
+    {
+        if (CompleteSources?.Contains(source) == true)
+        {
+            return true;
+        }
+        return PartialSources is not null
+            && PartialSources.TryGetValue(source, out var scopes)
+            && !scopes.Any(scope => Covers(scope, location));
+    }
+
+    private static bool Covers(string scope, string location)
+    {
+        var trimmed = scope.TrimEnd('\\');
+        return location.StartsWith(trimmed, StringComparison.OrdinalIgnoreCase)
+            && (location.Length == trimmed.Length || location[trimmed.Length] is '\\' or ' ');
+    }
+}

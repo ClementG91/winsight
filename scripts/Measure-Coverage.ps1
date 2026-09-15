@@ -83,6 +83,7 @@ $engineAssemblies = @(
     "WinSight.Hijack"
     "WinSight.CodeIntegrity"
     "WinSight.Application"
+    "WinSight.Response"
     "WinSight.Mcp"
     # The dashboard was absent for the reason the ten were: its assembly-wide number is 53%, because
     # MainWindow.xaml.cs is a thousand lines of WPF code-behind at zero. Omitting the whole assembly
@@ -115,6 +116,11 @@ $engineAssemblies = @(
 $engineExcludedFiles = @{
     "WinSight.NetMonitor" = @("OutboundConnectionWatcher.cs", "DnsEtwWatcher.cs")
     "WinSight.Attribution" = @("WriteAttributionWatcher.cs")
+    "WinSight.Response" = @("Win32ProcessInspector.cs", "Win32ProcessController.cs", "RestartManagerInspector.cs")
+    "WinSight.AvMonitor" = @("ConsentStoreChangeSignal.cs")
+    "WinSight.Core" = @("RegistryKeyWatcher.cs")
+    "WinSight.InputHooks" = @("InputFilterWatcher.cs")
+    "WinSight.Application" = @("RunningImageSource.cs")
     "winsight-dashboard" = @("MainWindow.xaml.cs", "App.xaml.cs", "VirusTotalSettingsWindow.xaml.cs")
 }
 

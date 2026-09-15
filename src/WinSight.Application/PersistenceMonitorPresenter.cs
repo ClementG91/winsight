@@ -51,6 +51,22 @@ public static class PersistenceMonitorPresenter
     }
 
     /// <summary>
+    /// The journal line for an arrival that an Allow rule kept from interrupting the operator.
+    /// </summary>
+    /// <remarks>
+    /// Allow silences the interruption, never the record. The rule store is writable by anything that
+    /// runs as this user, so software installing persistence could first plant a rule for its own
+    /// entry; if silenced arrivals left no trace, that would make the entry vanish from WinSight. The
+    /// arrival is therefore still journalled - shown by <c>winsight alerts</c> and to MCP clients - and
+    /// names the rule together with the command that revokes it.
+    /// </remarks>
+    public static string SuppressedDetail(string alertDetail, Guid ruleId)
+    {
+        ArgumentNullException.ThrowIfNull(alertDetail);
+        return $"not announced: allowed by rule {ruleId} (winsight revoke {ruleId} --confirm) — {alertDetail}";
+    }
+
+    /// <summary>
     /// The command-line reason, appended to the signature verdict rather than replacing it.
     /// </summary>
     /// <remarks>

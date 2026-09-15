@@ -80,15 +80,14 @@ public sealed class TrustAnchorTests
         Assert.Null(NativeSignatureVerifier.MapResult(0x800B0100));
 
     /// <summary>
-    /// On a machine with no user-installed root the per-file chain walk must never run, which is
-    /// what makes this check free on a healthy machine.
+    /// A snapshot with no user-installed roots must not report a user trust anchor.
     /// </summary>
     [Fact]
-    public void NoUserInstalledRootMeansNoFileIsEverChained()
+    public void NoUserInstalledRootMeansNoUserAnchor()
     {
         if (UserInstalledRoots.Any)
         {
-            // This machine has one, so the cheap path cannot be observed here. Assert the index is
+            // This machine has one, so the empty case cannot be observed here. Assert the index is
             // at least self-consistent instead of skipping silently.
             Assert.NotEmpty(UserInstalledRoots.Thumbprints);
             return;
@@ -109,12 +108,13 @@ public sealed class TrustAnchorTests
             System.Security.Cryptography.X509Certificates.StoreName.Root,
             System.Security.Cryptography.X509Certificates.StoreLocation.LocalMachine);
         machine.Open(System.Security.Cryptography.X509Certificates.OpenFlags.ReadOnly);
+        var userRoots = UserInstalledRoots.Thumbprints;
 
         foreach (var certificate in machine.Certificates)
         {
             using (certificate)
             {
-                Assert.DoesNotContain(certificate.Thumbprint, UserInstalledRoots.Thumbprints);
+                Assert.DoesNotContain(certificate.Thumbprint, userRoots);
             }
         }
     }

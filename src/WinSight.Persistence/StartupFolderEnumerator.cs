@@ -11,15 +11,25 @@ namespace WinSight.Persistence;
 /// binary; non-shortcut files are reported as-is. Resolution is best-effort, a .lnk
 /// that cannot be resolved falls back to the shortcut path.
 /// </summary>
-/// <param name="folders">
-/// The folders to read, as (directory, label). Defaults to the real per-user and all-users Startup
-/// folders; supplied by tests so the "folder exists but will not open" path — the one an attacker
-/// creates by re-ACLing a drop point — can actually be exercised.
-/// </param>
-public sealed class StartupFolderEnumerator(
-    IReadOnlyList<(string Dir, string Label)>? folders = null) : IAutostartEnumerator
+public sealed class StartupFolderEnumerator : IAutostartEnumerator
 {
-    private readonly IReadOnlyList<(string Dir, string Label)> _folders = folders ?? DefaultFolders();
+    private readonly IReadOnlyList<(string Dir, string Label)> _folders;
+    private readonly bool _discoveryIncomplete;
+
+    /// <param name="folders">Folders to read; defaults to the Windows startup folders.</param>
+    public StartupFolderEnumerator(IReadOnlyList<(string Dir, string Label)>? folders = null)
+    {
+        if (folders is not null)
+        {
+            _folders = folders;
+        }
+        else
+        {
+            (_folders, _discoveryIncomplete) = DefaultFolders();
+        }
+    }
+
+    public bool CanConfirmAbsence => true;
 
     public string Surface => "Startup folders";
 
@@ -40,7 +50,7 @@ public sealed class StartupFolderEnumerator(
 
     public IEnumerable<RawAutostart> Enumerate()
     {
-        Volatile.Write(ref _unreadable, 0);
+        Volatile.Write(ref _unreadable, _discoveryIncomplete ? 1 : 0);
         foreach (var (dir, label) in _folders)
         {
             foreach (var file in SafeFiles(dir))
@@ -68,8 +78,10 @@ public sealed class StartupFolderEnumerator(
     /// is counted as unreadable by <see cref="UnreadableLocations"/>, which is what turns this from
     /// a silent gap into a stated one.
     /// </remarks>
-    private static List<(string Dir, string Label)> DefaultFolders()
+    private static (List<(string Dir, string Label)> Folders, bool Incomplete) DefaultFolders()
     {
+        var incomplete = false;
+        void MarkUnreadable() => incomplete = true;
         var folders = new List<(string Dir, string Label)>
         {
             (Environment.GetFolderPath(Environment.SpecialFolder.Startup), "User startup"),
@@ -80,10 +92,11 @@ public sealed class StartupFolderEnumerator(
 
         const string StartupUnderProfile =
             @"AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup";
-        foreach (var sid in UserHiveEnumerator.ProfileSids())
+        foreach (var sid in UserHiveEnumerator.ProfileSids(MarkUnreadable))
         {
-            if (UserHiveEnumerator.ProfileDirectory(sid) is not { Length: > 0 } profile)
+            if (UserHiveEnumerator.ProfileDirectory(sid, MarkUnreadable) is not { Length: > 0 } profile)
             {
+                incomplete = true;
                 continue;
             }
             var startup = Path.Combine(profile, StartupUnderProfile);
@@ -93,14 +106,18 @@ public sealed class StartupFolderEnumerator(
                 folders.Add((startup, $"Startup ({owner})"));
             }
         }
-        return folders;
+        return (folders, incomplete);
     }
 
-    private static string ResolveCommand(string file)
+    private string ResolveCommand(string file)
     {
         if (file.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
             var target = ResolveShortcut(file);
+            if (string.IsNullOrEmpty(target))
+            {
+                Interlocked.Increment(ref _unreadable);
+            }
             return string.IsNullOrEmpty(target) ? file : target;
         }
         return file;
@@ -140,11 +157,19 @@ public sealed class StartupFolderEnumerator(
     {
         try
         {
-            return AutomaticFileAccess.IsLocal(dir) && Directory.Exists(dir)
-                ? Directory.GetFiles(dir)
-                : Array.Empty<string>();
+            if (!AutomaticFileAccess.IsLocal(dir))
+            {
+                Interlocked.Increment(ref _unreadable);
+                return [];
+            }
+            return Directory.GetFiles(dir);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (DirectoryNotFoundException)
+        {
+            return [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
         {
             // A folder that exists but refuses to be listed is not an empty folder, and the
             // difference is the whole finding: this is where something would be hidden.

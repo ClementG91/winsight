@@ -58,6 +58,21 @@ worse than one that admits a gap, because the guess is trusted.
 copied bit-layout appears to work. When no documented alternative exists, say so in the code and let
 unrecognised values stay unrecognised.
 
+## Response actions
+
+A response action (suspend, terminate, quarantine, disable, add/remove rule) obeys four rules, each
+because skipping it acts on the wrong thing:
+
+- **Revalidate before acting.** A process is captured as `(pid, start time, image path, image hash)`
+  and rechecked against the live process immediately before the action; a persistence value is
+  rechecked against its recorded identity. A mismatch refuses with a stable reason, never acts.
+- **Never act on a protected process.** The core Windows processes and WinSight's own processes are a
+  fixed refusal list; a wrong "safe to kill" here bugchecks the machine.
+- **Reversible where the platform allows.** Prefer disable over delete; quarantine (with hash-verified
+  restore) over destroy. Restore checks the origin is still free before writing back.
+- **Everything is journalled and confirmed.** Every attempt, refusal and undo is appended to the
+  action journal. Actions are operator-confirmed; the MCP server has no action primitive.
+
 ## Naming
 
 PascalCase for public members and types, camelCase for locals and parameters, `Is`/`Has`/`Can` for

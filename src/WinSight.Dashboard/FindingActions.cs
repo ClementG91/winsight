@@ -1,4 +1,5 @@
 using System.IO;
+using WinSight.Core;
 using WinSight.Reporting;
 
 namespace WinSight.Dashboard;
@@ -8,7 +9,10 @@ public static class FindingActions
 {
     private static readonly string[] PathFieldNames = ["image", "path"];
 
-    public static string? ExistingAbsolutePath(ReportItem item)
+    public static string? ExistingAbsolutePath(ReportItem item) =>
+        ExistingAbsolutePath(item, AutomaticFileAccess.IsLocal);
+
+    internal static string? ExistingAbsolutePath(ReportItem item, Func<string, bool> isLocal)
     {
         foreach (var key in PathFieldNames)
         {
@@ -21,7 +25,7 @@ public static class FindingActions
                 // Report fields may originate from programs or registry data. Never
                 // let a click initiate authentication to a UNC share or address a
                 // Win32/NT device namespace; only ordinary local drive paths qualify.
-                if (!IsOrdinaryLocalPath(candidate))
+                if (!IsOrdinaryLocalPath(candidate) || !isLocal(candidate))
                 {
                     continue;
                 }

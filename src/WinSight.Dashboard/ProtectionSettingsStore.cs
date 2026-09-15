@@ -67,7 +67,21 @@ public sealed class ProtectionSettingsStore
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            File.WriteAllText(_path, enabled ? EnabledMarker + Environment.NewLine : string.Empty);
+            // Replaced atomically: a torn write read back as "off" and silently left ransomware
+            // protection disabled after the next launch.
+            var temp = $"{_path}.{Guid.NewGuid():N}.tmp";
+            try
+            {
+                File.WriteAllText(temp, enabled ? EnabledMarker + Environment.NewLine : string.Empty);
+                File.Move(temp, _path, overwrite: true);
+            }
+            finally
+            {
+                if (File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException

@@ -25,6 +25,7 @@ public partial class MainWindow : Window, IDisposable
     private readonly Forms.NotifyIcon _trayIcon;
     private readonly Forms.ToolStripItem _openTrayItem;
     private readonly Forms.ToolStripItem _exitTrayItem;
+    private readonly Forms.ToolStripItem _retryGuardianTrayItem;
     private readonly DashboardReportCache _reportCache = new();
     private IReadOnlyList<ToolReport> _visibleReports = [];
     private string? _progressCommand;
@@ -51,8 +52,16 @@ public partial class MainWindow : Window, IDisposable
     // What each real-time monitor actually managed to do, as opposed to what was switched on. These
     // are read by RefreshProtectionHealth and are the difference between a green badge that means
     // something and one that only means a checkbox is ticked.
-    private bool _guardianStarted;
+    private volatile bool _guardianStarted;
+    private volatile bool _guardianStartFailed;
     private bool _cameraMicStarted;
+
+    // Monitor health can change without any UI event: a camera/mic worker can fail, a directory
+    // watch can be lost. Polling the cheap counters keeps the badge from freezing on "active".
+    private readonly System.Windows.Threading.DispatcherTimer _protectionHealthTimer = new()
+    {
+        Interval = TimeSpan.FromSeconds(5),
+    };
 
     // Guardian detections waiting to be announced together, and the timer that decides when
     // "together" has ended. Both are touched only on the UI thread.
@@ -66,6 +75,14 @@ public partial class MainWindow : Window, IDisposable
     private bool _disposed;
     private bool _initializing = true;
     private bool _shownTrayHint;
+
+    // Decides what a Guardian alert offers and carries out Allow/Block; UI-free and unit tested. The
+    // open decision windows are tracked per item so they close with the dashboard, so the same item
+    // never gets two windows, and so a burst cannot stack an unbounded number of topmost windows -
+    // past the cap the coalesced balloon remains the fallback, so no alert is ever lost.
+    private readonly GuardianAlertPresenter _alertPresenter = new();
+    private readonly Dictionary<PersistenceIdentity, AlertWindow> _openAlertWindows = [];
+    private const int MaxOpenAlertWindows = 3;
 
     /// <summary>
     /// The detection the balloon currently on screen is about, so clicking it can land the operator on
@@ -86,6 +103,10 @@ public partial class MainWindow : Window, IDisposable
 
         var menu = new Forms.ContextMenuStrip();
         _openTrayItem = menu.Items.Add(Text["TrayOpen"], null, (_, _) => Dispatcher.Invoke(ShowFromTray));
+        // Shown only while Guardian has undelivered alerts or an unrecovered scan/save, so the retry
+        // the monitor exposes is reachable after its bounded automatic attempts have stopped.
+        _retryGuardianTrayItem = menu.Items.Add(Text["TrayRetryGuardian"], null, (_, _) => Dispatcher.Invoke(RetryGuardian));
+        _retryGuardianTrayItem.Visible = false;
         _exitTrayItem = menu.Items.Add(Text["TrayExit"], null, (_, _) => Dispatcher.Invoke(ExitApplication));
         _applicationIcon = TryLoadApplicationIcon();
         _trayIcon = new Forms.NotifyIcon
@@ -109,6 +130,7 @@ public partial class MainWindow : Window, IDisposable
         };
 
         _guardianBalloonTimer.Tick += FlushGuardianBalloon;
+        _protectionHealthTimer.Tick += RefreshProtectionHealthOnTick;
 
         LanguagePicker.ItemsSource = Text.SupportedLanguages;
         LanguagePicker.SelectedValue = Text.CurrentCode;
@@ -138,16 +160,22 @@ public partial class MainWindow : Window, IDisposable
                 _guardian.Start();
                 _guardianStarted = true;
             }
-            catch (Exception ex) when (ex is IOException
-                                         or UnauthorizedAccessException
-                                         or System.Security.SecurityException)
+            catch (OperationCanceledException) when (_disposed)
             {
-                // Monitoring is best-effort: if the initial scan cannot run, the dashboard still
-                // works and the on-demand persistence scan is unaffected. It is no longer silent,
-                // though: the protection badge reports the monitor as failed rather than leaving it
-                // indistinguishable from a healthy one.
+                // Closing the dashboard cancels the initial scan.
             }
-            Dispatcher.BeginInvoke(RestoreRansomwareProtection);
+            catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
+            {
+                // Monitoring is best-effort: if the initial scan or watcher arming fails, the
+                // dashboard still works and the on-demand persistence scan is unaffected. It is no
+                // longer silent, though: the protection badge reports the monitor as failed. The
+                // filter is broad because a narrow one let other failures skip the restore below.
+                _guardianStartFailed = true;
+            }
+            finally
+            {
+                Dispatcher.BeginInvoke(RestoreRansomwareProtection);
+            }
         });
     }
 
@@ -194,7 +222,10 @@ public partial class MainWindow : Window, IDisposable
             RansomwareProtection.IsChecked = true;
         }
         RefreshProtectionHealth();
+        _protectionHealthTimer.Start();
     }
+
+    private void RefreshProtectionHealthOnTick(object? sender, EventArgs e) => RefreshProtectionHealth();
 
     /// <summary>
     /// Begins watching registry writes so a persistence alert can name the program that installed
@@ -246,7 +277,7 @@ public partial class MainWindow : Window, IDisposable
             "Camera/Mic",
             $"{usage.Kind}{(e.Kind == AvEventKind.Activated ? "Activated" : "Deactivated")}",
             usage.App);
-        AlertJournal.Append(alert);
+        _ = AlertJournal.TryAppend(alert); // a failed write is counted and shown in protection health
 
         if (e.Kind != AvEventKind.Activated)
         {
@@ -256,7 +287,9 @@ public partial class MainWindow : Window, IDisposable
         var message = usage.Kind == DeviceKind.Webcam
             ? Text["AvWebcamActivated"]
             : Text["AvMicrophoneActivated"];
-        Dispatcher.Invoke(() =>
+        // Asynchronous: the detection thread must not wait for the UI thread, which during shutdown
+        // is itself waiting for that detection thread to stop.
+        Dispatcher.BeginInvoke(() =>
         {
             if (_disposed)
             {
@@ -340,25 +373,14 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var guardianCoverage = _guardian.WatchCoverage;
+        var guardianDiagnostics = _guardian.Diagnostics;
+        JournalNewGuardianFault(guardianDiagnostics.LastFault);
         var ransomware = _ransomware;
         var monitors = new List<MonitorHealth>
         {
-            MonitorHealth.For(
-                "Guardian",
-                enabled: _guardianStarted,
-                armed: guardianCoverage.Armed,
-                requested: guardianCoverage.Requested),
-            MonitorHealth.For(
-                "Camera/Mic",
-                enabled: _cameraMicStarted,
-                armed: _cameraMicStarted ? 1 : 0,
-                requested: 1),
-            MonitorHealth.For(
-                "Ransomware",
-                enabled: ransomware is not null,
-                armed: ransomware?.WatchedDirectoryCount ?? 0,
-                requested: CanaryManager.DefaultDirectories().Count,
-                lostObservations: ransomware?.CoverageIsIncomplete ?? false),
+            GuardianHost.Health(_guardianStarted, _guardianStartFailed, guardianCoverage, guardianDiagnostics),
+            _avWatch.Health(enabled: _cameraMicStarted),
+            RansomwareHost.Health(ransomware, requestedWhenOff: 0),
         };
 
         var health = new RealTimeProtectionHealth(monitors);
@@ -375,7 +397,51 @@ public partial class MainWindow : Window, IDisposable
             Text["ProtectionHealthSummary"],
             health.HealthyCount,
             health.RunningCount);
-        ProtectionHealthBadge.ToolTip = string.Join(Environment.NewLine, health.Lines());
+        var tooltip = health.Lines().ToList();
+        if (GuardianHost.DiagnosticsLine(guardianDiagnostics) is { } guardianLine)
+        {
+            tooltip.Add(guardianLine);
+        }
+        if (AlertJournal.WriteFailures > 0)
+        {
+            tooltip.Add($"Alert journal: {AlertJournal.WriteFailures} write failure(s); last: "
+                + (AlertJournal.LastWriteFailure?.GetType().Name ?? "unknown"));
+        }
+        ProtectionHealthBadge.ToolTip = string.Join(Environment.NewLine, tooltip);
+        _retryGuardianTrayItem.Visible = GuardianHost.CanRetry(guardianDiagnostics);
+    }
+
+    private PersistenceMonitorFault? _journaledGuardianFault;
+
+    private void RetryGuardian()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _guardian.RetryNow();
+        RefreshProtectionHealth();
+    }
+
+    /// <summary>
+    /// Records a contained Guardian failure once. The failing operation can be the journal itself, so
+    /// this is best-effort and never throws into the health refresh.
+    /// </summary>
+    private void JournalNewGuardianFault(PersistenceMonitorFault? fault)
+    {
+        if (fault is null || ReferenceEquals(fault, _journaledGuardianFault))
+        {
+            return;
+        }
+        _journaledGuardianFault = fault;
+        try
+        {
+            AlertJournal.Append(GuardianHost.FaultAlert(fault));
+        }
+        catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
+        {
+            // Still visible in the protection badge tooltip as a partial Guardian.
+        }
     }
 
     /// <summary>Stops protection and removes every planted decoy. Safe to call when already off.</summary>
@@ -412,9 +478,9 @@ public partial class MainWindow : Window, IDisposable
                 // and saw nothing" call for different responses, and a silent absence reads as the
                 // second when it is usually the first.
                 health: _attribution?.Health));
-        AlertJournal.Append(alert);
+        _ = AlertJournal.TryAppend(alert); // a failed write is counted and shown in protection health
 
-        Dispatcher.Invoke(() =>
+        Dispatcher.BeginInvoke(() =>
         {
             if (_disposed)
             {
@@ -434,28 +500,49 @@ public partial class MainWindow : Window, IDisposable
     private void OnGuardianDetected(object? sender, PersistenceDetectedEventArgs e)
     {
         var detection = e.Detected;
+        var detail = PersistenceMonitorPresenter.AlertDetail(
+            detection,
+            _attribution is { } attribution ? attribution.Attribute : null,
+            _attribution?.Health);
+        // An Allow rule silences the interruption, never the record: the arrival is journalled either
+        // way, naming the rule, so a rule planted by software running as this user cannot make a
+        // persistence item vanish. The rule store fails open, so an unreadable store announces.
+        var allowedBy = _alertPresenter.SuppressingRule(detection.Entry);
         var alert = new SecurityAlert(
             DateTimeOffset.Now,
             "Guardian",
             detection.Entry.Vector.ToString(),
-            PersistenceMonitorPresenter.AlertDetail(
-                detection,
-                _attribution is { } attribution ? attribution.Attribute : null,
-                _attribution?.Health));
-        AlertJournal.Append(alert);
+            allowedBy is null ? detail : PersistenceMonitorPresenter.SuppressedDetail(detail, allowedBy.Id));
+        var journaled = AlertJournal.TryAppend(alert);
 
-        Dispatcher.Invoke(() =>
+        // The operator already decided on an allowed item: it is recorded above and not announced.
+        if (allowedBy is null)
         {
-            if (_disposed)
+            Dispatcher.BeginInvoke(() =>
             {
-                return;
-            }
-            _pendingDetections.Add(detection);
-            _pendingAlert = alert;
-            // Restarting the timer coalesces a burst: the balloon is raised once arrivals stop.
-            _guardianBalloonTimer.Stop();
-            _guardianBalloonTimer.Start();
-        });
+                if (_disposed)
+                {
+                    return;
+                }
+                // A retried arrival (after a journal failure) must not appear twice in one balloon batch.
+                _pendingDetections.RemoveAll(pending => pending.Identity == detection.Identity);
+                _pendingDetections.Add(detection);
+                _pendingAlert = alert;
+                // Restarting the timer coalesces a burst: the balloon is raised once arrivals stop.
+                _guardianBalloonTimer.Stop();
+                _guardianBalloonTimer.Start();
+            });
+        }
+
+        if (!journaled)
+        {
+            // An announced arrival still reaches the operator, but no arrival - announced or allowed -
+            // may be absorbed without a durable record. Failing the notification keeps it
+            // unacknowledged: Guardian retries it and, if the journal stays unwritable, reports it
+            // again on the next launch.
+            throw new IOException("The alert journal could not be written; the arrival stays unacknowledged.",
+                AlertJournal.LastWriteFailure);
+        }
     }
 
     /// <summary>
@@ -480,6 +567,15 @@ public partial class MainWindow : Window, IDisposable
         }
 
         var batch = GuardianAlertBatcher.Describe(_pendingDetections);
+        // A single arrival gets a decision window (Allow / Block / Decide later), BlockBlock-style. A
+        // burst keeps the coalesced balloon, as does a single arrival once enough windows are open.
+        if (batch.IsSingle && TryShowAlertWindow(batch.Single!))
+        {
+            _balloonAlert = _pendingAlert;
+            _pendingDetections.Clear();
+            return;
+        }
+
         var body = batch.IsSingle
             ? $"{batch.Single!.Entry.Vector}/"
                 + UntrustedDisplayText.Neutralize(batch.Single.Entry.Name) + " — "
@@ -497,6 +593,37 @@ public partial class MainWindow : Window, IDisposable
             Text["GuardianBalloonTitle"],
             body,
             batch.IsNotable ? Forms.ToolTipIcon.Warning : Forms.ToolTipIcon.Info);
+    }
+
+    /// <summary>
+    /// Opens a decision window for one arrival. True when the arrival is now on screen (a new window,
+    /// or the one already open for this item); false when the caller must fall back to the balloon.
+    /// </summary>
+    private bool TryShowAlertWindow(PersistenceEvent detection)
+    {
+        if (_openAlertWindows.ContainsKey(detection.Identity))
+        {
+            return true; // its window is already showing; a re-announcement needs no second one
+        }
+        if (_openAlertWindows.Count >= MaxOpenAlertWindows)
+        {
+            return false;
+        }
+        try
+        {
+            var window = new AlertWindow(detection.Entry, _alertPresenter);
+            window.Closed += (_, _) => _openAlertWindows.Remove(detection.Identity);
+            _openAlertWindows[detection.Identity] = window;
+            window.Show();
+            return true;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or IOException
+                                     or System.Windows.Markup.XamlParseException)
+        {
+            // The window could not be created; the balloon still carries the alert.
+            _openAlertWindows.Remove(detection.Identity);
+            return false;
+        }
     }
 
     private static LocalizationManager Text => LocalizationManager.Instance;
@@ -703,6 +830,7 @@ public partial class MainWindow : Window, IDisposable
     private void RefreshTrayText()
     {
         _openTrayItem.Text = Text["TrayOpen"];
+        _retryGuardianTrayItem.Text = Text["TrayRetryGuardian"];
         _exitTrayItem.Text = Text["TrayExit"];
         _trayIcon.Text = Text["TrayText"];
     }
@@ -1259,6 +1387,15 @@ public partial class MainWindow : Window, IDisposable
         _scanCancellation?.Dispose();
         _guardianBalloonTimer.Stop();
         _guardianBalloonTimer.Tick -= FlushGuardianBalloon;
+        // Decision windows are not owned by this (often hidden) window, so close them explicitly: with
+        // the default shutdown mode an open one would otherwise keep the process alive after exit.
+        foreach (var alertWindow in _openAlertWindows.Values.ToList())
+        {
+            alertWindow.Close();
+        }
+        _openAlertWindows.Clear();
+        _protectionHealthTimer.Stop();
+        _protectionHealthTimer.Tick -= RefreshProtectionHealthOnTick;
         StopRansomwareProtection(); // removes any planted decoys before we go
         _guardian.Detected -= OnGuardianDetected;
         _guardian.Dispose();

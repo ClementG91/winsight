@@ -2,4 +2,8 @@
   <PropertyGroup>
     <RootNamespace>WinSight.Core</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Core.Tests" />
+    <PackageReference Include="System.Security.Cryptography.Pkcs" />
+  </ItemGroup>
 </Project>

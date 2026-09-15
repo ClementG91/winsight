@@ -1,5 +1,5 @@
-# Three jobs: `verify` does the work across a Windows matrix, `build-test` is the stable name branch
-# protection requires, and `package` runs beside them.
+# `verify` and `package` run independently across their Windows matrices. `build-test` is the
+# stable branch-protection gate and requires both matrices, including installer lifecycles.
 #
 # `package` used to declare `needs: build-test`, and the wall clock was 8m18 — 2m37 of build and
 # test, then 5m38 of packaging that had been waiting for it. Nothing was being reused: the package
@@ -160,21 +160,23 @@ jobs:
   # required would mean re-listing every leg in branch protection and re-listing them again the day
   # the matrix changes. One stable name outlives the matrix behind it.
   #
-  # `needs.verify.result` is the aggregate: `success` only when every leg succeeded. `if: always()`
+  # Both matrix aggregates must succeed, including the native installer lifecycles. `if: always()`
   # matters more than it looks — without it this job is *skipped* when a leg fails, and a skipped
   # required check does not read as a failed one. It would sit there neither passing nor failing.
   # Do not rename this job, and do not give it a `name:`; either changes the check name and silently
   # stops the protection rule matching anything.
   build-test:
-    needs: verify
+    needs: [verify, package]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every Windows to have passed
+      - name: Require verification and native packaging to have passed
         run: |
           echo "verify: ${{ needs.verify.result }}"
+          echo "package: ${{ needs.package.result }}"
           test "${{ needs.verify.result }}" = "success"
+          test "${{ needs.package.result }}" = "success"
 
   # Pinned to the same image `verify` runs on, and for the same reason release.yml is pinned: this job
   # is the installer-lifecycle rehearsal for the release, so it is only a rehearsal while it runs on

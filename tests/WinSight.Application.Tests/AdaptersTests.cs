@@ -100,7 +100,7 @@ public sealed class AdaptersTests
     [Fact]
     public void DocumentedCommandCount_MatchesTheNumberTheReadmeClaims()
     {
-        const int ReadmeClaimsVerbs = 18;
+        const int ReadmeClaimsVerbs = 27;
 
         Assert.True(
             CliHelp.DocumentedCommands.Count == ReadmeClaimsVerbs,

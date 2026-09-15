@@ -15,4 +15,18 @@ public static class RansomwareHost
     /// run, plants fresh ones, and begins watching. Disposing removes the decoys again.
     /// </summary>
     public static RansomwareMonitor CreateDefault() => new();
+
+    /// <summary>
+    /// The monitor's real state: a directory counts as armed only when it is watched and holds its
+    /// full decoy set, not merely because a directory watch is open.
+    /// </summary>
+    public static MonitorHealth Health(RansomwareMonitor? monitor, int requestedWhenOff) =>
+        monitor is null
+            ? MonitorHealth.For("Ransomware", enabled: false, armed: 0, requested: requestedWhenOff)
+            : MonitorHealth.For(
+                "Ransomware",
+                enabled: true,
+                armed: monitor.ArmedDirectoryCount,
+                requested: monitor.RequestedDirectoryCount,
+                lostObservations: monitor.CoverageIsIncomplete);
 }

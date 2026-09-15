@@ -65,10 +65,10 @@ public sealed class PersistenceIdentityArgumentsTests
     public void OnlyTheArgumentTailIsPartOfTheIdentity(string? command, string expected) =>
         Assert.Equal(expected, PersistenceIdentity.CanonicalizeArguments(command));
 
-    /// <summary>Casing and spacing must not make one entry look like two.</summary>
+    /// <summary>Argument case can select a different DLL export or encoded payload.</summary>
     [Fact]
-    public void CasingAndSpacingAreCanonicalised() =>
-        Assert.Equal(
+    public void ArgumentCaseIsPreserved() =>
+        Assert.NotEqual(
             PersistenceIdentity.CanonicalizeArguments(@"x.exe   C:\Users\Me\A.DLL,Start"),
             PersistenceIdentity.CanonicalizeArguments(@"x.exe c:\users\me\a.dll,start"));
 
@@ -85,13 +85,15 @@ public sealed class PersistenceIdentityArgumentsTests
     /// against it would report every entry on the machine as new. The header is versioned so such a
     /// file reads as a first run instead.
     /// </summary>
-    [Fact]
-    public void ABaselineFromThePreviousShapeIsTreatedAsAFirstRun()
+    [Theory]
+    [InlineData("v1")]
+    [InlineData("v2")]
+    public void ABaselineFromThePreviousShapeIsTreatedAsAFirstRun(string version)
     {
         var path = Path.Combine(Path.GetTempPath(), $"winsight-baseline-{Guid.NewGuid():N}.tsv");
         File.WriteAllLines(path,
         [
-            "#winsight-guardian-baseline v1",
+            $"#winsight-guardian-baseline {version}",
             "RunKey\tUpdater\tc:\\windows\\system32\\rundll32.exe",
         ]);
         try

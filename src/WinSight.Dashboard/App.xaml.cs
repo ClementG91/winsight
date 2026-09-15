@@ -27,6 +27,14 @@ public partial class App : System.Windows.Application
         }
 
         var startup = DashboardStartupPolicy.FromArguments(e.Args);
+        if (startup.SignatureMode)
+        {
+            // Opened from the Explorer "Check signature with WinSight" verb: only the signature window -
+            // no dashboard, no monitors, no second tray icon per right-click - and the process ends
+            // when it closes. The path is untrusted and is validated before anything opens it.
+            new SignatureWindow(startup.SignaturePath, WinSight.Application.Adapters.ReportSignature).Show();
+            return;
+        }
         var window = new MainWindow(startup.StartMonitors);
         window.Show();
 
@@ -45,12 +53,26 @@ public partial class App : System.Windows.Application
 /// The smoke test validates construction, XAML, bindings and tray setup; starting ETW or device
 /// watchers would add no coverage and can outlive the deliberately short-lived process.
 /// </summary>
-internal readonly record struct DashboardStartupPolicy(bool StartMonitors, bool ExitAfterIdle)
+/// <remarks>
+/// <c>--signature &lt;path&gt;</c> selects signature mode, the Explorer verb's entry point. A missing path
+/// still selects it (the window then says there is no local file) rather than silently opening the full
+/// dashboard, which is not what the operator asked for.
+/// </remarks>
+internal readonly record struct DashboardStartupPolicy(
+    bool StartMonitors, bool ExitAfterIdle, bool SignatureMode = false, string? SignaturePath = null)
 {
     internal static DashboardStartupPolicy FromArguments(IEnumerable<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        var smokeTest = arguments.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
-        return new DashboardStartupPolicy(StartMonitors: !smokeTest, ExitAfterIdle: smokeTest);
+        var list = arguments.ToList();
+        var smokeTest = list.Contains("--smoke-test", StringComparer.OrdinalIgnoreCase);
+        var signatureIndex = list.FindIndex(argument => argument.Equals("--signature", StringComparison.OrdinalIgnoreCase));
+        var signatureMode = signatureIndex >= 0;
+        var signaturePath = signatureMode && signatureIndex + 1 < list.Count ? list[signatureIndex + 1] : null;
+        return new DashboardStartupPolicy(
+            StartMonitors: !smokeTest && !signatureMode,
+            ExitAfterIdle: smokeTest,
+            SignatureMode: signatureMode,
+            SignaturePath: signaturePath);
     }
 }

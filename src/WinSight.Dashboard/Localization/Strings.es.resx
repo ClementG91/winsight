@@ -93,6 +93,7 @@
   <data name="BlockOutboundConfirm" xml:space="preserve"><value>¿Bloquear todo el tráfico de red saliente de «{0}»? Se aplica cuando el filtrado del firewall está activado.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Abrir WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Salir</value></data>
+  <data name="TrayRetryGuardian" xml:space="preserve"><value>Reintentar Guardian</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, seguridad local</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight sigue ejecutándose en el área de notificación.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Análisis completado.</value></data>
@@ -380,4 +381,32 @@
   <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>No se pudo establecer si hay un depurador del núcleo conectado.</value></data>
   <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>El modo de depuración del núcleo está permitido, lo que relaja lo que el núcleo aceptará cargar y permite a un depurador leer y modificar la memoria del núcleo.</value></data>
   <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>La integridad del código de las aplicaciones (WDAC) se aplica además de la firma de controladores.</value></data>
+  <data name="AlertWindowTitle" xml:space="preserve"><value>WinSight — nuevo elemento de inicio</value></data>
+  <data name="AlertHeading" xml:space="preserve"><value>Apareció un nuevo elemento de inicio</value></data>
+  <data name="AlertItemLabel" xml:space="preserve"><value>Elemento</value></data>
+  <data name="AlertLocationLabel" xml:space="preserve"><value>Ubicación</value></data>
+  <data name="AlertProgramLabel" xml:space="preserve"><value>Programa</value></data>
+  <data name="AlertAllow" xml:space="preserve"><value>Permitir</value></data>
+  <data name="AlertBlock" xml:space="preserve"><value>Bloquear</value></data>
+  <data name="AlertDecideLater" xml:space="preserve"><value>Decidir más tarde</value></data>
+  <data name="AlertBlockHint" xml:space="preserve"><value>Bloquear guarda una copia y luego elimina el elemento, por lo que se puede restaurar después.</value></data>
+  <data name="AlertAllowed" xml:space="preserve"><value>Permitido: este elemento no volverá a generar alertas. Para deshacerlo, ejecute: winsight revoke {0} --confirm</value></data>
+  <data name="AlertBlocked" xml:space="preserve"><value>Bloqueado: hay una copia en cuarentena. Para restaurarlo, ejecute: winsight restore {0} --confirm</value></data>
+  <data name="AlertRefusedChanged" xml:space="preserve"><value>El elemento cambió desde la alerta, por lo que no se eliminó nada.</value></data>
+  <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight aún no puede revertir este elemento: se aplica a todo el equipo o es de un tipo sin eliminación reversible.</value></data>
+  <data name="AlertFailed" xml:space="preserve"><value>No se pudo completar la acción.</value></data>
+  <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — firma de archivo</value></data>
+  <data name="SignatureHeading" xml:space="preserve"><value>Quién firmó este archivo</value></data>
+  <data name="SignatureFileLabel" xml:space="preserve"><value>Archivo</value></data>
+  <data name="SignatureStateLabel" xml:space="preserve"><value>Firma</value></data>
+  <data name="SignatureSignerLabel" xml:space="preserve"><value>Firmante</value></data>
+  <data name="SignatureHashesLabel" xml:space="preserve"><value>Hashes de identificación</value></data>
+  <data name="SignatureChecking" xml:space="preserve"><value>Comprobando la firma…</value></data>
+  <data name="SignatureNoSigner" xml:space="preserve"><value>Sin firmante</value></data>
+  <data name="SignatureNotLocalFile" xml:space="preserve"><value>No es un archivo local normal, así que WinSight no lo abrió. Se rechazan las rutas de red (UNC) y de dispositivo.</value></data>
+  <data name="SignatureCheckFailed" xml:space="preserve"><value>No se pudo comprobar la firma.</value></data>
+  <data name="SignatureUserInstalledRoot" xml:space="preserve"><value>Esta confianza se basa en un certificado raíz que esta cuenta de usuario pudo instalar por sí misma. Puede ser una raíz corporativa legítima; si no la esperaba, considere la firma como no demostrada.</value></data>
+  <data name="SignatureRevocationNotChecked" xml:space="preserve"><value>No se comprobó la revocación: no había nada en caché para responder y WinSight no se conecta para verificar. Un certificado robado seguiría pareciendo válido aquí.</value></data>
+  <data name="SignatureRevoked" xml:space="preserve"><value>El certificado de firma ha sido revocado. No confíe en este archivo por su firma.</value></data>
+  <data name="Close" xml:space="preserve"><value>Cerrar</value></data>
 </root>

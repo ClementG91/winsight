@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>WinSight.Response</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Response.Tests" />
+    <InternalsVisibleTo Include="WinSight.Application.Tests" />
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
+  </ItemGroup>
+</Project>

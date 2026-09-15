@@ -265,6 +265,7 @@ public sealed class CanaryManagerTests
 
             // Simulate a run that died without disposing: the decoys are still on disk and the
             // manager that planted them is gone, so only the manifest identifies them.
+            manager.EndSessionWithoutCleanup();
             var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest, new byte[32]);
 
             Assert.Equal(planted.Count, removed);
@@ -298,7 +299,7 @@ public sealed class CanaryManagerTests
             Assert.Equal(0, removed);
             Assert.True(File.Exists(inside));
             Assert.True(File.Exists(outside));
-            Assert.False(File.Exists(manifest));
+            Assert.True(File.Exists(manifest)); // unknown legacy metadata authorises no deletion
         }
         finally
         {
@@ -309,11 +310,11 @@ public sealed class CanaryManagerTests
     }
 
     /// <summary>
-    /// Decoys planted by a version that used the published prefix must still be cleaned up, or an
-    /// upgrade strands hidden files in the operator's folders forever.
+    /// Old versions did not record file identity. Even identical bytes may belong to a replacement;
+    /// these require manual cleanup after upgrade rather than risking user data.
     /// </summary>
     [Fact]
-    public void RemoveOrphans_StillSweepsTheLegacyNamingScheme()
+    public void RemoveOrphans_PreservesLegacyFilesWithoutCreationIdentity()
     {
         var dir = TempDir();
         var manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt");
@@ -329,8 +330,8 @@ public sealed class CanaryManagerTests
 
             var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest);
 
-            Assert.Equal(1, removed);
-            Assert.False(File.Exists(legacy));
+            Assert.Equal(0, removed);
+            Assert.True(File.Exists(legacy));
             Assert.True(File.Exists(lookalike));
             Assert.True(File.Exists(userFile));
         }
@@ -479,13 +480,14 @@ public sealed class RansomwareFileWatcherTests
 public sealed class RansomwareMonitorTests
 {
     [Fact]
-    public void Monitor_PlantsCanaries_DetectsATouch_ThenCleansUpOnDispose()
+    public void Monitor_PlantsCanaries_DetectsATouch_ThenPreservesModifiedDataOnDispose()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"wsg-mon-{Guid.NewGuid():N}");
         Directory.CreateDirectory(dir);
 
         var fired = new ManualResetEventSlim(false);
-        var monitor = new RansomwareMonitor(new[] { dir });
+        var monitor = new RansomwareMonitor(new[] { dir }, null, new byte[32],
+            Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.json"));
         monitor.Detected += (_, _) => fired.Set();
         try
         {
@@ -503,7 +505,9 @@ public sealed class RansomwareMonitorTests
         finally
         {
             monitor.Dispose();
-            Assert.Empty(Directory.GetFiles(dir)); // decoys removed on dispose
+            // The modified decoy may now contain user data and must be preserved. Only the
+            // untouched originals can be safely removed during monitor shutdown.
+            Assert.Single(Directory.GetFiles(dir));
             Directory.Delete(dir, recursive: true);
         }
     }
@@ -523,7 +527,8 @@ public sealed class RansomwareMonitorTests
         // and the default thirty-second quiet period would suppress the second one, which is the
         // cooldown working rather than the latch failing. The cooldown has its own tests.
         var monitor = new RansomwareMonitor(
-            new[] { dir }, new RansomwareBurstDetector(cooldown: TimeSpan.Zero));
+            new[] { dir }, new RansomwareBurstDetector(cooldown: TimeSpan.Zero),
+            new byte[32], Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.json"));
         monitor.Detected += (_, e) =>
         {
             detections.Enqueue(e);

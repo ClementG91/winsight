@@ -63,7 +63,7 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
 2. **Canary manager + file watcher.** ✅ Done. `CanaryManager` plants visible decoys in the
    protected directories and answers `IsCanary`; `RansomwareSignalClassifier` (pure) maps a change to
    a signal; `RansomwareFileWatcher` runs a `FileSystemWatcher` over the dirs, classifies each change,
-   and feeds the burst detector; `RansomwareMonitor` wires them and removes the decoys on dispose. A
+   and feeds the burst detector; `RansomwareMonitor` wires them and cleans up verified decoys on dispose. A
    touched canary fires immediately; a rename/delete burst fires once. User-mode, real-machine
    validated by functional tests. Entropy-on-write is intentionally NOT wired here (legitimately
    compressed files - .docx/.jpg/.zip - are high-entropy and would false-positive).
@@ -75,18 +75,55 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
    conservative threshold. Ransomware's own extensions (.locked, .encrypted, …) are exactly what
    still gets scored; in-place encryption that keeps the original extension is covered by the canary.
 4. **Dashboard alert.** ✅ Done. An opt-in "Ransomware protection" toggle in the dashboard starts and
-   stops the monitor (planting runs off the UI thread; clearing the toggle removes the decoys).
+   stops the monitor (planting runs off the UI thread; clearing the toggle cleans up verified decoys).
    `RansomwarePresenter` maps a detection to a localization key and a detail line that shows only the
    file NAME - never the directory tree, so an alert cannot leak a folder layout into a screenshot.
    A touched canary is presented as critical, a burst as a warning, on the proven `ShowBalloonTip`
    path, localized en/fr/es.
 
+## Cleanup ownership and upgrades
+
+Cleanup checks the creation-time file identity and the original document bytes on the same open
+Windows handle, with concurrent writes and deletion excluded, then requests deletion on that
+handle. A pathname or a matching filename alone never authorizes deletion. Modified documents,
+replacement files (even with identical content), final symlinks and unverifiable identities are
+preserved. Version 2 manifests retain file identities for crash recovery. Legacy path-only
+manifests cannot prove ownership: their files are preserved and may require manual cleanup after
+an upgrade. An unreadable, malformed or oversized manifest authorizes no deletion.
+
+The sharing and deletion behavior follows the Windows contracts for
+[CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew) and
+[SetFileInformationByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle).
+
+Manifest records are kept for every directory, not only the directories of the current session:
+a session that manages fewer folders (for example when Downloads is unavailable) leaves the other
+records untouched, and deletion still requires the expected decoy path for the caller's directories.
+
+The watcher evaluates changes and notifies on a dedicated thread. Each subscriber is contained: a
+failing handler is counted (`NotificationFailures`), other handlers still receive the alert, the
+burst detector is re-armed, and processing continues; an unexpected evaluation failure is counted as
+a processing fault. Both make coverage incomplete (partial in the protection badge). The decoy seed is
+created atomically on first use so every component derives the same decoy names.
+
+Manifest updates (plant, session cleanup, orphan sweep) are serialized across threads and processes
+by a named mutex, each merges with the records on disk, and the file is replaced atomically (temp
+file, flush, move). A session holds a named mutex for as long as it runs and stamps its records with
+that session id; an orphan sweep leaves the decoys of a live session alone, and a session that never
+planted does not touch the manifest. Before this, the launch sweep racing restored protection could
+erase the new session's records (stranding its decoys after a crash) or delete its live decoys, and
+disposing an unstarted monitor deleted the manifest outright.
+
+A preserved file keeps its decoy name, so a later session cannot plant a decoy there. The protection
+badge therefore counts a directory as armed only when its watch is live **and** its full decoy set was
+planted by the current session and is still present (a decoy deleted or renamed later no longer counts). A folder whose decoy names are all occupied is reported as failed
+coverage (or partial, when other folders are armed); the preserved files are never deleted to make
+room. The operator can move or remove those files manually to restore decoy coverage.
+
 ## What this cannot do (stated on purpose)
 
-- **It detects and alerts; it does not stop the encryption.** Halting a process mid-write needs a
-  kernel **minifilter** (`FltRegisterFilter`) with the authority to block file I/O, which needs an
-  EV certificate + Microsoft attestation signing. Explicitly deferred, exactly as for Guardian's
-  blocking. **Windows already ships that blocker** - Microsoft Defender's Controlled Folder Access
+- **It detects and alerts; it does not stop the encryption.** WinSight does not implement process
+  suspension, termination or file-I/O blocking. Those are distinct response mechanisms requiring
+  their own design and validation. **Windows provides a separate prevention feature** - Microsoft Defender's Controlled Folder Access
   refuses untrusted writes to protected folders at the kernel - so rather than half-build a competing
   driver, WinSight reports its *configured and observed operational posture*. The `integrity` scan
   reads Defender WMI unelevated and only reports Protecting when CFA is Enabled and Defender reports

@@ -192,6 +192,40 @@ Product name and state use separate indexed report fields, so delimiters in a na
 association. Provider failure is `Unavailable`, while only a successful zero-product enumeration
 means no antivirus was registered. WinSight does not register, configure or remediate a product.
 
+## The response surface
+
+WinSight can act on a detection when the operator confirms it: suspend/terminate a process, remove or
+disable persistence, quarantine a file, or add a rule. This introduces a mutation surface, defended
+as follows.
+
+- **Same user is not an authority.** Same-user actions run unprivileged and can only touch what the
+  user already can. Machine-wide items (HKLM, services, tasks, WMI) are not acted on at all: the
+  privileged service response tier has not shipped, so Block is refused for them rather than attempted.
+- **TOCTOU on the target.** A process is acted on only after its captured `(pid, start time, image
+  path, hash)` still matches the live process; a persistence value only after its recorded identity
+  still matches. A reused pid, a replaced image or an edited value refuses the action. A restore
+  refuses when something else now occupies the original location, rather than overwriting it.
+- **A forged alert cannot drive an action.** Actions come from the operator through WinSight's own
+  decision window or the CLI, where nothing changes without `--confirm`. The window never defaults to a
+  destructive choice (Enter and Escape mean "decide later"). The MCP server has no action primitive and
+  does not reference the response layer.
+- **A planted Allow rule.** The per-user rule store is writable by anything running as this user, so
+  software installing persistence can first write an Allow rule for its own entry. This is a real
+  evasion path, and WinSight cannot prevent a same-user write. What it does guarantee is that the rule
+  silences only the interruption, never the evidence: an allowed arrival is still recorded in the
+  alert journal (`winsight alerts`, and to MCP clients) as "not announced", naming the rule and the
+  `winsight revoke` that removes it; every rule is listed by `winsight rules`; and adding or removing a
+  rule through WinSight is journalled. A rule the operator never created is therefore visible and
+  revocable. A malformed or unreadable store yields no rules, so it announces rather than suppresses.
+- **Journal tampering.** The action and alert journals are same-user writable too. A machine-wide
+  install and tamper evidence (planned, M10) narrow this; they cannot stop an attacker already running
+  as the user from rewriting that user's files.
+- **An untrusted path from File Explorer.** The signature verb's argument is validated as an ordinary
+  local file before anything opens it: a UNC path (which would authenticate to a share) or a device
+  path is refused.
+- **No automatic action.** Every action is operator-initiated. Termination is offered but never
+  automatic, and automatic suspension on a ransomware decoy touch is not built.
+
 ## Explicitly out of scope
 
 | Not defended | Why |
@@ -223,8 +257,9 @@ that completely requires an OS policy that blocks outbound SMB/NTLM, not a user-
 
 ## Residual risk
 
-- **Architecture qualification remains asymmetric.** Current native-x64 WFP/SCM, TOCTOU, IPC and
-  session behavior has candidate-bound VM evidence. Arm64 has current native CI coverage for build,
+- **Architecture qualification remains asymmetric.** Historical native-x64 WFP/SCM, TOCTOU, IPC and
+  session behavior has candidate-bound VM evidence; the September corrections require fresh
+  qualification. Arm64 has native CI coverage for build,
   tests, PE architecture, installer lifecycle and packaging, but its privileged runtime still needs
   an elevated native VM. See [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
 - **v0.10.5 is historical, unsigned and not production-ready.** SignPath Foundation declined the
@@ -246,4 +281,19 @@ that completely requires an OS policy that blocks outbound SMB/NTLM, not a user-
 - **Trust anchored in a user-installed root is reported, not prevented.** `CurrentUser\Root` is
   writable without elevation, so an implant signed beneath a root imported there does carry a
   technically valid signature. WinSight now names the anchor and flags such entries rather than
-  reading them as ordinary signed software, but it cannot stop the import.
+  reading them as ordinary signed software, but it cannot stop the import. Each verification batch
+  takes a fresh root-store snapshot; the cache also includes its version so unchanged files are
+  re-evaluated after roots are added or removed. Store-read failures leave anchor classification
+  unspecified and are not cached. This is a snapshot, not a guarantee against changes during a scan.
+- **A nearby MSIX signature file is not file-integrity evidence by itself.** WinSight accepts embedded
+  Authenticode, verified catalog membership, or verified package content. The last requires, through
+  the Windows packaging API (`IAppxFactory::CreateValidatedBlockMapReader`,
+  `IAppxBlockMapFile::ValidateFileHash`), that the package signature covers the block map, that the CMS
+  signer verifies with the code-signing EKU and chains to a trusted root (at a verified RFC 3161
+  timestamp when present, otherwise now), that the block-map-verified manifest names that signer as
+  publisher, and that the scanned file is listed and its bytes match. A certificate bag, a copied
+  sidecar beside another file, an altered byte, block map or manifest, another package's metadata, or
+  a genuinely signed package from an untrusted key using Microsoft's subject (refused by the packaging
+  API with CERT_E_UNTRUSTEDROOT) cannot produce a trusted verdict. It does not establish registration of the package, revocation
+  (no network), or anything about files outside the block map; a copied package directory verifies
+  because its bytes are the publisher's.

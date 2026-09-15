@@ -25,6 +25,21 @@ public sealed class PersistenceMonitorPresenterTests
 
 
 
+    [Fact]
+    public void ASilencedArrivalIsStillRecordedNamingTheRuleAndItsRevoke()
+    {
+        var detail = PersistenceMonitorPresenter.AlertDetail(Event(Unsigned("Updater", @"C:\evil.exe")));
+        var ruleId = Guid.NewGuid();
+
+        var line = PersistenceMonitorPresenter.SuppressedDetail(detail, ruleId);
+
+        // A rule planted by software running as the user must not make the entry vanish: the record keeps
+        // the original detection, says it was not announced, and names the way to be told again.
+        Assert.Contains(detail, line, StringComparison.Ordinal);
+        Assert.Contains("not announced", line, StringComparison.Ordinal);
+        Assert.Contains($"winsight revoke {ruleId} --confirm", line, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(true, "GuardianDetectedNotable")]
     [InlineData(false, "GuardianDetectedSigned")]

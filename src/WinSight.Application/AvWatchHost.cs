@@ -2,112 +2,224 @@ using WinSight.AvMonitor;
 
 namespace WinSight.Application;
 
-/// <summary>
-/// Hosts the camera/microphone monitor for as long as the dashboard runs, turning its blocking poll
-/// loop into a start/stop lifecycle with an event, the way <see cref="GuardianHost"/> does for
-/// persistence.
-/// </summary>
+/// <summary>An immutable view of the worker and its latest acquisition coverage.</summary>
+public sealed record AvWatchStatus(
+    bool IsRunning, bool HasSnapshot, int UnreadableSources, int UnreadableItems, Exception? Failure)
+{
+    /// <summary>Events a subscriber failed to handle. The watch continued; the alert may be missing.</summary>
+    public int NotificationFailures { get; init; }
+
+    /// <summary>The last subscriber exception, kept whole for diagnosis.</summary>
+    public Exception? LastNotificationFailure { get; init; }
+
+    /// <summary>Automatic restarts performed after an unexpected worker failure.</summary>
+    public int Restarts { get; init; }
+
+    /// <summary>True when the bounded automatic restarts are spent and the worker is stopped.</summary>
+    public bool RestartsExhausted { get; init; }
+}
+
+/// <summary>Owns the camera/microphone polling thread and reports its actual health.</summary>
 /// <remarks>
-/// The detection engine for this shipped long ago and nothing ever hosted it: <c>CameraMicMonitor</c>
-/// describes itself as an OverSight-class real-time monitor, but its only caller was a CLI watch
-/// command that prints to a console. Someone using the app was therefore never told their webcam had
-/// turned on — the entire point of that class. This adds the missing lifecycle, not new detection
-/// logic.
-///
-/// Read-only, so unlike ransomware protection it needs no opt-in and writes nothing: it polls the
-/// CapabilityAccessManager records Windows already keeps. Failures are swallowed deliberately —
-/// a monitor that cannot read must not take the dashboard down with it — but only the ones that
-/// mean "Windows would not let us look", so a genuine bug still surfaces.
+/// <para><b>A subscriber cannot blind the watch.</b> Each handler runs in its own containment: a handler
+/// that throws is counted and recorded, other handlers still receive the event, and polling continues.
+/// Before, one faulty consumer stopped camera/microphone monitoring for the rest of the session.</para>
+/// <para><b>Controlled recovery.</b> An unexpected acquisition failure stops the worker and is reported as
+/// failed; the host restarts it after 5 s, 30 s and 120 s, then stops trying until <see cref="Start"/> is
+/// called again. A catastrophic failure is never contained.</para>
 /// </remarks>
 public sealed class AvWatchHost : IDisposable
 {
     private readonly CameraMicMonitor _monitor;
+    private readonly IReadOnlyList<TimeSpan> _restartDelays;
     private readonly Lock _gate = new();
     private CancellationTokenSource? _cancellation;
     private Thread? _worker;
+    private Timer? _restartTimer;
+    private int _restartAttempt;
     private bool _disposed;
+    private AvWatchStatus _status = new(false, false, 0, 0, null);
 
-    public AvWatchHost(CameraMicMonitor? monitor = null) => _monitor = monitor ?? new CameraMicMonitor();
+    public AvWatchHost(CameraMicMonitor? monitor = null)
+        : this(monitor, null)
+    {
+    }
 
-    /// <summary>
-    /// Raised on the polling thread when an app starts or stops using the webcam or microphone.
-    /// </summary>
+    internal AvWatchHost(CameraMicMonitor? monitor, IReadOnlyList<TimeSpan>? restartDelays)
+    {
+        // Production camera/mic watch is event-driven: a fresh consent-store change signal per Watch run
+        // wakes the loop the moment a device is turned on, with the 1 s poll kept as the fallback.
+        _monitor = monitor ?? new CameraMicMonitor(changeSignalFactory: () => new ConsentStoreChangeSignal());
+        _restartDelays = restartDelays ?? [TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(120)];
+    }
+
+    /// <summary>Raised on the polling thread for a device activation/deactivation.</summary>
     public event EventHandler<DeviceEvent>? Detected;
 
-    /// <summary>Begins watching. Safe to call twice; the second call does nothing.</summary>
+    public AvWatchStatus Status => Volatile.Read(ref _status);
+
+    /// <summary>Four acquisition surfaces: webcam and microphone, in HKCU and HKLM.</summary>
+    public MonitorHealth Health(bool enabled)
+    {
+        var status = Status;
+        return MonitorHealth.For("Camera/Mic", enabled,
+            armed: status.IsRunning && status.HasSnapshot && status.Failure is null
+                ? Math.Clamp(4 - status.UnreadableSources, 0, 4) : 0,
+            requested: 4,
+            lostObservations: status.UnreadableItems > 0 || status.NotificationFailures > 0);
+    }
+
+    /// <summary>Starts the worker if it is not running; also resets the automatic restart budget.</summary>
     public void Start()
     {
-        CancellationTokenSource cancellation;
-        CancellationToken token;
         lock (_gate)
         {
-            if (_disposed || _cancellation is not null)
-            {
-                return;
-            }
-            cancellation = new CancellationTokenSource();
-            _cancellation = cancellation;
-            token = cancellation.Token;
-        }
-
-        // The poll loop blocks its thread until cancelled, so it cannot run on the caller's — and it
-        // must not run on the thread pool either. A work item that never returns holds a pool thread
-        // for the life of the dashboard, and the pool only grows slowly once saturated: on a busy
-        // machine this loop can wait seconds for a thread it then never gives back. That starvation
-        // is not theoretical — it made the end-to-end test intermittently fail and, on 2026-07-27,
-        // failed a release build outright. A loop that runs until shutdown owns a thread of its own.
-        var worker = new Thread(() =>
-        {
-            try
-            {
-                _monitor.Watch(usage => Detected?.Invoke(this, usage), token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Normal shutdown.
-            }
-            catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
-            {
-                // Windows denied the capability records, a subscriber threw, or the reader failed in
-                // a way this host cannot enumerate in advance. Watching stops; everything else in the
-                // dashboard, including the on-demand camera/mic scan, is unaffected.
-                //
-                // The breadth is the point, and it is a consequence of moving this loop off the
-                // thread pool. A pool work item that throws produces an unobserved task exception the
-                // runtime ignores; a dedicated thread that throws terminates the process. Listing
-                // three exception types was adequate under the old model and became a way for a
-                // camera-watcher fault to take the whole dashboard down with it, losing every other
-                // monitor at once. Only genuinely unrecoverable failures are left to propagate.
-            }
-        })
-        {
-            // Background, so a dashboard that is closing is never held open by a poll waiting out
-            // its interval.
-            IsBackground = true,
-            Name = "winsight-av-watch",
-        };
-        lock (_gate)
-        {
-            if (_disposed)
-            {
-                if (ReferenceEquals(_cancellation, cancellation))
-                {
-                    _cancellation = null;
-                }
-                cancellation.Dispose();
-                return;
-            }
-            _worker = worker;
-            worker.Start();
+            _restartAttempt = 0;
+            _restartTimer?.Dispose();
+            _restartTimer = null;
+            StartLocked(isRestart: false);
         }
     }
 
-    /// <summary>How long <see cref="Dispose"/> waits for the poll to unwind before giving up.</summary>
-    private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
+    private void StartLocked(bool isRestart)
+    {
+        if (_disposed || _worker is not null)
+        {
+            return;
+        }
+        var cancellation = new CancellationTokenSource();
+        _cancellation = cancellation;
+        var previous = Status;
+        Volatile.Write(ref _status, new AvWatchStatus(true, false, 0, 0, null)
+        {
+            NotificationFailures = previous.NotificationFailures,
+            LastNotificationFailure = previous.LastNotificationFailure,
+            Restarts = previous.Restarts + (isRestart ? 1 : 0),
+        });
+        var worker = new Thread(() => Run(cancellation))
+        {
+            IsBackground = true,
+            Name = "winsight-av-watch",
+        };
+        _worker = worker;
+        try
+        {
+            worker.Start();
+        }
+        catch
+        {
+            _worker = null;
+            _cancellation = null;
+            Volatile.Write(ref _status, Status with { IsRunning = false });
+            cancellation.Dispose();
+            throw;
+        }
+    }
+
+    private void Run(CancellationTokenSource cancellation)
+    {
+        var token = cancellation.Token;
+        var failed = false;
+        try
+        {
+            _monitor.Watch(Publish, token, snapshot =>
+            {
+                Volatile.Write(ref _status, Status with
+                {
+                    IsRunning = true,
+                    HasSnapshot = true,
+                    UnreadableSources = snapshot.UnreadableSources,
+                    UnreadableItems = snapshot.UnreadableItems,
+                    Failure = null,
+                    RestartsExhausted = false,
+                });
+                lock (_gate)
+                {
+                    _restartAttempt = 0; // a working acquisition restores the full restart budget
+                }
+            });
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            // Normal shutdown.
+        }
+        catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
+        {
+            // A dedicated thread must contain ordinary faults, while preserving a visible failure.
+            Volatile.Write(ref _status, Status with { IsRunning = false, Failure = ex });
+            failed = true;
+        }
+        finally
+        {
+            lock (_gate)
+            {
+                Volatile.Write(ref _status, Status with { IsRunning = false });
+                _worker = null;
+                _cancellation = null;
+                // Only the worker disposes its source, after its last wait on the token handle.
+                cancellation.Dispose();
+                if (failed)
+                {
+                    ScheduleRestartLocked();
+                }
+            }
+        }
+    }
+
+    private void Publish(DeviceEvent deviceEvent)
+    {
+        foreach (var handler in Detected?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                ((EventHandler<DeviceEvent>)handler)(this, deviceEvent);
+            }
+            catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
+            {
+                Volatile.Write(ref _status, Status with
+                {
+                    NotificationFailures = Status.NotificationFailures + 1,
+                    LastNotificationFailure = ex,
+                });
+            }
+        }
+    }
+
+    private void ScheduleRestartLocked()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        if (_restartAttempt >= _restartDelays.Count)
+        {
+            Volatile.Write(ref _status, Status with { RestartsExhausted = true });
+            return;
+        }
+        var delay = _restartDelays[_restartAttempt++];
+        _restartTimer?.Dispose();
+        _restartTimer = new Timer(_ =>
+        {
+            lock (_gate)
+            {
+                _restartTimer?.Dispose();
+                _restartTimer = null;
+                try
+                {
+                    StartLocked(isRestart: true);
+                }
+                catch (Exception ex) when (!WinSight.NetMonitor.EtwFailure.IsCatastrophic(ex))
+                {
+                    // Could not create the thread: keep the failure visible and try the next delay.
+                    Volatile.Write(ref _status, Status with { IsRunning = false, Failure = ex });
+                    ScheduleRestartLocked();
+                }
+            }
+        }, null, delay, Timeout.InfiniteTimeSpan);
+    }
 
     public void Dispose()
     {
-        CancellationTokenSource? cancellation;
         Thread? worker;
         lock (_gate)
         {
@@ -116,30 +228,15 @@ public sealed class AvWatchHost : IDisposable
                 return;
             }
             _disposed = true;
-            cancellation = _cancellation;
             worker = _worker;
-            _worker = null;
+            _cancellation?.Cancel();
+            _restartTimer?.Dispose();
+            _restartTimer = null;
         }
-
-        if (cancellation is null)
+        // A subscriber can dispose its own host. Never try to join the current thread.
+        if (worker is not null && worker != Thread.CurrentThread)
         {
-            return;
+            _ = worker.Join(TimeSpan.FromSeconds(2));
         }
-
-        try
-        {
-            cancellation.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-            // The worker completed between the state snapshot and cancellation.
-        }
-
-        // Wait before disposing the source. The poll loop is blocked on this token's wait handle,
-        // and disposing it out from under that thread turns a clean shutdown into an
-        // ObjectDisposedException on a background thread nobody is watching. AttributionHost in the
-        // sibling project already does exactly this, with a comment describing this bug; this host
-        // did the opposite.
-        _ = worker?.Join(StopTimeout);
     }
 }

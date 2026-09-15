@@ -60,6 +60,10 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource, IPersisten
     private Thread? _thread;
     private bool _started;
     private bool _disposed;
+    private int _notificationFailures;
+
+    /// <summary>Change signals a subscriber failed to handle.</summary>
+    public int NotificationFailures => Volatile.Read(ref _notificationFailures);
 
     public event EventHandler<PersistenceSurfaceChangedEventArgs>? SurfaceChanged;
 
@@ -124,9 +128,23 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource, IPersisten
                 return; // nothing to watch (e.g. empty target set); Start is a no-op.
             }
 
-            foreach (var watch in _watches)
+            // One key that cannot be armed (deleted or re-ACL'd since it was opened) is dropped like
+            // one that cannot be opened; it used to throw out of Start and fail Guardian entirely.
+            foreach (var watch in _watches.ToArray())
             {
-                Arm(watch);
+                try
+                {
+                    Arm(watch);
+                }
+                catch (Win32Exception)
+                {
+                    _watches.Remove(watch);
+                    watch.Dispose();
+                }
+            }
+            if (_watches.Count == 0)
+            {
+                return;
             }
 
             _thread = new Thread(WaitLoop)
@@ -179,7 +197,15 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource, IPersisten
 
         while (true)
         {
-            var index = WaitHandle.WaitAny(handles);
+            int index;
+            try
+            {
+                index = WaitHandle.WaitAny(handles);
+            }
+            catch (ObjectDisposedException)
+            {
+                return; // Dispose did not wait for a slow subscriber and released the handles
+            }
             if (index == 0)
             {
                 return; // cancelled
@@ -190,12 +216,21 @@ public sealed class RegistryChangeWatcher : IPersistenceChangeSource, IPersisten
             // between reset and re-arm is caught by the next arming; the monitor's debounced full
             // re-scan absorbs the tiny window.
             watch.Signal.Reset();
-            SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(new[] { watch.Target }));
+            try
+            {
+                SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(new[] { watch.Target }));
+            }
+            catch (Exception ex) when (!PersistenceMonitor.IsCatastrophic(ex))
+            {
+                // A dedicated thread: an escaping subscriber exception ended the process. Counted,
+                // and the watch keeps running.
+                Interlocked.Increment(ref _notificationFailures);
+            }
             try
             {
                 Arm(watch);
             }
-            catch (Win32Exception)
+            catch (Exception ex) when (ex is Win32Exception or ObjectDisposedException)
             {
                 // The key became unreadable (deleted, permissions changed). Drop this watch; the
                 // remaining keys keep working and the on-start diff still covers the surface.

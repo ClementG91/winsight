@@ -1,5 +1,12 @@
 namespace WinSight.AvMonitor;
 
+/// <summary>Which CapabilityAccessManager consent store an observation came from.</summary>
+public enum CapabilityStore
+{
+    CurrentUser,
+    LocalMachine,
+}
+
 /// <summary>A privacy-sensitive capture device WinSight watches.</summary>
 public enum DeviceKind
 {
@@ -25,4 +32,8 @@ public sealed record DeviceUsage(
     bool Packaged,
     DateTime? LastStart,
     DateTime? LastStop,
-    bool Active);
+    bool Active)
+{
+    /// <summary>The consent store this observation was read from; null when the reader does not say.</summary>
+    public CapabilityStore? Store { get; init; }
+}

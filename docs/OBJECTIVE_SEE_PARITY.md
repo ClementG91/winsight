@@ -1,4 +1,4 @@
-# WinSight vs Objective-See: parity and what is left
+# WinSight vs Objective-See: capabilities and remaining gaps
 
 Objective-See is the reference for "free, local, no-telemetry security tools that treat the operator
 as an adult". This is an honest, tool-by-tool comparison and the plan that follows from it.
@@ -7,39 +7,46 @@ Two structural differences shape everything below:
 
 - **Objective-See ships a dozen separate apps; WinSight is one.** That is WinSight's advantage and
   is not worth giving up: a single scan surface, one alert journal, one language setting.
-- **Objective-See's blocking tools rest on Apple's endpoint APIs.** The Windows equivalents for
-  *blocking* (file/registry interception) require a signed kernel minifilter and an EV certificate.
-  WinSight is deliberately detect-and-alert plus WFP network enforcement, which needs no driver.
-  Everything marked "cannot block" below is that constraint, not an oversight.
+- **The response models differ.** WinSight implements detection and alerts plus explicit WFP
+  network rules. It does not implement persistence removal, automatic ransomware process
+  suspension, or an interactive decision before an unknown application's first connection.
+  Those are product gaps; the existence of a Windows detection surface does not establish parity.
 
 ## Tool-by-tool
 
 | Objective-See | What it does | WinSight today | Gap |
 |---|---|---|---|
-| **BlockBlock** | Real-time persistence alerts | **Guardian** - ~17 live registry/file surfaces, tray alert, journalled | **Parity.** Cannot block the write (driver). |
-| **KnockKnock** | One-shot persistence enumeration | **Persistence scan** - 27 autostart surfaces with signature verdicts | **Parity, arguably ahead** (more surfaces, Authenticode + catalog). |
-| **LuLu** | Per-app outbound firewall | **Outbound firewall** - WFP per-app, enforcement opt-in, survives reboot | **Qualified parity for published v0.12.0 x64.** Its exact candidate passed WFP/SCM, rollback, per-app scoping, adversarial trust and IPC qualification. Native Arm64 privileged behavior remains pending. |
-| **RansomWhere?** | Ransomware behaviour detection | **Ransomware protection** - canaries, rename/delete burst, entropy-on-write, opt-in | **Parity.** Cannot halt the process mid-encryption (driver). |
-| **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** - live, tray alert, journalled | **Parity** (the host landed 2026-07-21; the detector predated it). |
-| **Netiquette** | Network connection list | **Connections scan** - with process attribution | **Parity.** |
-| **TaskExplorer** | Process explorer with signatures, libraries, network | **Processes + Modules scans, plus `process <pid>`** - lineage, unsigned modules and live external sockets in one view | **Parity.** |
-| **What's Your Sign?** | Signature info in the file manager | *(none)* | **Missing** - Explorer shell extension. |
-| **ReiKey** | Keyboard event-tap (keylogger) detection | **Keyboard interception scan** - filter drivers on the keyboard/mouse stacks, with signature verdicts | **Parity, by the route Windows actually allows** (see below). |
-| **DHS** | Dylib hijack scanner | **Hijack scan** - unquoted command lines, writable service directories and PATH entries, and **phantom imports**; **modules scan** flags unsigned/untrusted loaded modules | **Parity, arguably ahead.** DHS finds weak/rpath dylibs; the Windows equivalents are all covered, each graded by real exploitability on this machine. |
-| **KextViewr** | Kernel extension viewer | **Drivers scan** - every registered kernel driver, its start disposition and signature verdict | **Parity**, with one honest limit: registered, not resident (see below). |
-| **DoNotDisturb** | Physical-access ("evil maid") detection | **Presence scan** - resume timeline with Windows' wake source, flagging only wakes attributable to a human hand | **Parity, with a narrower honest claim.** A lid open is unambiguous; a Windows wake source is `Unknown` half the time, and the scan says so rather than guessing. |
+| **BlockBlock** | Persistence monitoring with a user response that can remove the detected persistence | **Guardian** - live registry/file surfaces and a decision window per new item: **Allow** (a journalled rule that silences the item; listed by `winsight rules`, undone by `winsight revoke`), **Block** (quarantine-then-remove after revalidation; undone by `winsight restore`) or decide later, with the coalesced tray balloon as fallback | Parity for the user-privilege vectors (HKCU Run/RunOnce, per-user Startup files). HKLM, services, tasks and WMI still offer Allow only, until the service response tier ships. |
+| **KnockKnock** | One-shot persistence enumeration with #unsigned/#nonApple filters | **Persistence scan** - 27 autostart surfaces with signature verdicts, filterable with `--unsigned`/`--nonmicrosoft` | Comparable purpose and triage filters; surface counts across operating systems do not prove equal detection. |
+| **LuLu** | Blocks unknown outgoing connections pending a user decision | **Outbound firewall** - WFP per-app rules, enforcement opt-in, survives reboot | Explicit rules; no equivalent first-connection decision workflow. |
+| **RansomWhere?** | Detects suspicious encryption and can suspend the process for a user decision | **Ransomware protection** - canaries, rename/delete burst, entropy-on-write, opt-in; plus `winsight holders <path>` (unelevated Restart Manager identification of the processes holding a file, revalidated, with a confidence) and `winsight suspend|resume|terminate <pid> --confirm` (revalidated, protected processes refused, journalled) | The operator can identify and suspend the encrypting process by hand. Automatic suspension on a decoy touch is not built: it waits for a ransomware alert window that carries Resume/Terminate, so a suspension is never left undoable only from a command line. |
+| **OverSight** | Webcam/mic activation alerts | **Camera/mic watch** - Windows consent-store polling with an event-driven `RegNotifyChangeKeyValue` watcher for immediate reads, tray alert, journalled; plus a process-level locator that maps a desktop app's device use to revalidated process identities | Process identification is surfaced by `winsight av --watch`, which names the process per activation; packaged-app package-family mapping, the terminate-the-process Block decision, and allow/always rules are pending. |
+| **Netiquette** | Network connection list | **Connections scan** - with process attribution | Similar inventory; comparative coverage and latency have not been measured. |
+| **TaskExplorer** | Process explorer with signatures, libraries, network, and #unsigned/#nonApple filters | **Processes + Modules scans, plus `process <pid>`** - lineage, unsigned modules and live external sockets in one view, filterable with `--unsigned`/`--nonmicrosoft` | Similar triage data and filters on the CLI; the auto-refreshing dashboard task view is pending; no measured feature or detection equivalence. |
+| **What's Your Sign?** | Signature info in the file manager | **`winsight sign <path>`** and an out-of-process per-user Explorer verb registrar (`HKCU\...\shell\WinSight.Signature` -> `--signature "%1"`) reporting Authenticode state, signer, anchor, revocation and MD5/SHA-1/SHA-256 | Parity on the entry point: the Explorer verb opens a dedicated signature window (verdict, signer, revocation / user-installed-root caveats, copyable hashes) that shares the CLI's verifier, and the verb is added/removed by `register-signature-verb` / `unregister-signature-verb`. The window was verified end to end on a real signed binary. The modern Windows 11 context menu (packaged `IExplorerCommand`) and an opt-in VirusTotal view remain out of scope; no in-process shell extension by design. |
+| **ReiKey** | Keyboard event-tap (keylogger) detection, with a real-time alert on new taps | **Keyboard interception scan** - filter drivers on the keyboard/mouse stacks, with signature verdicts; plus a live `InputFilterWatcher` that alerts the moment a keyboard/mouse class filter is added or removed | Real-time class-filter alerting is available through `winsight input --watch`; surfacing it in the dashboard UI and per-device-instance `Enum` filters are pending. Still a different layer from user-mode keyboard hooks. |
+| **DHS** | Dylib hijack scanner | **Hijack scan** - unquoted command lines, writable service directories and PATH entries, and **phantom imports**; **modules scan** flags unsigned/untrusted loaded modules | Windows-specific exposure checks; dynamic library-loading coverage remains incomplete. |
+| **KextViewr** | Kernel extension viewer | **Drivers scan** - registered kernel drivers, start disposition and signature verdicts | Registered inventory does not establish which drivers are currently resident. |
+| **DoNotDisturb** | Physical-access ("evil maid") detection | **Presence scan** - resume timeline and Windows wake source | Narrower evidence; unknown wake sources and activity without a recorded wake remain unresolved. |
 
-The published v0.12.0 x64 result is candidate-bound and complete. Exact candidate `dbaded1` passed
+The response distinctions above follow the official descriptions of
+[BlockBlock](https://objective-see.org/products/blockblock.html),
+[LuLu](https://objective-see.org/products/lulu.html) and
+[RansomWhere?](https://objective-see.org/products/ransomwhere.html) and
+[OverSight](https://objective-see.org/products/oversight.html), rechecked on 2026-09-14.
+This is a capability comparison, not a comparative effectiveness benchmark.
+
+The historical v0.12.0 x64 result is candidate-bound. Exact candidate `dbaded1` passed
 the native Windows VM campaign: WFP/SCM 35/35, adversarial trust 13/13, local IPC 7/7, and a real
 second-VM Network Logon campaign 7/7 plus independent observer 3/3. The published downloads then
 passed checksum, provenance/SBOM attestation, architecture and x64 installer-smoke verification.
 The authoritative evidence and exact hashes are linked from
 [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
 
-Production readiness is target-specific: published v0.12.0 x64 is production-ready under the
-documented unsigned-distribution policy; native Arm64 privileged behavior and x64-on-Arm64 identity
-remain hardware-bound gates. Authenticode remains an explicitly accepted unsigned-distribution
-limitation until a publisher certificate becomes available.
+Current production readiness is not established: the September audit identified defects outside
+those historical scenarios. The corrected candidate needs fresh qualification; native Arm64
+privileged behavior and x64-on-Arm64 identity remain hardware-bound gates. Authenticode remains an
+explicitly accepted unsigned-distribution limitation until a publisher certificate becomes available.
 
 The local protocol's 26/26 contract self-test and deliberate exit-1 negative control remain portable
 regression evidence. They do not qualify different executable bytes, Arm64 privileged runtime,
@@ -50,22 +57,17 @@ evidence.
 That candidate remains an operator-provided trust-root prerequisite, not something the probe can
 prove about itself.
 
-### What WinSight has that Objective-See does not
+### WinSight's additional integration and Windows-specific capabilities
 
-- **Command-line triage on autostart entries.** Every persistence verdict in both products is a fact
-  about a *file*, and that model is blind by construction to the technique that dominates Windows
-  persistence: the file is genuinely Microsoft's and genuinely signed, and the payload is in the
-  arguments. WinSight reads the command line as well, and flags a signed Windows interpreter handed
-  something its signature does not cover. This has no Objective-See counterpart because it has no
-  macOS counterpart at that scale - the LOLBin surface is a Windows-specific consequence of shipping
-  a large set of signed, general-purpose interpreters in the base OS.
+- **Command-line triage on autostart entries.** WinSight inspects arguments as well as file
+  signatures, including signed Windows interpreters that execute a separate payload. This adds
+  context that a trusted executable signature alone cannot provide.
 - **An MCP server**, so any LLM can run the read-only scanners, pivot onto a single process, and read
   the detection history.
 - **DNS cache, browser extensions, trusted-root certificates, hosts file** scanners.
 - **A local alert journal** surviving suppressed toasts, surfaced in-app and over MCP.
-- **A Controlled Folder Access posture report.** RansomWhere? detects; it does not point you at an OS
-  blocker, because macOS has no built-in equivalent. Windows does, and WinSight - which likewise
-  cannot block without a driver - reports Defender Controlled Folder Access's configured and
+- **A Controlled Folder Access posture report.** WinSight reports Defender Controlled Folder
+  Access's configured and
   observed operational posture and links to the Windows control. It does not treat a configured
   value alone as proof that a particular write will be blocked.
 - **Three languages**, and a single unified UI.
@@ -277,28 +279,20 @@ timeline you consult when you suspect somebody was at your desk, not a routine c
 
 ### Deliberately not planned
 
-- **Blocking file/registry writes.** Needs a signed minifilter and an EV certificate. The honest
-  position is detect-and-alert, stated plainly rather than implied away.
+- **Blocking file/registry writes.** WinSight currently detects and alerts on these surfaces.
+  Adding prevention or process response would require a separate design and safety qualification.
 - **A shell extension for signature info.** Real value, but it means shipping an in-process
   Explorer component - a crash surface in every file window, for a convenience feature.
 
 ## The bar this sets
 
-Beating Objective-See on Windows is not a checklist race. WinSight has feature coverage at parity or
-ahead on the eight tools that matter most - persistence × 2, firewall, ransomware, camera/mic,
-keyboard interception, kernel drivers and hijack analysis - while being one app instead of eight,
-with an MCP server, an alert journal and four scanners Objective-See has no equivalent for. That is
-a product-capability comparison, not a product-readiness verdict: current native-x64 WFP/SCM,
-trust, IPC and session qualification is candidate-bound, while native Arm64 privileged runtime,
-independent presentation review and signing remain separate gates.
+WinSight combines Windows-specific scanners, a shared alert journal, an MCP interface and three
+languages in one application. That integration is useful, but it does not establish superiority in
+detection, prevention, false positives, latency or resource use. No controlled comparative benchmark
+has established those claims.
 
-**Every tool on the list above now has parity-or-better feature coverage**, in one app instead of
-eight, with an MCP server, an alert journal, four scanners Objective-See has no equivalent for, and
-three languages. The wording does not convert feature parity or the candidate-bound native-x64
-record into a product-wide production-readiness claim.
-
-What is left is not parity work. It is depth: the elevated resident-driver pass, boot-configuration
-context for the driver findings, per-device-instance input filters, and runtime observation for the
-DLL hijacks that `LoadLibrary` reaches rather than the import table. Each is a smaller increment than
-anything above, and each is worth doing only with the same rule the list was built on - measure the
-signal before building the check, and say plainly what it cannot see.
+Remaining work includes response workflows, resident-driver visibility, per-device input filters,
+dynamic library-loading observation and measured detection coverage. Priorities should follow
+reproducible scenarios and operator safety. Current release qualification is tracked separately in
+[`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md). The implementation plan for the remaining gaps
+is [`OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md`](OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md).
