@@ -10,7 +10,9 @@ namespace WinSight.Application.Tests;
 /// </summary>
 public sealed class WfpValidationContractTests
 {
-    private static readonly TimeSpan ScriptProcessTimeout = TimeSpan.FromSeconds(60);
+    // A hang detector, not a performance bound: a busy windows-2022 runner once needed more than 60 s to start
+    // PowerShell and run the contract, while a real hang never exits at all.
+    private static readonly TimeSpan ScriptProcessTimeout = TimeSpan.FromSeconds(180);
     private static readonly TimeSpan TimedOutProcessTerminationTimeout = TimeSpan.FromSeconds(10);
 
     private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(
@@ -22,7 +24,7 @@ public sealed class WfpValidationContractTests
     // scope whose functions a GetNewClosure() closure cannot resolve. On a real VM that difference
     // killed the protocol on its first output call, at "0 checks", while this suite stayed green at
     // 26/26. Both modes are now measured, because the mode nobody tested is the mode people use.
-    [Theory(Timeout = 90000)]
+    [Theory(Timeout = 420000)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task ContractSelfTestPassesUnderBothInvocationModes(bool useCallOperator)
@@ -42,7 +44,7 @@ public sealed class WfpValidationContractTests
     // adapter with a path that does not exist. The workflow emits its banner, runs the preconditions,
     // fails "candidate and protected tools exist" and stops - and every SCM operation lives strictly
     // after that check, so this stays safe even on an elevated CI runner.
-    [Theory(Timeout = 90000)]
+    [Theory(Timeout = 420000)]
     [InlineData(false)]
     [InlineData(true)]
     public async Task RealAdapterReachesPreconditionsAndStopsBeforeAnyScmCall(bool useCallOperator)
@@ -69,7 +71,7 @@ public sealed class WfpValidationContractTests
 
     // This case intentionally starts two independent PowerShell processes. Its outer timeout must
     // exceed two process budgets; otherwise a valid pair of slow runs can never finish in CI.
-    [Fact(Timeout = 150000)]
+    [Fact(Timeout = 420000)]
     public async Task ContractSelfTestPassesAndLifecyclePollNegativeControlFails()
     {
         var normal = await RunContractAsync(negativeControl: false);
@@ -109,7 +111,7 @@ public sealed class WfpValidationContractTests
         Assert.DoesNotContain("third.Type == 0", script, StringComparison.Ordinal);
     }
 
-    [Fact(Timeout = 90000)]
+    [Fact(Timeout = 420000)]
     public async Task ContractSelfTestFailsWhenExactScmAbsencePredicatesAreBroadened()
     {
         const string exactPredicate = "$query.ExitCode -eq 1060";
