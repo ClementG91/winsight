@@ -150,7 +150,8 @@ public sealed class AlertWindowTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
 
-        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "The alert window test did not finish.");
+        // A hang detector, not a performance bound (see VirusTotalSettingsWindowTests).
+        Assert.True(thread.Join(TimeSpan.FromSeconds(90)), "The alert window test did not finish.");
         Assert.Null(failure);
     }
 

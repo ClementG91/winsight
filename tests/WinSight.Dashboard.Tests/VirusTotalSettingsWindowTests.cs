@@ -79,7 +79,9 @@ public sealed class VirusTotalSettingsWindowTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
 
-        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "The VirusTotal settings dialog did not finish.");
+        // A hang detector, not a performance bound: the dialog plus three full dashboards take ~15 s on
+        // the Arm64 runner under parallel test load, while a real hang never finishes at all.
+        Assert.True(thread.Join(TimeSpan.FromSeconds(90)), "The VirusTotal settings dialog did not finish.");
         Assert.Null(failure);
         Assert.True(completed);
     }

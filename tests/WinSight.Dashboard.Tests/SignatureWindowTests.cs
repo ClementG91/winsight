@@ -113,7 +113,8 @@ public sealed class SignatureWindowTests
         thread.SetApartmentState(ApartmentState.STA);
         thread.Start();
 
-        Assert.True(thread.Join(TimeSpan.FromSeconds(15)), "The signature window test did not finish.");
+        // A hang detector, not a performance bound (see VirusTotalSettingsWindowTests).
+        Assert.True(thread.Join(TimeSpan.FromSeconds(90)), "The signature window test did not finish.");
         Assert.Null(failure);
     }
 }
