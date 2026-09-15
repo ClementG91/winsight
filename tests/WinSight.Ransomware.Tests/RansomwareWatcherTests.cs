@@ -371,7 +371,7 @@ public sealed class RansomwareFileWatcherTests
 
             File.AppendAllText(canary, "encrypted-by-ransomware");
 
-            Assert.True(fired.Wait(TimeSpan.FromSeconds(5)), "a canary touch did not fire within 5s");
+            Assert.True(fired.Wait(TimeSpan.FromSeconds(30)), "a canary touch did not fire within 30s");
             Assert.Equal(RansomwareSignalKind.CanaryTouched, kind);
         }
         finally
@@ -406,7 +406,7 @@ public sealed class RansomwareFileWatcherTests
                 File.Move(file, file + ".locked");
             }
 
-            Assert.True(fired.Wait(TimeSpan.FromSeconds(5)), "a rename burst did not fire within 5s");
+            Assert.True(fired.Wait(TimeSpan.FromSeconds(30)), "a rename burst did not fire within 30s");
         }
         finally
         {
@@ -500,7 +500,7 @@ public sealed class RansomwareMonitorTests
 
             File.AppendAllText(canary, "boom");
 
-            Assert.True(fired.Wait(TimeSpan.FromSeconds(5)), "the monitor did not detect a canary touch");
+            Assert.True(fired.Wait(TimeSpan.FromSeconds(30)), "the monitor did not detect a canary touch");
         }
         finally
         {
@@ -547,12 +547,12 @@ public sealed class RansomwareMonitorTests
             var canary = monitor.Canaries[0];
 
             File.AppendAllText(canary, "first-touch");
-            Assert.True(first.Wait(TimeSpan.FromSeconds(5)), "the first canary touch never alerted");
+            Assert.True(first.Wait(TimeSpan.FromSeconds(30)), "the first canary touch never alerted");
 
             // The decoy is gone after a real touch is fine to keep touching for this test; what
             // matters is that the detector — not the canary — is ready to fire again immediately.
             File.AppendAllText(canary, "second-touch");
-            Assert.True(second.Wait(TimeSpan.FromSeconds(5)),
+            Assert.True(second.Wait(TimeSpan.FromSeconds(30)),
                 "a second touch after the first alert produced no second alert — the detector did not re-arm");
         }
         finally

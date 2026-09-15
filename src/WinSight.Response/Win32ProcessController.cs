@@ -6,10 +6,16 @@ using Microsoft.Win32.SafeHandles;
 namespace WinSight.Response;
 
 /// <summary>
-/// The production <see cref="IProcessController"/>. Suspension and resumption enumerate the process's
-/// threads and suspend/resume each, repeating until the thread set is stable so a thread created
-/// during the pass is caught too. Termination uses <c>TerminateProcess</c>.
+/// The production <see cref="IProcessController"/>. Suspension enumerates the process's threads and
+/// suspends each exactly once, repeating until a pass finds no thread it has not already suspended, so
+/// a thread created during the pass is caught too. Resumption resumes each thread once. Termination
+/// uses <c>TerminateProcess</c>.
 /// </summary>
+/// <remarks>
+/// <c>SuspendThread</c> increments a per-thread count that <c>ResumeThread</c> decrements, so the two
+/// must stay balanced: suspending a thread twice and resuming it once leaves the process frozen while
+/// both calls report success.
+/// </remarks>
 /// <remarks>
 /// The thread-by-thread route uses only documented Win32 (<c>CreateToolhelp32Snapshot</c>,
 /// <c>OpenThread</c>, <c>SuspendThread</c>/<c>ResumeThread</c>). The undocumented
@@ -24,9 +30,9 @@ public sealed class Win32ProcessController : IProcessController
     private const uint Th32csSnapThread = 0x00000004;
     private const int MaxPasses = 8;
 
-    public bool SuspendThreads(int pid) => ForEachThread(pid, SuspendThread, requireStable: true);
+    public bool SuspendThreads(int pid) => ForEachThread(pid, SuspendThread, untilNoNewThread: true);
 
-    public bool ResumeThreads(int pid) => ForEachThread(pid, ResumeThread, requireStable: false);
+    public bool ResumeThreads(int pid) => ForEachThread(pid, ResumeThread, untilNoNewThread: false);
 
     public bool TerminateProcess(int pid)
     {
@@ -41,20 +47,21 @@ public sealed class Win32ProcessController : IProcessController
         }
     }
 
-    private static bool ForEachThread(int pid, Func<SafeThreadHandle, uint> operation, bool requireStable)
+    private static bool ForEachThread(int pid, Func<SafeThreadHandle, uint> operation, bool untilNoNewThread)
     {
         var touchedAny = false;
+        // Each thread is acted on at most once, whatever the number of passes.
+        var handled = new HashSet<int>();
         try
         {
-            var previousCount = -1;
             for (var pass = 0; pass < MaxPasses; pass++)
             {
-                var threadIds = ThreadIds(pid);
-                if (threadIds.Count == 0)
+                var newThreads = ThreadIds(pid).Where(handled.Add).ToList();
+                if (newThreads.Count == 0)
                 {
-                    return touchedAny; // the process has no threads we can see, or has exited
+                    return touchedAny; // no thread left to act on, or the process has exited
                 }
-                foreach (var tid in threadIds)
+                foreach (var tid in newThreads)
                 {
                     using var thread = OpenThread(ThreadSuspendResume, false, tid);
                     if (!thread.IsInvalid && operation(thread) != uint.MaxValue)
@@ -62,13 +69,12 @@ public sealed class Win32ProcessController : IProcessController
                         touchedAny = true;
                     }
                 }
-                // For suspend, keep going until two consecutive passes see the same thread count, so a
-                // thread spawned mid-pass is suspended too. Resume needs only a single pass.
-                if (!requireStable || threadIds.Count == previousCount)
+                // For suspend, a thread spawned by a still-running thread during the pass is caught by
+                // the next one. Resume needs only a single pass.
+                if (!untilNoNewThread)
                 {
                     return touchedAny;
                 }
-                previousCount = threadIds.Count;
             }
             return touchedAny;
         }

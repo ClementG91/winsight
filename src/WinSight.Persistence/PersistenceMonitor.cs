@@ -13,6 +13,9 @@ public enum PersistenceMonitorOperation
     Notification,
     BaselineSave,
     SourceShutdown,
+
+    /// <summary>The change source could not be armed, so live monitoring never started.</summary>
+    WatcherArming,
 }
 
 /// <summary>One contained failure, kept whole so it can be diagnosed.</summary>
@@ -259,9 +262,13 @@ public sealed class PersistenceMonitor : IDisposable
                         _started = true;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
                     _source.SurfaceChanged -= OnSurfaceChanged;
+                    if (!IsCatastrophic(ex))
+                    {
+                        RecordFault(PersistenceMonitorOperation.WatcherArming, ex);
+                    }
                     throw;
                 }
             }

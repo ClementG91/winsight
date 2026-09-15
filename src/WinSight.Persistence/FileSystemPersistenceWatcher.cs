@@ -107,11 +107,42 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
             // TryCreate would let an event fire on a thread-pool thread while this loop is still
             // writing _targetByWatcher, and a Dictionary read racing a write can throw, return
             // garbage, or spin forever — silently killing the filesystem half of persistence
-            // monitoring, which is the worst failure mode a security tool has.
-            foreach (var watcher in _watchers)
+            // monitoring, which is the worst failure mode a security tool has. The map is not
+            // written again after this point, so a watch that fails to arm below leaves its entry.
+            foreach (var watcher in _watchers.ToArray())
             {
-                watcher.EnableRaisingEvents = true;
+                if (!TryEnable(watcher))
+                {
+                    _watchers.Remove(watcher);
+                    watcher.Dispose();
+                }
             }
+        }
+    }
+
+    /// <summary>
+    /// Arms one watch. False for a folder that exists but this user may not watch.
+    /// </summary>
+    /// <remarks>
+    /// <c>Directory.Exists</c> is true for <c>C:\Windows\System32\Tasks</c> without elevation, yet
+    /// arming it throws. That exception used to escape <see cref="Start"/>, fail Guardian's whole
+    /// start, and leave a standard user with no live persistence monitoring anywhere. One folder
+    /// this user may not watch is a coverage gap, reported as such through
+    /// <see cref="ArmedLocations"/>; the start-up reconciliation still covers it.
+    /// </remarks>
+    private static bool TryEnable(FileSystemWatcher watcher)
+    {
+        try
+        {
+            watcher.EnableRaisingEvents = true;
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or ArgumentException)
+        {
+            return false;
         }
     }
 

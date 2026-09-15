@@ -50,6 +50,33 @@ public sealed class Win32ProcessActionsTests
     }
 
     [Fact]
+    public void AResumedProcessRunsAgain()
+    {
+        // Outcomes alone are not enough: a suspend that raised each thread's suspend count twice
+        // reported Succeeded for both verbs while the process stayed frozen for good. `pause` exits on
+        // input only if its thread actually runs.
+        using var child = StartChild();
+        var controller = new Win32ProcessController();
+        try
+        {
+            Assert.True(controller.SuspendThreads(child.Id));
+            child.StandardInput.WriteLine();
+            Assert.False(child.WaitForExit(1000), "a suspended process consumed its input");
+
+            Assert.True(controller.ResumeThreads(child.Id));
+            Assert.True(child.WaitForExit(10_000), "the process is still frozen after resume");
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                controller.ResumeThreads(child.Id);
+                child.Kill();
+            }
+        }
+    }
+
+    [Fact]
     public void SuspendResumeTerminateDriveARealChildProcess()
     {
         using var child = StartChild();
