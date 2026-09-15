@@ -64,11 +64,30 @@ public static class AlertJournal
     /// <summary>Records a detection. Best-effort: never throws, whatever the target.</summary>
     public static void Append(SecurityAlert alert) => Append(alert, DefaultPath);
 
+    /// <summary>Appends and reports whether the alert was durably written.</summary>
+    /// <remarks>
+    /// The detection paths promise "journal first", and a failed write used to vanish without a
+    /// trace. Callers that can keep an alert pending (Guardian) use the result; every failure is
+    /// also counted in <see cref="WriteFailures"/> so the protection status can show it.
+    /// </remarks>
+    public static bool TryAppend(SecurityAlert alert) => TryAppend(alert, DefaultPath);
+
+    private static int _writeFailures;
+    private static Exception? _lastWriteFailure;
+
+    /// <summary>Journal writes that failed in this process.</summary>
+    public static int WriteFailures => Volatile.Read(ref _writeFailures);
+
+    /// <summary>The last write failure, kept whole for diagnosis.</summary>
+    public static Exception? LastWriteFailure => Volatile.Read(ref _lastWriteFailure);
+
     /// <summary>
     /// Overload taking the target path so tests never write into the real <see cref="DefaultPath"/> —
     /// a test must not leave entries in the operator's own journal.
     /// </summary>
-    internal static void Append(SecurityAlert alert, string path)
+    internal static void Append(SecurityAlert alert, string path) => _ = TryAppend(alert, path);
+
+    internal static bool TryAppend(SecurityAlert alert, string path)
     {
         ArgumentNullException.ThrowIfNull(alert);
         try
@@ -99,6 +118,7 @@ public static class AlertJournal
                 }
                 Trim(path);
             }
+            return true;
         }
         // Deliberately broad: this runs on a detection path, so a malformed path or an unwritable
         // target must never turn a real alert into an exception that takes the monitor down.
@@ -108,6 +128,9 @@ public static class AlertJournal
                                      or ArgumentException
                                      or NotSupportedException)
         {
+            Interlocked.Increment(ref _writeFailures);
+            Volatile.Write(ref _lastWriteFailure, ex);
+            return false;
         }
     }
 

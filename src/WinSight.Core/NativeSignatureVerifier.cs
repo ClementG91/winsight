@@ -26,6 +26,12 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
 
     public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
         IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
+        => VerifyMany(paths, UserInstalledRoots.ReadSnapshot(), cancellationToken);
+
+    internal IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
+        IReadOnlyCollection<string> paths,
+        UserInstalledRoots.RootSnapshot roots,
+        CancellationToken cancellationToken = default)
     {
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var deferToCatalog = new List<string>();
@@ -44,7 +50,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
         };
         var verified = new System.Collections.Concurrent.ConcurrentBag<(string Path, SignatureVerdict? Verdict)>();
-        Parallel.ForEach(paths, options, path => verified.Add((path, VerifyEmbedded(path))));
+        Parallel.ForEach(paths, options, path => verified.Add((path, VerifyEmbedded(path, roots))));
 
         // Reassembled in the caller's order so a scan's output does not vary run to run.
         var byPath = new Dictionary<string, SignatureVerdict?>(StringComparer.OrdinalIgnoreCase);
@@ -71,12 +77,26 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                 results[kv.Key] = kv.Value;
             }
         }
+
+        // Last: a member of a signed MSIX package has no individual signature. Only a package whose
+        // signature covers its block map, whose manifest names the signer, and whose block map
+        // matches this file's bytes can change "unsigned" (see PackageContentSignatureVerifier).
+        using var packages = new PackageContentSignatureVerifier.Batch();
+        foreach (var path in deferToCatalog)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (results.TryGetValue(path, out var verdict) && verdict.State == SignatureState.Unsigned
+                && PackageContentSignatureVerifier.Verify(path, roots, packages) is { } packaged)
+            {
+                results[path] = packaged;
+            }
+        }
         return results;
     }
 
     // Embedded-signature verdict, or null when the file has no embedded signature or
     // the native check could not run (both defer to the catalog fallback).
-    private static SignatureVerdict? VerifyEmbedded(string path)
+    private static SignatureVerdict? VerifyEmbedded(string path, UserInstalledRoots.RootSnapshot roots)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -100,25 +120,17 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                 SignatureState.SignedTrusted => new SignatureVerdict(
                     SignatureState.SignedTrusted,
                     SignerOf(path),
-                    // Asked only when the machine actually has a user-installed root, so a healthy
-                    // machine pays nothing for it. WinVerifyTrust consults CurrentUser\Root, which
-                    // any account writes without elevation; the verdict has to say when that is
-                    // where its trust came from.
-                    UserInstalledRoots.TrustsAUserInstalledRoot(path)
-                        ? SignatureTrustAnchor.UserInstalledRoot
-                        : SignatureTrustAnchor.MachineRoot,
+                    UserInstalledRoots.TrustAnchorFor(path, roots),
                     revocation),
                 SignatureState.SignedUntrusted => new SignatureVerdict(
                     SignatureState.SignedUntrusted,
                     SignerOf(path),
                     SignatureTrustAnchor.Unspecified,
                     revocation),
-                // No embedded signature. Before the catalog, ask whether this file belongs to an
-                // installed MSIX package: those are signed once as a package, so their executables
-                // carry no embedded signature and appear in no catalog. Without this the chain ran
-                // out of options and concluded "unsigned" for every Store application on the
-                // machine, Microsoft's own included.
-                _ => MsixPackageSignature.Verify(path), // null here still falls through to the catalog
+                // Package sidecars are not evidence of this file's signature or integrity. Only
+                // the embedded signature and verified local catalog membership determine this
+                // verdict. Package-only signatures need a separate, fully bound verifier.
+                _ => null,
             };
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)

@@ -24,5 +24,6 @@
     <ProjectReference Include="..\WinSight.Drivers\WinSight.Drivers.csproj" />
     <ProjectReference Include="..\WinSight.Hijack\WinSight.Hijack.csproj" />
     <ProjectReference Include="..\WinSight.Presence\WinSight.Presence.csproj" />
+    <ProjectReference Include="..\WinSight.Response\WinSight.Response.csproj" />
   </ItemGroup>
 </Project>

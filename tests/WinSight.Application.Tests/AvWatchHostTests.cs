@@ -1,4 +1,5 @@
 using WinSight.AvMonitor;
+using WinSight.Core;
 
 using Xunit;
 
@@ -137,26 +138,98 @@ public sealed class AvWatchHostTests
     /// adequate under the old model and meant a camera-watcher fault could take the whole dashboard
     /// down and every other monitor with it. On 2026-07-30 that crashed a CI test host mid-run.
     ///
-    /// The test cannot assert "the process did not die" directly, so it asserts the observable
-    /// consequence: after a subscriber throws, the host is still disposable and a second start is
-    /// still refused, meaning the exception was contained rather than propagated out of the thread.
+    /// A real activation must reach the throwing subscriber; an empty reader never exercised
+    /// this fault. The failure is contained per handler: the other handler still receives the event,
+    /// the watch keeps polling (a second activation still arrives), and the fault is visible as a
+    /// partial monitor. Stopping the whole watch for one faulty consumer blinded camera/microphone
+    /// monitoring for the rest of the session.
     /// </remarks>
     [Fact]
-    public void AThrowingSubscriberStopsTheWatcher_NotTheProcess()
+    public void AThrowingSubscriberIsContainedAndTheWatchContinues()
     {
-        using var polled = new ManualResetEventSlim();
-        var reader = new ThreadRecordingReader(polled.Set);
+        using var healthyReceivedTwo = new ManualResetEventSlim();
+        var later = InUse with { LastStart = SessionStart.AddMinutes(1) };
+        var reader = new ScriptedReader([Idle], [InUse], [Idle], [later]);
         var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(15)));
         host.Detected += (_, _) => throw new InvalidOperationException("a subscriber fault");
+        var healthy = 0;
+        host.Detected += (_, e) =>
+        {
+            if (e.Kind == AvEventKind.Activated && Interlocked.Increment(ref healthy) == 2)
+            {
+                healthyReceivedTwo.Set();
+            }
+        };
 
         host.Start();
 
-        Assert.True(polled.Wait(TimeSpan.FromSeconds(10)), "The poll loop never ran at all.");
-        // Reached at all only because the worker thread did not tear the test host down with it.
+        Assert.True(healthyReceivedTwo.Wait(TimeSpan.FromSeconds(10)), "The watch stopped after the subscriber fault.");
+        Assert.True(host.Status.IsRunning);
+        Assert.Null(host.Status.Failure);
+        Assert.True(host.Status.NotificationFailures >= 2);
+        Assert.IsType<InvalidOperationException>(host.Status.LastNotificationFailure);
+        Assert.Equal(ProtectionState.Partial, host.Health(enabled: true).State);
         host.Dispose();
         host.Dispose();
     }
 
+    [Fact]
+    public void AnUnexpectedReaderFaultIsVisibleThenRecoveredByABoundedRestart()
+    {
+        var reader = new FaultThenWorkReader(faults: 1);
+        using var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(10)),
+            [TimeSpan.FromMilliseconds(50)]);
+
+        host.Start();
+
+        Assert.True(WaitUntil(() => host.Status is { IsRunning: true, HasSnapshot: true, Restarts: 1 }));
+        Assert.Null(host.Status.Failure);
+        Assert.Equal(ProtectionState.Active, host.Health(enabled: true).State);
+    }
+
+    [Fact]
+    public void RestartsStopAfterTheBudgetAndStayFailed()
+    {
+        var reader = new FaultThenWorkReader(faults: int.MaxValue);
+        using var host = new AvWatchHost(new CameraMicMonitor(reader, TimeSpan.FromMilliseconds(10)),
+            [TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(20)]);
+
+        host.Start();
+
+        Assert.True(WaitUntil(() => host.Status.RestartsExhausted));
+        Thread.Sleep(150); // no further restarts
+        Assert.Equal(2, host.Status.Restarts);
+        Assert.Equal(3, reader.Calls);
+        Assert.Equal(ProtectionState.Failed, host.Health(enabled: true).State);
+    }
+
+    /// <summary>
+    /// Restarts are scheduled on a thread-pool timer, which parallel test classes can delay by seconds.
+    /// This is a hang detector: it sleeps rather than spins so it does not compete for the same cores.
+    /// </summary>
+    private static bool WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                return false;
+            }
+            Thread.Sleep(20);
+        }
+        return true;
+    }
+
+    private sealed class FaultThenWorkReader(int faults) : ICapabilityAccessReader
+    {
+        private int _calls;
+        public int Calls => Volatile.Read(ref _calls);
+        public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage() =>
+            Interlocked.Increment(ref _calls) <= faults
+                ? throw new InvalidOperationException("unexpected reader fault")
+                : new AcquisitionSnapshot<DeviceUsage>([]);
+    }
     [Fact]
     public void ADeviceAlreadyInUseAtStartupIsNotReportedAsNew()
     {
@@ -175,8 +248,11 @@ public sealed class AvWatchHostTests
         Assert.False(raised.Wait(TimeSpan.FromMilliseconds(400)), "A pre-existing session was reported as new.");
     }
 
+    // Windows keeps LastUsedTimeStart fixed for the life of one capture session; a new value is a restart.
+    private static readonly DateTime SessionStart = DateTime.UtcNow.AddMinutes(-1);
+
     private static DeviceUsage InUse => new(
-        DeviceKind.Microphone, @"C:\apps\recorder.exe", Packaged: false, LastStart: DateTime.UtcNow,
+        DeviceKind.Microphone, @"C:\apps\recorder.exe", Packaged: false, LastStart: SessionStart,
         LastStop: null, Active: true);
 
     private static DeviceUsage Idle => InUse with { Active = false, LastStop = DateTime.UtcNow };
@@ -189,11 +265,11 @@ public sealed class AvWatchHostTests
     {
         private int _index;
 
-        public IReadOnlyList<DeviceUsage> Read()
+        public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage()
         {
             var current = snapshots[Math.Min(_index, snapshots.Length - 1)];
             _index++;
-            return current;
+            return new AcquisitionSnapshot<DeviceUsage>(current);
         }
     }
 
@@ -202,13 +278,13 @@ public sealed class AvWatchHostTests
     {
         private int _reads;
 
-        public IReadOnlyList<DeviceUsage> Read()
+        public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage()
         {
             if (Interlocked.Increment(ref _reads) == 1)
             {
                 onFirstRead();
             }
-            return [];
+            return new AcquisitionSnapshot<DeviceUsage>([]);
         }
     }
 }

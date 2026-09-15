@@ -112,6 +112,7 @@ public sealed class LocalizationTests
         "InfoSeverity",
         "RansomwareProtectionShort",
         "SensorMicrophone",
+        "SignatureStateLabel", // "Signature" is the same word in French
     };
 
     /// <summary>
@@ -121,6 +122,60 @@ public sealed class LocalizationTests
     /// translation must be removed from the list, which keeps the list from becoming a dumping
     /// ground.
     /// </summary>
+    /// <summary>
+    /// A translation must keep exactly the format placeholders of the English string.
+    /// </summary>
+    /// <remarks>
+    /// A translated string that drops or adds a <c>{n}</c> does not fail at build time; it throws
+    /// <see cref="FormatException"/> the first time a French or Spanish user reaches that message - a
+    /// crash in, for example, the confirmation that tells them how to undo a Block. This turns that
+    /// runtime crash into a failing test.
+    /// </remarks>
+    [Theory]
+    [InlineData("fr")]
+    [InlineData("es")]
+    public void SatelliteResource_KeepsEveryFormatPlaceholder(string cultureName)
+    {
+        var resources = new ResourceManager(
+            "WinSight.Dashboard.Localization.Strings",
+            typeof(LocalizationManager).Assembly);
+        var neutral = resources.GetResourceSet(CultureInfo.InvariantCulture, true, false);
+        var localized = resources.GetResourceSet(CultureInfo.GetCultureInfo(cultureName), true, false);
+        Assert.NotNull(neutral);
+        Assert.NotNull(localized);
+
+        var mismatched = new List<string>();
+        foreach (DictionaryEntry entry in neutral)
+        {
+            var key = (string)entry.Key;
+            if (entry.Value is not string english || localized.GetString(key) is not { } translated)
+            {
+                continue;
+            }
+            if (!Placeholders(english).SetEquals(Placeholders(translated)))
+            {
+                mismatched.Add(key);
+            }
+        }
+
+        Assert.True(
+            mismatched.Count == 0,
+            $"These {cultureName} strings do not keep the English format placeholders: {string.Join(", ", mismatched)}");
+    }
+
+    /// <summary>Guards the parser: one that matched nothing would make the parity test pass for anything.</summary>
+    [Fact]
+    public void PlaceholderParsing_RecognisesIndexedAndFormattedItemsButNotEscapedBraces()
+    {
+        Assert.Equal(["0", "1", "2"], Placeholders("a {0} b {1:N0} c {2,-8} d {{3}}").Order());
+        Assert.Contains("0", Placeholders(LocalizationManager.Instance.GetOrFallback("AlertBlocked", string.Empty)));
+    }
+
+    private static HashSet<string> Placeholders(string text) =>
+        [.. System.Text.RegularExpressions.Regex
+            .Matches(text, @"(?<!\{)\{(\d+)(?:[,:][^{}]*)?\}(?!\})")
+            .Select(match => match.Groups[1].Value)];
+
     [Theory]
     [InlineData("fr")]
     [InlineData("es")]

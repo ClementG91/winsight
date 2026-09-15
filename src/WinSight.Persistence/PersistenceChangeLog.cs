@@ -35,6 +35,7 @@ public sealed record PersistenceEvent(
 ///
 /// <b>It never drops silently.</b> A refused arrival increments <see cref="DroppedChanges"/> so the
 /// UI can say "and more were not recorded" instead of showing a truncated list that looks complete.
+/// Capacity limits this list only: the monitor reports every arrival whether or not it was listed.
 /// A security tool that hides its own blind spot is worse than one without the feature.
 /// </remarks>
 public sealed class PersistenceChangeLog
@@ -58,6 +59,16 @@ public sealed class PersistenceChangeLog
     /// observation or when the log is full.
     /// </summary>
     public PersistenceEvent? Observe(AutostartEntry entry, DateTimeOffset seenUtc)
+        => Observe(entry, seenUtc, newArrival: false);
+
+    /// <summary>
+    /// Records an arrival confirmed by the current-state diff. A previous pending event for the
+    /// same identity belongs to an earlier appearance and must not suppress this notification.
+    /// </summary>
+    internal PersistenceEvent? RecordArrival(AutostartEntry entry, DateTimeOffset seenUtc)
+        => Observe(entry, seenUtc, newArrival: true);
+
+    private PersistenceEvent? Observe(AutostartEntry entry, DateTimeOffset seenUtc, bool newArrival)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var id = PersistenceIdentity.FromEntry(entry);
@@ -65,6 +76,12 @@ public sealed class PersistenceChangeLog
         {
             if (_events.TryGetValue(id, out var existing))
             {
+                if (newArrival)
+                {
+                    var arrival = new PersistenceEvent(id, entry, seenUtc, seenUtc, Observations: 1);
+                    _events[id] = arrival;
+                    return arrival;
+                }
                 _events[id] = existing with
                 {
                     Entry = entry,

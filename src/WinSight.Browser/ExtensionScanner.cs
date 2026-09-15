@@ -162,9 +162,14 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
                 return null;
             }
             var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
 
             var name = ResolveName(root, versionDir, id);
-            var version = root.TryGetProperty("version", out var v) ? v.GetString() : null;
+            // Display fields only. A mistyped label must not cost the permission evidence below.
+            var version = DisplayString(root, "version");
             var permissions = ReadStringArray(root, "permissions")
                 .Concat(ReadStringArray(root, "optional_permissions")).Distinct().ToList();
             var hosts = ReadStringArray(root, "host_permissions")
@@ -182,7 +187,7 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
     // messages.json when present, else fall back to the raw value or the id.
     private static string ResolveName(JsonElement manifest, string versionDir, string id)
     {
-        var raw = manifest.TryGetProperty("name", out var n) ? n.GetString() : null;
+        var raw = DisplayString(manifest, "name");
         if (string.IsNullOrEmpty(raw))
         {
             return id;
@@ -192,8 +197,12 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
             return raw;
         }
 
+        if (raw.Length <= "__MSG_".Length + 2)
+        {
+            return raw;
+        }
         var key = raw.Substring("__MSG_".Length, raw.Length - "__MSG_".Length - 2);
-        var locale = manifest.TryGetProperty("default_locale", out var dl) ? dl.GetString() : null;
+        var locale = DisplayString(manifest, "default_locale");
         if (string.IsNullOrEmpty(locale))
         {
             return raw;
@@ -215,16 +224,16 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
                 return raw;
             }
             using var doc = ParseJson(messages);
-            if (doc is null)
+            if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Object)
             {
                 return raw;
             }
             foreach (var prop in doc.RootElement.EnumerateObject())
             {
-                if (string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase) &&
-                    prop.Value.TryGetProperty("message", out var msg))
+                if (string.Equals(prop.Name, key, StringComparison.OrdinalIgnoreCase)
+                    && prop.Value.ValueKind == JsonValueKind.Object)
                 {
-                    return msg.GetString() ?? raw;
+                    return ReadOptionalString(prop.Value, "message") ?? raw;
                 }
             }
         }
@@ -235,18 +244,41 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         return raw;
     }
 
+    // Lenient read for a label: absent, null or mistyped all mean "no usable value".
+    private static string? DisplayString(JsonElement obj, string property) =>
+        obj.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+    private static string? ReadOptionalString(JsonElement obj, string property)
+    {
+        if (!obj.TryGetProperty(property, out var value) || value.ValueKind == JsonValueKind.Null)
+        {
+            return null;
+        }
+        return value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : throw new JsonException("An extension string field has an invalid type.");
+    }
+
     private static List<string> ReadStringArray(JsonElement obj, string property)
     {
         var list = new List<string>();
-        if (obj.TryGetProperty(property, out var arr) && arr.ValueKind == JsonValueKind.Array)
+        if (!obj.TryGetProperty(property, out var arr))
         {
-            foreach (var e in arr.EnumerateArray())
+            return list;
+        }
+        if (arr.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("An extension permission field is not an array.");
+        }
+        foreach (var element in arr.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String)
             {
-                if (e.ValueKind == JsonValueKind.String && e.GetString() is { } s)
-                {
-                    list.Add(s);
-                }
+                throw new JsonException("An extension permission is not a string.");
             }
+            list.Add(element.GetString()!);
         }
         return list;
     }

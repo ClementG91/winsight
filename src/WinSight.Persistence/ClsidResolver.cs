@@ -22,6 +22,11 @@ namespace WinSight.Persistence;
 /// out-of-process one, or by <c>TreatAs</c>, which hands the class over to a different CLSID
 /// entirely. Following that redirection is what makes a <c>TreatAs</c> entry resolve to a real file
 /// instead of reading as "no resolvable image".
+///
+/// <b>A denied read is neither an answer nor a reason to abort the surface.</b> A denied HKCU
+/// override must not fall through to a machine DLL, and letting the exception escape made one
+/// protected CLSID end the enumeration of every later credential provider, BHO or scheduled task.
+/// <see cref="TryResolveInprocServer"/> reports the gap so the enumerator counts it and continues.
 /// </remarks>
 internal static class ClsidResolver
 {
@@ -32,10 +37,38 @@ internal static class ClsidResolver
     // there so a loop crafted in the registry cannot spin a scan forever.
     private const int MaxTreatAsDepth = 4;
 
-    public static string? ResolveInprocServer(string clsid, RegistryView view) =>
-        Resolve(clsid, view, depth: 0);
+    internal delegate string? RegistryDefaultValueReader(
+        RegistryHive hive, RegistryView view, string clsid, string subKey);
 
-    private static string? Resolve(string clsid, RegistryView view, int depth)
+    /// <summary>
+    /// Resolved server path, or null when the class names no server. A denied read throws, so a
+    /// caller that already counts registry failures around this call keeps doing so.
+    /// </summary>
+    public static string? ResolveInprocServer(string clsid, RegistryView view) =>
+        Resolve(clsid, view, depth: 0, Read);
+
+    /// <summary>
+    /// False when a registry read needed for the answer was denied; <paramref name="path"/> is then
+    /// null and must be treated as an unreadable location, not as an unregistered class.
+    /// </summary>
+    internal static bool TryResolveInprocServer(
+        string clsid, RegistryView view, out string? path, RegistryDefaultValueReader? read = null)
+    {
+        try
+        {
+            path = Resolve(clsid, view, depth: 0, read ?? Read);
+            return true;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or IOException)
+        {
+            path = null;
+            return false;
+        }
+    }
+
+    private static string? Resolve(string clsid, RegistryView view, int depth, RegistryDefaultValueReader read)
     {
         if (depth > MaxTreatAsDepth || string.IsNullOrWhiteSpace(clsid))
         {
@@ -47,15 +80,15 @@ internal static class ClsidResolver
         {
             foreach (var server in ServerKeys)
             {
-                if (Read(hive, view, clsid, server) is { } path)
+                if (read(hive, view, clsid, server) is { } path)
                 {
                     return path;
                 }
             }
-            if (Read(hive, view, clsid, "TreatAs") is { } redirect
+            if (read(hive, view, clsid, "TreatAs") is { } redirect
                 && !redirect.Equals(clsid, StringComparison.OrdinalIgnoreCase))
             {
-                return Resolve(redirect, view, depth + 1);
+                return Resolve(redirect, view, depth + 1, read);
             }
         }
         return null;
@@ -63,17 +96,8 @@ internal static class ClsidResolver
 
     private static string? Read(RegistryHive hive, RegistryView view, string clsid, string subKey)
     {
-        try
-        {
-            using var baseKey = RegistryKey.OpenBaseKey(hive, view);
-            using var key = baseKey.OpenSubKey($@"SOFTWARE\Classes\CLSID\{clsid}\{subKey}");
-            return key?.GetValue(null) is string value && value.Trim().Length > 0 ? value : null;
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or IOException)
-        {
-            return null;
-        }
+        using var baseKey = RegistryKey.OpenBaseKey(hive, view);
+        using var key = baseKey.OpenSubKey($@"SOFTWARE\Classes\CLSID\{clsid}\{subKey}");
+        return key?.GetValue(null) is string value && value.Trim().Length > 0 ? value : null;
     }
 }

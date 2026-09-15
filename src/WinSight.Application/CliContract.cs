@@ -1,3 +1,5 @@
+using WinSight.Reporting;
+
 namespace WinSight.Application;
 
 /// <summary>
@@ -40,7 +42,27 @@ public static class CliContract
     private static readonly HashSet<string> GlobalOptions = new(StringComparer.OrdinalIgnoreCase)
     {
         "--json", "--flagged", "--watch", "--help", "-h", "--version", "--no-network",
+        "--unsigned", "--nonmicrosoft", "--confirm",
     };
+
+    /// <summary>
+    /// The signature view-filter tokens present in the arguments (#unsigned, #nonMicrosoft), in a
+    /// fixed order. Empty when none is asked for, which leaves the report unchanged.
+    /// </summary>
+    public static IReadOnlyList<ReportFilterToken> ViewFilterTokens(IReadOnlyList<string> args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        var tokens = new List<ReportFilterToken>();
+        if (HasOption(args, "--unsigned"))
+        {
+            tokens.Add(ReportFilterToken.Unsigned);
+        }
+        if (HasOption(args, "--nonmicrosoft"))
+        {
+            tokens.Add(ReportFilterToken.NonMicrosoft);
+        }
+        return tokens;
+    }
 
     /// <summary>
     /// Whether an option is present, using the same case-insensitive contract as validation.
@@ -78,7 +100,7 @@ public static class CliContract
     /// </summary>
     private static readonly HashSet<string> WatchableVerbs = new(StringComparer.OrdinalIgnoreCase)
     {
-        "av", "avmonitor", "attribution", "dns",
+        "av", "avmonitor", "attribution", "dns", "input",
     };
 
     /// <summary>

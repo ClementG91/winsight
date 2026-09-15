@@ -22,6 +22,12 @@ public interface IScheduledTaskSource
 
     /// <summary>True when the source could not be read at all, so an empty result is not "no tasks".</summary>
     bool Unreadable { get; }
+
+    /// <summary>
+    /// Task folders (e.g. <c>\Microsoft\Windows\Foo</c>) holding every skipped task when
+    /// <see cref="Unreadable"/> is true; null when some gap cannot be attributed to a folder.
+    /// </summary>
+    IReadOnlyCollection<string>? UnreadableFolders => null;
 }
 
 /// <summary>
@@ -51,12 +57,16 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
     private const int IncludeHidden = 1;
 
     private bool _unreadable;
+    private List<string>? _unreadableFolders = [];
 
     public bool Unreadable => _unreadable;
+
+    public IReadOnlyCollection<string>? UnreadableFolders => _unreadableFolders;
 
     public IEnumerable<ScheduledTaskDefinition> Enumerate()
     {
         _unreadable = false;
+        _unreadableFolders = [];
         object? service = null;
         try
         {
@@ -65,6 +75,7 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
             if (service is null)
             {
                 _unreadable = true;
+                _unreadableFolders = null;
                 return [];
             }
             Invoke(service, "Connect", Type.Missing, Type.Missing, Type.Missing, Type.Missing);
@@ -72,12 +83,20 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
             if (root is null)
             {
                 _unreadable = true;
+                _unreadableFolders = null;
                 return [];
             }
             var collected = new List<ScheduledTaskDefinition>();
             try
             {
-                Collect(root, collected, depth: 0);
+                // Skipped tasks and folders make the list incomplete. Guardian must not read an
+                // unopened folder as proof that its tasks were removed.
+                var gaps = new List<string>();
+                if (!Collect(root, collected, depth: 0, gaps))
+                {
+                    _unreadable = true;
+                    _unreadableFolders = gaps.Contains(UnattributedFolder) ? null : gaps;
+                }
             }
             finally
             {
@@ -90,6 +109,7 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
             // The Task Scheduler service can be stopped or restricted. An empty list is then not a
             // finding about the machine, and saying so is the whole point of this flag.
             _unreadable = true;
+            _unreadableFolders = null;
             return [];
         }
         finally
@@ -134,12 +154,19 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
     /// <summary>Folders nest, and a cycle or a pathological tree must not become a stack overflow.</summary>
     private const int MaxDepth = 32;
 
-    private static void Collect(object folder, List<ScheduledTaskDefinition> into, int depth)
+    /// <summary>Recorded in the gap list when a skipped part has no readable folder path.</summary>
+    internal const string UnattributedFolder = "\u0000unattributed";
+
+    /// <returns>False when any task or folder below <paramref name="folder"/> was skipped.</returns>
+    internal static bool Collect(
+        object folder, List<ScheduledTaskDefinition> into, int depth, List<string>? gaps = null)
     {
         if (depth > MaxDepth)
         {
-            return;
+            gaps?.Add(FolderPath(folder));
+            return false;
         }
+        var complete = true;
 
         var tasks = Invoke(folder, "GetTasks", IncludeHidden);
         try
@@ -156,10 +183,17 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
                         {
                             into.Add(new ScheduledTaskDefinition(path, xml));
                         }
+                        else
+                        {
+                            complete = false;
+                            gaps?.Add(FolderPath(folder));
+                        }
                     }
                     catch (Exception ex) when (IsRecoverable(ex))
                     {
-                        // One unreadable task must not cost the other 194.
+                        // One unreadable task must not cost the other 194, but it is still a gap.
+                        complete = false;
+                        gaps?.Add(FolderPath(folder));
                     }
                     finally
                     {
@@ -182,11 +216,13 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
                 {
                     try
                     {
-                        Collect(child, into, depth + 1);
+                        complete &= Collect(child, into, depth + 1, gaps);
                     }
                     catch (Exception ex) when (IsRecoverable(ex))
                     {
                         // Likewise: a folder we cannot open is not a reason to abandon the rest.
+                        complete = false;
+                        gaps?.Add(FolderPath(child));
                     }
                     finally
                     {
@@ -198,6 +234,20 @@ public sealed class ComScheduledTaskSource : IScheduledTaskSource
         finally
         {
             Release(folders);
+        }
+        return complete;
+    }
+
+    /// <summary>A folder's task path, or the unattributed marker when even that cannot be read.</summary>
+    private static string FolderPath(object folder)
+    {
+        try
+        {
+            return Get(folder, "Path") is string { Length: > 0 } path ? path : UnattributedFolder;
+        }
+        catch (Exception ex) when (IsRecoverable(ex))
+        {
+            return UnattributedFolder;
         }
     }
 

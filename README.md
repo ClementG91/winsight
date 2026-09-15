@@ -28,11 +28,16 @@ It shows you what **persists** across reboots, what **watches** your camera and 
 **phones home**, and what could be **hijacked** - and it lets you block any application's outbound
 traffic at the kernel filtering layer.
 
-> **Everything observes and reports.** Nothing acts on its own, and nothing is modified. Two
-> features write to disk, and both say so here:
+> **Nothing acts on its own.** Every check observes and reports. The few things that change the
+> machine happen only when you choose them, are revalidated first, are recorded in an append-only
+> journal (`winsight actions`), and can be undone: blocking a startup item from a Guardian alert
+> (restorable with `winsight restore`), allowing one (revocable with `winsight revoke`), and
+> suspending, resuming or terminating a process (`--confirm` required). Beyond those, two features
+> write to disk, and both say so here:
 >
-> - **Ransomware protection** creates its decoy files. It stays off until you turn it on, removes
->   them when you turn it off, and sweeps any left by a previous run at startup. The decoys are
+> - **Ransomware protection** creates its decoy files. It stays off until you turn it on. Cleanup
+>   removes only files whose recorded identity and original content still match; modified,
+>   replaced or unverifiable legacy files are preserved. The decoys are
 >   ordinary visible files in Documents, Desktop, Pictures, Downloads, Videos and Music - they are
 >   not hidden, because a good many ransomware families skip hidden files and a decoy that is
 >   skipped is not a decoy.
@@ -53,11 +58,11 @@ traffic at the kernel filtering layer.
 |---|---|---|
 | **Persistence scanner** | KnockKnock | 27 autostart surfaces, catalog-aware Authenticode verdicts, command-line triage for signed interpreters handed someone else's payload, optional VirusTotal enrichment |
 | **Outbound firewall** | LuLu | Per-application block/allow enforced through the Windows Filtering Platform; audit-only until you arm it |
-| **Guardian** | BlockBlock | Live tray alert the moment a new startup item appears, plus reconciliation of what changed while WinSight was not running |
+| **Guardian** | BlockBlock | A decision window the moment a new startup item appears - Allow, Block (quarantined, restorable) or decide later - plus reconciliation of what changed while WinSight was not running |
 | **Ransomware detection** | RansomWhere? | Visible machine-varied decoy files, rename/delete-burst and entropy-on-write heuristics |
-| **Camera & mic monitor** | OverSight | Which process turned the webcam or microphone on |
+| **Camera & mic monitor** | OverSight | Which application turned the webcam or microphone on, with per-store read coverage |
 | **Connections & DNS** | Netiquette, DNSMonitor | Live outbound connections and DNS queries, attributed to processes |
-| **Signature verification** | What's Your Sign? | Authenticode verdicts with catalog fallback, used by every tool |
+| **Signature verification** | What's Your Sign? | Authenticode, catalog and verified MSIX package verdicts, used by every tool - and for any file from File Explorer's "Check signature with WinSight" (an out-of-process window: verdict, signer, trust caveats, MD5/SHA-1/SHA-256) or `winsight sign` |
 | **Hijack scan** | DHS | Unquoted service paths, writable service directories and PATH entries, and phantom DLL imports - each graded by whether it is exploitable on *this* machine |
 
 Beyond the macOS originals: **write attribution** names the program behind a persistence or
@@ -76,7 +81,7 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
 
 - **Dashboard** - a WPF desktop and tray application, in **English, French and Spanish**. Every check
   explains what it observes and what an alert means.
-- **Command line** - 18 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
+- **Command line** - 27 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
   notable, so it drops straight into a scheduled task. `--json` emits a versioned envelope -
   `{ "schemaVersion": 1, "generatedAt": ..., "reports": [...] }` - so a stored report says when it
   was true and a consumer can tell which contract produced it:
@@ -86,9 +91,24 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   winsight firewall | processes | modules | extensions | certs | hosts
   winsight input | integrity | drivers | hijack
   winsight process <pid>                  one process: lineage, modules, connections
+  winsight sign <path>                    one file: Authenticode standing + identification hashes
+  winsight holders <path>                 which processes hold this file open
+  winsight actions                        response-action history (read-only), newest first
+  winsight [suspend|resume|terminate] <pid>  act on a process (needs --confirm)
+  winsight rules                          allow rules in force (read-only)
+  winsight [restore|revoke] <id>          undo a block or an allow (needs --confirm)
   winsight presence                       when this machine woke, and whether anyone was there
-  winsight av --watch | dns --watch | attribution --watch
+  winsight av --watch | dns --watch | attribution --watch | input --watch
   ```
+
+  The commands that change anything are the process actions and the two undo verbs. Each does
+  nothing without `--confirm`, and every change is recorded in an append-only journal readable with
+  `winsight actions`. A process action revalidates that the target is still the same process and
+  refuses protected and WinSight processes; a restore refuses if something else now occupies the
+  item's original location.
+
+  `--unsigned` and `--nonmicrosoft` narrow any scan to unsigned/untrusted items, or to items not
+  signed by Microsoft; they stack with each other and with `--flagged`.
 - **MCP server** - `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. Six
   tools, three resources and two guided prompts; no network listener. See
   [`docs/MCP.md`](docs/MCP.md).
@@ -184,7 +204,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | **Published v0.12.0 is production-ready under the documented unsigned policy.** Candidate `dbaded1` passed the complete native VM security campaign; the published artifacts separately passed checksum, attestation, architecture and installer-smoke verification |
+| **x64** | **Current production readiness is not established.** The September security audit found defects outside the historical qualification scenarios. The corrected candidate needs fresh CI and isolated VM qualification; Authenticode remains excluded from this verdict |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 > **CodeQL runs through GitHub's default setup, not a workflow in this repository.** The run IDs
@@ -197,15 +217,15 @@ each run bound to the commit and CI run that built it:
 | Gate | Result | Record |
 |---|---|---|
 | Published v0.12.0 downloads, supply chain, x64 install/MCP/EN-FR-ES smoke and cleanup | PASS | [record](docs/validation/2026-09-01-v0.12.0-published-release.md) |
-| Current v0.12.0 x64 installer, ETW, WFP/SCM, trust, local/Network IPC and cleanup | PASS | [record](docs/validation/2026-09-01-x64-qualification-dbaded1.md) |
+| Historical v0.12.0 x64 installer, ETW, WFP/SCM, trust, local/Network IPC and cleanup | PASS | [record](docs/validation/2026-09-01-x64-qualification-dbaded1.md) |
 | WFP enforcement, SCM, rollback, per-app scoping | 25 checks, 0 failures | [record](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md) |
 | Service-path trust, adversarial TOCTOU | 11 checks, 0 failures | [record](docs/validation/2026-07-23-trust-boundary-f84ac36.md) |
 | Multi-user IPC capability boundary | 7 checks, 0 failures | [record](docs/validation/2026-07-23-ipc-boundary-c9177cd.md) |
 | Historical v0.11.6 x64 ETW, WFP/SCM, trust, local/Network IPC, installer and cleanup | 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | [record](docs/validation/2026-08-23-x64-qualification-8486155.md) |
 | Exact dashboard settings layout, posture interpretation, installer and EN/FR/ES smoke | PASS | [record](docs/validation/2026-08-25-ui-windows-posture-3912d67.md) |
 
-Each record qualifies its exact binaries. The two 2026-09-01 records jointly qualify the published
-v0.12.0 x64 release and its native privileged-runtime baseline. The 2026-08-23 campaign closed the
+Each record covers its named checks on its exact binaries; none covers the defects identified in
+the September audit or qualifies the corrected working tree. The 2026-08-23 campaign closed the
 former IPC-path, Network Logon and host-control gaps; the 2026-08-25 record
 qualifies only the changed dashboard/package surface and does not pretend to rerun those privileged
 gates. Native Arm64 privileged gates, x64-on-Arm64 identity and independent EN/FR/ES review remain
@@ -229,7 +249,7 @@ The authoritative statement, with every limitation named:
 | Contributing code | [CODING_STANDARDS.md](docs/CODING_STANDARDS.md) |
 | Releasing and verifying | [RELEASE.md](docs/RELEASE.md) |
 | Evidence | [validation/](docs/validation/README.md) |
-| Where it is going | [ROADMAP.md](docs/ROADMAP.md) |
+| Where it is going | [ROADMAP.md](docs/ROADMAP.md), [OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md](docs/OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md) |
 
 ## Build from source
 

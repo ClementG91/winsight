@@ -1,5 +1,96 @@
-## Unreleased
+## 0.13.0 - 2026-09-15
 
+- Guardian alerts are now decisions (BlockBlock parity). A new startup item opens a keyboard-safe
+  window - Allow, Block or Decide later, where Enter and Escape both mean "decide later" - and a burst
+  keeps the coalesced balloon. Block revalidates the item against the alert, quarantines it (a registry
+  value keeps its kind; a file keeps its bytes) and removes it; its confirmation shows the exact
+  `winsight restore <id> --confirm` that puts it back, which refuses if something else now occupies
+  the origin. Allow stores a journalled rule that silences the item; `winsight rules` lists them and
+  `winsight revoke <id> --confirm` removes one. Block covers HKCU Run/RunOnce values and the current
+  user's Startup files; machine-wide items offer Allow only until the service response tier ships.
+- Operator-confirmed process response on the command line: `winsight holders <path>` names the
+  processes holding a file open (Restart Manager, unelevated), and
+  `winsight suspend|resume|terminate <pid> --confirm` act on one after revalidating that it is still
+  the same process, refusing protected and WinSight processes. `winsight actions` shows the
+  append-only history of every response, including what was undone. Nothing changes without
+  `--confirm`, and the MCP server can reach none of it.
+- File Explorer's "Check signature with WinSight" opens a dedicated signature window - verdict, signer,
+  revocation and user-installed-root caveats, copyable MD5/SHA-1/SHA-256 - that uses the same verifier
+  as the new `winsight sign <path> [--json]`, and exits without leaving a dashboard or tray icon behind.
+  `register-signature-verb` / `unregister-signature-verb` add and remove the per-user verb; the path is
+  validated as an ordinary local file, so a UNC or device path is refused, never opened.
+- Camera/microphone watching is event-driven: a consent-store change wakes the watch at once, with the
+  poll kept as a fallback, and `winsight av --watch` names the process behind each activation (packaged
+  apps are reported as unsupported rather than guessed).
+- `winsight input --watch` reports a keyboard or mouse class filter the moment it is installed or
+  removed (ReiKey parity), instead of only on the next scan.
+- `--unsigned` and `--nonmicrosoft` narrow any scan to unsigned/untrusted items, or to items not signed
+  by Microsoft; they stack with each other and with `--flagged`.
+- The response rule store refuses durations it cannot honour ("until reboot", "until process exit")
+  instead of keeping them forever, and never throws on an unusable store: a monitor that cannot read its
+  rules alerts rather than suppressing.
+- The command line documents 27 verbs.
+- New `WinSight.Response` engine library behind the actions above: it revalidates a captured process
+  identity `(pid, start time, image path, hash)` before acting, refuses protected and WinSight
+  processes, keeps a per-user rule store and an append-only action journal, and quarantines removed
+  items with hash-verified restore. The MCP server has no action primitive and does not reference this
+  library (enforced by a contract test).
+
+- Signature trust no longer accepts certificates from a neighboring `AppxSignature.p7x` as proof
+  that an executable is signed. Members of MSIX packages are instead verified through the Windows
+  packaging API: signed block map, code-signing signer chained at its verified timestamp, manifest
+  publisher equal to the signer, and the file's own block-map hash. Tampered members are reported
+  signed-untrusted; files outside the block map are unaffected.
+- Guardian contains notification, scan and baseline-save failures on its timer threads instead of
+  ending the process, records them in `Diagnostics`, retries on a bounded schedule without
+  acknowledging undelivered arrivals, and no longer holds `Dispose` on an acquisition that ignores
+  cancellation. WMI subscription queries time out; a denied IFEO key no longer aborts the IFEO
+  enumeration; partly unreadable sources confirm removals outside their attributed unreadable scopes.
+- A subscriber that throws no longer stops or ends the ransomware watcher (it previously ended the
+  drain loop silently, or the process) nor latches its burst detector; the camera/microphone watch
+  keeps polling after a subscriber fault and restarts itself (5 s, 30 s, 120 s) after an unexpected
+  reader failure; Guardian's registry and file-system watchers contain subscriber faults, and one key
+  that cannot be armed no longer fails Guardian's start. Failures are counted and shown as partial.
+- The alert journal reports failed writes: they are counted and shown in protection health, and a
+  Guardian arrival whose journal entry failed stays unacknowledged. Detection handlers no longer wait
+  synchronously for the UI thread.
+- The decoy seed is created atomically (first writer wins; a torn seed is replaced once), so
+  concurrent first use can no longer produce decoys that later cleanup does not recognise; the
+  ransomware protection setting is written atomically.
+- Guardian reports arrivals even after its 256-entry display log is full (they were previously absorbed
+  into the baseline without notification), shows pending alerts, unrecovered faults and unlisted
+  arrivals in the protection tooltip, and offers "Retry Guardian" in the tray menu when retries stopped.
+- Camera/microphone observations keep their consent store (HKCU/HKLM) and gaps are attributed by
+  scope, so a stop observed in one store is not announced while the app may still capture in another.
+- Decoy manifest updates are serialized across processes, merged and written atomically; a sweep no
+  longer deletes a live session's decoys, and disposing an unstarted monitor no longer deletes the
+  manifest. A decoy that disappears after planting no longer counts toward armed coverage.
+- Signature batches refresh user/machine root-store snapshots and invalidate cached verdicts when
+  their trust configuration changes; unreadable stores no longer imply a machine trust anchor.
+- Guardian identities preserve source locations and argument case/whitespace. Confirmed removals
+  can re-arm arrival alerts, while scoped or incomplete scans preserve other sources' baselines.
+  The lossless v3 baseline format requires a one-time silent reseed of older baselines on upgrade.
+- Ransomware decoy cleanup verifies the original file identity and pristine content before deleting
+  through the same Windows handle. Modified/replaced files and legacy files without identity
+  evidence are preserved.
+- Camera/microphone monitoring reports worker failure and acquisition coverage instead of showing
+  an unconditional active state. Incomplete reads cannot establish device deactivation.
+- Malformed browser extension manifests are isolated and counted as unreadable; invalid localized
+  labels retain the available permission evidence instead of terminating the scan.
+- Hosts-file discovery uses Windows' system-folder API rather than inherited `SystemRoot`.
+  Hosts reads and dashboard file actions reject network paths, including mapped drives.
+- Guardian excludes an arrival from the saved baseline until its notification has been delivered,
+  cancels an in-flight scan on shutdown, and counts denied scheduled-task folders/definitions and
+  denied COM class registrations instead of treating them as absence or aborting the surface.
+  The dashboard reports a failed Guardian start as failed and refreshes protection health.
+- Camera/microphone monitoring reports a restart (a new capture start time), so carrying an earlier
+  active observation across a partial read can no longer hide that app's next activation.
+- The ransomware badge counts a directory as armed only when it is watched and holds its full decoy
+  set; manifest records for directories outside the current session are retained.
+- A mistyped extension name, locale or version no longer discards the extension's permissions.
+- The required CI gate now includes native packaging and installer checks. Readiness and
+  Objective-See comparison documents distinguish historical qualification from current validation
+  and describe the remaining response and detection gaps.
 - CLI options now use one case-insensitive contract from validation through execution, so spellings
   such as `--NO-NETWORK`, `--JSON`, `--WATCH` and `--VERSION` can no longer be accepted and then
   ignored.
@@ -9,8 +100,6 @@
 - Dashboard overview results are immutable point-in-time snapshots rather than a mix of category
   scans from different times. Cached results show their capture time, and a failed or cancelled
   refresh clears the affected view instead of presenting old rows beneath a new failure message.
-
-## 0.12.1 - 2026-09-01
 
 - Dashboard results are now cached independently by analysis and filter mode. Running a specialized
   check no longer discards overview results.

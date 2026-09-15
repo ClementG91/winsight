@@ -40,6 +40,23 @@ public interface IAutostartEnumerator
     /// are not the same statement. Counting turns the second into something the report can say.
     /// </remarks>
     int UnreadableLocations => 0;
+
+    /// <summary>
+    /// Whether a successful enumeration with zero unreadable locations proves absence. Opt in
+    /// only when every skipped read is counted; an unknown result must not erase Guardian state.
+    /// </summary>
+    bool CanConfirmAbsence => false;
+
+    /// <summary>
+    /// Location prefixes, spelled as <see cref="RawAutostart.Location"/> is, that cover every read
+    /// counted in <see cref="UnreadableLocations"/>; null when any failure cannot be attributed.
+    /// </summary>
+    /// <remarks>
+    /// Lets a partly readable source confirm absence where it did read: an identity outside every
+    /// scope was in readable territory. A source that cannot attribute a failure returns null and
+    /// keeps the conservative whole-source rule.
+    /// </remarks>
+    IReadOnlyCollection<string>? UnreadableScopes => null;
 }
 
 /// <summary>
@@ -48,6 +65,10 @@ public interface IAutostartEnumerator
 /// </summary>
 public sealed class RunKeyEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+    public int UnreadableLocations => _unreadable;
+    public bool CanConfirmAbsence => true;
+
     private static readonly string[] SubKeys =
     {
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
@@ -79,6 +100,7 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
         {
             foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
@@ -95,7 +117,7 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
         }
     }
 
-    private static IEnumerable<RawAutostart> ReadValues(
+    private IEnumerable<RawAutostart> ReadValues(
         RegistryKey baseKey, RegistryHive hive, RegistryView view, string sub)
     {
         RegistryKey? key;
@@ -105,6 +127,7 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
         {
+            _unreadable++;
             yield break;
         }
         if (key is null)
@@ -144,9 +167,16 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class ServiceEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+    public int UnreadableLocations => _unreadable;
+    public bool CanConfirmAbsence => true;
+
     private const string Root = @"SYSTEM\CurrentControlSet\Services";
+    private readonly List<string> _unreadableScopes = [];
 
     public string Surface => "Services & drivers";
+
+    public IReadOnlyCollection<string>? UnreadableScopes => _unreadableScopes;
 
     // Watch the whole Services subtree: a new service is a new subkey (Name) and a repurposed one
     // is a changed ImagePath/Start value (LastSet), both under this root.
@@ -158,6 +188,8 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
+        _unreadableScopes.Clear();
         using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64);
         using var services = baseKey.OpenSubKey(Root);
         if (services is null)
@@ -190,7 +222,8 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
-                // Skip service keys we cannot read.
+                _unreadable++;
+                _unreadableScopes.Add($"HKLM\\{Root}\\{name}");
             }
 
             foreach (var e in entries)
@@ -211,6 +244,8 @@ public sealed class ServiceEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class WinlogonEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon";
 
     /// <summary>
@@ -306,6 +341,8 @@ public sealed class WinlogonEnumerator : IAutostartEnumerator
 /// </remarks>
 public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null) : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private static readonly string TasksRoot =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "Tasks");
 
@@ -329,20 +366,37 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
     /// </remarks>
     public int UnreadableLocations => _unreadable;
 
+    private List<string>? _unreadableScopes = [];
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string>? UnreadableScopes => _unreadableScopes;
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         var tasks = _source.Enumerate().ToList();
         _unreadable = _source.Unreadable ? 1 : 0;
+        // Folders the service refused are scopes; a source that cannot name its gap is unattributed.
+        _unreadableScopes = !_source.Unreadable
+            ? []
+            : _source.UnreadableFolders is { } folders
+                ? [.. folders.Select(folder => Path.Combine(TasksRoot, folder.Trim('\\')))]
+                : null;
         foreach (var task in tasks)
         {
+            var location = Path.Combine(TasksRoot, task.Path.TrimStart('\\'));
             if (!TryParseTaskCommands(task.Xml, out var commands, out var unresolvedComHandlers))
             {
                 _unreadable++;
+                _unreadableScopes?.Add(location);
                 continue;
             }
             // A COM handler this scan could not resolve to a file is a task whose code it never
             // looked at. Counted rather than guessed at.
             _unreadable += unresolvedComHandlers;
+            if (unresolvedComHandlers > 0)
+            {
+                _unreadableScopes?.Add(location);
+            }
             foreach (var command in commands)
             {
                 yield return new RawAutostart(
@@ -446,9 +500,20 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
         {
             return string.Empty;
         }
-        return ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry64)
-            ?? ClsidResolver.ResolveInprocServer(clsid, RegistryView.Registry32)
-            ?? string.Empty;
+        // A denied class registration is an unresolved handler (counted by the caller), not a
+        // reason to abandon every task after it in the enumeration.
+        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        {
+            if (!ClsidResolver.TryResolveInprocServer(clsid, view, out var path))
+            {
+                return string.Empty;
+            }
+            if (path is not null)
+            {
+                return path;
+            }
+        }
+        return string.Empty;
     }
 
     /// <summary>The <c>Arguments</c> value beside a given <c>Command</c>, or null when it has none.</summary>
@@ -473,6 +538,8 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
 /// </summary>
 public sealed class AppInitDllsEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
     private static readonly char[] Separators = [',', ' '];
 
@@ -512,6 +579,8 @@ public sealed class AppInitDllsEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class ActiveSetupEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Active Setup\Installed Components";
 
     public string Surface => "Active Setup";
@@ -553,6 +622,8 @@ public sealed class ActiveSetupEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class BootExecuteEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Control\Session Manager";
 
     public string Surface => "BootExecute";
@@ -610,6 +681,8 @@ public sealed class BootExecuteEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class AppCertDllsEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Control\Session Manager\AppCertDlls";
 
     public string Surface => "AppCertDLLs";
@@ -643,6 +716,8 @@ public sealed class AppCertDllsEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class TimeProviderEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Services\W32Time\TimeProviders";
 
     public string Surface => "Time providers";
@@ -680,6 +755,8 @@ public sealed class TimeProviderEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class ScreensaverEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Value = "SCRNSAVE.EXE";
     private static readonly string[] Paths =
     {
@@ -713,6 +790,10 @@ public sealed class ScreensaverEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class ComHijackEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+    public int UnreadableLocations => _unreadable;
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Classes\CLSID";
 
     public string Surface => "COM (HKCU CLSID)";
@@ -740,6 +821,7 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
     {
         // Both views: a 32-bit COM server registered under the WOW6432Node twin is loaded into
         // every 32-bit host that instantiates the class, and was previously invisible.
+        _unreadable = 0;
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
             using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view);
@@ -758,7 +840,7 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
         }
     }
 
-    private static List<RawAutostart> ServerEntries(RegistryKey root, string clsid, RegistryView view)
+    private List<RawAutostart> ServerEntries(RegistryKey root, string clsid, RegistryView view)
     {
         var entries = new List<RawAutostart>();
         foreach (var (key, _) in ServerKeys)
@@ -783,7 +865,7 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
-                // Unreadable CLSID key, skip.
+                _unreadable++;
             }
         }
         return entries;
@@ -796,6 +878,8 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class PrintMonitorEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Control\Print\Monitors";
 
     public string Surface => "Print monitors";
@@ -831,6 +915,8 @@ public sealed class PrintMonitorEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class NetshHelperEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\NetSh";
 
     public string Surface => "Netsh helpers";
@@ -871,6 +957,8 @@ public sealed class NetshHelperEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class LsaPackagesEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Control\Lsa";
     private static readonly string[] Values =
         { "Security Packages", "Authentication Packages", "Notification Packages" };
@@ -918,6 +1006,10 @@ public sealed class LsaPackagesEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+    public int UnreadableLocations => _unreadable;
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\SilentProcessExit";
 
     public string Surface => "SilentProcessExit monitors";
@@ -934,6 +1026,7 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
     /// </summary>
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
             using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
@@ -957,7 +1050,7 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
                 }
                 catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
                 {
-                    // Unreadable target key, skip.
+                    _unreadable++;
                 }
                 if (entry is { } e)
                 {
@@ -975,6 +1068,8 @@ public sealed class SilentProcessExitEnumerator : IAutostartEnumerator
 /// </summary>
 public sealed class ImageHijackEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options";
 
     // Per-executable Debugger / GlobalFlag hijacks live in subkeys under this root.
@@ -997,8 +1092,17 @@ public sealed class ImageHijackEnumerator : IAutostartEnumerator
     /// only the 64-bit view left a Debugger value that hijacks every 32-bit process on the machine
     /// completely invisible, on the surface whose whole purpose is to catch that.
     /// </remarks>
+    private int _unreadable;
+    private readonly List<string> _unreadableScopes = [];
+
+    public int UnreadableLocations => _unreadable;
+
+    public IReadOnlyCollection<string>? UnreadableScopes => _unreadableScopes;
+
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
+        _unreadableScopes.Clear();
         foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
         {
             using var baseKey = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
@@ -1009,12 +1113,25 @@ public sealed class ImageHijackEnumerator : IAutostartEnumerator
             }
             foreach (var target in root.GetSubKeyNames())
             {
-                using var sub = root.OpenSubKey(target);
-                if (sub?.GetValue("Debugger") is string debugger && debugger.Trim().Length > 0)
+                string? debugger = null;
+                try
+                {
+                    using var sub = root.OpenSubKey(target);
+                    debugger = sub?.GetValue("Debugger") as string;
+                }
+                catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+                {
+                    // One protected executable's options key used to end the whole enumeration, both
+                    // views included, hiding every Debugger hijack that sorted after it.
+                    _unreadable++;
+                    _unreadableScopes.Add($"HKLM\\{RegistryViews.Describe(Path, view)}\\{target}");
+                    continue;
+                }
+                if (debugger is { } value && value.Trim().Length > 0)
                 {
                     yield return new RawAutostart(
                         AutostartVector.ImageHijack, target,
-                        $"HKLM\\{RegistryViews.Describe(Path, view)}\\{target} [Debugger]", debugger);
+                        $"HKLM\\{RegistryViews.Describe(Path, view)}\\{target} [Debugger]", value);
                 }
             }
         }

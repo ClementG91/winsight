@@ -138,6 +138,23 @@ sc start WinSightFirewall
 
 Keep the `.bad` file - it is evidence if the corruption was not accidental.
 
+## Restore something Guardian quarantined
+
+A Guardian Block moves the entry to a per-user quarantine under
+`%LOCALAPPDATA%\WinSight\quarantine`. The Block confirmation shows the exact command that undoes it;
+if you no longer have it, find the block's id with `winsight actions` (the history is kept in
+`%LOCALAPPDATA%\WinSight\action-journal.jsonl`) and run `winsight restore <id> --confirm`.
+
+To be alerted again about an item you allowed, list the rules with `winsight rules` and run
+`winsight revoke <id> --confirm`. An allowed item is never hidden: its arrivals still appear in
+`winsight alerts` as "not announced", naming the rule.
+
+Restore rewrites the original
+registry value (with its kind) or startup file **only if that location is still free**; if something
+else has taken the name, WinSight leaves the new occupant alone and reports the conflict, so restoring
+never overwrites a legitimate replacement. A quarantined payload is stored under the user's own DACL;
+deleting the quarantine directory discards the ability to restore.
+
 ## Full removal
 
 ```powershell

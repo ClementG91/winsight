@@ -37,4 +37,28 @@ public sealed class FindingActionsTests
 
     private static ReportItem Item(IReadOnlyDictionary<string, string?> fields) =>
         new(Severity.Notable, "test", "detail", fields);
+
+    [Fact]
+    public void AnExistingDriveLetterPathMustAlsoBeOnLocalStorage()
+    {
+        var file = Path.GetTempFileName();
+        try
+        {
+            var item = Item(new Dictionary<string, string?> { ["image"] = file });
+            var inspected = new List<string>();
+
+            var result = FindingActions.ExistingAbsolutePath(item, candidate =>
+            {
+                inspected.Add(candidate);
+                return false; // A mapped drive has the same syntax as this existing local file.
+            });
+
+            Assert.Null(result);
+            Assert.Equal([file], inspected);
+        }
+        finally
+        {
+            File.Delete(file);
+        }
+    }
 }

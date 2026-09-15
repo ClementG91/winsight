@@ -563,6 +563,34 @@ if ($RequireSigned) {
 if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle failed.' }
 ```
 
+### Signature evidence and operator-confirmed responses
+
+`PackageContentSignatureVerifier.cs` is excluded from the coverage gate because its trusted path needs
+an installed Store package whose members carry no Authenticode signature of their own. Qualify it here,
+on the guest, against a real one:
+
+```powershell
+Assert-CandidateFiles
+$member = Get-AppxPackage -Name Microsoft.Paint | ForEach-Object {
+    Get-ChildItem $_.InstallLocation -Recurse -Depth 2 -Filter *.exe } |
+    Where-Object { (Get-AuthenticodeSignature $_.FullName).Status -eq 'NotSigned' } |
+    Select-Object -First 1
+if ($null -eq $member) { throw 'No unsigned Store package member: record NOT_RUN, not PASS.' }
+$sign = & $Cli sign $member.FullName --json | ConvertFrom-Json
+$signer = $sign.reports[0].items[0].fields.signer
+if ($sign.reports[0].items[0].fields.state -ne 'SignedTrusted' -or
+    $signer -notmatch 'MSIX package' -or $signer -notmatch 'content verified') {
+    throw 'Store package member was not verified through its package signature.'
+}
+```
+
+Then exercise every response verb on objects the run creates itself - never on a pre-existing
+process or startup item: `suspend`/`resume`/`terminate` on a spawned child (each refused without
+`--confirm`, and pid 4 refused with it), `holders` on a file the run holds open, a Guardian Block of a
+planted `HKCU\...\Run` value followed by `restore <id> --confirm`, an Allow followed by `rules`, a
+re-arrival recorded as "not announced" in `actions`, and `revoke <id> --confirm`. Every action must
+appear in `actions`, and the planted value must be absent at the end.
+
 ## 5. Continuity across restores
 
 Seal evidence from sections 1 through 4 under `$EvidenceRoot`. Shut down the VM, then restore

@@ -83,6 +83,7 @@ $engineAssemblies = @(
     "WinSight.Hijack"
     "WinSight.CodeIntegrity"
     "WinSight.Application"
+    "WinSight.Response"
     "WinSight.Mcp"
     # The dashboard was absent for the reason the ten were: its assembly-wide number is 53%, because
     # MainWindow.xaml.cs is a thousand lines of WPF code-behind at zero. Omitting the whole assembly
@@ -112,9 +113,20 @@ $engineAssemblies = @(
 # own harness. What keeps them honest is section 3 of docs/validation/VM_QUALIFICATION_KIT.md, which
 # drives the real dashboard. Everything these files call into - the presenter, the settings stores,
 # the localization manager, the palette - is ordinary code and is held to the bar like the rest.
+#
+# The MSIX package-content verifier is excluded on terms of a third kind: its trusted path is reachable
+# only where a Store-signed package without per-file signatures is installed, which a developer machine
+# or Windows 11 has and the windows-2022 runner does not. The tests exercise it against real packages
+# wherever one exists; gating on it would make one runner image fail and another pass the same code.
+# The VM protocol qualifies it by verifying a real Store package member with `winsight sign`.
 $engineExcludedFiles = @{
     "WinSight.NetMonitor" = @("OutboundConnectionWatcher.cs", "DnsEtwWatcher.cs")
     "WinSight.Attribution" = @("WriteAttributionWatcher.cs")
+    "WinSight.Response" = @("Win32ProcessInspector.cs", "Win32ProcessController.cs", "RestartManagerInspector.cs")
+    "WinSight.AvMonitor" = @("ConsentStoreChangeSignal.cs")
+    "WinSight.Core" = @("RegistryKeyWatcher.cs", "PackageContentSignatureVerifier.cs")
+    "WinSight.InputHooks" = @("InputFilterWatcher.cs")
+    "WinSight.Application" = @("RunningImageSource.cs")
     "winsight-dashboard" = @("MainWindow.xaml.cs", "App.xaml.cs", "VirusTotalSettingsWindow.xaml.cs")
 }
 
@@ -309,7 +321,7 @@ try
     }
     if ($engineExcluded)
     {
-        ("Excluded from the engine gate: {0} lines of live ETW capture and WPF code-behind, " +
+        ("Excluded from the engine gate: {0} lines of native, live-capture and WPF code-behind boundaries, " +
          "each named above and qualified by the VM protocol.") -f $engineExcluded | Write-Output
     }
 
@@ -337,7 +349,7 @@ try
     if ($adjusted.Count -gt 0)
     {
         "" | Write-Output
-        "Gated view (live ETW capture removed) -- these are the numbers the bar is applied to:" | Write-Output
+        "Gated view (named boundaries removed) -- these are the numbers the bar is applied to:" | Write-Output
         ($adjusted |
             Sort-Object Percent |
             Format-Table Assembly, Lines, Covered, Percent -AutoSize |

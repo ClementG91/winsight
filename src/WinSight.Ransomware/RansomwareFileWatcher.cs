@@ -71,6 +71,9 @@ public sealed class RansomwareFileWatcher : IDisposable
     private int _unwatchable;
     private int _overflows;
     private int _dropped;
+    private int _processingFaults;
+    private int _notificationFailures;
+    private Exception? _lastFault;
     private bool _started;
     private bool _disposed;
 
@@ -124,6 +127,35 @@ public sealed class RansomwareFileWatcher : IDisposable
     /// </remarks>
     public int UnwatchableDirectoryCount => Volatile.Read(ref _unwatchable);
 
+    /// <summary>True when <paramref name="directory"/> has a live watch that has not been lost.</summary>
+    public bool IsWatching(string directory)
+    {
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            return false;
+        }
+        lock (_gate)
+        {
+            return _watchers.Any(watcher => !_lost.ContainsKey(watcher)
+                && SameDirectory(watcher.Path, directory));
+        }
+    }
+
+    private static bool SameDirectory(string left, string right)
+    {
+        try
+        {
+            return string.Equals(
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
+                StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Watches that overflowed and could not be re-armed. Each one is a directory that stopped being
     /// observed at some point and has not resumed.
@@ -152,7 +184,22 @@ public sealed class RansomwareFileWatcher : IDisposable
         OverflowCount > 0
         || DroppedChangeCount > 0
         || LostWatchCount > 0
-        || UnwatchableDirectoryCount > 0;
+        || UnwatchableDirectoryCount > 0
+        || ProcessingFaultCount > 0
+        || NotificationFailures > 0;
+
+    /// <summary>Changes that could not be evaluated because of an unexpected failure.</summary>
+    public int ProcessingFaultCount => Volatile.Read(ref _processingFaults);
+
+    /// <summary>Detections a subscriber failed to handle; the alert may not have reached anyone.</summary>
+    public int NotificationFailures => Volatile.Read(ref _notificationFailures);
+
+    /// <summary>The last processing or notification exception, kept whole for diagnosis.</summary>
+    public Exception? LastFault => Volatile.Read(ref _lastFault);
+
+    internal static bool IsCatastrophic(Exception exception) =>
+        exception is OutOfMemoryException or StackOverflowException or AccessViolationException
+            or InsufficientExecutionStackException;
 
     public void Start()
     {
@@ -301,7 +348,8 @@ public sealed class RansomwareFileWatcher : IDisposable
                 Process(change);
             }
         }
-        catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException)
+        catch (Exception ex) when (ex is ObjectDisposedException
+                                     || (ex is InvalidOperationException && Volatile.Read(ref _disposed)))
         {
             // The queue was completed and disposed during shutdown.
         }
@@ -343,7 +391,7 @@ public sealed class RansomwareFileWatcher : IDisposable
             // large save look like a burst.
             if (_detector.Observe(kind.Value, _clock(), change.IdentityPath))
             {
-                Detected?.Invoke(this, new RansomwareDetectedEventArgs(kind.Value, change.FullPath));
+                Publish(new RansomwareDetectedEventArgs(kind.Value, change.FullPath));
             }
         }
         catch (Exception ex) when (ex is IOException
@@ -351,6 +399,30 @@ public sealed class RansomwareFileWatcher : IDisposable
                                      or System.Security.SecurityException)
         {
             // One unreadable file must not end the watch. The next change is still processed.
+        }
+        catch (Exception ex) when (!IsCatastrophic(ex))
+        {
+            // Runs on the dedicated drain thread: an escaping exception ended the process, and an
+            // InvalidOperationException silently ended the drain loop while the monitor looked armed.
+            Interlocked.Increment(ref _processingFaults);
+            Volatile.Write(ref _lastFault, ex);
+        }
+    }
+
+    /// <summary>Each subscriber is contained, so one faulty consumer neither stops the watch nor others.</summary>
+    private void Publish(RansomwareDetectedEventArgs args)
+    {
+        foreach (var handler in Detected?.GetInvocationList() ?? [])
+        {
+            try
+            {
+                ((EventHandler<RansomwareDetectedEventArgs>)handler)(this, args);
+            }
+            catch (Exception ex) when (!IsCatastrophic(ex))
+            {
+                Interlocked.Increment(ref _notificationFailures);
+                Volatile.Write(ref _lastFault, ex);
+            }
         }
     }
 

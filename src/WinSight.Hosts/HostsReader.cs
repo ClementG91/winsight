@@ -1,4 +1,5 @@
 using System.Net;
+using WinSight.Core;
 
 namespace WinSight.Hosts;
 
@@ -27,8 +28,8 @@ public sealed class HostsReader(string? path = null)
     /// <summary><c>%SystemRoot%\System32\drivers\etc\hosts</c>.</summary>
     public static string DefaultPath()
     {
-        var systemRoot = Environment.GetEnvironmentVariable("SystemRoot") ?? @"C:\Windows";
-        return Path.Combine(systemRoot, "System32", "drivers", "etc", "hosts");
+        var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        return Path.Combine(systemDirectory, "drivers", "etc", "hosts");
     }
 
     /// <summary>The active entries, or an empty list when the file could not be read.</summary>
@@ -51,6 +52,10 @@ public sealed class HostsReader(string? path = null)
     {
         try
         {
+            if (!AutomaticFileAccess.IsLocal(_path))
+            {
+                return new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
+            }
             var parsed = ParseWithCoverage(File.ReadLines(_path));
             return new HostsSnapshot(parsed.Entries, Unreadable: false, Missing: false, parsed.MalformedLines);
         }

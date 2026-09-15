@@ -197,7 +197,8 @@ public sealed class PersistenceMonitorStartWithStoreTests
             };
 
             using var monitor = new PersistenceMonitor(
-                Array.Empty<IAutostartEnumerator>(), new NoopSource(), (_, _) => scan, baselineStore: store);
+                Array.Empty<IAutostartEnumerator>(), new NoopSource(),
+                (_, _) => new PersistenceScanResult(scan, PersistenceCoverage.Complete), baselineStore: store);
             var detected = new List<PersistenceEvent>();
             monitor.Detected += (_, e) => detected.Add(e.Detected);
 
@@ -221,7 +222,8 @@ public sealed class PersistenceMonitorStartWithStoreTests
             var scan = new[] { Entries.Unsigned(AutostartVector.RunKey, "X", @"C:\x.exe") };
 
             using var monitor = new PersistenceMonitor(
-                Array.Empty<IAutostartEnumerator>(), new NoopSource(), (_, _) => scan, baselineStore: store);
+                Array.Empty<IAutostartEnumerator>(), new NoopSource(),
+                (_, _) => new PersistenceScanResult(scan, PersistenceCoverage.Complete), baselineStore: store);
             var detected = new List<PersistenceEvent>();
             monitor.Detected += (_, e) => detected.Add(e.Detected);
 

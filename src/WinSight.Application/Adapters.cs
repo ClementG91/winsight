@@ -18,6 +18,7 @@ using WinSight.Presence;
 using WinSight.Processes;
 using WinSight.Ransomware;
 using WinSight.Reporting;
+using WinSight.Response;
 
 namespace WinSight.Application;
 
@@ -26,7 +27,7 @@ namespace WinSight.Application;
 /// The tools stay pure data producers; presentation lives here, once, so the renderer
 /// (text/JSON) and a future GUI consume one contract.
 /// </summary>
-public static class Adapters
+public static partial class Adapters
 {
     public static IReadOnlySet<string> SnapshotCommands { get; } = new HashSet<string>(
         ["persistence", "av", "net", "dns", "firewall", "processes", "modules", "extensions", "certs", "hosts", "input", "drivers", "integrity", "hijack", "presence"],
@@ -145,6 +146,8 @@ public static class Adapters
             "hijack" or "hijacks" => Hijack(flaggedOnly, cancellationToken),
             "presence" => Presence(flaggedOnly),
             "alerts" => Alerts(),
+            "actions" => Actions(),
+            "rules" => Rules(),
             _ => throw new ArgumentOutOfRangeException(nameof(command), command, "Unknown WinSight tool."),
         };
     }
@@ -437,17 +440,70 @@ public static class Adapters
             cts.Cancel();
         };
         Console.WriteLine("Watching camera/mic, Ctrl+C to stop.");
-        new CameraMicMonitor().Watch(OnEvent, cts.Token);
+        // Event driven: a consent-store change is read at once, with the poll as the fallback.
+        var locator = new CaptureDeviceProcessLocator(new RunningImageSource(), new Win32ProcessInspector());
+        new CameraMicMonitor(changeSignalFactory: () => new ConsentStoreChangeSignal()).Watch(OnEvent, cts.Token);
         return 0;
 
-        static void OnEvent(DeviceEvent e)
+        void OnEvent(DeviceEvent e)
         {
             var device = e.Usage.Kind == DeviceKind.Webcam ? "webcam" : "mic";
             var verb = e.Kind == AvEventKind.Activated ? "ON " : "OFF";
             Console.WriteLine(
                 $"  [{verb}] {device}, {UntrustedDisplayText.Neutralize(e.Usage.App)}");
+            if (e.Kind != AvEventKind.Activated)
+            {
+                return;
+            }
+            // Name the process behind the application, so "who is using the camera" is answerable.
+            var match = locator.Locate(e.Usage);
+            if (match.Processes.Count == 0)
+            {
+                Console.WriteLine($"        process: {match.Reason}");
+                return;
+            }
+            foreach (var process in match.Processes)
+            {
+                Console.WriteLine($"        process: pid {process.Identity.Pid} "
+                    + UntrustedDisplayText.Neutralize(System.IO.Path.GetFileName(process.ImagePath)));
+            }
         }
     }
+
+    /// <summary>
+    /// Runs the live input-filter watcher, printing keyboard/mouse class filters as they appear or
+    /// disappear until Ctrl+C. The ReiKey-style "a tap was just installed" signal, user-mode and
+    /// read-only.
+    /// </summary>
+    public static int WatchInputFilters()
+    {
+        using var cts = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        };
+
+        using var watcher = new InputFilterWatcher();
+        watcher.Changed += alerts =>
+        {
+            foreach (var alert in alerts)
+            {
+                var verb = alert.Kind == InputFilterChangeKind.Added ? "ADDED  " : "REMOVED";
+                Console.WriteLine($"  [{verb}] {alert.Filter.Stack} {alert.Filter.Position} filter: "
+                    + UntrustedDisplayText.Neutralize(alert.Filter.Name));
+            }
+        };
+        if (!watcher.Start())
+        {
+            Console.Error.WriteLine("could not watch the keyboard/mouse class keys");
+            return CliContract.ObservationFailed;
+        }
+        Console.WriteLine("Watching keyboard/mouse input filters, Ctrl+C to stop.");
+        cts.Token.WaitHandle.WaitOne();
+        return CliContract.Clean;
+    }
+
 
     /// <summary>
     /// Runs the live write-attribution watcher, printing who writes what until Ctrl+C.

@@ -4,8 +4,9 @@ Status: **engine implemented and tested; dashboard surfacing wired.** Increments
 below have landed. The pure core, the registry watcher and the filesystem watcher are
 covered by unit tests, including real-Windows functional tests that fire
 `RegNotifyChangeKeyValue` and `FileSystemWatcher` against private HKCU / temp keys (not
-only a VM). The dashboard hosts the monitor and raises a tray balloon on a new startup
-item, reusing the app's existing proven `ShowBalloonTip` path. On-start reconciliation
+only a VM). The dashboard hosts the monitor and opens a decision window (Allow / Block /
+Decide later) on a new startup item, keeping the existing `ShowBalloonTip` path as the fallback for a
+burst of arrivals. On-start reconciliation
 across runs (increment 5) is implemented: the baseline is persisted locally and, on the
 next launch, what appeared while WinSight was not running surfaces once. Remaining: a
 live end-to-end dashboard smoke test, and ETW/WMI surfaces + writing-process attribution
@@ -66,34 +67,35 @@ flowchart LR
         LOG -->|PersistenceDetected| PRES[PersistenceMonitorPresenter]
     end
     PRES --> VIEW[Live view: Surveillance persistance]
-    PRES --> TRAY[Tray balloon on Notable]
+    PRES --> WIN[Decision window: Allow / Block / Decide later]
+    PRES --> TRAY[Coalesced tray balloon for a burst]
 ```
 
 ## Components
 
 ### Pure core (in `WinSight.Persistence`, fully unit-tested)
 
-These have no I/O and carry all the logic. This is where correctness is *proven in CI* -
-the standing lesson from the firewall is that anything the unit tests can reach is a bug
-caught before the VM, so we push every decision into this layer.
+These have no I/O and carry the reconciliation logic. Unit tests exercise the modeled scenarios;
+live Windows acquisition and notification behavior still require VM qualification.
 
-- **`PersistenceIdentity`** - the canonical dedup key for an entry: `(Vector, Name,
-  normalized target)`. Normalization reuses the same path-canonicalization idea as
-  `OutboundPolicyEvaluator.CanonicalPath` so `C:\X\a.exe` and `c:\x\a.exe` are one identity.
-  Two entries with the same identity are "the same persistence", regardless of transient
-  command-line noise.
+- **`PersistenceIdentity`** - the dedup key includes the enumerator source, vector, entry name,
+  source location, normalized executable target and argument payload. Executable path spelling
+  can be normalized, but argument case, quoted spaces and encoded data are preserved. Moving an
+  entry from Run to RunOnce, or changing a case-sensitive function argument, is a new identity.
 - **`PersistenceDiffEngine`** - pure function: `(baseline: ISet<PersistenceIdentity>,
-  fresh: IReadOnlyList<AutostartEntry>) -> (Added, Reappeared, Removed)`. No clock, no I/O,
-  fully table-testable.
+  fresh: IReadOnlyList<AutostartEntry>) -> (Added, Removed)`. The monitor applies removals only to
+  completely read sources and uses that updated state to recognize a later arrival. No clock or I/O
+  is needed for the comparison.
 - **`PersistenceChangeLog`** - the direct analog of `PendingOutboundLog`:
   - bounded at `MaxChanges` (a normal machine adds persistence rarely; a hundred pending
     means something pathological),
   - deduplicates by `PersistenceIdentity`,
-  - `Observe(...)` returns `true` only the first time, so callers notify once per entry,
+  - ordinary repeated observations are deduplicated; a confirmed disappearance followed by a
+    new arrival can notify again even if the previous journal entry is still pending,
   - refused entries increment `DroppedChanges` - **never a silent truncation**,
   - `Snapshot()` returns most-recent-first.
 - **`PersistenceEvent`** - the surfaced record: the `AutostartEntry`, its identity,
-  `FirstSeenUtc`/`LastSeenUtc`, and a `kind` (`Added` / `Reappeared`). Severity is *derived*
+  `FirstSeenUtc`/`LastSeenUtc`, and an observation count. Severity is *derived*
   from the existing `AutostartEntry.IsSuspicious` / `Status`, not invented here.
 
 ### Surface → watch-target map (cohesion with the enumerators)
@@ -153,8 +155,77 @@ source and a fake/real scanner:
 5. **Graceful degradation** - a surface that can't be watched under the current token
    (e.g. an HKLM key a standard user can't open for notify) is reported as
    *not-watchable*, not silently skipped. Honesty about blind spots is a product rule here.
+6. **Absence needs evidence** - a source may remove identities only after a read in which every
+   skipped item was counted. Denied scheduled-task folders or definitions, and denied COM class
+   registrations behind credential providers, BHOs and task COM handlers, are counted as
+   unreadable locations; a denied class no longer aborts the rest of its surface.
+7. **Delivery before acknowledgement** - notifications run outside every lock `Dispose` waits on.
+   An arrival is excluded from each saved baseline until every `Detected` handler has returned for
+   it, so a subscriber failure, shutdown or crash before delivery re-reports it on the next launch
+   (at-least-once; a crash after delivery can repeat it).
+9. **Failure boundary** - scans, saves and notifications run on timer threads, where an unhandled
+   exception ends the process. Non-catastrophic failures (anything but out-of-memory, stack
+   exhaustion or access violations) are contained and recorded in `PersistenceMonitor.Diagnostics`
+   (counts, last exception, pending notifications). A failing handler is retried for that handler
+   only, at most four attempts per arrival; failed scans are requeued for the same surfaces; retries
+   back off (2 s, 10 s, 60 s) and then stop until a new change signal, `RetryNow`, or the next launch.
+   The dashboard shows a degraded Guardian as partial and journals each new fault once. The baseline
+   store now throws on write failure instead of silently skipping persistence.
+10. **Bounded shutdown** - `Dispose` cancels acquisition and waits 300 ms for the scan in progress.
+   Registry reads, Task Scheduler COM calls and in-flight WinVerifyTrust calls do not observe
+   cancellation (the scanner checks it between surfaces and files; WMI queries now time out after
+   30 s). If the scan does not leave in time, its own thread disposes the change source and saves
+   the final baseline as it exits, so resources in use are not released early and the UI thread is
+   not held. If the process ends first, the last baseline saved during monitoring remains.
+11. **Scoped absence** - an enumerator may attribute each unreadable read to a location prefix
+   (`UnreadableScopes`). Removals are then confirmed for identities outside those prefixes, so a
+   remove-and-reinstall in the readable part of another user's hive, the services key, task folders
+   or IFEO is re-alerted. Any unattributed failure keeps the whole-source rule. On the unelevated
+   development machine all four routinely incomplete sources became scoped; a denied IFEO key
+   (`DefenderAgentScan.exe`) previously aborted the whole IFEO enumeration in both registry views.
+   A removal and reinstallation that both happen between two observations remain undetectable.
+12. **Notification independent of the display list** - the change log keeps at most 256 arrivals for
+   display and nothing acknowledges them. Arrivals beyond that used to enter the baseline without any
+   notification for the rest of the session; they are now reported, and the unlisted count appears in
+   the diagnostics tooltip. When automatic retries have stopped, the tray menu offers "Retry Guardian".
+8. **Visible start failure** - the dashboard reports a Guardian start that failed as `Failed`, not
+   `Off`, and polls monitor health so later coverage loss is not frozen behind an earlier state.
+13. **Watcher threads** - the registry watcher's wait loop and the file-system watcher's callbacks
+   contain subscriber faults (counted) instead of ending the process; a key that cannot be armed is
+   dropped like one that cannot be opened. The dashboard's handler writes the alert journal first and
+   fails the notification when that write fails, so the arrival stays unacknowledged and is retried.
 
-### Application + Dashboard
+### Response (operator-confirmed, reversible)
+
+A new arrival opens a decision window in the dashboard (`AlertWindow`) offering Allow, Block or Decide
+later; "Decide later" is the default and the cancel action, so no keystroke removes an item. A burst of
+arrivals keeps the coalesced balloon, and at most three decision windows are open at once, beyond which
+the balloon is the fallback. The decisions are made by `GuardianAlertPresenter` (`WinSight.Application`)
+over `PersistenceResponder` and the `WinSight.Response` engine, never automatically, and all of them are
+journalled:
+
+- **Allow** stores a rule that silences the item. It silences the interruption, not the evidence: an
+  allowed arrival is still journalled as "not announced", naming the rule, because the rule store is
+  writable by any software running as the user. `winsight rules` lists rules; `winsight revoke <id>
+  --confirm` removes one.
+- **Block** is available for the two user-privilege vectors below; the confirmation shows the
+  `winsight restore <id> --confirm` that undoes it.
+
+The vectors Block covers:
+
+- **HKCU Run/RunOnce values** and **the current user's Startup-folder files**. `PersistenceActionResolver`
+  turns an `AutostartEntry` into a structured target only for these; every other vector is offered Allow
+  only until the privileged response command family ships (no guessing at a target).
+- **Block** = revalidate the entry against the alert (the value's data, or the file path), quarantine
+  it (the registry value with its kind preserved, or the file's bytes) and remove it. A value or file
+  that changed since the alert is refused.
+- **Restore** writes the quarantined item back, but only when the origin is still free - a name now
+  occupied by something else is left untouched.
+- Because a Block removes the entry, the next scan reconciles a confirmed removal and raises no alert
+  for WinSight's own action; a later reinstallation alerts again unless an Allow rule (the per-user
+  `RuleStore`) covers it.
+
+## Application + Dashboard
 
 - **`PersistenceMonitorPresenter`** (`WinSight.Application`) - mirrors
   `FirewallControlPresenter`: exposes the live change list + counts (`DroppedChanges`,
@@ -203,8 +274,11 @@ source and a fake/real scanner:
    `FilePersistenceBaselineStore` (local-only `%LocalAppData%\WinSight\guardian-baseline.tsv`,
    atomic write, corrupt-tolerant, bounded) persist the baseline; `PersistenceMonitorCore`
    .`ReconcileFromPersistedBaseline` diffs the current scan against it on Start, so what appeared
-   while WinSight was off surfaces once, then the baseline resets to the current state. Wired by
-   default through `GuardianHost`.
+   while WinSight was off surfaces once. The baseline replaces only sources whose absence can be
+   confirmed; unscanned or incompletely read sources retain previous identities. Version 3 stores
+   source, location and lossless encoded arguments. Older baselines cannot recover that information
+   and are reseeded silently once on upgrade, so that first launch cannot reconstruct offline
+   changes against the older baseline. Wired by default through `GuardianHost`.
 6. **Scoped re-scan.** ✅ Done. A change re-scans only the surface that fired - the change source
    carries the fired `PersistenceWatchTarget`, and the monitor maps it to the owning enumerator(s)
    via `WatchTargets` and scans just those (full scan when the origin is unknown). Real-machine
@@ -220,13 +294,11 @@ source and a fake/real scanner:
 The firewall documents its report-vs-enforce boundary; Guardian documents its detect-vs-block
 boundary with the same honesty:
 
-- **It detects and alerts; it does not block the write.** Stopping persistence *as it is
-  written* needs a kernel **minifilter** (`FltRegisterFilter`) or a registry-callback driver,
-  which needs an EV certificate and attestation signing. Explicitly deferred (Phase 4+), as in
-  `ARCHITECTURE.md`.
-- **It sees *what* appeared, not *who* wrote it.** A registry-change notification says a key
-  changed, not which process changed it. Writing-process attribution needs ETW/audit and
-  elevation; deferred.
+- **It detects and alerts; it does not block or remove the persistence.** A prevention or removal
+  workflow needs a separate implementation and safety qualification.
+- **Writing-process attribution is conditional.** Registry notifications do not identify the
+  writer. The optional elevated ETW attribution path can supply that context when a matching
+  observation exists; otherwise the alert reports the attribution gap.
 - **Real-time coverage is "while the tray host runs".** Persistence written while WinSight is
   not running is caught on the next start by the reconciliation diff (implemented, increment 5),
   not in real time.

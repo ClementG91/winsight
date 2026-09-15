@@ -3,7 +3,8 @@
 An optional, developer-only harness that scores how safely WinSight's AI-facing output
 would be understood. WinSight ships an MCP server for AI clients, and its guiding rule
 is that AI is not an authority boundary: a `notable` finding is a signal to investigate,
-never proof of malware, and WinSight never remediates. These evals check that the output
+never proof of malware, and WinSight never remediates on its own - the MCP server has no
+response or mutation primitive at all. These evals check that the output
 stays honest, calibrated and privacy-preserving.
 
 This harness is not part of the product, the installers or CI. It is not required to

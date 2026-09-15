@@ -21,10 +21,15 @@ Deliberate constraints, chosen to avoid building an EDR nobody asked for:
 - **User-mode first, no kernel driver.** A production minifilter needs a signed certificate and a
   separate safety programme. Detect-and-alert without a driver is genuinely useful; a half-built
   driver is a liability on someone's boot path.
-- **Observe, do not remediate.** Every scanner reports. The firewall blocks only what the user
-  chose. Ransomware protection plants visible decoys and the hijack scan creates then removes a
-  uniquely named writability probe; both writes are documented, bounded, and neither modifies an
-  existing file.
+- **No automatic remediation; operator-confirmed, reversible response.** Scanners report and never
+  act on their own. A response layer (see [`OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md`](OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md))
+  lets the operator act from an alert - allow, block, remove, disable, suspend - with every action
+  revalidated against the live target, recorded in an append-only journal and reversible where the
+  platform allows (quarantine and restore rather than delete). The one bounded exception is opt-in
+  automatic *suspension* (never termination) of a process that touches a ransomware decoy. The
+  firewall blocks only what the user chose. Ransomware protection plants visible decoys and the
+  hijack scan creates then removes a uniquely named writability probe; both writes are documented,
+  bounded, and neither modifies an existing file.
 - **One report shape.** Every scanner emits the same `ToolReport`, so the CLI, dashboard and MCP
   server render the same semantics without duplicating detection logic.
 - **No account, no telemetry, no paywall.** Non-negotiable. A security tool that phones home is
@@ -66,6 +71,11 @@ deliberately not hidden because many ransomware families skip hidden files.
 
 ## What is next
 
+The proposed, milestone-by-milestone plan for Objective-See parity - including the response layer,
+the documentation changes it requires and the measurements any "better" claim needs - is in
+[`OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md`](OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md). The scope decisions
+above stay authoritative until its milestone M1 is accepted.
+
 ### Native Arm64 privileged qualification
 
 **Blocked on hardware nobody on the project has, not on unwritten work.** Build, PE architecture,
@@ -106,7 +116,7 @@ See [`ATTRIBUTION_DESIGN.md`](ATTRIBUTION_DESIGN.md).
 | Kernel minifilter for blocking | Needs a signed driver and a safety programme; deferred, not abandoned |
 | Cloud console / fleet management | Would require telemetry, which is the line this project will not cross |
 | Signature-based malware detection | That is antivirus; WinSight is triage and visibility |
-| Automatic remediation | A tool that deletes things on its own is a tool you cannot trust |
+| Silent automatic remediation | A tool that deletes things on its own is a tool you cannot trust; response is operator-confirmed and reversible |
 
 ## Naming
 

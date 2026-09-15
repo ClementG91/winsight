@@ -161,6 +161,17 @@ public sealed class AlertJournalTests
     }
 
     [Fact]
+    public void AFailedWriteIsReportedAndCountedInsteadOfVanishing()
+    {
+        var before = AlertJournal.WriteFailures;
+
+        var written = AlertJournal.TryAppend(new SecurityAlert(T0, "Guardian", "RunKey", "x"), "\0:\\invalid<>path\\alerts.log");
+
+        Assert.False(written);
+        Assert.True(AlertJournal.WriteFailures > before);
+        Assert.NotNull(AlertJournal.LastWriteFailure);
+    }
+    [Fact]
     public void Read_MissingJournal_IsEmptyNotAnException() =>
         Assert.Empty(AlertJournal.Read(TempJournal(), 10));
 

@@ -4,5 +4,6 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="WinSight.Hosts.Tests" />
+    <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
 </Project>

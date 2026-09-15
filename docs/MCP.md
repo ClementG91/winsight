@@ -10,7 +10,11 @@ The server uses MCP over standard input/output. The AI client starts one child
 process for one session; WinSight does not open a port, bind to localhost, accept
 remote clients or install a background MCP service.
 
-All exposed tools are declared read-only, idempotent, non-destructive and
+The MCP server never exposes a response action. Suspending a process, removing or disabling
+persistence, quarantining a file, or adding a firewall or trust rule are reachable only from the
+dashboard and CLI, never from a model: the MCP assembly does not even reference the response layer,
+and a contract test (`ResponseIsNotReachableFromMcpTests`) fails the build if that changes. All
+exposed tools are declared read-only, idempotent, non-destructive and
 closed-world. MCP never exposes process termination, file deletion, quarantine,
 registry editing, firewall mutation or WFP policy changes. VirusTotal and every
 other network lookup are disabled inside MCP scans even when `WINSIGHT_VT_KEY` is

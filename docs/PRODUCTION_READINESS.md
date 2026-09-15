@@ -1,31 +1,39 @@
 # Production readiness
 
-This is the authoritative status as of 2026-09-01. Evidence is candidate-bound: a successful result
+This is the authoritative status as of 2026-09-14. Evidence is candidate-bound: a successful result
 for one commit or package does not qualify different executable bytes.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **The published v0.12.0 release is production-ready under the documented unsigned-distribution policy.** Exact candidate `dbaded1` passed CI, installer, WFP/SCM, trust, local/Network IPC, ETW recovery and final cleanup; the published downloads separately passed checksum, attestation, architecture and installer-smoke verification. |
+| **x64** | **Current production readiness is not established.** The September audit identified signature-trust, canary-cleanup and monitoring defects beyond the historical qualification scenarios. The corrected candidate needs fresh CI and isolated VM qualification. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
 Authenticode is an accepted distribution limitation and is not counted as a blocker here. Public
 binaries remain deliberately unsigned and Windows therefore cannot establish a publisher identity.
 
-## Qualified v0.12.0 x64 candidate
+The historical records below remain evidence of their named checks on their exact artifacts. They
+do not cover the newly identified regressions and must not be read as a current blanket assurance
+for the published release or the working tree. Local regression tests are necessary, but cannot
+replace installer, privilege-boundary, ETW lifecycle and native-architecture runtime qualification.
+The findings, corrections and local verification are recorded in
+[`validation/2026-09-14-security-corrections.md`](validation/2026-09-14-security-corrections.md) and
+[`validation/2026-09-14-guardian-av-msix-ransomware-hardening.md`](validation/2026-09-14-guardian-av-msix-ransomware-hardening.md).
+
+## Historically qualified v0.12.0 x64 candidate
 
 The qualified candidate was versioned v0.12.0 because it replaced the public `--json` bare array
 with a versioned envelope and contained a substantial security and detection delta. Reusing the
 already published v0.11.6 version for different bytes and an incompatible contract would have been
-misleading. The working tree has since advanced to v0.12.1; that does not alter the candidate-bound
+misleading. The working tree has since advanced to v0.13.0; that does not alter the candidate-bound
 v0.12.0 evidence below.
 
 Exact candidate `dbaded1feac9803d4fa3ffd122036b176ab6d47c` from CI run `33416259797`
 passed the complete native-x64 VM campaign. The campaign covered the installer twice from clean S0,
 WFP/SCM 35/35, trust 13/13, local IPC 7/7, real second-VM Network Logon 7/7 plus observer 3/3,
 dashboard and service ETW orphan recovery, DNS Ctrl+C, HTTPS connectivity, immutable candidate
-files, and final cleanup. CodeQL `33416257089` also passed. The authoritative candidate statement
-is:
+files, and final cleanup. CodeQL `33416257089` also passed. The candidate statement recorded at
+that time was:
 
 ```text
 production_ready=true

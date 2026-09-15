@@ -13,10 +13,10 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     // A machine's autostart surfaces total a few hundred entries; the cap only guards against a
     // pathological or tampered file being read whole into memory.
     private const int MaxBaselineEntries = 20_000;
-    // v2 adds the argument component of an identity. The header is versioned precisely so a v1
-    // file is treated as a first run rather than silently compared against identities of a
-    // different shape - which would report every entry on the machine as new.
-    private const string Header = "#winsight-guardian-baseline v2";
+    private const long MaxBaselineBytes = 16 * 1024 * 1024;
+    // v3 preserves argument case/whitespace, location and source ownership. Older lossy identities
+    // cannot be migrated faithfully: reseed them silently once instead of reporting every entry.
+    private const string Header = "#winsight-guardian-baseline v3";
 
     private readonly string _path;
 
@@ -35,7 +35,7 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     {
         try
         {
-            if (!File.Exists(_path))
+            if (!File.Exists(_path) || new FileInfo(_path).Length > MaxBaselineBytes)
             {
                 return null;
             }
@@ -48,17 +48,31 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
 
             var result = new HashSet<PersistenceIdentity>();
             string? line;
-            while ((line = reader.ReadLine()) is not null && result.Count < MaxBaselineEntries)
+            var lines = 0;
+            while ((line = reader.ReadLine()) is not null)
             {
+                if (++lines > MaxBaselineEntries)
+                {
+                    return null;
+                }
                 var parts = line.Split('\t');
-                if (parts.Length != 4 || !Enum.TryParse<AutostartVector>(parts[0], out var vector))
+                if (parts.Length != 6 || !Enum.TryParse<AutostartVector>(parts[0], out var vector)
+                    || !Enum.IsDefined(vector))
                 {
                     continue; // skip a malformed line rather than discarding the whole baseline
                 }
-                result.Add(new PersistenceIdentity(vector, parts[1], parts[2], parts[3]));
+                try
+                {
+                    result.Add(new PersistenceIdentity(vector, Decode(parts[1]), Decode(parts[2]),
+                        Decode(parts[3]), Decode(parts[4]), Decode(parts[5])));
+                }
+                catch (FormatException)
+                {
+                    // Corrupt base64 is not an identity.
+                }
             }
 
-            return result.Count > 0 ? result : null;
+            return lines == 0 || result.Count > 0 ? result : null;
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -68,10 +82,22 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         }
     }
 
+    /// <summary>Writes the baseline atomically (temp file, then replace).</summary>
+    /// <exception cref="IOException">The file could not be written; the previous file is intact.</exception>
+    /// <exception cref="InvalidDataException">The baseline exceeds the format limits and was not written.</exception>
+    /// <remarks>
+    /// Failures are thrown rather than swallowed: the monitor records them and retries, so a baseline
+    /// that silently stopped persisting is visible instead of looking like working cross-run detection.
+    /// </remarks>
     public void Save(IReadOnlyCollection<PersistenceIdentity> baseline)
     {
         ArgumentNullException.ThrowIfNull(baseline);
-        try
+        if (baseline.Count > MaxBaselineEntries)
+        {
+            // Do not replace a usable baseline with a truncated one.
+            throw new InvalidDataException(
+                $"The Guardian baseline has {baseline.Count} entries, above the {MaxBaselineEntries} limit.");
+        }
         {
             var directory = Path.GetDirectoryName(_path);
             if (!string.IsNullOrEmpty(directory))
@@ -88,29 +114,23 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
                 {
                     break;
                 }
-                // A tab or newline in a name/target would break the line format; such an identity
-                // simply is not persisted (vanishingly rare for real registry names / paths).
-                if (id.Name.IndexOfAny(['\t', '\n', '\r']) >= 0 ||
-                    id.Target.IndexOfAny(['\t', '\n', '\r']) >= 0 ||
-                    id.Arguments.IndexOfAny(['\t', '\n', '\r']) >= 0)
-                {
-                    continue;
-                }
-                builder.Append(id.Vector).Append('\t').Append(id.Name).Append('\t')
-                    .Append(id.Target).Append('\t').Append(id.Arguments).Append('\n');
+                // Encode every string so quotes, tabs, newlines and argument case round-trip.
+                builder.Append(id.Vector).Append('\t').Append(Encode(id.Name)).Append('\t')
+                    .Append(Encode(id.Target)).Append('\t').Append(Encode(id.Arguments)).Append('\t')
+                    .Append(Encode(id.Location)).Append('\t').Append(Encode(id.Source)).Append('\n');
                 written++;
             }
 
+            if (builder.Length > MaxBaselineBytes - 3)
+            {
+                throw new InvalidDataException("The encoded Guardian baseline exceeds the file size limit.");
+            }
             var temp = _path + ".tmp";
             File.WriteAllText(temp, builder.ToString(), Encoding.UTF8);
             File.Move(temp, _path, overwrite: true);
         }
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            // Persisting the baseline is best-effort: if it cannot be written, live monitoring still
-            // works this session; only cross-run reconciliation is skipped next launch.
-        }
     }
+
+    private static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
+    private static string Decode(string value) => Encoding.UTF8.GetString(Convert.FromBase64String(value));
 }

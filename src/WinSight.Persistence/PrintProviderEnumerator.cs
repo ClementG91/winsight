@@ -10,6 +10,8 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class PrintProviderEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Control\Print\Providers";
 
     // Each print provider is a subkey (with a Driver value) under this root.

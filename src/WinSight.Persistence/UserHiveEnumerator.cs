@@ -27,6 +27,8 @@ namespace WinSight.Persistence;
 /// </remarks>
 public sealed class UserHiveEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private static readonly string[] SubKeys =
     [
         @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run",
@@ -58,11 +60,35 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
     /// </remarks>
     public int UnreadableLocations => Volatile.Read(ref _unreadable);
 
+    // Per-SID hive scopes for every attributed failure; null once any failure is unattributed.
+    private List<string>? _unreadableScopes = [];
+
+    /// <inheritdoc />
+    public IReadOnlyCollection<string>? UnreadableScopes => _unreadableScopes;
+
+    private void Unreadable(string? sid)
+    {
+        Interlocked.Increment(ref _unreadable);
+        if (sid is null)
+        {
+            _unreadableScopes = null;
+        }
+        else
+        {
+            _unreadableScopes?.Add($"HKU\\{sid}");
+        }
+    }
+
     public IEnumerable<RawAutostart> Enumerate()
     {
         Volatile.Write(ref _unreadable, 0);
+        _unreadableScopes = [];
 
         var current = _currentUserSid();
+        if (current is null)
+        {
+            Unreadable(null);
+        }
         var loaded = LoadedHiveSids();
 
         foreach (var sid in loaded)
@@ -78,11 +104,11 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
         }
 
         // Every real profile that has no hive loaded is a location this scan could not look at.
-        foreach (var sid in ProfileSids())
+        foreach (var sid in ProfileSids(() => Unreadable(null)))
         {
             if (!IsCoveredElsewhere(sid, current) && !loaded.Contains(sid))
             {
-                Interlocked.Increment(ref _unreadable);
+                Unreadable(sid);
             }
         }
     }
@@ -113,11 +139,12 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
                                          or System.Security.SecurityException
                                          or IOException)
             {
-                Interlocked.Increment(ref _unreadable);
+                Unreadable(sid);
                 continue;
             }
             if (hive is null)
             {
+                Unreadable(sid);
                 continue;
             }
 
@@ -145,7 +172,7 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
                                      or System.Security.SecurityException
                                      or IOException)
         {
-            Interlocked.Increment(ref _unreadable);
+            Unreadable(sid);
             return entries;
         }
         if (key is null)
@@ -182,13 +209,14 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
                                      or System.Security.SecurityException
                                      or IOException)
         {
-            Interlocked.Increment(ref _unreadable);
+            // Which hives are loaded is unknown, so no failure below can be scoped.
+            Unreadable(null);
         }
         return sids;
     }
 
     /// <summary>Real user profiles on this machine, from the profile list Windows maintains.</summary>
-    internal static List<string> ProfileSids()
+    internal static List<string> ProfileSids(Action? onUnreadable = null)
     {
         var sids = new List<string>();
         try
@@ -212,14 +240,13 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
                                      or System.Security.SecurityException
                                      or IOException)
         {
-            // The caller counts what it could not read; an unreadable profile list simply yields
-            // no additional profiles rather than an invented one.
+            onUnreadable?.Invoke();
         }
         return sids;
     }
 
     /// <summary>The profile directory for a SID, or null when it is not recorded or not readable.</summary>
-    internal static string? ProfileDirectory(string sid)
+    internal static string? ProfileDirectory(string sid, Action? onUnreadable = null)
     {
         try
         {
@@ -234,6 +261,7 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
                                      or System.Security.SecurityException
                                      or IOException)
         {
+            onUnreadable?.Invoke();
             return null;
         }
     }

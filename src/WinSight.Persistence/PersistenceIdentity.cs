@@ -2,7 +2,7 @@ namespace WinSight.Persistence;
 
 /// <summary>
 /// The canonical identity of a persistence entry: the tuple that decides whether two
-/// observations are "the same persistence". It is (surface, name, target executable, arguments).
+/// observations are "the same persistence". It includes the source location and the exact argument payload.
 /// </summary>
 /// <remarks>
 /// <b>The arguments used to be excluded, and that was the hole.</b> The reasoning was that they are
@@ -27,7 +27,9 @@ public readonly record struct PersistenceIdentity(
     AutostartVector Vector,
     string Name,
     string Target,
-    string Arguments = "")
+    string Arguments = "",
+    string Location = "",
+    string Source = "")
 {
     /// <summary>
     /// Derives the identity of a resolved entry. Prefers the expected target Windows would load
@@ -40,9 +42,11 @@ public readonly record struct PersistenceIdentity(
         var target = entry.ExpectedImagePath ?? entry.ImagePath ?? entry.Command;
         return new PersistenceIdentity(
             entry.Vector,
-            Canonicalize(entry.Name),
+            entry.Name.ToLowerInvariant(),
             Canonicalize(target),
-            CanonicalizeArguments(entry.Command));
+            CanonicalizeArguments(entry.Command),
+            entry.Location.ToLowerInvariant(),
+            entry.Source);
     }
 
     /// <summary>
@@ -56,7 +60,7 @@ public readonly record struct PersistenceIdentity(
     /// </remarks>
     internal static string CanonicalizeArguments(string? command)
     {
-        var trimmed = command?.Trim();
+        var trimmed = command?.TrimStart();
         if (string.IsNullOrEmpty(trimmed))
         {
             return string.Empty;
@@ -69,21 +73,18 @@ public readonly record struct PersistenceIdentity(
         }
         else
         {
-            var space = trimmed.IndexOf(' ');
+            var space = trimmed.IndexOfAny([' ', '\t']);
             tail = space < 0 ? trimmed.Length : space;
         }
-        var arguments = trimmed[tail..].Trim();
+        var arguments = trimmed[tail..].TrimStart(' ', '\t');
         if (arguments.Length == 0)
         {
             return string.Empty;
         }
-        // Case-folded and whitespace-collapsed, but separators are left exactly as written: unlike
-        // a path, a forward slash in arguments is a switch introducer, and rewriting "/select,x" to
-        // "\select,x" would corrupt the very string this is meant to compare.
-        return string.Join(
-            ' ',
-            arguments.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-            .ToLowerInvariant();
+        // This is stored program input, not a Windows path. Case, repeated whitespace inside
+        // quotes, and encoded data can all change its meaning. Remove only the separator before
+        // the first argument; preserve the rest verbatim instead of guessing program semantics.
+        return arguments;
     }
 
     /// <summary>

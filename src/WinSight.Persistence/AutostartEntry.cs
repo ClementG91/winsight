@@ -97,6 +97,9 @@ public sealed record AutostartEntry(
     SignatureVerdict Signature,
     string? OriginalFileName = null)
 {
+    /// <summary>The enumerator owning this observation, used to reconcile scoped scan snapshots.</summary>
+    public string Source { get; init; } = string.Empty;
+
     public PersistenceStatus Status => ImageStatus switch
     {
         ImageResolutionStatus.FileMissing => PersistenceStatus.FileMissing,

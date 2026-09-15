@@ -4,8 +4,8 @@ namespace WinSight.Core;
 
 /// <summary>
 /// A caching decorator over any <see cref="ISignatureVerifier"/>. A file's verdict is
-/// cached by path and file identity, so unchanged binaries are verified once when
-/// several tools inspect them. Entries expire and the least-recently-used entry is
+/// cached by path, file identity and root-store snapshot, so unchanged binaries can be reused
+/// while the trust stores remain unchanged. Entries expire and the least-recently-used entry is
 /// evicted at a fixed bound: a long-running dashboard cannot grow this cache without
 /// limit or treat an old verdict as an authorization decision.
 /// </summary>
@@ -35,6 +35,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     private readonly int _maxEntries;
     private readonly TimeSpan _maxAge;
     private readonly bool _verifyContent;
+    private readonly Func<UserInstalledRoots.RootSnapshot> _readRoots;
     private readonly object _sync = new();
     private readonly LinkedList<string> _lru = new();
     private readonly Dictionary<string, CacheEntry> _cache =
@@ -50,8 +51,19 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         int maxEntries = 4096,
         TimeSpan? maxAge = null,
         bool verifyContent = true)
+        : this(inner, UserInstalledRoots.ReadSnapshot, maxEntries, maxAge, verifyContent)
+    {
+    }
+
+    internal CachingSignatureVerifier(
+        ISignatureVerifier inner,
+        Func<UserInstalledRoots.RootSnapshot> readRoots,
+        int maxEntries = 4096,
+        TimeSpan? maxAge = null,
+        bool verifyContent = true)
     {
         ArgumentNullException.ThrowIfNull(inner);
+        ArgumentNullException.ThrowIfNull(readRoots);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxEntries);
         if (maxAge is { } configuredAge && configuredAge <= TimeSpan.Zero)
         {
@@ -61,6 +73,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         _maxEntries = maxEntries;
         _maxAge = maxAge ?? TimeSpan.FromMinutes(5);
         _verifyContent = verifyContent;
+        _readRoots = readRoots;
     }
 
     public SignatureVerdict Verify(string path, CancellationToken cancellationToken = default) =>
@@ -73,6 +86,8 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     public IReadOnlyDictionary<string, SignatureVerdict> VerifyMany(
         IReadOnlyCollection<string> paths, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var roots = _readRoots();
         var results = new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase);
         var misses = new List<string>();
         var preVerificationFingerprints = new Dictionary<string, FileFingerprint?>(
@@ -102,7 +117,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
                 continue;
             }
             var observedFingerprint = fingerprints.TryGetValue(path, out var f) ? f : Fingerprint(path);
-            if (TryGetCached(path, observedFingerprint, out var verdict))
+            if (TryGetCached(path, observedFingerprint, roots.Version, out var verdict))
             {
                 results[path] = verdict;
             }
@@ -115,12 +130,16 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
 
         if (misses.Count > 0)
         {
-            var fresh = _inner.VerifyMany(misses, cancellationToken);
+            // Share the exact snapshot used for cache identity with the native verifier; a
+            // second store read here could bind a verdict to the wrong store generation.
+            var fresh = _inner is NativeSignatureVerifier native
+                ? native.VerifyMany(misses, roots, cancellationToken)
+                : _inner.VerifyMany(misses, cancellationToken);
             foreach (var path in misses)
             {
                 var verdict = fresh.TryGetValue(path, out var v) ? v : SignatureVerdict.Unknown;
                 results[path] = verdict;
-                StoreIfUnchanged(path, verdict, preVerificationFingerprints[path]);
+                StoreIfUnchanged(path, verdict, preVerificationFingerprints[path], roots);
             }
         }
         return results;
@@ -133,6 +152,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     private bool TryGetCached(
         string path,
         FileFingerprint? observedFingerprint,
+        string trustVersion,
         out SignatureVerdict verdict)
     {
         verdict = default;
@@ -145,6 +165,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         {
             if (!_cache.TryGetValue(path, out var entry) ||
                 entry.Fingerprint != observedFingerprint ||
+                entry.TrustVersion != trustVersion ||
                 Stopwatch.GetElapsedTime(entry.CachedAtTimestamp) > _maxAge)
             {
                 Remove(path, entry);
@@ -161,8 +182,14 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     private void StoreIfUnchanged(
         string path,
         SignatureVerdict verdict,
-        FileFingerprint? preVerificationFingerprint)
+        FileFingerprint? preVerificationFingerprint,
+        UserInstalledRoots.RootSnapshot roots)
     {
+        // Do not retain answers from a batch that could not establish its trust-store state.
+        if (!roots.IsComplete)
+        {
+            return;
+        }
         var postVerificationFingerprint = Fingerprint(path);
         // The verifier works on a path, so the file can be replaced after WinVerifyTrust returns
         // but before this cache entry is written. Never bind that old verdict to the replacement.
@@ -196,6 +223,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             _cache[path] = new CacheEntry(
                 postVerificationFingerprint,
                 verdict,
+                roots.Version,
                 Stopwatch.GetTimestamp(),
                 node);
         }
@@ -240,6 +268,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     private sealed record CacheEntry(
         FileFingerprint Fingerprint,
         SignatureVerdict Verdict,
+        string TrustVersion,
         long CachedAtTimestamp,
         LinkedListNode<string> Node);
 

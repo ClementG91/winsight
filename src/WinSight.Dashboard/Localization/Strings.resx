@@ -93,6 +93,7 @@
   <data name="BlockOutboundConfirm" xml:space="preserve"><value>Block all outbound network traffic for '{0}'? It takes effect once firewall enforcement is enabled.</value></data>
   <data name="TrayOpen" xml:space="preserve"><value>Open WinSight</value></data>
   <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
+  <data name="TrayRetryGuardian" xml:space="preserve"><value>Retry Guardian</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, local security</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight is still running in the notification area.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Analysis complete.</value></data>
@@ -383,4 +384,32 @@
   <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>Whether a kernel debugger is attached could not be established.</value></data>
   <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>Kernel debug mode is permitted, which relaxes what the kernel will load and lets a debugger read and change kernel memory.</value></data>
   <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>Application code integrity (WDAC) is enforced as well as driver signing.</value></data>
+  <data name="AlertWindowTitle" xml:space="preserve"><value>WinSight — new startup item</value></data>
+  <data name="AlertHeading" xml:space="preserve"><value>A new startup item appeared</value></data>
+  <data name="AlertItemLabel" xml:space="preserve"><value>Item</value></data>
+  <data name="AlertLocationLabel" xml:space="preserve"><value>Location</value></data>
+  <data name="AlertProgramLabel" xml:space="preserve"><value>Program</value></data>
+  <data name="AlertAllow" xml:space="preserve"><value>Allow</value></data>
+  <data name="AlertBlock" xml:space="preserve"><value>Block</value></data>
+  <data name="AlertDecideLater" xml:space="preserve"><value>Decide later</value></data>
+  <data name="AlertBlockHint" xml:space="preserve"><value>Block keeps a copy, then removes the item, so it can be put back afterwards.</value></data>
+  <data name="AlertAllowed" xml:space="preserve"><value>Allowed: this item will not raise alerts again. To undo, run: winsight revoke {0} --confirm</value></data>
+  <data name="AlertBlocked" xml:space="preserve"><value>Blocked: a copy is in quarantine. To put it back, run: winsight restore {0} --confirm</value></data>
+  <data name="AlertRefusedChanged" xml:space="preserve"><value>The item changed since the alert, so nothing was removed.</value></data>
+  <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight cannot reverse this item yet: it is machine-wide, or of a kind with no reversible removal.</value></data>
+  <data name="AlertFailed" xml:space="preserve"><value>The action could not be completed.</value></data>
+  <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — file signature</value></data>
+  <data name="SignatureHeading" xml:space="preserve"><value>Who signed this file</value></data>
+  <data name="SignatureFileLabel" xml:space="preserve"><value>File</value></data>
+  <data name="SignatureStateLabel" xml:space="preserve"><value>Signature</value></data>
+  <data name="SignatureSignerLabel" xml:space="preserve"><value>Signer</value></data>
+  <data name="SignatureHashesLabel" xml:space="preserve"><value>Identification hashes</value></data>
+  <data name="SignatureChecking" xml:space="preserve"><value>Checking the signature…</value></data>
+  <data name="SignatureNoSigner" xml:space="preserve"><value>No signer</value></data>
+  <data name="SignatureNotLocalFile" xml:space="preserve"><value>This is not an ordinary local file, so WinSight did not open it. Network (UNC) and device paths are refused.</value></data>
+  <data name="SignatureCheckFailed" xml:space="preserve"><value>The signature could not be checked.</value></data>
+  <data name="SignatureUserInstalledRoot" xml:space="preserve"><value>This trust rests on a root certificate that this user account could have installed itself. It may be a legitimate company root; if you did not expect one, treat the signature as unproven.</value></data>
+  <data name="SignatureRevocationNotChecked" xml:space="preserve"><value>Revocation was not checked: nothing was cached to answer from, and WinSight does not go online to verify. A stolen certificate would still read as valid here.</value></data>
+  <data name="SignatureRevoked" xml:space="preserve"><value>The signing certificate has been revoked. Do not trust this file on the strength of its signature.</value></data>
+  <data name="Close" xml:space="preserve"><value>Close</value></data>
 </root>

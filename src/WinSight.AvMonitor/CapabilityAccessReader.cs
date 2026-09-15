@@ -15,10 +15,15 @@ namespace WinSight.AvMonitor;
 /// </remarks>
 public interface ICapabilityAccessReader
 {
-    /// <summary>Recorded webcam and microphone usage, including what is live right now.</summary>
-    IReadOnlyList<DeviceUsage> Read();
-}
+    /// <summary>Usage plus unreadable surfaces/items; failures must not look like an empty snapshot.</summary>
+    AcquisitionSnapshot<DeviceUsage> ReadWithCoverage();
 
+    /// <summary>
+    /// Usage with its store of origin and the exact parts that could not be read. Readers that cannot
+    /// attribute their gaps keep the default, which the monitor treats conservatively.
+    /// </summary>
+    CapabilityAccessSnapshot ReadWithProvenance() => CapabilityAccessSnapshot.FromCoverage(ReadWithCoverage());
+}
 /// <summary>
 /// Reads the Windows CapabilityAccessManager ConsentStore to report which apps have
 /// used the webcam/microphone and which are using them right now. This is the
@@ -51,110 +56,125 @@ public sealed class CapabilityAccessReader : ICapabilityAccessReader
     }
 
     /// <summary>Reads recorded webcam + microphone usage across HKCU and HKLM.</summary>
-    public IReadOnlyList<DeviceUsage> Read() => ReadWithCoverage().Items;
+    public IReadOnlyList<DeviceUsage> Read() => ReadWithProvenance().Items;
 
     /// <summary>Reads usage and reports every capability/hive surface that could not be read.</summary>
-    public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage()
+    public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage() => ReadWithProvenance().ToCoverage();
+
+    /// <summary>Reads usage tagged with its store, and every unreadable part by scope.</summary>
+    public CapabilityAccessSnapshot ReadWithProvenance()
     {
         var results = new List<DeviceUsage>();
-        var unreadableSources = 0;
-        var unreadableItems = 0;
+        var gaps = new List<CapabilityGap>();
         foreach (var (kind, capability) in new[]
                  {
                      (DeviceKind.Webcam, "webcam"),
                      (DeviceKind.Microphone, "microphone"),
                  })
         {
-            foreach (var hive in new[] { RegistryHive.CurrentUser, RegistryHive.LocalMachine })
+            foreach (var (hive, store) in new[]
+                     {
+                         (RegistryHive.CurrentUser, CapabilityStore.CurrentUser),
+                         (RegistryHive.LocalMachine, CapabilityStore.LocalMachine),
+                     })
             {
-                var (readable, itemGaps) = ReadCapability(hive, capability, kind, results);
-                if (!readable)
-                {
-                    unreadableSources++;
-                }
-                unreadableItems += itemGaps;
+                ReadCapability(hive, store, capability, kind, results, gaps);
             }
         }
-        return new AcquisitionSnapshot<DeviceUsage>(results, unreadableSources, unreadableItems);
+        return new CapabilityAccessSnapshot(results, gaps);
     }
 
-    private (bool SourceReadable, int UnreadableItems) ReadCapability(
-        RegistryHive hive, string capability, DeviceKind kind, List<DeviceUsage> results)
+    private void ReadCapability(
+        RegistryHive hive, CapabilityStore store, string capability, DeviceKind kind,
+        List<DeviceUsage> results, List<CapabilityGap> gaps)
     {
-        var unreadableItems = 0;
+        // Items are staged so a failure part-way through a store is reported as the whole store
+        // being unreadable, never as a clean partial list.
+        var staged = new List<DeviceUsage>();
+        var stagedGaps = new List<CapabilityGap>();
         try
         {
             using var baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry64);
             using var capKey = baseKey.OpenSubKey($@"{_basePath}\{capability}");
             if (capKey is null)
             {
-                return (true, 0);
+                return;
             }
             foreach (var appName in capKey.GetSubKeyNames())
             {
                 if (appName.Equals("NonPackaged", StringComparison.OrdinalIgnoreCase))
                 {
-                    using var nonPackaged = capKey.OpenSubKey(appName);
-                    if (nonPackaged is null)
+                    RegistryKey? nonPackaged;
+                    string[] exeKeys;
+                    try
                     {
-                        unreadableItems++;
+                        nonPackaged = capKey.OpenSubKey(appName);
+                        exeKeys = nonPackaged?.GetSubKeyNames() ?? [];
+                    }
+                    catch (Exception ex) when (IsReadFailure(ex))
+                    {
+                        stagedGaps.Add(new CapabilityGap(kind, store, Packaged: false));
                         continue;
                     }
-                    foreach (var exeKey in nonPackaged.GetSubKeyNames())
+                    if (nonPackaged is null)
                     {
-                        using var appKey = nonPackaged.OpenSubKey(exeKey);
-                        if (!TryAddUsage(appKey, DecodeExePath(exeKey), packaged: false, kind, results))
+                        stagedGaps.Add(new CapabilityGap(kind, store, Packaged: false));
+                        continue;
+                    }
+                    using (nonPackaged)
+                    {
+                        foreach (var exeKey in exeKeys)
                         {
-                            unreadableItems++;
+                            var app = DecodeExePath(exeKey);
+                            if (!TryAddUsage(nonPackaged, exeKey, app, packaged: false, kind, store, staged))
+                            {
+                                stagedGaps.Add(new CapabilityGap(kind, store, app, Packaged: false));
+                            }
                         }
                     }
                 }
-                else
+                else if (!TryAddUsage(capKey, appName, appName, packaged: true, kind, store, staged))
                 {
-                    using var appKey = capKey.OpenSubKey(appName);
-                    if (!TryAddUsage(appKey, appName, packaged: true, kind, results))
-                    {
-                        unreadableItems++;
-                    }
+                    stagedGaps.Add(new CapabilityGap(kind, store, appName, Packaged: true));
                 }
             }
-            return (true, unreadableItems);
+            results.AddRange(staged);
+            gaps.AddRange(stagedGaps);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or IOException)
+        catch (Exception ex) when (IsReadFailure(ex))
         {
-            return (false, unreadableItems);
+            gaps.Add(new CapabilityGap(kind, store));
         }
     }
 
+    private static bool IsReadFailure(Exception ex) =>
+        ex is UnauthorizedAccessException or System.Security.SecurityException or IOException;
+
     private static bool TryAddUsage(
-        RegistryKey? appKey, string app, bool packaged, DeviceKind kind, List<DeviceUsage> results)
+        RegistryKey parent, string keyName, string app, bool packaged, DeviceKind kind,
+        CapabilityStore store, List<DeviceUsage> results)
     {
-        if (appKey is null)
-        {
-            return false;
-        }
         try
         {
+            using var appKey = parent.OpenSubKey(keyName);
+            if (appKey is null)
+            {
+                return false;
+            }
             var start = ReadFileTime(appKey, "LastUsedTimeStart");
             var stop = ReadFileTime(appKey, "LastUsedTimeStop");
             if (start is null && stop is null)
             {
                 return true; // no recorded usage
             }
-            results.Add(new DeviceUsage(kind, app, packaged, start, stop, IsActive(start, stop)));
+            results.Add(new DeviceUsage(kind, app, packaged, start, stop, IsActive(start, stop)) { Store = store });
             return true;
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or IOException
-                                     or ArgumentOutOfRangeException)
+        catch (Exception ex) when (IsReadFailure(ex) || ex is ArgumentOutOfRangeException)
         {
             return false;
         }
     }
-
     private static DateTime? ReadFileTime(RegistryKey key, string valueName) =>
         key.GetValue(valueName) is long ft && ft > 0 ? DateTime.FromFileTimeUtc(ft) : null;
 

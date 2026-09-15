@@ -10,6 +10,8 @@ namespace WinSight.Persistence;
 /// </summary>
 public sealed class WindowsLoadRunEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows";
 
     // The Load/Run values live under this key in both HKLM and HKCU.

@@ -15,6 +15,10 @@ namespace WinSight.Persistence;
 /// </remarks>
 public sealed class RunOnceExEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+    public int UnreadableLocations => _unreadable;
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunOnceEx";
 
     public string Surface => "RunOnceEx";
@@ -29,6 +33,7 @@ public sealed class RunOnceExEnumerator : IAutostartEnumerator
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
         {
             foreach (var entry in ReadHive(hive))
@@ -38,7 +43,7 @@ public sealed class RunOnceExEnumerator : IAutostartEnumerator
         }
     }
 
-    private static List<RawAutostart> ReadHive(RegistryHive hive)
+    private List<RawAutostart> ReadHive(RegistryHive hive)
     {
         var entries = new List<RawAutostart>();
         try
@@ -74,7 +79,7 @@ public sealed class RunOnceExEnumerator : IAutostartEnumerator
                                      or System.Security.SecurityException
                                      or IOException)
         {
-            // An unreadable RunOnceEx contributes nothing; the surface count reports the scan.
+            _unreadable++;
         }
         return entries;
     }
@@ -91,6 +96,8 @@ public sealed class RunOnceExEnumerator : IAutostartEnumerator
 /// </remarks>
 public sealed class SecurityProvidersEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SYSTEM\CurrentControlSet\Control\SecurityProviders";
     private static readonly char[] Separators = [',', ' '];
 
@@ -132,6 +139,8 @@ public sealed class SecurityProvidersEnumerator : IAutostartEnumerator
 /// </remarks>
 public sealed class JustInTimeDebuggerEnumerator : IAutostartEnumerator
 {
+    public bool CanConfirmAbsence => true;
+
     private const string Path = @"SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug";
 
     public string Surface => "Just-in-time debugger";
@@ -176,19 +185,35 @@ public sealed class JustInTimeDebuggerEnumerator : IAutostartEnumerator
 /// </remarks>
 public sealed class PowerShellProfileEnumerator : IAutostartEnumerator
 {
+    private int _unreadable;
+    public int UnreadableLocations => _unreadable;
+    public bool CanConfirmAbsence => true;
+
     public string Surface => "PowerShell profiles";
 
     public IEnumerable<RawAutostart> Enumerate()
     {
+        _unreadable = 0;
         foreach (var (path, label) in CandidateProfiles())
         {
             bool exists;
             try
             {
-                exists = AutomaticFileAccess.IsLocal(path) && File.Exists(path);
+                if (!AutomaticFileAccess.IsLocal(path))
+                {
+                    _unreadable++;
+                    continue;
+                }
+                exists = (File.GetAttributes(path) & FileAttributes.Directory) == 0;
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {
+                continue;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
+                                         or System.Security.SecurityException)
+            {
+                _unreadable++;
                 continue;
             }
             if (exists)

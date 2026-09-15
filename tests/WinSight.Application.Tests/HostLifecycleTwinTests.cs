@@ -1,5 +1,6 @@
 using WinSight.Application;
 using WinSight.AvMonitor;
+using WinSight.Core;
 using Xunit;
 
 namespace WinSight.Application.Tests;
@@ -78,13 +79,13 @@ public sealed class HostLifecycleTwinTests
 
         internal Exception? Failure { get; private set; }
 
-        public IReadOnlyList<DeviceUsage> Read()
+        public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage()
         {
             try
             {
                 Interlocked.Increment(ref _polls);
                 Polled.Set();
-                return [];
+                return new AcquisitionSnapshot<DeviceUsage>([]);
             }
             catch (Exception ex)
             {

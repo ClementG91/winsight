@@ -192,8 +192,21 @@ public sealed class FileSystemPersistenceWatcher : IPersistenceChangeSource, IPe
         var changed = sender is FileSystemWatcher watcher && _targetByWatcher.TryGetValue(watcher, out var target)
             ? new[] { target }
             : Array.Empty<PersistenceWatchTarget>();
-        SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(changed));
+        try
+        {
+            SurfaceChanged?.Invoke(this, new PersistenceSurfaceChangedEventArgs(changed));
+        }
+        catch (Exception ex) when (!PersistenceMonitor.IsCatastrophic(ex))
+        {
+            // Raised on a thread-pool thread, where an escaping exception ends the process.
+            Interlocked.Increment(ref _notificationFailures);
+        }
     }
+
+    private int _notificationFailures;
+
+    /// <summary>Change notifications a subscriber failed to handle.</summary>
+    public int NotificationFailures => Volatile.Read(ref _notificationFailures);
 
     public void Dispose()
     {
