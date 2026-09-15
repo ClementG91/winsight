@@ -1,5 +1,12 @@
 ## 0.13.0 - 2026-09-15
 
+- Fixed: Guardian's live monitoring never started for a standard (non-administrator) user, since
+  0.10.0. Arming a watch on a folder the user may see but not watch - `C:\Windows\System32\Tasks` -
+  threw out of the start, after the baseline was saved, so only the start-up comparison ran and a new
+  startup item went unreported until the next launch. That folder is now a reported coverage gap, every
+  other surface is watched, and a failure to arm the watchers is journalled instead of discarded.
+- Fixed: `winsight resume` left the process frozen. Suspending counted every thread twice and resuming
+  undid it once, while both commands reported success; each thread is now suspended exactly once.
 - Guardian alerts are now decisions (BlockBlock parity). A new startup item opens a keyboard-safe
   window - Allow, Block or Decide later, where Enter and Escape both mean "decide later" - and a burst
   keeps the coalesced balloon. Block revalidates the item against the alert, quarantines it (a registry

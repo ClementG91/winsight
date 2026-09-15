@@ -58,6 +58,48 @@ public sealed class FileSystemPersistenceWatcherTests
     }
 
     [Fact]
+    public void AFolderThisUserCannotWatchIsSkippedAndTheOthersStillArmAndFire()
+    {
+        // Unelevated, C:\Windows\System32\Tasks exists but cannot be watched: arming it threw out of
+        // Start, which failed Guardian's whole start and left a standard user with no live
+        // persistence monitoring at all. A deny ACE reproduces that at any privilege level.
+        var denied = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"winsight-denied-{Guid.NewGuid():N}"));
+        var open = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), $"winsight-open-{Guid.NewGuid():N}"));
+        var user = System.Security.Principal.WindowsIdentity.GetCurrent().User!;
+        var deny = new System.Security.AccessControl.FileSystemAccessRule(user,
+            System.Security.AccessControl.FileSystemRights.ListDirectory,
+            System.Security.AccessControl.AccessControlType.Deny);
+        var acl = denied.GetAccessControl();
+        acl.AddAccessRule(deny);
+        denied.SetAccessControl(acl);
+
+        using var fired = new ManualResetEventSlim(false);
+        using var watcher = new FileSystemPersistenceWatcher(new[]
+        {
+            PersistenceWatchTarget.FileSystem(denied.FullName, includeSubdirectories: true),
+            PersistenceWatchTarget.FileSystem(open.FullName, includeSubdirectories: false),
+        });
+        watcher.SurfaceChanged += (_, _) => fired.Set();
+        try
+        {
+            watcher.Start();
+
+            Assert.Equal(1, watcher.WatchedDirectoryCount);
+            Assert.Equal(1, watcher.ArmedLocations);
+            Assert.Equal(2, watcher.RequestedLocations);
+            File.WriteAllText(Path.Combine(open.FullName, "evil.lnk"), "stub");
+            Assert.True(fired.Wait(TimeSpan.FromSeconds(30)), "the watchable folder was not armed");
+        }
+        finally
+        {
+            acl.RemoveAccessRule(deny);
+            denied.SetAccessControl(acl);
+            denied.Delete(recursive: true);
+            open.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public void CreatingAFileInAWatchedFolder_RaisesSurfaceChanged()
     {
         var dir = Path.Combine(Path.GetTempPath(), $"winsight-startup-{Guid.NewGuid():N}");

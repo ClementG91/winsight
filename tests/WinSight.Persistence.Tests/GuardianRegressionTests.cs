@@ -253,8 +253,12 @@ public sealed class GuardianRegressionTests
         var arrivals = new List<PersistenceEvent>();
         monitor.Detected += (_, args) => arrivals.Add(args.Detected);
 
-        Assert.Throws<IOException>(() => monitor.Start());
+        var thrown = Assert.Throws<IOException>(() => monitor.Start());
 
+        // Kept as a diagnosable fault, so the dashboard journals why live monitoring is not running.
+        var fault = monitor.Diagnostics.LastFault!;
+        Assert.Equal(PersistenceMonitorOperation.WatcherArming, fault.Operation);
+        Assert.Same(thrown, fault.Exception);
         Assert.Single(arrivals);
         Assert.Contains(PersistenceIdentity.FromEntry(entry), store.Load());
         Assert.False(monitor.IsStarted);
