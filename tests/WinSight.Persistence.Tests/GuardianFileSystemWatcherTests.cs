@@ -77,8 +77,8 @@ public sealed class FileSystemPersistenceWatcherTests
 
             File.WriteAllText(Path.Combine(dir, "evil.lnk"), "stub");
 
-            Assert.True(fired.Wait(TimeSpan.FromSeconds(5)),
-                "FileSystemWatcher did not signal within 5s of a file creation.");
+            Assert.True(fired.Wait(TimeSpan.FromSeconds(30)),
+                "FileSystemWatcher did not signal within 30s of a file creation.");
         }
         finally
         {

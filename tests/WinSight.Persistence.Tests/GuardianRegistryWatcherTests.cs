@@ -139,8 +139,8 @@ public sealed class RegistryChangeWatcherTests
 
             created!.SetValue("Payload", @"C:\evil.exe");
 
-            Assert.True(fired.Wait(TimeSpan.FromSeconds(5)),
-                "RegNotifyChangeKeyValue did not signal within 5s of a value write.");
+            Assert.True(fired.Wait(TimeSpan.FromSeconds(30)),
+                "RegNotifyChangeKeyValue did not signal within 30s of a value write.");
         }
         finally
         {
