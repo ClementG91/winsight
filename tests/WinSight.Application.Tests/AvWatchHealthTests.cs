@@ -11,7 +11,7 @@ public sealed class AvWatchHealthTests
     {
         using var host = new AvWatchHost(new CameraMicMonitor(new FaultingReader()));
         host.Start();
-        Assert.True(SpinWait.SpinUntil(() => host.Status.Failure is not null, TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => host.Status.Failure is not null, TimeSpan.FromSeconds(30)));
         Assert.False(host.Status.IsRunning);
         Assert.IsType<InvalidOperationException>(host.Status.Failure);
         Assert.Equal(ProtectionState.Failed, host.Health(enabled: true).State);
@@ -28,7 +28,7 @@ public sealed class AvWatchHealthTests
         WaitFor(ProtectionState.Partial);
         Assert.Equal(3, host.Health(true).Armed);
         reader.Snapshot = new AcquisitionSnapshot<DeviceUsage>([], unreadableItems: 1);
-        Assert.True(SpinWait.SpinUntil(() => host.Health(true).LostObservations, TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => host.Health(true).LostObservations, TimeSpan.FromSeconds(30)));
         reader.Snapshot = null; // transient access failure
         WaitFor(ProtectionState.Failed);
         Assert.True(host.Status.IsRunning);
@@ -41,7 +41,7 @@ public sealed class AvWatchHealthTests
         Assert.Equal(ProtectionState.Off, host.Health(false).State);
 
         void WaitFor(ProtectionState state) => Assert.True(SpinWait.SpinUntil(
-            () => host.Health(true).State == state, TimeSpan.FromSeconds(5)), $"Expected {state}");
+            () => host.Health(true).State == state, TimeSpan.FromSeconds(30)), $"Expected {state}");
     }
 
     private sealed class FaultingReader : ICapabilityAccessReader

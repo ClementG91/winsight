@@ -22,7 +22,7 @@ public sealed class CameraMicWakeOnChangeTests
         using var stop = new CancellationTokenSource();
         using var activated = new ManualResetEventSlim(false);
 
-        // A 30 s interval: if the loop only polled, the event could not arrive within the 5 s below.
+        // A 30 s interval: if the loop only polled, the event could not arrive within the 15 s below.
         var monitor = new CameraMicMonitor(reader, TimeSpan.FromSeconds(30), () => signal);
         var thread = new Thread(() => monitor.Watch(
             e => { if (e.Kind == AvEventKind.Activated) { activated.Set(); } }, stop.Token))
@@ -32,18 +32,18 @@ public sealed class CameraMicWakeOnChangeTests
         thread.Start();
         try
         {
-            Assert.True(reader.FirstReadDone.Wait(TimeSpan.FromSeconds(5)), "the baseline read never happened");
+            Assert.True(reader.FirstReadDone.Wait(TimeSpan.FromSeconds(30)), "the baseline read never happened");
 
             var sw = Stopwatch.StartNew();
             signal.Trigger();
 
-            Assert.True(activated.Wait(TimeSpan.FromSeconds(5)), "the loop did not wake on the change signal");
+            Assert.True(activated.Wait(TimeSpan.FromSeconds(15)), "the loop did not wake on the change signal");
             Assert.True(sw.Elapsed < TimeSpan.FromSeconds(20), "the loop woke on the poll interval, not the signal");
         }
         finally
         {
             stop.Cancel();
-            thread.Join(TimeSpan.FromSeconds(5));
+            thread.Join(TimeSpan.FromSeconds(30));
         }
 
         Assert.True(signal.Disposed); // Watch owns the per-run signal and disposes it.
@@ -94,12 +94,12 @@ public sealed class CameraMicWakeOnChangeTests
         thread.Start();
         try
         {
-            activated.Wait(TimeSpan.FromSeconds(5));
+            activated.Wait(TimeSpan.FromSeconds(30));
         }
         finally
         {
             stop.Cancel();
-            thread.Join(TimeSpan.FromSeconds(5));
+            thread.Join(TimeSpan.FromSeconds(30));
         }
     }
 

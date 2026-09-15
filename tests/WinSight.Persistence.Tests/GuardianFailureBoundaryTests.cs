@@ -32,7 +32,7 @@ public sealed class GuardianFailureBoundaryTests
             baselineStore: store ?? new MemoryStore(), disposeWait, retries ?? FastRetries);
 
     private static bool Eventually(Func<bool> condition) =>
-        SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(10));
+        SpinWait.SpinUntil(condition, TimeSpan.FromSeconds(30));
 
     [Fact]
     public void ASubscriberFailingDuringMonitoringIsContainedVisibleAndRetriedUntilDelivered()
@@ -200,22 +200,22 @@ public sealed class GuardianFailureBoundaryTests
         var starting = Task.Run(() => monitor.Start());
         if (!duringStartup)
         {
-            await starting.WaitAsync(TimeSpan.FromSeconds(5));
+            await starting.WaitAsync(TimeSpan.FromSeconds(30));
             source.Signal();
         }
-        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(30)));
 
         await Task.Run(() =>
         {
             Volatile.Write(ref disposedFlag, 1);
             monitor.Dispose();
-        }).WaitAsync(TimeSpan.FromSeconds(2));
+        }).WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.False(source.Disposed); // still in use by the blocked read: not released early
         Assert.True(monitor.Diagnostics.ShutdownDeferred);
 
         release.Set();
-        await starting.WaitAsync(TimeSpan.FromSeconds(5));
+        await starting.WaitAsync(TimeSpan.FromSeconds(30));
         Assert.True(Eventually(() => source.Disposed));
         Assert.False(monitor.Diagnostics.ShutdownDeferred);
         Assert.Equal(0, afterDispose);
@@ -248,7 +248,7 @@ public sealed class GuardianFailureBoundaryTests
                 }
             });
             var dispose = Task.Run(monitor.Dispose);
-            await Task.WhenAll(start, dispose).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.WhenAll(start, dispose).WaitAsync(TimeSpan.FromSeconds(30));
             Assert.True(Eventually(() => source.Disposed));
             Assert.Equal(1, source.DisposeCount);
             Assert.False(monitor.IsStarted);

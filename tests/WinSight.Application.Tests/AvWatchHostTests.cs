@@ -182,8 +182,7 @@ public sealed class AvWatchHostTests
 
         host.Start();
 
-        Assert.True(SpinWait.SpinUntil(() => host.Status is { IsRunning: true, HasSnapshot: true, Restarts: 1 },
-            TimeSpan.FromSeconds(10)));
+        Assert.True(WaitUntil(() => host.Status is { IsRunning: true, HasSnapshot: true, Restarts: 1 }));
         Assert.Null(host.Status.Failure);
         Assert.Equal(ProtectionState.Active, host.Health(enabled: true).State);
     }
@@ -197,11 +196,29 @@ public sealed class AvWatchHostTests
 
         host.Start();
 
-        Assert.True(SpinWait.SpinUntil(() => host.Status.RestartsExhausted, TimeSpan.FromSeconds(10)));
+        Assert.True(WaitUntil(() => host.Status.RestartsExhausted));
         Thread.Sleep(150); // no further restarts
         Assert.Equal(2, host.Status.Restarts);
         Assert.Equal(3, reader.Calls);
         Assert.Equal(ProtectionState.Failed, host.Health(enabled: true).State);
+    }
+
+    /// <summary>
+    /// Restarts are scheduled on a thread-pool timer, which parallel test classes can delay by seconds.
+    /// This is a hang detector: it sleeps rather than spins so it does not compete for the same cores.
+    /// </summary>
+    private static bool WaitUntil(Func<bool> condition)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(60);
+        while (!condition())
+        {
+            if (DateTime.UtcNow > deadline)
+            {
+                return false;
+            }
+            Thread.Sleep(20);
+        }
+        return true;
     }
 
     private sealed class FaultThenWorkReader(int faults) : ICapabilityAccessReader

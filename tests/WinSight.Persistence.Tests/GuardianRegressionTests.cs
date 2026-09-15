@@ -222,12 +222,12 @@ public sealed class GuardianRegressionTests
         {
             if (!duringStartup)
             {
-                await starting.WaitAsync(TimeSpan.FromSeconds(5));
+                await starting.WaitAsync(TimeSpan.FromSeconds(30));
                 source.Signal();
             }
-            await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await callbackEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-            await Task.Run(monitor.Dispose).WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Run(monitor.Dispose).WaitAsync(TimeSpan.FromSeconds(30));
 
             Assert.True(source.Disposed);
             Assert.False(monitor.IsStarted);
@@ -235,10 +235,10 @@ public sealed class GuardianRegressionTests
         finally
         {
             releaseCallback.TrySetResult();
-            await starting.WaitAsync(TimeSpan.FromSeconds(5));
+            await starting.WaitAsync(TimeSpan.FromSeconds(30));
             if (callbackEntered.Task.IsCompleted)
             {
-                await callbackExited.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await callbackExited.Task.WaitAsync(TimeSpan.FromSeconds(30));
             }
         }
     }

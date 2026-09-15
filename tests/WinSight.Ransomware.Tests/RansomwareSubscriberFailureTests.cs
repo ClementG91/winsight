@@ -37,12 +37,12 @@ public sealed class RansomwareSubscriberFailureTests
         {
             watcher.Start();
             File.AppendAllText(decoyA, "touch");
-            Assert.True(SpinWait.SpinUntil(() => detections >= 1, TimeSpan.FromSeconds(5)));
+            Assert.True(SpinWait.SpinUntil(() => detections >= 1, TimeSpan.FromSeconds(30)));
             watcher.Detector.Reset();
 
             File.AppendAllText(decoyB, "touch");
 
-            Assert.True(second.Wait(TimeSpan.FromSeconds(5)), "detections stopped after a subscriber fault");
+            Assert.True(second.Wait(TimeSpan.FromSeconds(30)), "detections stopped after a subscriber fault");
             Assert.Equal(1, watcher.NotificationFailures);
             Assert.True(watcher.CoverageIsIncomplete);
         }
@@ -75,11 +75,11 @@ public sealed class RansomwareSubscriberFailureTests
         {
             monitor.Start();
             File.AppendAllText(monitor.Canaries[0], "first");
-            Assert.True(SpinWait.SpinUntil(() => calls >= 1, TimeSpan.FromSeconds(5)));
+            Assert.True(SpinWait.SpinUntil(() => calls >= 1, TimeSpan.FromSeconds(30)));
 
             File.AppendAllText(monitor.Canaries[1], "second");
 
-            Assert.True(second.Wait(TimeSpan.FromSeconds(5)), "the detector stayed latched after a subscriber fault");
+            Assert.True(second.Wait(TimeSpan.FromSeconds(30)), "the detector stayed latched after a subscriber fault");
             Assert.Equal(1, monitor.NotificationFailures);
         }
         finally

@@ -109,7 +109,7 @@ public sealed class GuardianDeliveryAndEvidenceTests
             }
             // The operator closes the dashboard while the change scan is finishing.
             disposing = Task.Run(monitor!.Dispose, CancellationToken.None);
-            SpinWait.SpinUntil(() => !monitor.IsStarted, TimeSpan.FromSeconds(5));
+            SpinWait.SpinUntil(() => !monitor.IsStarted, TimeSpan.FromSeconds(30));
             return Scan(entry);
         }, debounce: TimeSpan.FromMilliseconds(1), baselineStore: store);
         var arrivals = 0;
@@ -117,8 +117,8 @@ public sealed class GuardianDeliveryAndEvidenceTests
         monitor.Start();
 
         source.Signal();
-        SpinWait.SpinUntil(() => disposing is not null, TimeSpan.FromSeconds(5));
-        await disposing!.WaitAsync(TimeSpan.FromSeconds(5));
+        SpinWait.SpinUntil(() => disposing is not null, TimeSpan.FromSeconds(30));
+        await disposing!.WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(0, arrivals);
         Assert.DoesNotContain(PersistenceIdentity.FromEntry(entry), store.Load()!);

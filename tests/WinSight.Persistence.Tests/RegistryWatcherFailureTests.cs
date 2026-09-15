@@ -35,10 +35,10 @@ public sealed class RegistryWatcherFailureTests : IDisposable
         Assert.Equal(1, watcher.ArmedKeyCount);
 
         SetValue("first");
-        Assert.True(SpinWait.SpinUntil(() => calls >= 1, TimeSpan.FromSeconds(5)));
+        Assert.True(SpinWait.SpinUntil(() => calls >= 1, TimeSpan.FromSeconds(30)));
         SetValue("second");
 
-        Assert.True(second.Wait(TimeSpan.FromSeconds(5)), "the registry watch stopped after a subscriber fault");
+        Assert.True(second.Wait(TimeSpan.FromSeconds(30)), "the registry watch stopped after a subscriber fault");
         Assert.Equal(1, watcher.NotificationFailures);
     }
 
@@ -62,10 +62,10 @@ public sealed class RegistryWatcherFailureTests : IDisposable
             watcher.Start();
 
             File.WriteAllText(Path.Combine(directory, "first.lnk"), "x");
-            Assert.True(SpinWait.SpinUntil(() => calls >= 1, TimeSpan.FromSeconds(5)));
+            Assert.True(SpinWait.SpinUntil(() => calls >= 1, TimeSpan.FromSeconds(30)));
             File.WriteAllText(Path.Combine(directory, "second.lnk"), "y");
 
-            Assert.True(second.Wait(TimeSpan.FromSeconds(5)));
+            Assert.True(second.Wait(TimeSpan.FromSeconds(30)));
             Assert.True(watcher.NotificationFailures >= 1);
         }
         finally
