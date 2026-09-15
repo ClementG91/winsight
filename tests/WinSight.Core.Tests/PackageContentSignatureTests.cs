@@ -249,7 +249,7 @@ public sealed class PackageContentSignatureTests : IDisposable
                     RecurseSubdirectories = true,
                     MaxRecursionDepth = 2,
                     IgnoreInaccessible = true,
-                }).FirstOrDefault(file => new FileInfo(file).Length < 64 * 1024 * 1024);
+                }).FirstOrDefault(file => new FileInfo(file).Length < 64 * 1024 * 1024 && !HasEmbeddedSignature(file));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -258,6 +258,24 @@ public sealed class PackageContentSignatureTests : IDisposable
             {
                 yield return new InstalledPackage(root, executable);
             }
+        }
+    }
+
+    /// <summary>
+    /// Many Store members also carry their own Authenticode signature, which the native verifier
+    /// reports first; only a member without one exercises the package evidence.
+    /// </summary>
+    private static bool HasEmbeddedSignature(string path)
+    {
+        try
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = new System.Reflection.PortableExecutable.PEReader(stream);
+            return reader.PEHeaders.PEHeader is not { CertificateTableDirectory.Size: 0 };
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or BadImageFormatException)
+        {
+            return true; // unreadable or not a PE image: not a usable member
         }
     }
 

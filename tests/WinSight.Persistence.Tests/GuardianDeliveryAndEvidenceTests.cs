@@ -35,21 +35,24 @@ public sealed class GuardianDeliveryAndEvidenceTests
             {
                 scanEntered.TrySetResult();
                 // A real full rescan verifies thousands of signatures; only cancellation ends it.
-                token.WaitHandle.WaitOne(TimeSpan.FromSeconds(30));
+                token.WaitHandle.WaitOne(TimeSpan.FromSeconds(120));
                 token.ThrowIfCancellationRequested();
             }
             return Scan();
         }, debounce: TimeSpan.FromMilliseconds(1), baselineStore: new MemoryStore());
 
-        var starting = Task.Run(() => monitor.Start());
+        // Dedicated threads, not the pool: parallel test classes block pool threads, and a start or
+        // dispose queued behind them would time out without saying anything about the monitor.
+        var starting = OnOwnThread(() => monitor.Start());
         if (!duringStartup)
         {
-            await starting.WaitAsync(TimeSpan.FromSeconds(5));
+            await starting.WaitAsync(TimeSpan.FromSeconds(30));
             source.Signal();
         }
-        await scanEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await scanEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        await Task.Run(monitor.Dispose).WaitAsync(TimeSpan.FromSeconds(5));
+        // The bound that matters: far shorter than the scan, so Dispose must have cancelled it.
+        await OnOwnThread(monitor.Dispose).WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.True(source.Disposed);
         if (duringStartup)
@@ -57,6 +60,9 @@ public sealed class GuardianDeliveryAndEvidenceTests
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => starting);
         }
     }
+
+    private static Task OnOwnThread(Action action) =>
+        Task.Factory.StartNew(action, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
 
     [Fact]
     public void AnArrivalWhoseSubscriberFailedIsReportedAgainOnTheNextLaunch()
