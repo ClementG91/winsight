@@ -82,12 +82,27 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
 
     public IReadOnlyList<PersistenceWatchTarget> WatchTargets { get; } = BuildWatchTargets();
 
+    /// <summary>
+    /// The registry views worth reading for <paramref name="hive"/>. WOW64 redirects
+    /// <c>HKLM\SOFTWARE</c>, never the user's own hive, so reading HKCU under both views returns the
+    /// same values twice.
+    /// </summary>
+    /// <remarks>
+    /// The duplicate was not merely noise: Guardian saw every user-level startup item as two arrivals,
+    /// so it announced them as a coalesced burst - a balloon - instead of opening the decision window
+    /// that Allow/Block exists for, and journalled each arrival twice.
+    /// </remarks>
+    private static RegistryView[] ViewsFor(RegistryHive hive) =>
+        hive == RegistryHive.CurrentUser
+            ? [RegistryView.Registry64]
+            : [RegistryView.Registry64, RegistryView.Registry32];
+
     private static PersistenceWatchTarget[] BuildWatchTargets()
     {
         var targets = new List<PersistenceWatchTarget>();
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
         {
-            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            foreach (var view in ViewsFor(hive))
             {
                 foreach (var sub in SubKeys)
                 {
@@ -103,7 +118,7 @@ public sealed class RunKeyEnumerator : IAutostartEnumerator
         _unreadable = 0;
         foreach (var hive in new[] { RegistryHive.LocalMachine, RegistryHive.CurrentUser })
         {
-            foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+            foreach (var view in ViewsFor(hive))
             {
                 using var baseKey = RegistryKey.OpenBaseKey(hive, view);
                 foreach (var sub in SubKeys)

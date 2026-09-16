@@ -1,5 +1,10 @@
 ## 0.13.0 - 2026-09-15
 
+- Fixed: every startup item in the user's own Run keys was reported twice. WOW64 redirects
+  `HKLM\SOFTWARE`, never `HKCU`, so reading the user's Run keys under both the 64-bit and the 32-bit
+  view returned the same value twice. Guardian therefore saw each user-level arrival as a burst of
+  two, announced it as a coalesced balloon instead of opening the Allow/Block window that decision
+  exists for, and journalled it twice. The user's hive is now read once.
 - Fixed: Guardian's live monitoring never started for a standard (non-administrator) user, since
   0.10.0. Arming a watch on a folder the user may see but not watch - `C:\Windows\System32\Tasks` -
   threw out of the start, after the baseline was saved, so only the start-up comparison ran and a new

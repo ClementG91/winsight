@@ -46,6 +46,31 @@ public sealed class GuardianEndToEndRegistryTests : IDisposable
         Assert.Equal("Planted", name);
     }
 
+    [Fact]
+    public void AUserRunValueIsReportedOnceNotOncePerRegistryView()
+    {
+        // WOW64 redirects HKLM\Software, never HKCU: reading the user's Run key under both the 64-bit
+        // and the 32-bit view returns the same value twice. Guardian then saw every user-level startup
+        // item as two arrivals, announced them as a coalesced burst instead of opening the decision
+        // window the whole feature exists for, and wrote each one into the alert journal twice.
+        var name = $"WinSightViewProbe{Guid.NewGuid():N}";
+        using (var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)!)
+        {
+            run.SetValue(name, @"""C:\Windows\System32\notepad.exe""");
+        }
+        try
+        {
+            var mine = new RunKeyEnumerator().Enumerate().Where(entry => entry.Name == name).ToList();
+
+            Assert.Single(mine);
+        }
+        finally
+        {
+            using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)!;
+            run.DeleteValue(name, throwOnMissingValue: false);
+        }
+    }
+
     private sealed class PrivateRunKeyEnumerator(string subPath) : IAutostartEnumerator
     {
         public string Surface => "Private run key";
