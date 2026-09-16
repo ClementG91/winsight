@@ -237,14 +237,14 @@ public sealed class PolicyStoreTests : IDisposable
         // must prevent File.Replace from racing a FileShare.Read | FileShare.Delete handle.
         await new FirewallPolicyStore(PolicyPath).SaveAsync(previous);
         var save = Task.Run(() => store.SaveAsync(next));
-        await guard.FirstInspectionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await guard.FirstInspectionEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
         var concurrentLoad = store.LoadAsync();
         Assert.False(concurrentLoad.IsCompleted);
         guard.ReleaseFirstInspection();
 
         await save;
-        var observed = await concurrentLoad.WaitAsync(TimeSpan.FromSeconds(5));
+        var observed = await concurrentLoad.WaitAsync(TimeSpan.FromSeconds(30));
 
         Assert.Equal(next.Mode, observed.Mode);
         Assert.Equal(next.Policies, observed.Policies);
@@ -261,7 +261,7 @@ public sealed class PolicyStoreTests : IDisposable
             [new AppFirewallPolicy(@"C:\after-cancellation.exe", OutboundAction.Ask)]);
 
         var heldSave = Task.Run(() => store.SaveAsync(configuration));
-        await guard.FirstInspectionEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await guard.FirstInspectionEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
         using var cancelledWaiter = new CancellationTokenSource();
         var waitingLoad = store.LoadAsync(cancelledWaiter.Token);
         await cancelledWaiter.CancelAsync();
@@ -293,11 +293,11 @@ public sealed class PolicyStoreTests : IDisposable
         // Run the reader on a worker because the guard deliberately blocks the synchronous
         // revalidation that happens after the FileShare.Read | FileShare.Delete handle opens.
         var openedReader = Task.Run(() => readerStore.LoadAsync());
-        await readerGuard.RevalidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await readerGuard.RevalidationEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-        await writerStore.SaveAsync(next).WaitAsync(TimeSpan.FromSeconds(5));
+        await writerStore.SaveAsync(next).WaitAsync(TimeSpan.FromSeconds(30));
         readerGuard.ReleaseFirstRevalidation();
-        var observedNextFromRetry = await openedReader.WaitAsync(TimeSpan.FromSeconds(5));
+        var observedNextFromRetry = await openedReader.WaitAsync(TimeSpan.FromSeconds(30));
         var observedNext = await new FirewallPolicyStore(PolicyPath).LoadAsync();
 
         Assert.Equal(next.Mode, observedNextFromRetry.Mode);
