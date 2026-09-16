@@ -1,5 +1,8 @@
 ## 0.13.0 - 2026-09-15
 
+- Fixed: saving a firewall policy could report failure after it had already succeeded. The temporary
+  file is deleted as housekeeping once the replace is done; a scanner holding it open for a moment
+  made that delete throw out of the save. The cleanup is now best-effort, like every other one.
 - Fixed: every startup item in the user's own Run keys was reported twice. WOW64 redirects
   `HKLM\SOFTWARE`, never `HKCU`, so reading the user's Run keys under both the 64-bit and the 32-bit
   view returned the same value twice. Guardian therefore saw each user-level arrival as a burst of

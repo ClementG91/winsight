@@ -292,10 +292,9 @@ public sealed class FirewallPolicyStore
         }
         finally
         {
-            if (File.Exists(temporaryPath))
-            {
-                File.Delete(temporaryPath);
-            }
+            // Best-effort: the temporary file is inert once the replace has happened, and a scanner
+            // holding it open for a moment must not turn a completed save into a reported failure.
+            WinSight.Core.AtomicFile.TryDelete(temporaryPath);
         }
     }
 
