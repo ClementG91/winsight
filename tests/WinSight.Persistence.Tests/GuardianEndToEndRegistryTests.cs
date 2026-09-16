@@ -54,7 +54,8 @@ public sealed class GuardianEndToEndRegistryTests : IDisposable
         // item as two arrivals, announced them as a coalesced burst instead of opening the decision
         // window the whole feature exists for, and wrote each one into the alert journal twice.
         var name = $"WinSightViewProbe{Guid.NewGuid():N}";
-        using (var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)!)
+        // A fresh Windows image may not have the key at all: create it rather than assume it.
+        using (var run = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run")!)
         {
             run.SetValue(name, @"""C:\Windows\System32\notepad.exe""");
         }
@@ -66,8 +67,8 @@ public sealed class GuardianEndToEndRegistryTests : IDisposable
         }
         finally
         {
-            using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true)!;
-            run.DeleteValue(name, throwOnMissingValue: false);
+            using var run = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+            run?.DeleteValue(name, throwOnMissingValue: false);
         }
     }
 
