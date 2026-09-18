@@ -1224,7 +1224,7 @@ $OriginalNetworkCategory = (Get-NetConnectionProfile `
 Set-NetConnectionProfile -InterfaceIndex $TargetInterface.InterfaceIndex -NetworkCategory Private
 
 New-LocalUser -Name $NetworkProbeUser -Password $NetworkProbePassword `
-    -Description 'Disposable account for Network Logon qualification' | Out-Null
+    -Description 'WinSight Network Logon probe (disposable)' | Out-Null
 Add-LocalGroupMember -Group $RemoteManagementGroup.Name -Member $NetworkProbeUser
 
 # Do not use Enable-PSRemoting here. On current workgroup Windows builds it can create
