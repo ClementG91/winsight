@@ -63,7 +63,8 @@ public static partial class Adapters
             // this the entry reads "signature valid" beside a [!] mark, which is the most confusing
             // thing a report can do: it looks like the tool contradicting itself rather than making
             // a point about where the code is registered to load.
-            var privileged = PrivilegedSurfaceTriage.IsForeignCodeInAPrivilegedHost(e)
+            var foreignCodeInPrivilegedHost = PrivilegedSurfaceTriage.IsForeignCodeInAPrivilegedHost(e);
+            var privileged = foreignCodeInPrivilegedHost
                 ? $"third-party code loaded by {PrivilegedHostLabel(e.Vector)}"
                 : null;
             var reasons = string.Join("; ", new[] { verdict, abuse, privileged }
@@ -102,6 +103,10 @@ public static partial class Adapters
                     ["microsoftSigned"] = e.ImageStatus == ImageResolutionStatus.Present
                         ? MicrosoftSignedField(e.Signature)
                         : null,
+                    // The surface, when the entry is foreign code on a privileged one, so a consumer
+                    // that rebuilds the line from fields - the dashboard - can still say why it is
+                    // flagged beside a valid signature.
+                    ["privilegedHost"] = foreignCodeInPrivilegedHost ? e.Vector.ToString() : null,
                     // Null rather than "Unspecified" when nothing was established, so a consumer
                     // tests for the key's presence and the MCP projector drops it from a clean
                     // entry rather than paying for a word that means "no answer".

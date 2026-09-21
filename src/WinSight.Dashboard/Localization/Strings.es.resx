@@ -137,6 +137,7 @@
   <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Firma no válida</value></data>
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Acceso denegado, firma no comprobada</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Error de verificación</value></data>
+  <data name="PersistencePrivilegedForeignCode" xml:space="preserve"><value>código de terceros cargado en un proceso con privilegios</value></data>
 
   <data name="PersistenceAbuseRemotePayload" xml:space="preserve"><value>un intérprete de Windows firmado apunta a una ubicación remota: lo que se ejecuta no está en este equipo</value></data>
   <data name="PersistenceAbusePerUserPayload" xml:space="preserve"><value>un intérprete de Windows firmado apunta a un archivo en una ubicación de usuario o temporal</value></data>
@@ -332,6 +333,8 @@
   <data name="SignatureStateUnsigned" xml:space="preserve"><value>SIN FIRMAR</value></data>
   <data name="SignatureStateMissing" xml:space="preserve"><value>Archivo ausente</value></data>
   <data name="SignatureStateUnknown" xml:space="preserve"><value>No se pudo verificar la firma</value></data>
+  <data name="TrustUserInstalledRoot" xml:space="preserve"><value>válida SOLO gracias a una raíz instalada por el usuario</value></data>
+  <data name="TrustCertificateRevoked" xml:space="preserve"><value>certificado REVOCADO</value></data>
   <data name="InputConcernExpected" xml:space="preserve"><value>controlador de clase de Windows, esperado</value></data>
   <data name="InputConcernThirdParty" xml:space="preserve"><value>controlador de terceros en la ruta de entrada</value></data>
   <data name="InputConcernUntrusted" xml:space="preserve"><value>SIN FIRMAR o no confiable, y ve cada pulsación de tecla</value></data>
@@ -359,6 +362,7 @@
   <data name="PresenceCauseDevice" xml:space="preserve"><value>un dispositivo que Windows nombró sin explicar</value></data>
   <data name="DnsFromCache" xml:space="preserve"><value>respondido desde la caché local</value></data>
   <data name="DnsFromNetwork" xml:space="preserve"><value>resuelto por la red</value></data>
+  <data name="DnsInResolverCache" xml:space="preserve"><value>en la caché del resolvedor</value></data>
   <data name="AlertKindCanaryTouched" xml:space="preserve"><value>archivo señuelo modificado</value></data>
   <data name="AlertKindHighEntropyWrite" xml:space="preserve"><value>escritura de alta entropía</value></data>
   <data name="AlertKindRename" xml:space="preserve"><value>ráfaga de renombrados</value></data>

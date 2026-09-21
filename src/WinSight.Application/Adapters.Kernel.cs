@@ -49,6 +49,7 @@ public static partial class Adapters
                     ["imageSource"] = filter.ImageSource.ToString(),
                     ["signature"] = filter.Signature.State.ToString(),
                     ["signer"] = filter.Signature.Signer,
+                    ["userInstalledTrust"] = filter.Signature.RestsOnUserInstalledTrust ? "true" : null,
                     ["microsoftSigned"] = MicrosoftSignedField(filter.Signature),
                     ["concern"] = concern.ToString(),
                 });
@@ -120,6 +121,7 @@ public static partial class Adapters
                     ["imageSource"] = driver.ImageSource.ToString(),
                     ["signature"] = driver.Signature.State.ToString(),
                     ["signer"] = driver.Signature.Signer,
+                    ["userInstalledTrust"] = driver.Signature.RestsOnUserInstalledTrust ? "true" : null,
                     ["microsoftSigned"] = MicrosoftSignedField(driver.Signature),
                     ["windowsProvided"] = driver.IsWindowsProvided.ToString(),
                     ["concern"] = concern.ToString(),

@@ -138,6 +138,94 @@ public sealed class DashboardFindingPresenterTests
     }
 
     /// <summary>
+    /// A row flagged beside a valid signature must say why in every presenter. The dashboard
+    /// rebuilds lines from fields, and the reason - a chain valid only through a user-installed root -
+    /// used to vanish, leaving "Signature valid" next to a [!] mark, or a bare path.
+    /// </summary>
+    [Theory]
+    [InlineData("en", "valid ONLY through a user-installed root")]
+    [InlineData("fr", "valide UNIQUEMENT grâce à une racine installée")]
+    [InlineData("es", "válida SOLO gracias a una raíz instalada")]
+    public void AFlaggedValidSignatureSaysWhyInEveryPresenter(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var trust = new Dictionary<string, string?>
+            {
+                ["signature"] = "SignedTrusted",
+                ["signer"] = "CN=Microsoft Windows",
+                ["userInstalledTrust"] = "true",
+            };
+            var rows = new (string Tool, Dictionary<string, string?> Fields)[]
+            {
+                ("persistence", new(trust) { ["status"] = "SignatureValid", ["image"] = @"C:\x.dll", ["vector"] = "RunKey", ["name"] = "x" }),
+                ("processes", new(trust) { ["name"] = "x.exe", ["pid"] = "7", ["path"] = @"C:\x.exe" }),
+                ("modules", new(trust) { ["process"] = "app", ["pid"] = "7", ["module"] = "x.dll", ["path"] = @"C:\x.dll" }),
+                ("connections", new(trust) { ["process"] = "x.exe", ["pid"] = "7", ["state"] = "ESTABLISHED" }),
+                ("drivers", new(trust) { ["name"] = "x", ["concern"] = "Untrusted", ["image"] = @"C:\x.sys" }),
+                ("input", new(trust) { ["name"] = "x", ["concern"] = "Untrusted", ["image"] = @"C:\x.sys" }),
+            };
+
+            foreach (var (tool, fields) in rows)
+            {
+                var detail = DashboardFindingPresenter.Present(tool, Item(Severity.Notable, fields), text).Detail;
+                Assert.Contains(expected, detail, StringComparison.Ordinal);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "third-party code loaded into a privileged process")]
+    [InlineData("fr", "code tiers chargé dans un processus privilégié")]
+    [InlineData("es", "código de terceros cargado en un proceso con privilegios")]
+    public void ForeignCodeInAPrivilegedHostSaysSoBesideAValidSignature(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["status"] = "SignatureValid",
+                ["image"] = @"C:\Program Files\Vendor\auth.dll",
+                ["vector"] = "LsaPackage",
+                ["name"] = "auth",
+                ["privilegedHost"] = "LsaPackage",
+            });
+
+            var detail = DashboardFindingPresenter.Present("persistence", item, text).Detail;
+
+            Assert.Contains(text["PersistenceStatusSignatureValid"], detail, StringComparison.Ordinal);
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// The cache snapshot says nothing about where an answer came from, and every record used to
+    /// read "resolved over the network".
+    /// </summary>
+    [Theory]
+    [InlineData("en", "in the resolver cache")]
+    [InlineData("fr", "dans le cache du résolveur")]
+    [InlineData("es", "en la caché del resolvedor")]
+    public void ACacheRecordIsNotClaimedToHaveComeFromTheNetwork(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Info, new()
+            {
+                ["name"] = "example.invalid",
+                ["type"] = "A",
+                ["data"] = "203.0.113.7",
+                ["ttl"] = "300",
+            });
+
+            var detail = DashboardFindingPresenter.Present("dns", item, text).Detail;
+
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+            Assert.DoesNotContain(text["DnsFromNetwork"], detail, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
     /// A row about the hosts file itself is not a mapping. It used to fall into the redirect branch
     /// and read "redirects a hostname to an external address" - for an unreadable file, malformed
     /// records, or a relocated database.

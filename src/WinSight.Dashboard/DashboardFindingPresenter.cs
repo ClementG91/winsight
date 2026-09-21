@@ -47,11 +47,11 @@ public static class DashboardFindingPresenter
     private static FindingPresentation InputHook(ReportItem item, LocalizationManager text)
     {
         var name = Field(item, "name") ?? item.Title;
-        var signature = SignatureLabel(item, text);
         var concern = Field(item, "concern");
-        var detail = string.IsNullOrWhiteSpace(concern)
-            ? signature
-            : $"{signature}; {text.GetOrFallback($"InputConcern{concern}", concern)}";
+        var detail = string.Join("; ", new[] { SignatureLabel(item, text) }
+            .Concat(TrustNotes(item, text))
+            .Append(string.IsNullOrWhiteSpace(concern) ? null : text.GetOrFallback($"InputConcern{concern}", concern))
+            .OfType<string>());
         var image = FirstNonEmpty(item, "image", "registeredImage");
         return new FindingPresentation(
             name,
@@ -61,11 +61,11 @@ public static class DashboardFindingPresenter
     private static FindingPresentation Driver(ReportItem item, LocalizationManager text)
     {
         var name = Field(item, "name") ?? item.Title;
-        var signature = SignatureLabel(item, text);
         var concern = Field(item, "concern");
-        var detail = string.IsNullOrWhiteSpace(concern)
-            ? signature
-            : $"{signature}; {text.GetOrFallback($"DriverConcern{concern}", concern)}";
+        var detail = string.Join("; ", new[] { SignatureLabel(item, text) }
+            .Concat(TrustNotes(item, text))
+            .Append(string.IsNullOrWhiteSpace(concern) ? null : text.GetOrFallback($"DriverConcern{concern}", concern))
+            .OfType<string>());
         var image = FirstNonEmpty(item, "image", "expectedImage");
         return new FindingPresentation(
             name,
@@ -120,7 +120,12 @@ public static class DashboardFindingPresenter
         var name = Field(item, "name") ?? item.Title;
         var type = Field(item, "type");
         var data = Field(item, "data");
-        var origin = BoolField(item, "local") ? text["DnsFromCache"] : text["DnsFromNetwork"];
+        // The cache snapshot carries no origin at all, and every record in it was labelled
+        // "resolved over the network". It is a record in the resolver cache; only a source that
+        // says where an answer came from gets to claim either.
+        var origin = Field(item, "local") is null
+            ? text["DnsInResolverCache"]
+            : BoolField(item, "local") ? text["DnsFromCache"] : text["DnsFromNetwork"];
         var detail = string.IsNullOrWhiteSpace(data) ? origin : $"{data}  [{origin}]";
         return new FindingPresentation(
             string.IsNullOrWhiteSpace(type) ? name : $"{name} ({type})", detail);
@@ -177,6 +182,14 @@ public static class DashboardFindingPresenter
         {
             suffix = $"{suffix}; {text.GetOrFallback($"PersistenceAbuse{concern}", concern)}";
         }
+        foreach (var note in TrustNotes(item, text))
+        {
+            suffix = $"{suffix}; {note}";
+        }
+        if (Field(item, "privilegedHost") is not null)
+        {
+            suffix = $"{suffix}; {text["PersistencePrivilegedForeignCode"]}";
+        }
         var vector = Field(item, "vector");
         var name = Field(item, "name");
         var localizedVector = string.IsNullOrWhiteSpace(vector)
@@ -213,7 +226,7 @@ public static class DashboardFindingPresenter
         var pid = Field(item, "pid") ?? "?";
         return new FindingPresentation(
             text.Format("ProcessWithPid", name, pid),
-            Field(item, "path") ?? text["NoImage"]);
+            WithSignature(Field(item, "path") ?? text["NoImage"], item, text));
     }
 
     private static FindingPresentation Module(ReportItem item, LocalizationManager text)
@@ -223,7 +236,39 @@ public static class DashboardFindingPresenter
         var module = Field(item, "module") ?? text["UnknownValue"];
         return new FindingPresentation(
             text.Format("ModuleLoadedByProcess", process, pid, module),
-            Field(item, "path") ?? text["UnknownValue"]);
+            WithSignature(Field(item, "path") ?? text["UnknownValue"], item, text));
+    }
+
+    /// <summary>
+    /// The evidence, then its signature standing and any reason it is flagged anyway. Process and
+    /// module rows used to show the path alone, so a row marked [!] never said why - least of all
+    /// when the signature is valid only through a root the user could have installed.
+    /// </summary>
+    private static string WithSignature(string evidence, ReportItem item, LocalizationManager text)
+    {
+        if (Field(item, "signature") is null)
+        {
+            return evidence;
+        }
+        var parts = new[] { SignatureLabel(item, text) }.Concat(TrustNotes(item, text));
+        return $"{evidence}  [{string.Join("; ", parts)}]";
+    }
+
+    /// <summary>
+    /// Why a signature that reads as valid is still flagged, in the operator's language. The
+    /// adapters say it in English in the detail; the dashboard rebuilds its lines from fields, and
+    /// without this the reason vanished and "Signature valid" sat beside a [!] mark.
+    /// </summary>
+    private static IEnumerable<string> TrustNotes(ReportItem item, LocalizationManager text)
+    {
+        if (BoolField(item, "userInstalledTrust"))
+        {
+            yield return text["TrustUserInstalledRoot"];
+        }
+        if (string.Equals(Field(item, "revocation"), "Revoked", StringComparison.Ordinal))
+        {
+            yield return text["TrustCertificateRevoked"];
+        }
     }
 
     private static FindingPresentation Hosts(ReportItem item, LocalizationManager text)
@@ -384,6 +429,11 @@ public static class DashboardFindingPresenter
         var pid = Field(item, "pid") ?? "?";
         var state = Field(item, "state");
         var detail = text.Format("ConnectionProcessState", process, pid, state);
+        if (item.Severity == Severity.Notable)
+        {
+            // The owner's standing is the reason an external connection is flagged; say it.
+            detail = WithSignature(detail, item, text);
+        }
         if (HasVirusTotal(item, out var malicious, out var total))
         {
             detail += $"  [VT {malicious}/{total}]";
