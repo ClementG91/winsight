@@ -76,6 +76,7 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
             ? new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase)
             : _verifier.VerifyMany(paths, cancellationToken);
 
+        var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
         var results = new List<InputFilter>(resolved.Count);
         foreach (var (stack, position, name, driver) in resolved)
         {
@@ -92,7 +93,7 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
                 name,
                 driver.Path,
                 verdict,
-                InputFilterTriage.IsWindowsClassDriver(stack, name),
+                InputFilterTriage.IsWindowsClassDriver(stack, name, driver.Path, verdict, systemDirectory),
                 driver.Source,
                 driver.Registered));
         }

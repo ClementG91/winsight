@@ -328,6 +328,8 @@
   <data name="InputConcernUntrusted" xml:space="preserve"><value>UNSIGNED or untrusted, and can see every keystroke</value></data>
   <data name="InputConcernMissing" xml:space="preserve"><value>registered filter whose driver file is missing</value></data>
   <data name="InputConcernUnresolvable" xml:space="preserve"><value>image registered outside any local path, so it could not be verified</value></data>
+  <data name="InputConcernUnverified" xml:space="preserve"><value>signature could not be verified, and it sees every keystroke</value></data>
+  <data name="InputConcernImpersonating" xml:space="preserve"><value>NAMED like the Windows class driver, but its image is not the Windows file</value></data>
   <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>shipped by Windows</value></data>
   <data name="DriverConcernThirdParty" xml:space="preserve"><value>signed by a third party</value></data>
   <data name="DriverConcernUntrusted" xml:space="preserve"><value>UNSIGNED or untrusted kernel code</value></data>

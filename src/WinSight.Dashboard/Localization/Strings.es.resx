@@ -325,6 +325,8 @@
   <data name="InputConcernUntrusted" xml:space="preserve"><value>SIN FIRMAR o no confiable, y ve cada pulsación de tecla</value></data>
   <data name="InputConcernMissing" xml:space="preserve"><value>filtro registrado cuyo archivo de controlador falta</value></data>
   <data name="InputConcernUnresolvable" xml:space="preserve"><value>imagen registrada fuera de toda ruta local, por lo que no se pudo verificar</value></data>
+  <data name="InputConcernUnverified" xml:space="preserve"><value>no se pudo verificar la firma, y ve cada pulsación de tecla</value></data>
+  <data name="InputConcernImpersonating" xml:space="preserve"><value>USA EL NOMBRE del controlador de clase de Windows, pero su imagen no es el archivo de Windows</value></data>
   <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>suministrado por Windows</value></data>
   <data name="DriverConcernThirdParty" xml:space="preserve"><value>firmado por un tercero</value></data>
   <data name="DriverConcernUntrusted" xml:space="preserve"><value>código de núcleo SIN FIRMAR o no confiable</value></data>

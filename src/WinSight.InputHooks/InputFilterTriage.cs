@@ -22,6 +22,15 @@ public enum InputFilterConcern
     /// name), so it could not be verified at all.
     /// </summary>
     Unresolvable,
+
+    /// <summary>Verification of the filter's image could not be completed, so nothing is known either way.</summary>
+    Unverified,
+
+    /// <summary>
+    /// The filter carries the name of the class driver Windows installs, but its image is not the
+    /// Windows file: signed by somebody else, unsigned, outside System32, or another file entirely.
+    /// </summary>
+    Impersonating,
 }
 
 /// <summary>
@@ -42,6 +51,15 @@ public enum InputFilterConcern
 /// installs is treated as expected; everything else is reported with its signature standing, and
 /// the operator decides. Listing a real touchpad driver costs a moment's reading. Hiding a
 /// keylogger because it borrowed a familiar name costs everything.
+///
+/// <b>Why the class driver is recognised by its image, not its name.</b> The same argument applies
+/// to <c>kbdclass</c> and <c>mouclass</c> themselves. They used to be expected on their names
+/// alone, so repointing the <c>kbdclass</c> service's <c>ImagePath</c> at another driver - the
+/// natural way to put a keylogger in the keyboard stack without adding a line to it - left the
+/// one line there reading "the class driver Windows installs". Expected now means the name, and a
+/// <c>{name}.sys</c> image that Windows itself signed and that lives inside System32, which is the
+/// rule the kernel-driver scan applies to every in-box driver. Anything else under that name is
+/// reported as impersonating it.
 /// </remarks>
 public static class InputFilterTriage
 {
@@ -49,10 +67,28 @@ public static class InputFilterTriage
     public static string ClassDriverFor(InputStack stack) =>
         stack == InputStack.Keyboard ? "kbdclass" : "mouclass";
 
-    /// <summary>Whether <paramref name="name"/> is the Windows-provided class driver for its stack.</summary>
-    public static bool IsWindowsClassDriver(InputStack stack, string? name) =>
+    /// <summary>
+    /// Whether <paramref name="name"/> is the name of the Windows-provided class driver for its
+    /// stack. A name is a label: see <see cref="IsWindowsClassDriver"/> for what makes it the driver.
+    /// </summary>
+    public static bool HasClassDriverName(InputStack stack, string? name) =>
         !string.IsNullOrWhiteSpace(name)
         && name.Trim().Equals(ClassDriverFor(stack), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a filter is the class driver Windows installs: its name, and an image named after it
+    /// that Windows itself signed and that lives inside <paramref name="systemDirectory"/>.
+    /// </summary>
+    public static bool IsWindowsClassDriver(
+        InputStack stack,
+        string? name,
+        string? imagePath,
+        SignatureVerdict signature,
+        string systemDirectory) =>
+        HasClassDriverName(stack, name)
+        && string.Equals(
+            Path.GetFileName(imagePath), $"{ClassDriverFor(stack)}.sys", StringComparison.OrdinalIgnoreCase)
+        && WindowsImage.IsWindowsProvided(imagePath, signature, systemDirectory);
 
     /// <summary>What the filter means for the operator.</summary>
     public static InputFilterConcern Concern(InputFilter filter)
@@ -71,9 +107,12 @@ public static class InputFilterTriage
         return filter.Signature.State switch
         {
             SignatureState.Missing => InputFilterConcern.Missing,
+            // Unknown means verification could not run, which is not evidence of anything. Calling it
+            // untrusted would cry wolf on files WinSight simply failed to check; calling it third-party
+            // - or, under a class driver's name, an impostor - would assert what was never established.
+            SignatureState.Unknown => InputFilterConcern.Unverified,
+            _ when HasClassDriverName(filter.Stack, filter.Name) => InputFilterConcern.Impersonating,
             SignatureState.Unsigned or SignatureState.SignedUntrusted => InputFilterConcern.Untrusted,
-            // Unknown means verification could not run, which is not evidence of anything. Treating
-            // it as suspicious would cry wolf on files WinSight simply failed to check.
             _ => InputFilterConcern.ThirdParty,
         };
     }

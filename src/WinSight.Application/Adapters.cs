@@ -1129,6 +1129,9 @@ public static partial class Adapters
             InputFilterConcern.Untrusted => "UNSIGNED or untrusted, and can see every keystroke",
             InputFilterConcern.Unresolvable =>
                 "its registered image is not a local path, so it could not be verified, and it can see every keystroke",
+            InputFilterConcern.Unverified => "its signature could not be verified, and it can see every keystroke",
+            InputFilterConcern.Impersonating =>
+                "NAMED like the Windows class driver, but its image is not the Windows file, and it can see every keystroke",
             _ => "listed here but its driver file is missing",
         };
 
