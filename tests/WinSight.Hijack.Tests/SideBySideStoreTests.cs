@@ -140,4 +140,43 @@ public sealed class SideBySideStoreTests : IDisposable
 
         Assert.False(store.Contains("second.dll"));
     }
+
+    /// <summary>
+    /// The walk holds one directory open at a time, whatever the size of the store.
+    /// </summary>
+    /// <remarks>
+    /// The recursive enumerator opened every subdirectory as it met it and kept the handle queued, so
+    /// indexing the real WinSxS - tens of thousands of component directories - held about 46 000
+    /// directory handles at once. Three thousand directories here would have meant three thousand
+    /// open handles; nested ones (the <c>f</c>/<c>r</c> delta folders real components carry) must
+    /// still be indexed.
+    /// </remarks>
+    [Fact]
+    public void AStoreOfManyDirectoriesIsIndexedWithoutHoldingTheirHandles()
+    {
+        const int Components = 3000;
+        for (var i = 0; i < Components; i++)
+        {
+            var component = Path.Combine(_root, "WinSxS", $"amd64_component_{i}");
+            Directory.CreateDirectory(Path.Combine(component, "f"));
+            File.WriteAllBytes(Path.Combine(component, "f", $"lib{i}.dll"), []);
+        }
+        var store = new SideBySideStore(_root, TimeSpan.FromMinutes(2), int.MaxValue);
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        process.Refresh();
+        var before = process.HandleCount;
+        var peak = before;
+        using var sampling = new Timer(_ =>
+        {
+            using var self = System.Diagnostics.Process.GetCurrentProcess();
+            Interlocked.Exchange(ref peak, Math.Max(Volatile.Read(ref peak), self.HandleCount));
+        }, null, 0, 5);
+
+        Assert.True(store.Contains("lib0.dll"));
+        Assert.True(store.Contains($"lib{Components - 1}.dll"));
+        Assert.False(store.Contains("absent.dll"));
+
+        Assert.True(Volatile.Read(ref peak) - before < Components / 4,
+            $"the walk held {Volatile.Read(ref peak) - before} extra handles at its peak");
+    }
 }

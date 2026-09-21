@@ -1,36 +1,63 @@
+using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
+
+using Microsoft.Win32.SafeHandles;
 
 using WinSight.Core;
 
 namespace WinSight.Hijack;
 
+/// <summary>What a writability question is about: a new file, or a new subdirectory.</summary>
+/// <remarks>
+/// Windows grants the two separately (<c>FILE_ADD_FILE</c> and <c>FILE_ADD_SUBDIRECTORY</c>), and
+/// the default ACL on the system drive root grants a standard user the second and not the first.
+/// </remarks>
+public enum PlantedObject
+{
+    File,
+    Directory,
+}
+
+/// <summary>How a writability answer was reached.</summary>
+public enum WriteAccessEvaluation
+{
+    /// <summary>Windows <c>AccessCheck</c> with the current user's complete non-elevated token.</summary>
+    EffectiveAccess,
+
+    /// <summary>
+    /// The DACL read for the well-known unprivileged groups (Users, Authenticated Users, Everyone,
+    /// Interactive), because the process has no non-elevated token to ask Windows about: SYSTEM, a
+    /// service account, or an administrator with UAC disabled.
+    /// </summary>
+    WellKnownPrincipals,
+}
+
 /// <summary>
-/// Answers "could an <i>unprivileged</i> principal create a file in this directory" by reading the
-/// directory's DACL, for the case where creating one with the current token would answer a
-/// different question entirely.
+/// Answers whether the current interactive user, with elevation removed, can create an object in a
+/// directory. Production uses Windows <c>AccessCheck</c> with the complete token and exact DACL.
 /// </summary>
 /// <remarks>
-/// <b>Why this exists.</b> <see cref="WritabilityProbe"/> answers by really creating a file, which
-/// is the right method — effective access on Windows is the sum of inherited allow and deny entries
+/// <b>Why Windows is asked.</b> Effective access is the sum of inherited allow and deny entries
 /// across every group in the token, plus privileges that override both, and reconstructing that
-/// from a security descriptor is where this kind of check quietly gets it wrong. But it answers for
-/// <i>the current token</i>. Run elevated — which is the mode WinSight recommends for attribution
-/// and for scheduled tasks — an administrator can create a file in <c>C:\</c>, in
-/// <c>C:\Program Files</c>, in <c>System32</c> and in every machine PATH entry. Every unquoted
-/// service path then graded Exploitable, every service directory writable, every PATH entry
-/// reported. The measurement the design rests on ("18 PATH entries and 88 services, none writable")
-/// only holds in a non-elevated session.
+/// from a security descriptor is where this kind of check quietly gets it wrong. <c>AccessCheck</c>
+/// performs the evaluation Windows itself performs. It replaced creating and deleting a probe file,
+/// which answered the same question but wrote into <c>Program Files</c>, service directories and
+/// PATH entries on every scan.
 ///
-/// <b>Why the DACL, here specifically.</b> The real-attempt argument does not survive the change of
-/// question: WinSight cannot create a file <i>as somebody else</i> without impersonating a token it
-/// has no business fabricating. Reading the ACL is what remains, so it is done narrowly and
-/// conservatively rather than generally.
+/// <b>Why the non-elevated token.</b> Elevated, the process token can create a file in <c>C:\</c>,
+/// in <c>Program Files</c> and in <c>System32</c>: every unquoted service path would grade
+/// Exploitable. The question is what an attacker who landed as this user could do, so an elevated
+/// token is exchanged for its linked, filtered one.
 ///
-/// <b>Conservative by construction.</b> A grant is claimed only when an explicit Allow gives a
-/// file-creating right to one of the well-known unprivileged principals and no Deny takes it back.
-/// Anything it cannot read or cannot parse is <see langword="false"/>, because an unproven "yes" is
-/// a false accusation against installed software — the same rule the real-attempt probe follows.
+/// <b>Without such a token</b> - SYSTEM, a service account, an administrator with UAC disabled - the
+/// DACL is read for the well-known unprivileged groups instead (<see cref="IsGrantedBy(FileSystemSecurity, PlantedObject)"/>).
+/// That model claims a grant only when an explicit Allow gives the right to one of those groups on
+/// the directory itself and no Deny takes it back, and the answer says which method produced it.
+///
+/// <b>Conservative either way.</b> Anything that cannot be read or evaluated is
+/// <see langword="false"/> and counted as unreadable, because an unproven "yes" is a false
+/// accusation against installed software.
 /// </remarks>
 public static class UnprivilegedWriteAccess
 {
@@ -50,32 +77,93 @@ public static class UnprivilegedWriteAccess
         WellKnownSidType.InteractiveSid,           // S-1-5-4
     ];
 
-    // The rights that let somebody place a new file (or a new directory) in this one. WriteData and
-    // CreateFiles are the same bit on a directory; both spellings are listed because a descriptor
-    // may carry either.
+    // The right that lets somebody place a new file, or a new subdirectory, in a directory. On a
+    // directory WriteData is CreateFiles (FILE_ADD_FILE) and AppendData is CreateDirectories
+    // (FILE_ADD_SUBDIRECTORY). They were one set, and they are not interchangeable: the default ACL
+    // on the system drive root grants Authenticated Users CreateDirectories and nothing that creates
+    // a file, so reading either bit as "can plant a file" graded C:\Program.exe - the first candidate
+    // of every unquoted service path - as creatable by a standard user who cannot create it.
     //
-    // GenericWrite does NOT map onto this set on its own, which this comment used to claim. The
-    // generic bits live in the high word and share nothing with the specific rights below, so an
-    // ACE granting Users GENERIC_WRITE - what `icacls /grant Users:(GW)` and an SDDL `GW` produce -
-    // read as granting no planting right at all, and a real DLL side-loading point was reported as
-    // safe. Every mask is now expanded through the file generic mapping first.
-    private const FileSystemRights PlantingRights =
-        FileSystemRights.CreateFiles | FileSystemRights.CreateDirectories | FileSystemRights.Write;
+    // GenericWrite does not map onto these bits on its own. The generic bits live in the high word
+    // and share nothing with the specific rights, so an ACE granting Users GENERIC_WRITE - what
+    // `icacls /grant Users:(GW)` and an SDDL `GW` produce - read as granting no planting right at
+    // all, and a real DLL side-loading point was reported as safe. Every mask is expanded through
+    // the file generic mapping first.
+    private static FileSystemRights PlantingRights(PlantedObject planted) => planted == PlantedObject.Directory
+        ? FileSystemRights.CreateDirectories
+        : FileSystemRights.CreateFiles;
 
     /// <summary>
     /// Whether an unprivileged principal is granted a file-creating right on
     /// <paramref name="directory"/>. False whenever that cannot be established.
     /// </summary>
-    public static bool IsGrantedIn(string directory)
+    public static bool IsGrantedIn(string directory) => IsGrantedIn(directory, PlantedObject.File);
+
+    /// <summary>
+    /// Whether an unprivileged principal is granted the right to create <paramref name="planted"/>
+    /// in <paramref name="directory"/>. False whenever that cannot be established.
+    /// </summary>
+    public static bool IsGrantedIn(string directory, PlantedObject planted) =>
+        TryIsGrantedIn(directory, planted, out var granted) && granted;
+
+    /// <summary>
+    /// Evaluates the directory DACL with the complete non-elevated current token. Returns false
+    /// when the descriptor or a suitable token cannot be acquired; <paramref name="granted"/> then
+    /// carries no evidence and remains false.
+    /// </summary>
+    public static bool TryIsGrantedIn(
+        string directory,
+        PlantedObject planted,
+        out bool granted) =>
+        TryIsGrantedIn(directory, planted, out granted, out _);
+
+    /// <summary>
+    /// As <see cref="TryIsGrantedIn(string, PlantedObject, out bool)"/>, and says which method
+    /// produced the answer.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why there is a second method at all.</b> <c>AccessCheck</c> needs a token to ask about,
+    /// and the honest one is the current user's with elevation removed. SYSTEM, a service account
+    /// and an administrator with UAC disabled have no such token - and that is exactly how a
+    /// scheduled scan runs. Refusing to answer there made the scan report nothing in the context it
+    /// is most often automated in. Those processes fall back to reading the DACL for the well-known
+    /// unprivileged groups: narrower than a real user's token (a grant to one named user is not
+    /// seen) and conservative in the same direction, never claiming a grant it cannot show.
+    /// </remarks>
+    public static bool TryIsGrantedIn(
+        string directory,
+        PlantedObject planted,
+        out bool granted,
+        out WriteAccessEvaluation evaluation)
     {
+        granted = false;
+        evaluation = WriteAccessEvaluation.EffectiveAccess;
         if (string.IsNullOrWhiteSpace(directory))
         {
             return false;
         }
         try
         {
-            var security = new DirectoryInfo(directory).GetAccessControl(AccessControlSections.Access);
-            return IsGrantedBy(security);
+            var descriptor = AutomaticFileAccess.TryReadDirectorySecurityDescriptor(directory);
+            if (descriptor is null)
+            {
+                return false;
+            }
+            var state = TryOpenUnprivilegedImpersonationToken(out var token);
+            using (token)
+            {
+                switch (state)
+                {
+                    case TokenState.Available when token is { IsInvalid: false }:
+                        return TryAccessCheck(descriptor, token, planted, out granted);
+                    case TokenState.PrivilegedUnsplit:
+                        evaluation = WriteAccessEvaluation.WellKnownPrincipals;
+                        granted = IsGrantedByDescriptor(descriptor, planted);
+                        return true;
+                    default:
+                        return false;
+                }
+            }
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException
                                      or IOException
@@ -90,12 +178,30 @@ public static class UnprivilegedWriteAccess
     }
 
     /// <summary>
+    /// The well-known-group decision over a self-relative security descriptor, as read from a
+    /// directory handle.
+    /// </summary>
+    internal static bool IsGrantedByDescriptor(byte[] descriptor, PlantedObject planted)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        var security = new DirectorySecurity();
+        security.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Access);
+        return IsGrantedBy(security, planted);
+    }
+
+    /// <summary>
     /// The decision itself, over a descriptor rather than a path, so it is testable against
     /// constructed ACLs without needing a directory whose real ACL says the right thing.
     /// </summary>
-    public static bool IsGrantedBy(FileSystemSecurity security)
+    public static bool IsGrantedBy(FileSystemSecurity security) => IsGrantedBy(security, PlantedObject.File);
+
+    /// <summary>
+    /// The decision for <paramref name="planted"/>, over a descriptor rather than a path.
+    /// </summary>
+    public static bool IsGrantedBy(FileSystemSecurity security, PlantedObject planted)
     {
         ArgumentNullException.ThrowIfNull(security);
+        var plantingRights = PlantingRights(planted);
 
         var principals = ResolvePrincipals();
         if (principals.Count == 0)
@@ -117,10 +223,15 @@ public static class UnprivilegedWriteAccess
         var allowed = false;
         foreach (var rule in rules)
         {
+            // An inherit-only entry describes what children of this directory will receive; it
+            // grants nothing on the directory itself. The system drive root carries exactly such an
+            // entry - Authenticated Users, Modify, inherit only - and reading it as a grant on C:\
+            // is the other half of the false "C:\Program.exe is plantable" verdict above.
             if (rule is not FileSystemAccessRule access
+                || (access.PropagationFlags & PropagationFlags.InheritOnly) != 0
                 || access.IdentityReference is not SecurityIdentifier sid
                 || !principals.Contains(sid)
-                || (GenericFileRights.Expand(access.FileSystemRights) & PlantingRights) == 0)
+                || (GenericFileRights.Expand(access.FileSystemRights) & plantingRights) == 0)
             {
                 continue;
             }
@@ -153,4 +264,233 @@ public static class UnprivilegedWriteAccess
         }
         return principals;
     }
+
+    private enum TokenState
+    {
+        Available,
+        PrivilegedUnsplit,
+        Unavailable,
+    }
+
+    private static TokenState TryOpenUnprivilegedImpersonationToken(out SafeAccessTokenHandle? token)
+    {
+        token = null;
+        if (!OpenProcessToken(
+                GetCurrentProcess(),
+                TokenQuery | TokenDuplicate,
+                out var processToken))
+        {
+            return TokenState.Unavailable;
+        }
+        using (processToken)
+        {
+            SafeAccessTokenHandle? linked = null;
+            try
+            {
+                var source = processToken;
+                if (!GetTokenInformation(
+                        processToken,
+                        TokenElevationTypeClass,
+                        out int elevationType,
+                        sizeof(int),
+                        out _))
+                {
+                    return TokenState.Unavailable;
+                }
+                if (elevationType == TokenElevationTypeFull)
+                {
+                    if (!GetTokenInformation(
+                            processToken,
+                            TokenLinkedTokenClass,
+                            out TokenLinkedToken linkedInfo,
+                            Marshal.SizeOf<TokenLinkedToken>(),
+                            out _))
+                    {
+                        return TokenState.Unavailable;
+                    }
+                    linked = new SafeAccessTokenHandle(linkedInfo.Handle);
+                    source = linked;
+                }
+                else if (elevationType == TokenElevationTypeDefault
+                         && IsPrivilegedUnsplitToken(processToken))
+                {
+                    // SYSTEM/service and UAC-disabled administrator tokens have no honest
+                    // standard-user counterpart, and evaluating their powerful token would accuse
+                    // every protected directory. The caller falls back to the well-known
+                    // unprivileged groups instead of fabricating a token.
+                    return TokenState.PrivilegedUnsplit;
+                }
+                if (!DuplicateToken(source, SecurityImpersonation, out var impersonation))
+                {
+                    return TokenState.Unavailable;
+                }
+                token = impersonation;
+                return TokenState.Available;
+            }
+            finally
+            {
+                linked?.Dispose();
+            }
+        }
+    }
+
+    private static bool IsPrivilegedUnsplitToken(SafeAccessTokenHandle token)
+    {
+        using var identity = new WindowsIdentity(token.DangerousGetHandle());
+        if (identity.User is { } user
+            && (user.IsWellKnown(WellKnownSidType.LocalSystemSid)
+                || user.IsWellKnown(WellKnownSidType.LocalServiceSid)
+                || user.IsWellKnown(WellKnownSidType.NetworkServiceSid)))
+        {
+            return true;
+        }
+        return identity.Groups?.Any(group =>
+            group is SecurityIdentifier sid
+            && sid.IsWellKnown(WellKnownSidType.BuiltinAdministratorsSid)) == true;
+    }
+
+    private static bool TryAccessCheck(
+        byte[] descriptor,
+        SafeAccessTokenHandle token,
+        PlantedObject planted,
+        out bool granted)
+    {
+        granted = false;
+        var mapping = new GenericMapping
+        {
+            GenericRead = FileGenericRead,
+            GenericWrite = FileGenericWrite,
+            GenericExecute = FileGenericExecute,
+            GenericAll = FileAllAccess,
+        };
+        var descriptorHandle = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+        var privileges = IntPtr.Zero;
+        try
+        {
+            uint privilegeBytes = InitialPrivilegeSetBytes;
+            privileges = Marshal.AllocHGlobal(checked((int)privilegeBytes));
+            if (!AccessCheck(
+                    descriptorHandle.AddrOfPinnedObject(),
+                    token,
+                    DesiredAccess(planted),
+                    ref mapping,
+                    privileges,
+                    ref privilegeBytes,
+                    out var grantedAccess,
+                    out var accessStatus))
+            {
+                if (Marshal.GetLastPInvokeError() != ErrorInsufficientBuffer
+                    || privilegeBytes > MaximumPrivilegeSetBytes)
+                {
+                    return false;
+                }
+                Marshal.FreeHGlobal(privileges);
+                privileges = Marshal.AllocHGlobal(checked((int)privilegeBytes));
+                if (!AccessCheck(
+                        descriptorHandle.AddrOfPinnedObject(),
+                        token,
+                        DesiredAccess(planted),
+                        ref mapping,
+                        privileges,
+                        ref privilegeBytes,
+                        out grantedAccess,
+                        out accessStatus))
+                {
+                    return false;
+                }
+            }
+            granted = accessStatus && (grantedAccess & DesiredAccess(planted)) != 0;
+            return true;
+        }
+        finally
+        {
+            if (privileges != IntPtr.Zero)
+            {
+                Marshal.FreeHGlobal(privileges);
+            }
+            descriptorHandle.Free();
+        }
+    }
+
+    private static uint DesiredAccess(PlantedObject planted) =>
+        planted == PlantedObject.Directory ? FileAddSubdirectory : FileAddFile;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TokenLinkedToken
+    {
+        public IntPtr Handle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GenericMapping
+    {
+        public uint GenericRead;
+        public uint GenericWrite;
+        public uint GenericExecute;
+        public uint GenericAll;
+    }
+
+    private const uint TokenDuplicate = 0x0002;
+    private const uint TokenQuery = 0x0008;
+    private const int TokenElevationTypeClass = 18;
+    private const int TokenLinkedTokenClass = 19;
+    private const int TokenElevationTypeDefault = 1;
+    private const int TokenElevationTypeFull = 2;
+    private const int SecurityImpersonation = 2;
+    private const uint FileAddFile = 0x00000002;
+    private const uint FileAddSubdirectory = 0x00000004;
+    private const uint FileGenericRead = 0x00120089;
+    private const uint FileGenericWrite = 0x00120116;
+    private const uint FileGenericExecute = 0x001200A0;
+    private const uint FileAllAccess = 0x001F01FF;
+    private const uint InitialPrivilegeSetBytes = 4096;
+    private const uint MaximumPrivilegeSetBytes = 1024 * 1024;
+    private const int ErrorInsufficientBuffer = 122;
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    private static extern IntPtr GetCurrentProcess();
+
+    [DllImport("advapi32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(
+        IntPtr processHandle,
+        uint desiredAccess,
+        out SafeAccessTokenHandle tokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DuplicateToken(
+        SafeAccessTokenHandle existingToken,
+        int impersonationLevel,
+        out SafeAccessTokenHandle duplicateToken);
+
+    [DllImport("advapi32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(
+        SafeAccessTokenHandle tokenHandle,
+        int tokenInformationClass,
+        out int tokenInformation,
+        int tokenInformationLength,
+        out int returnLength);
+
+    [DllImport("advapi32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(
+        SafeAccessTokenHandle tokenHandle,
+        int tokenInformationClass,
+        out TokenLinkedToken tokenInformation,
+        int tokenInformationLength,
+        out int returnLength);
+
+    [DllImport("advapi32.dll", SetLastError = true, ExactSpelling = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool AccessCheck(
+        IntPtr securityDescriptor,
+        SafeAccessTokenHandle clientToken,
+        uint desiredAccess,
+        ref GenericMapping genericMapping,
+        IntPtr privilegeSet,
+        ref uint privilegeSetLength,
+        out uint grantedAccess,
+        [MarshalAs(UnmanagedType.Bool)] out bool accessStatus);
 }

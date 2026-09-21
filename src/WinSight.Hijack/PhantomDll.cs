@@ -56,7 +56,7 @@ public static class DllSearchOrder
             return systemDirectory;
         }
         var wow = Path.Combine(windowsDirectory, "SysWOW64");
-        return Directory.Exists(wow) ? wow : systemDirectory;
+        return AutomaticFileAccess.DirectoryExists(wow) ? wow : systemDirectory;
     }
 
     public static IReadOnlyList<string> For(

@@ -818,12 +818,38 @@ public static partial class Adapters
     /// </remarks>
     public static ToolReport Hijack(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
-        var acquisition = new HijackScanner().ScanWithCoverage(cancellationToken);
+        var scanner = new HijackScanner();
+        var acquisition = scanner.ScanWithCoverage(cancellationToken);
         var findings = acquisition.Items;
         var b = new ToolReport.Builder("hijack");
         AddCoverageFinding(b, acquisition);
-        foreach (var f in findings.Where(f => !flaggedOnly || f.Exposure != HijackExposure.Latent))
+        if (scanner.UsedWellKnownPrincipalModel)
         {
+            // Said once, as its own row, rather than folded into each finding: it qualifies every
+            // "not writable" answer of the scan, including the ones that produced no row at all.
+            b.Add(
+                Severity.Info,
+                "writability evaluated for well-known groups",
+                "this process has no non-elevated token (SYSTEM, a service account or UAC off), so "
+                + "directory ACLs were read for Users, Authenticated Users, Everyone and Interactive; "
+                + "a grant to one named user is not seen - run unelevated for the full evaluation",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "evaluationMethod",
+                    ["method"] = nameof(WriteAccessEvaluation.WellKnownPrincipals),
+                });
+        }
+        foreach (var raw in findings.Where(f => !flaggedOnly || f.Exposure != HijackExposure.Latent))
+        {
+            // An unquoted service path's context is the service's whole registered command line,
+            // arguments included, and arguments are where services keep secrets. It rode in the
+            // `context` field and the detail, which MCP forwards without the sensitive-evidence gate
+            // that withholds `command`. The full line now travels as `command`; the prose and
+            // `context` name only the executable.
+            var commandLine = raw.Kind == HijackKind.UnquotedServicePath ? raw.Context : null;
+            var f = commandLine is null
+                ? raw
+                : raw with { Context = UnquotedPath.ExecutablePart(commandLine) ?? CommandHead(commandLine) };
             b.Add(
                 // Latent is deliberately Info: unquoted paths are common, almost always sit under
                 // Program Files where nobody unprivileged can plant anything, and flagging them all
@@ -836,6 +862,7 @@ public static partial class Adapters
                     ["kind"] = f.Kind.ToString(),
                     ["subject"] = f.Subject,
                     ["context"] = f.Context,
+                    ["command"] = commandLine,
                     ["exposure"] = f.Exposure.ToString(),
                     ["actionablePath"] = f.ActionablePath,
                     ["candidates"] = f.Candidates.Count == 0 ? null : string.Join(" | ", f.Candidates),

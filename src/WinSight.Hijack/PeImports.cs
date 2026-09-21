@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Text;
 
+using WinSight.Core;
+
 namespace WinSight.Hijack;
 
 /// <summary>The modules a binary declares it needs, split by how the loader fetches them.</summary>
@@ -87,12 +89,17 @@ public static class PeImports
     {
         try
         {
-            var file = new FileInfo(path);
-            if (!file.Exists || file.Length is 0 or > MaxImageBytes)
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory || lease.Length is 0 or > MaxImageBytes)
             {
                 return PeImportSet.Unreadable;
             }
-            return Read(File.ReadAllBytes(path));
+            var image = new byte[checked((int)lease.Length)];
+            using (var stream = lease.OpenRead(FileOptions.SequentialScan))
+            {
+                stream.ReadExactly(image);
+            }
+            return lease.IsCurrent() ? Read(image) : PeImportSet.Unreadable;
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException

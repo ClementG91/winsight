@@ -123,4 +123,16 @@ public sealed class UnquotedPathTests
 
         Assert.Empty(candidates);
     }
+
+    /// <summary>
+    /// The executable part names the program without its arguments, which is where a service keeps
+    /// its secrets; reports carry this, and the full line only in the gated <c>command</c> field.
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\Program Files\My App\svc.exe --token=s3cr3t", @"C:\Program Files\My App\svc.exe")]
+    [InlineData(@"C:\Program Files\My App\svc.exe", @"C:\Program Files\My App\svc.exe")]
+    [InlineData("   ", null)]
+    [InlineData(@"C:\no-executable-here --flag", null)]
+    public void TheExecutablePartDropsTheArguments(string commandLine, string? expected) =>
+        Assert.Equal(expected, UnquotedPath.ExecutablePart(commandLine));
 }

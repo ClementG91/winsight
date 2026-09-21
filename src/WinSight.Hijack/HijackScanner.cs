@@ -152,15 +152,26 @@ public sealed class HijackScanner(
 {
     private readonly IServiceRegistry _services = services ?? new RegistryServiceSource();
     private readonly IMachinePath _machinePath = machinePath ?? new RegistryMachinePath();
-    private readonly IWritabilityProbe _probe = probe ?? new WritabilityProbe();
+    // One probe for the whole scan, shared with the triage below. The triage used to be handed the
+    // raw constructor argument and so built a second probe of its own: its memo was not shared, and
+    // none of its unreadable answers reached the coverage count taken from this one - a scan whose
+    // every unquoted-path, service-directory and PATH question failed still reported itself complete.
+    private readonly IWritabilityProbe _probe = probe ??= new WritabilityProbe();
     private readonly IKnownDllSource _knownDlls = knownDlls ?? new RegistryKnownDllSource();
     private readonly Func<string, PeImportSet> _readImports = readImports ?? PeImports.ReadFile;
-    private readonly Func<string, bool> _fileExists = fileExists ?? File.Exists;
+    private readonly Func<string, bool> _fileExists = fileExists ?? AutomaticFileAccess.FileExists;
     private readonly ISideBySideStore? _sideBySideStore = sideBySideStore;
     private readonly HijackTriage _triage = new(probe);
 
     public IReadOnlyList<HijackFinding> Scan(CancellationToken cancellationToken = default)
         => ScanWithCoverage(cancellationToken).Items;
+
+    /// <summary>
+    /// True when some writability answer in this scanner's scans came from the well-known-group DACL
+    /// model, because the process has no non-elevated token (SYSTEM, a service account, UAC off).
+    /// </summary>
+    public bool UsedWellKnownPrincipalModel =>
+        (_probe as IWritabilityProbeCoverage)?.UsedWellKnownPrincipals == true;
 
     public AcquisitionSnapshot<HijackFinding> ScanWithCoverage(
         CancellationToken cancellationToken = default)
@@ -189,7 +200,7 @@ public sealed class HijackScanner(
         {
             if (!plantable.TryGetValue(directory, out var writable))
             {
-                writable = AutomaticFileAccess.IsLocal(directory) && Directory.Exists(directory)
+                writable = AutomaticFileAccess.DirectoryExists(directory)
                     && _probe.CanCreate(Path.Combine(directory, "winsight-probe.dll"));
                 plantable[directory] = writable;
             }

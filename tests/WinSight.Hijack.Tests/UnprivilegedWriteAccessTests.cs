@@ -125,20 +125,72 @@ public sealed class UnprivilegedWriteAccessTests
     }
 
     /// <summary>
-    /// The unelevated path is unchanged and still answers by really trying, which remains the best
-    /// method when the current token already is the unprivileged one.
+    /// A grant to the user's own SID is seen when Windows can evaluate the non-elevated token, and
+    /// is the documented blind spot of the well-known-group model used when it cannot.
     /// </summary>
+    /// <remarks>
+    /// Which method runs depends on the account running the tests: a split (UAC) token is evaluated
+    /// by <c>AccessCheck</c>; SYSTEM or an administrator with UAC disabled - a common CI runner shape -
+    /// has no non-elevated token and falls back to the well-known groups. Both outcomes are asserted,
+    /// each against the method that actually answered.
+    /// </remarks>
     [Fact]
-    public void TheUnelevatedPathStillAnswersByAttempt()
+    public void AGrantToTheActualUserSidIsSeenExactlyWhenTheEffectiveTokenIsAvailable()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"winsight-user-acl-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var user = WindowsIdentity.GetCurrent().User;
+            Assert.NotNull(user);
+            var security = new DirectorySecurity();
+            security.SetOwner(user);
+            security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+            security.AddAccessRule(new FileSystemAccessRule(
+                user,
+                FileSystemRights.FullControl,
+                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+                PropagationFlags.None,
+                AccessControlType.Allow));
+            new DirectoryInfo(directory).SetAccessControl(security);
+
+            Assert.True(UnprivilegedWriteAccess.TryIsGrantedIn(
+                directory, PlantedObject.File, out var granted, out var evaluation));
+            Assert.Equal(evaluation == WriteAccessEvaluation.EffectiveAccess, granted);
+            Assert.Equal(granted, new WritabilityProbe().CanCreate(Path.Combine(directory, "winsight-probe.dll")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// The probe answers without creating anything, and its answer is the evaluator's.
+    /// </summary>
+    /// <remarks>
+    /// It used to answer unelevated by creating and deleting a real file. The directory here is the
+    /// test user's own, so with the effective token the answer must be yes; the well-known-group
+    /// fallback (no split token, e.g. a CI runner with UAC off) does not see a grant to one named
+    /// user and must say so consistently rather than guess.
+    /// </remarks>
+    [Fact]
+    public void TheProbeAnswersWithoutWritingAnything()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"winsight-probe-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {
-            var probe = new WritabilityProbe(elevated: false);
+            var answer = new WritabilityProbe().CanCreate(Path.Combine(directory, "anything.dll"));
 
-            Assert.True(probe.CanCreate(Path.Combine(directory, "anything.dll")));
-            Assert.Empty(Directory.GetFiles(directory)); // and it leaves no litter behind
+            Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
+            Assert.True(UnprivilegedWriteAccess.TryIsGrantedIn(
+                directory, PlantedObject.File, out var granted, out var evaluation));
+            Assert.Equal(granted, answer);
+            if (evaluation == WriteAccessEvaluation.EffectiveAccess)
+            {
+                Assert.True(answer);
+            }
         }
         finally
         {

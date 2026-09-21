@@ -1,5 +1,7 @@
 using System.Diagnostics;
 
+using WinSight.Core;
+
 namespace WinSight.Hijack;
 
 /// <summary>Whether a DLL is present in the side-by-side assembly store.</summary>
@@ -120,11 +122,27 @@ public sealed class SideBySideStore : ISideBySideStore
         {
             return;
         }
-        if (!Directory.Exists(_root))
+        using var rootLease = AutomaticFileAccess.TryAcquire(_root);
+        if (rootLease is null)
         {
-            // No store on this machine: nothing resolves through it, which is a complete answer.
-            _names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            _complete = true;
+            // IsLocal performs the same non-reparse lookup but also distinguishes a genuinely
+            // missing local path from a refused one. Only the former proves the store is empty.
+            if (AutomaticFileAccess.IsLocal(_root))
+            {
+                _names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _complete = true;
+            }
+            else
+            {
+                _names = null;
+                _complete = false;
+            }
+            return;
+        }
+        if (!rootLease.IsDirectory)
+        {
+            _names = null;
+            _complete = false;
             return;
         }
 
@@ -132,25 +150,49 @@ public sealed class SideBySideStore : ISideBySideStore
         var spent = Stopwatch.StartNew();
         try
         {
+            // Walked depth first, one directory at a time, rather than with RecurseSubdirectories.
+            // The recursive enumerator opens every subdirectory as it meets it and queues the open
+            // handle; WinSxS has tens of thousands of component directories, so one index held about
+            // 46 000 directory handles at once - every one a kernel object and a file-system filter
+            // callback - before letting them go. A stack of names holds one handle at a time.
             var options = new EnumerationOptions
             {
-                RecurseSubdirectories = true,
+                RecurseSubdirectories = false,
                 // A reparse point in the store would take the walk somewhere else entirely.
                 AttributesToSkip = FileAttributes.ReparsePoint,
                 IgnoreInaccessible = true,
             };
-            foreach (var file in Directory.EnumerateFiles(_root, "*.dll", options))
+            var pending = new Stack<string>();
+            pending.Push(_root);
+            while (pending.Count > 0)
             {
-                names.Add(Path.GetFileName(file));
-                if (names.Count >= _maxEntries || spent.Elapsed > _budget)
+                var directory = pending.Pop();
+                var entries = new System.IO.Enumeration.FileSystemEnumerable<(string Path, bool IsDirectory)>(
+                    directory,
+                    (ref System.IO.Enumeration.FileSystemEntry entry) => (entry.ToFullPath(), entry.IsDirectory),
+                    options);
+                foreach (var (path, isDirectory) in entries)
                 {
-                    _names = names;
-                    _complete = false;
-                    return;
+                    if (isDirectory)
+                    {
+                        pending.Push(path);
+                        continue;
+                    }
+                    if (!path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                    names.Add(Path.GetFileName(path));
+                    if (names.Count >= _maxEntries || spent.Elapsed > _budget)
+                    {
+                        _names = names;
+                        _complete = false;
+                        return;
+                    }
                 }
             }
             _names = names;
-            _complete = true;
+            _complete = rootLease.IsCurrent();
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
