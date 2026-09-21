@@ -191,9 +191,13 @@ source and a fake/real scanner:
 8. **Visible start failure** - the dashboard reports a Guardian start that failed as `Failed`, not
    `Off`, and polls monitor health so later coverage loss is not frozen behind an earlier state.
 13. **Watcher threads** - the registry watcher's wait loop and the file-system watcher's callbacks
-   contain subscriber faults (counted) instead of ending the process; a key that cannot be armed is
-   dropped like one that cannot be opened. The dashboard's handler writes the alert journal first and
-   fails the notification when that write fails, so the arrival stays unacknowledged and is retried.
+   contain subscriber faults (counted) instead of ending the process. Registry keys and filesystem
+   directories that cannot currently be armed remain explicit unarmed targets and are retried every
+   30 seconds; a successful recovery forces a scoped reconciliation because the blind interval cannot
+   be replayed. Overflow/re-arm failures, OS observations, recovery attempts/successes and delivery
+   failures flow through the shared `SensorHealthSnapshot` into the dashboard tooltip. Historical
+   loss remains a partial state after recovery. The dashboard's handler writes the alert journal first
+   and fails the notification when that write fails, so the arrival stays unacknowledged and is retried.
 
 ### Response (operator-confirmed, reversible)
 

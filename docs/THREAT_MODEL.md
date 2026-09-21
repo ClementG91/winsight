@@ -202,9 +202,20 @@ as follows.
   user already can. Machine-wide items (HKLM, services, tasks, WMI) are not acted on at all: the
   privileged service response tier has not shipped, so Block is refused for them rather than attempted.
 - **TOCTOU on the target.** A process is acted on only after its captured `(pid, start time, image
-  path, hash)` still matches the live process; a persistence value only after its recorded identity
-  still matches. A reused pid, a replaced image or an edited value refuses the action. A restore
-  refuses when something else now occupies the original location, rather than overwriting it.
+  path, hash)` still matches the live process, through the one handle that was checked; a
+  persistence value only after its recorded identity still matches. A reused pid, a replaced image
+  or an edited value refuses the action. A restore refuses when something else now occupies the
+  original location, rather than overwriting it.
+
+  How strong that is depends on the object. A startup file is compared and deleted through one
+  handle, and restored with create-new, so both are exact. A registry value has no
+  compare-and-delete or create-if-absent primitive: WinSight uses a registry transaction (TxR) where
+  Windows has one active - current Windows 11 builds answer `ERROR_RM_NOT_ACTIVE` for both hives -
+  and otherwise compares and acts through one key handle and re-reads the result. That leaves a
+  window of microseconds in which a concurrent writer's value could be removed without being
+  quarantined, or overwritten by a restore. A program that writes its entry back the moment it is
+  removed is reported as such - partly applied, the removed copy kept in quarantine - rather than as
+  a successful block.
 - **A forged alert cannot drive an action.** Actions come from the operator through WinSight's own
   decision window or the CLI, where nothing changes without `--confirm`. The window never defaults to a
   destructive choice (Enter and Escape mean "decide later"). The MCP server has no action primitive and
@@ -235,6 +246,7 @@ as follows.
 | Kernel-mode malware, rootkits, hypervisor attacks | No driver; user-mode only |
 | Physical access, DMA, offline disk tampering | Outside a user-mode tool's reach |
 | Detection evasion by malware | WinSight is triage, not EDR - a missed technique is a coverage gap |
+| Code evading a per-application outbound block | A block is keyed to the executable path WFP resolves at connect time (`FWPM_CONDITION_ALE_APP_ID`), not to the file's content or ancestry. Copying, renaming or hard-linking the binary to another path, reaching the network through a child process or another program, or injecting into an allowed process all defeat it without privilege. This is a property of path-based application filtering - Windows Defender Firewall's per-program rules share it - and closing it needs content-based identity or a callout driver. A block stops the program as installed; it does not contain code determined to get out. |
 | Malicious Windows updates or a compromised OS | WinSight trusts the platform it runs on |
 | A compromised GitHub account or signing key | Provenance proves which workflow built it, not that the workflow was trustworthy |
 

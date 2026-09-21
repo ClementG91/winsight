@@ -40,6 +40,8 @@ name its author.
 | `UnannouncedKey` | Seen, but the kernel never announced that key handle. |
 | `UntranslatablePath` | The key resolved, but its namespace does not map to a readable path. |
 | `Failure` | Stable redacted ETW failure: access, resource exhaustion, collision, platform or unexpected. |
+| `Sensor` | Shared lifecycle, observed-event, native-loss and delivery-failure snapshot. |
+| `EventsLost` | Live `TraceEventSession.EventsLost` count; non-zero means ETW dropped events under load. |
 
 The two unresolved counters are kept apart because they look identical from outside and have
 different fixes: one is a gap in the kernel's bookkeeping replay, the other in WinSight's namespace
@@ -47,6 +49,17 @@ mapping.
 
 `Failure` is an additive init property. The original six-field `AttributionHealth` constructor and
 six-value deconstruction remain unchanged for existing API consumers.
+
+The dashboard protection badge includes attribution when the elevated host exists. A running session
+with unattributed writes, ETW loss or delivery failures is partial, and its exact bounded counters
+appear in the tooltip. A nameless alert also states native event loss at the time of the detection
+instead of presenting a quiet index as complete. DNS delivery additionally uses a 1,024-event bounded
+single-reader queue: the ETW callback only parses and attempts a non-blocking enqueue, while caller
+work runs on a separate task in provider order. Queue overflow and cancellation backlog are added to
+the same loss counter as `TraceEventSession.EventsLost`; a caller exception is a delivery failure and
+stops the session. The `attribution --watch` and `dns --watch` CLI paths return exit code 13 with a
+fixed `SENSOR_COVERAGE_INCOMPLETE` line after shutdown when loss was observed; total ETW failure
+remains exit code 10.
 
 ## Session ownership and abrupt termination
 

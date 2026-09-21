@@ -139,6 +139,14 @@ selected by the user at the moment they ask and puts the rule in the same turn a
 and command/command-line fields are omitted. Only one scan runs at a time and a scan
 has a 90-second safety limit.
 
+That limit is a cooperative cancellation boundary, not a way for managed code to terminate an
+arbitrary Windows provider safely. WinSight cancels the actual scan and keeps the single-scan gate
+until its worker returns. If a WMI or native provider ignores cancellation, later requests fail fast
+with a specific stalled-scan error instead of waiting repeatedly or starting overlapping scans; the
+MCP child process may need to be restarted. A hard timeout with safe continuation requires moving
+scan execution into a disposable child process and is intentionally not claimed by the current
+in-process architecture.
+
 The gate withholds fields by name, so a finding's human-readable *detail* has to be built so it
 never carries a command line. Persistence details previously fell back to the raw command whenever
 the image could not be resolved - which is exactly the encoded-interpreter case the gate exists for,
