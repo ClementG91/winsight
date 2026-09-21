@@ -76,9 +76,7 @@ public static partial class Adapters
         }
 
         var inspector = new Win32ProcessInspector();
-        // Say "protected" when that is the real reason, rather than reporting it as unreadable: a
-        // critical Windows process cannot be opened either, and the two are not the same refusal.
-        if (ProtectedProcesses.IsProtected(pid, inspector.ImageFileName(pid)))
+        if (ProtectedProcesses.IsAlwaysProtected(pid))
         {
             Console.WriteLine($"{ResponseOutcome.TargetProtected}: {VerbFor(kind)} pid {pid} "
                 + "— refused, this is a protected process");
@@ -88,6 +86,12 @@ public static partial class Adapters
         if (identity is null)
         {
             Console.Error.WriteLine($"no process with id {pid} that WinSight can open");
+            return CliContract.Notable;
+        }
+        if (ProtectedProcesses.IsProtected(identity))
+        {
+            Console.WriteLine($"{ResponseOutcome.TargetProtected}: {VerbFor(kind)} pid {pid} "
+                + "— refused, this is a protected process");
             return CliContract.Notable;
         }
 
@@ -103,7 +107,8 @@ public static partial class Adapters
 
         Console.WriteLine(
             $"{result.Outcome}: {VerbFor(kind)} pid {pid} ({UntrustedDisplayText.Neutralize(target)})"
-            + (result.Reversible ? " — reversible, see `winsight actions`" : string.Empty));
+            + (result.Reversible ? " — reversible, see `winsight actions`" : string.Empty)
+            + (result.Detail is { Length: > 0 } ? $" — {result.Detail}" : string.Empty));
         return ExitCodeFor(result.Outcome);
     }
 
@@ -187,7 +192,7 @@ public static partial class Adapters
     internal static int ExitCodeFor(ResponseOutcome outcome) => outcome switch
     {
         ResponseOutcome.Succeeded => CliContract.Clean,
-        ResponseOutcome.Failed => CliContract.UnexpectedFailure,
+        ResponseOutcome.Failed or ResponseOutcome.PartiallyApplied => CliContract.UnexpectedFailure,
         _ => CliContract.Notable, // a stated refusal: protected, changed, gone, or not supported
     };
 

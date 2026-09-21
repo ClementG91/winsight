@@ -110,18 +110,62 @@ public sealed class AlertWindowTests
         window.Close();
     });
 
+    /// <summary>
+    /// A block whose entry came straight back says so, instead of the audit-gap wording that the
+    /// other partly-applied outcomes use.
+    /// </summary>
+    [Fact]
+    public void AReassertedBlockTellsTheOperatorTheEntryCameBack() => RunSta(_ =>
+    {
+        var id = Guid.NewGuid();
+        var message = AlertWindow.MessageFor(new ResponseResult(
+            id, ResponseActionKind.QuarantinePersistence, ResponseOutcome.PartiallyApplied, "Updater",
+            DateTimeOffset.UtcNow, Reversible: true, Detail: PersistenceResponder.ReassertedDetail));
+
+        Assert.Contains("came straight back", message, StringComparison.Ordinal);
+        Assert.Contains(id.ToString(), message, StringComparison.Ordinal);
+        Assert.DoesNotContain("audited", message, StringComparison.OrdinalIgnoreCase);
+    });
+
+    [Fact]
+    public void APartiallyAppliedBlockSaysTheSystemMayHaveChangedAndNamesTheAction() => RunSta(state =>
+    {
+        var journal = new SequencedJournal(true, false);
+        var presenter = new GuardianAlertPresenter(
+            new FakeMutator(),
+            new Quarantine(Path.Combine(state.Root, "partial-quarantine")),
+            new RuleStore(Path.Combine(state.Root, "partial-rules.json")),
+            journal);
+        var window = new AlertWindow(RunEntry(), presenter);
+
+        window.BlockButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+
+        var prepared = Assert.Single(journal.Written);
+        Assert.Contains("may have changed", window.StatusText.Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(prepared.ActionId.ToString(), window.StatusText.Text, StringComparison.Ordinal);
+        Assert.Contains("could not be journalled", window.StatusText.Text, StringComparison.OrdinalIgnoreCase);
+        window.Close();
+    });
+
     private static AutostartEntry RunEntry() =>
         new(AutostartVector.RunKey, "Updater", @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run [Registry64]",
             @"C:\u.exe", @"C:\u.exe", @"C:\u.exe", ImageResolutionStatus.Present, SignatureVerdict.Unsigned);
 
     /// <summary>Throwaway per-test state: one journal, quarantine and rule store under a temp directory.</summary>
-    private sealed class TestState(string root)
+    private sealed class TestState
     {
-        public ActionJournal Journal { get; } = new(Path.Combine(root, "journal.jsonl"));
+        public TestState(string root)
+        {
+            Root = root;
+            Journal = new ActionJournal(Path.Combine(root, "journal.jsonl"));
+        }
+
+        public string Root { get; }
+        public ActionJournal Journal { get; }
 
         public GuardianAlertPresenter Presenter(FakeMutator mutator) =>
-            new(mutator, new Quarantine(Path.Combine(root, "quarantine")),
-                new RuleStore(Path.Combine(root, "rules.json")), Journal);
+            new(mutator, new Quarantine(Path.Combine(Root, "quarantine")),
+                new RuleStore(Path.Combine(Root, "rules.json")), Journal);
     }
 
     /// <summary>Runs a WPF assertion on an STA thread, in English, against a throwaway state directory.</summary>
@@ -161,14 +205,36 @@ public sealed class AlertWindowTests
 
         public PersistenceSnapshot? Capture(PersistenceActionTarget target) => new([1, 2, 3], @"C:\u.exe");
 
-        public bool Remove(PersistenceActionTarget target)
+        public PersistenceMutationOutcome RemoveIfUnchanged(
+            PersistenceActionTarget target, PersistenceSnapshot expected)
         {
             Removed = true;
-            return true;
+            return PersistenceMutationOutcome.Succeeded;
         }
 
-        public bool OriginIsFree(PersistenceActionTarget target) => true;
+        public PersistenceMutationOutcome RestoreIfFree(PersistenceActionTarget target, byte[] payload) =>
+            PersistenceMutationOutcome.Succeeded;
+    }
 
-        public bool Restore(PersistenceActionTarget target, byte[] payload) => true;
+    private sealed class SequencedJournal(params bool[] outcomes) : IActionJournal
+    {
+        private readonly Queue<bool> _outcomes = new(outcomes);
+        public List<ActionJournalEntry> Written { get; } = [];
+
+        public bool TryAppend(ActionJournalEntry entry)
+        {
+            var succeeds = _outcomes.Count == 0 || _outcomes.Dequeue();
+            if (succeeds)
+            {
+                Written.Add(entry);
+            }
+            return succeeds;
+        }
+
+        public void MarkUndone(Guid actionId, Guid undoActionId)
+        {
+        }
+
+        public IReadOnlyList<ActionJournalEntry> Read(int max = 200) => Written;
     }
 }

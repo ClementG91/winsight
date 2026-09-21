@@ -123,4 +123,48 @@ public sealed class RuleStoreTests : IDisposable
 
         Assert.Equal(16, store.ActiveRules(RuleScopeKind.Persistence).Count);
     }
+
+    [Fact]
+    public void LockTimeoutFailsClosedWithoutWritingARule()
+    {
+        var path = Path.Combine(_directory, "contended-rules.json");
+        using var lockHeld = new ManualResetEventSlim();
+        using var releaseLock = new ManualResetEventSlim();
+        Exception? holderFailure = null;
+        var holder = new Thread(() =>
+        {
+            try
+            {
+                using var mutex = new Mutex(false, RuleStore.LockNameFor(path));
+                if (!mutex.WaitOne(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("Test holder could not acquire the rule-store mutex.");
+                }
+                lockHeld.Set();
+                releaseLock.Wait(CancellationToken.None);
+                mutex.ReleaseMutex();
+            }
+            catch (Exception ex)
+            {
+                holderFailure = ex;
+                lockHeld.Set();
+            }
+        });
+        holder.Start();
+        try
+        {
+            Assert.True(lockHeld.Wait(TimeSpan.FromSeconds(5)));
+            Assert.Null(holderFailure);
+            var store = new RuleStore(path, () => _now, TimeSpan.FromMilliseconds(100));
+
+            Assert.Null(store.Add(Rule(item: "run:must-not-be-written")));
+            Assert.False(File.Exists(path));
+        }
+        finally
+        {
+            releaseLock.Set();
+            Assert.True(holder.Join(TimeSpan.FromSeconds(5)));
+        }
+        Assert.Null(holderFailure);
+    }
 }

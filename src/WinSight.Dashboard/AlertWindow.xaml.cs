@@ -52,10 +52,19 @@ public partial class AlertWindow : Window
     private void BlockButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
     {
         var result = _presenter.Block(_entry);
-        return result.Outcome == ResponseOutcome.Succeeded
-            ? Text.Format("AlertBlocked", result.ActionId)
-            : Text[MessageKeyFor(result.Outcome)];
+        return MessageFor(result);
     });
+
+    internal static string MessageFor(ResponseResult result) => result.Outcome switch
+    {
+        ResponseOutcome.Succeeded => Text.Format("AlertBlocked", result.ActionId),
+        // Partly applied for a reason the operator can act on: the entry came straight back.
+        ResponseOutcome.PartiallyApplied when result.Detail == PersistenceResponder.ReassertedDetail =>
+            Text.Format("AlertBlockReasserted", result.ActionId),
+        ResponseOutcome.PartiallyApplied => Text.Format(
+            "AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty),
+        _ => Text[MessageKeyFor(result.Outcome)],
+    };
 
     private void LaterButton_Click(object sender, RoutedEventArgs e) => Close();
 

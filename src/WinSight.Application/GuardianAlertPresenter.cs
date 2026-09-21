@@ -38,7 +38,7 @@ public sealed class GuardianAlertPresenter
 {
     private readonly PersistenceResponder _responder;
     private readonly RuleStore _rules;
-    private readonly ActionJournal _journal;
+    private readonly IActionJournal _journal;
     private readonly Func<DateTimeOffset> _clock;
 
     /// <summary>
@@ -49,7 +49,7 @@ public sealed class GuardianAlertPresenter
         IPersistenceMutator? mutator = null,
         Quarantine? quarantine = null,
         RuleStore? rules = null,
-        ActionJournal? journal = null,
+        IActionJournal? journal = null,
         Func<DateTimeOffset>? clock = null)
     {
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
@@ -109,10 +109,26 @@ public sealed class GuardianAlertPresenter
             // Fall back to the image path when the vector has no actionable item key, so an Allow on an
             // unsupported vector still silences that exact program rather than nothing.
             ImagePath: target is null ? entry.ImagePath : null);
+        var targetDescription = $"allow {entry.Vector}/{entry.Name}";
+        if (!Prepare(ResponseActionKind.AddRule, rule.Id, targetDescription))
+        {
+            return null;
+        }
         var stored = _rules.Add(rule);
-        Journal(ResponseActionKind.AddRule, stored is null ? ResponseOutcome.Failed : ResponseOutcome.Succeeded,
-            rule.Id, $"allow {entry.Vector}/{entry.Name}", reversible: stored is not null);
-        return stored;
+        var completed = Journal(
+            ResponseActionKind.AddRule,
+            stored is null ? ResponseOutcome.Failed : ResponseOutcome.Succeeded,
+            rule.Id,
+            targetDescription,
+            reversible: stored is not null);
+        if (completed || stored is null)
+        {
+            return stored;
+        }
+        // A suppression whose completion cannot be audited must not silently remain active. Roll it
+        // back when possible; if rollback itself fails, return the still-active rule truthfully and
+        // leave the durable Prepared entry as evidence that completion is unknown.
+        return _rules.Remove(rule.Id) ? null : stored;
     }
 
     /// <summary>The persistence Allow rules currently in force, so no Allow is invisible.</summary>
@@ -121,8 +137,19 @@ public sealed class GuardianAlertPresenter
     /// <summary>Removes an Allow rule, so its item alerts again. Journalled as the undo of the Allow.</summary>
     public ResponseOutcome Revoke(Guid ruleId)
     {
+        var revokeId = Guid.NewGuid();
+        var target = $"rule {ruleId}";
+        if (!Prepare(ResponseActionKind.RemoveRule, revokeId, target))
+        {
+            return ResponseOutcome.Failed;
+        }
         var outcome = _rules.Remove(ruleId) ? ResponseOutcome.Succeeded : ResponseOutcome.TargetNotFound;
-        var revokeId = Journal(ResponseActionKind.RemoveRule, outcome, Guid.NewGuid(), $"rule {ruleId}", reversible: false);
+        var completed = Journal(
+            ResponseActionKind.RemoveRule, outcome, revokeId, target, reversible: false);
+        if (!completed)
+        {
+            return outcome == ResponseOutcome.Succeeded ? ResponseOutcome.PartiallyApplied : outcome;
+        }
         if (outcome == ResponseOutcome.Succeeded)
         {
             _journal.MarkUndone(ruleId, revokeId);
@@ -149,9 +176,13 @@ public sealed class GuardianAlertPresenter
     /// <summary>Puts a blocked entry back, if its origin is still free. Takes the block's action id.</summary>
     public ResponseResult Restore(Guid blockActionId) => _responder.Restore(blockActionId);
 
-    private Guid Journal(ResponseActionKind kind, ResponseOutcome outcome, Guid actionId, string target, bool reversible)
-    {
-        _journal.TryAppend(new ActionJournalEntry(actionId, kind, outcome, target, _clock(), reversible));
-        return actionId;
-    }
+    private bool Prepare(ResponseActionKind kind, Guid actionId, string target) =>
+        _journal.TryAppend(new ActionJournalEntry(
+            actionId, kind, ResponseOutcome.AuditPrepared, target, _clock(),
+            Reversible: false, Phase: ActionJournalPhase.Prepared));
+
+    private bool Journal(
+        ResponseActionKind kind, ResponseOutcome outcome, Guid actionId, string target, bool reversible) =>
+        _journal.TryAppend(new ActionJournalEntry(
+            actionId, kind, outcome, target, _clock(), reversible));
 }

@@ -280,7 +280,7 @@
   <data name="AvWebcamActivated" xml:space="preserve"><value>ha activado su cámara</value></data>
   <data name="AvMicrophoneActivated" xml:space="preserve"><value>ha activado su micrófono</value></data>
   <data name="RansomwareProtectionShort" xml:space="preserve"><value>Protección</value></data>
-  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Coloca archivos señuelo ocultos en Documentos, Escritorio e Imágenes y le avisa en cuanto algo los modifica: así se comporta el ransomware. No se escribe nada hasta que active esta opción, y los señuelos se eliminan al desactivarla o cerrar WinSight.</value></data>
+  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Coloca archivos señuelo visibles en Documentos, Escritorio, Imágenes, Descargas, Vídeos y Música cuando esas carpetas están disponibles, y avisa si alguno cambia. No se escribe nada hasta activar la opción, y los señuelos intactos se eliminan al desactivarla o cerrar WinSight.</value></data>
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Posible actividad de ransomware</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>Se acaba de modificar un archivo señuelo protegido. Nada legítimo lo toca: así se comporta el ransomware. Desconecte este equipo de la red y revise qué se está ejecutando.</value></data>
   <data name="RansomwareBurstDetected" xml:space="preserve"><value>Se detectó una ráfaga inusual de cambios de nombre o eliminaciones de archivos. Si no inició una operación masiva, trátela como sospechosa.</value></data>
@@ -395,6 +395,8 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>El elemento cambió desde la alerta, por lo que no se eliminó nada.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight aún no puede revertir este elemento: se aplica a todo el equipo o es de un tipo sin eliminación reversible.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>No se pudo completar la acción.</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Es posible que el sistema haya cambiado, pero el resultado no se pudo auditar por completo. ID de acción: {0}. {1}</value></data>
+  <data name="AlertBlockReasserted" xml:space="preserve"><value>Eliminado y puesto en cuarentena, pero el elemento de inicio volvió a aparecer de inmediato: un programa en ejecución lo vuelve a crear. Ocúpese de ese programa y vuelva a bloquearlo. ID de acción: {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — firma de archivo</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Quién firmó este archivo</value></data>
   <data name="SignatureFileLabel" xml:space="preserve"><value>Archivo</value></data>

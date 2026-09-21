@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 
 using Microsoft.Win32.SafeHandles;
 
+using WinSight.Core;
+
 namespace WinSight.Response;
 
 /// <summary>
@@ -37,17 +39,19 @@ public sealed class Win32ProcessInspector : IProcessInspector
         return new ProcessIdentity(pid, startTicks, imagePath, hash);
     }
 
+    /// <summary>
+    /// The image basename for display/diagnostics. It is deliberately not part of
+    /// <see cref="IProcessInspector"/> and must never authorize a response action.
+    /// </summary>
     public string? ImageFileName(int pid)
     {
         using var handle = OpenProcess(ProcessQueryLimitedInformation, false, pid);
         if (handle.IsInvalid)
         {
-            // A process WinSight cannot open is not one it can act on either; the responder will
-            // capture null and refuse. The reserved pids are still caught by the protected check.
             return null;
         }
         var path = QueryImagePath(handle);
-        return path is null ? null : System.IO.Path.GetFileName(path);
+        return path is null ? null : Path.GetFileName(path);
     }
 
     private static string? QueryImagePath(SafeProcessHandle handle)
@@ -63,12 +67,18 @@ public sealed class Win32ProcessInspector : IProcessInspector
     {
         try
         {
-            if (string.IsNullOrEmpty(imagePath) || !File.Exists(imagePath))
+            if (string.IsNullOrEmpty(imagePath))
             {
                 return null;
             }
-            using var stream = new FileStream(imagePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return Convert.ToHexString(SHA256.HashData(stream));
+            using var lease = AutomaticFileAccess.TryAcquire(imagePath);
+            if (lease is null || lease.IsDirectory)
+            {
+                return null;
+            }
+            using var stream = lease.OpenRead(FileOptions.SequentialScan);
+            var hash = Convert.ToHexString(SHA256.HashData(stream));
+            return lease.IsCurrent() ? hash : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or System.Security.SecurityException)

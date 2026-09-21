@@ -51,8 +51,20 @@ public enum ResponseOutcome
     /// <summary>A recoverable failure while carrying the action out (I/O, access, transient OS error).</summary>
     Failed,
 
+    /// <summary>
+    /// The action changed part of the target and rollback could not be proven complete. Manual
+    /// recovery may be required; this must never be presented as an ordinary failed/no-op action.
+    /// </summary>
+    PartiallyApplied,
+
     /// <summary>The operator has an allow rule that covers this target; the action was skipped.</summary>
     SuppressedByRule,
+
+    /// <summary>
+    /// A durable intent exists, but no durable completion record does. Used only in the action
+    /// journal; an operator-facing action result is never reported as successful in this state.
+    /// </summary>
+    AuditPrepared,
 }
 
 /// <summary>The privilege an action requires.</summary>

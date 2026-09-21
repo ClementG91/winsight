@@ -137,6 +137,34 @@ public sealed class GuardianAlertPresenterTests : IDisposable
         Assert.Equal(ResponseOutcome.TargetNotFound, Presenter(new FakeMutator()).Revoke(Guid.NewGuid()));
 
     [Fact]
+    public void RevokeIsNotAttemptedWhenItsAuditIntentCannotBeWritten()
+    {
+        var store = new RuleStore(Path.Combine(_root, "rules-intent.json"), () => Now);
+        var rule = new ResponseRule(Guid.NewGuid(), RuleScopeKind.Persistence, RuleDecision.Allow,
+            RuleDuration.Permanent, Now, Item: "item");
+        Assert.NotNull(store.Add(rule));
+        var presenter = new GuardianAlertPresenter(
+            new FakeMutator(), rules: store, journal: new SequencedJournal(false), clock: () => Now);
+
+        Assert.Equal(ResponseOutcome.Failed, presenter.Revoke(rule.Id));
+        Assert.Equal(rule.Id, Assert.Single(store.ActiveRules(RuleScopeKind.Persistence)).Id);
+    }
+
+    [Fact]
+    public void RevokeCompletionFailureIsPartiallyApplied()
+    {
+        var store = new RuleStore(Path.Combine(_root, "rules-completion.json"), () => Now);
+        var rule = new ResponseRule(Guid.NewGuid(), RuleScopeKind.Persistence, RuleDecision.Allow,
+            RuleDuration.Permanent, Now, Item: "item");
+        Assert.NotNull(store.Add(rule));
+        var presenter = new GuardianAlertPresenter(
+            new FakeMutator(), rules: store, journal: new SequencedJournal(true, false), clock: () => Now);
+
+        Assert.Equal(ResponseOutcome.PartiallyApplied, presenter.Revoke(rule.Id));
+        Assert.Empty(store.ActiveRules(RuleScopeKind.Persistence));
+    }
+
+    [Fact]
     public void AnAllowThatCannotBeStoredReturnsNullAndIsJournalledAsFailed()
     {
         var presenter = new GuardianAlertPresenter(
@@ -172,18 +200,31 @@ public sealed class GuardianAlertPresenterTests : IDisposable
 
         public PersistenceSnapshot? Capture(PersistenceActionTarget target) => new(Payload, @"C:\u.exe");
 
-        public bool Remove(PersistenceActionTarget target)
+        public PersistenceMutationOutcome RemoveIfUnchanged(
+            PersistenceActionTarget target, PersistenceSnapshot expected)
         {
             Removed = true;
-            return true;
+            return PersistenceMutationOutcome.Succeeded;
         }
 
-        public bool OriginIsFree(PersistenceActionTarget target) => true;
-
-        public bool Restore(PersistenceActionTarget target, byte[] payload)
+        public PersistenceMutationOutcome RestoreIfFree(PersistenceActionTarget target, byte[] payload)
         {
             Restored = payload;
-            return true;
+            return PersistenceMutationOutcome.Succeeded;
         }
+    }
+
+    private sealed class SequencedJournal(params bool[] outcomes) : IActionJournal
+    {
+        private readonly Queue<bool> _outcomes = new(outcomes);
+
+        public bool TryAppend(ActionJournalEntry entry) =>
+            _outcomes.Count == 0 || _outcomes.Dequeue();
+
+        public void MarkUndone(Guid actionId, Guid undoActionId)
+        {
+        }
+
+        public IReadOnlyList<ActionJournalEntry> Read(int max = 200) => [];
     }
 }

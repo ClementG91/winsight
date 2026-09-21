@@ -72,22 +72,50 @@ public sealed class ProcessResponderTests
     }
 
     [Theory]
-    [InlineData(0, "System Idle Process")]
-    [InlineData(4, "System")]
-    [InlineData(9000, "lsass.exe")]
-    [InlineData(9000, "winsight-dashboard.exe")]
-    public void AProtectedProcessIsNeverActedOn(int pid, string fileName)
+    [InlineData(0)]
+    [InlineData(4)]
+    public void AReservedProcessIsNeverActedOn(int pid)
     {
         var captured = Identity(pid: pid);
-        var inspector = new FakeInspector { Current = captured, FileName = fileName };
+        var inspector = new FakeInspector { Current = captured };
         var controller = new FakeController();
         using var journal = new TempFile();
 
-        var result = Responder(inspector, controller, journal.Path).Terminate(captured, fileName);
+        var result = Responder(inspector, controller, journal.Path).Terminate(captured, "reserved");
 
         Assert.Equal(ResponseOutcome.TargetProtected, result.Outcome);
         Assert.Empty(controller.Terminated);
         Assert.Empty(controller.Suspended);
+    }
+
+    [Fact]
+    public void AWindowsCriticalProcessAtItsVerifiedSystemPathIsNeverActedOn()
+    {
+        var path = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "lsass.exe");
+        var captured = Identity(pid: 9000, path: path);
+        var inspector = new FakeInspector { Current = captured };
+        var controller = new FakeController();
+        using var journal = new TempFile();
+
+        var result = Responder(inspector, controller, journal.Path).Terminate(captured, "lsass.exe");
+
+        Assert.Equal(ResponseOutcome.TargetProtected, result.Outcome);
+        Assert.Empty(controller.Terminated);
+    }
+
+    [Fact]
+    public void AProcessOnlyRenamedLikeAProtectedBinaryDoesNotEvadeResponse()
+    {
+        var captured = Identity(pid: 9000, path: @"C:\Users\me\AppData\Local\Temp\lsass.exe");
+        var inspector = new FakeInspector { Current = captured };
+        var controller = new FakeController();
+        using var journal = new TempFile();
+
+        var result = Responder(inspector, controller, journal.Path).Terminate(captured, "lsass.exe");
+
+        Assert.Equal(ResponseOutcome.Succeeded, result.Outcome);
+        Assert.Equal([captured.Pid], controller.Terminated);
     }
 
     [Fact]
@@ -103,6 +131,23 @@ public sealed class ProcessResponderTests
         Assert.Equal(ResponseOutcome.Failed, result.Outcome);
         Assert.False(result.Reversible);
         Assert.Equal(ResponseOutcome.Failed, Assert.Single(new ActionJournal(journal.Path).Read()).Outcome);
+    }
+
+    [Fact]
+    public void AnIncompleteSuspendRollbackIsNeverReportedAsAnOrdinaryFailure()
+    {
+        var captured = Identity();
+        var inspector = new FakeInspector { Current = captured, FileName = "evil.exe" };
+        var controller = new FakeController { Outcome = ProcessControlOutcome.RollbackIncomplete };
+        using var journal = new TempFile();
+
+        var result = Responder(inspector, controller, journal.Path).Suspend(captured, "evil.exe");
+
+        Assert.Equal(ResponseOutcome.PartiallyApplied, result.Outcome);
+        Assert.False(result.Reversible);
+        Assert.Contains("may still be suspended", result.Detail, StringComparison.Ordinal);
+        Assert.Equal(ResponseOutcome.PartiallyApplied,
+            Assert.Single(new ActionJournal(journal.Path).Read()).Outcome);
     }
 
     [Fact]
@@ -122,23 +167,82 @@ public sealed class ProcessResponderTests
         Assert.Equal(2, new ActionJournal(journal.Path).Read().Count);
     }
 
+    [Fact]
+    public void AnUnavailableAuditIntentPreventsTheProcessAction()
+    {
+        var captured = Identity();
+        var inspector = new FakeInspector { Current = captured, FileName = "evil.exe" };
+        var controller = new FakeController();
+        var journal = new SequencedJournal(false);
+        var responder = new ProcessResponder(inspector, controller, journal, () => T0);
+
+        var result = responder.Terminate(captured, "evil.exe");
+
+        Assert.Equal(ResponseOutcome.Failed, result.Outcome);
+        Assert.Contains("not attempted", result.Detail, StringComparison.Ordinal);
+        Assert.Empty(controller.Terminated);
+    }
+
+    [Fact]
+    public void ACompletionJournalFailureCannotReadAsAFullSuccess()
+    {
+        var captured = Identity();
+        var inspector = new FakeInspector { Current = captured, FileName = "evil.exe" };
+        var controller = new FakeController();
+        var journal = new SequencedJournal(true, false);
+        var responder = new ProcessResponder(inspector, controller, journal, () => T0);
+
+        var result = responder.Terminate(captured, "evil.exe");
+
+        Assert.Equal(ResponseOutcome.PartiallyApplied, result.Outcome);
+        Assert.Contains("could not be journalled", result.Detail, StringComparison.Ordinal);
+        Assert.Equal([captured.Pid], controller.Terminated);
+        Assert.Equal(ActionJournalPhase.Prepared, Assert.Single(journal.Written).Phase);
+    }
+
     private sealed class FakeInspector : IProcessInspector
     {
         public ProcessIdentity? Current { get; set; }
         public string? FileName { get; set; }
         public ProcessIdentity? Capture(int pid, bool hashImage = false) => Current;
-        public string? ImageFileName(int pid) => FileName;
     }
 
     private sealed class FakeController : IProcessController
     {
-        public bool Succeed { get; set; } = true;
+        public bool Succeed
+        {
+            get => Outcome == ProcessControlOutcome.Succeeded;
+            set => Outcome = value ? ProcessControlOutcome.Succeeded : ProcessControlOutcome.Failed;
+        }
+        public ProcessControlOutcome Outcome { get; set; } = ProcessControlOutcome.Succeeded;
         public List<int> Suspended { get; } = [];
         public List<int> Resumed { get; } = [];
         public List<int> Terminated { get; } = [];
-        public bool SuspendThreads(int pid) { if (Succeed) { Suspended.Add(pid); } return Succeed; }
-        public bool ResumeThreads(int pid) { if (Succeed) { Resumed.Add(pid); } return Succeed; }
-        public bool TerminateProcess(int pid) { if (Succeed) { Terminated.Add(pid); } return Succeed; }
+        public ProcessControlOutcome SuspendThreads(ProcessIdentity expected) { if (Succeed) { Suspended.Add(expected.Pid); } return Outcome; }
+        public ProcessControlOutcome ResumeThreads(ProcessIdentity expected) { if (Succeed) { Resumed.Add(expected.Pid); } return Outcome; }
+        public ProcessControlOutcome TerminateProcess(ProcessIdentity expected) { if (Succeed) { Terminated.Add(expected.Pid); } return Outcome; }
+    }
+
+    private sealed class SequencedJournal(params bool[] outcomes) : IActionJournal
+    {
+        private readonly Queue<bool> _outcomes = new(outcomes);
+        public List<ActionJournalEntry> Written { get; } = [];
+
+        public bool TryAppend(ActionJournalEntry entry)
+        {
+            var succeeds = _outcomes.Count == 0 || _outcomes.Dequeue();
+            if (succeeds)
+            {
+                Written.Add(entry);
+            }
+            return succeeds;
+        }
+
+        public void MarkUndone(Guid actionId, Guid undoActionId)
+        {
+        }
+
+        public IReadOnlyList<ActionJournalEntry> Read(int max = 200) => Written;
     }
 }
 

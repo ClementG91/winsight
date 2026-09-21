@@ -53,6 +53,7 @@ public sealed record QuarantineItem(
 public sealed class Quarantine
 {
     private const long MaxPayloadBytes = 64 * 1024 * 1024;
+    private const long MaxManifestBytes = 1024 * 1024;
 
     private readonly string _root;
 
@@ -106,13 +107,17 @@ public sealed class Quarantine
         try
         {
             var path = PayloadPath(item.Id);
-            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path)
-                || new FileInfo(path).Length > MaxPayloadBytes)
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory || lease.Length > MaxPayloadBytes)
             {
                 return null;
             }
-            var bytes = File.ReadAllBytes(path);
-            return Convert.ToHexString(SHA256.HashData(bytes)).Equals(item.PayloadSha256, StringComparison.OrdinalIgnoreCase)
+            using var stream = lease.OpenRead();
+            var bytes = new byte[checked((int)lease.Length)];
+            stream.ReadExactly(bytes);
+            return lease.IsCurrent()
+                && Convert.ToHexString(SHA256.HashData(bytes)).Equals(
+                    item.PayloadSha256, StringComparison.OrdinalIgnoreCase)
                 ? bytes : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -128,15 +133,25 @@ public sealed class Quarantine
         var items = new List<QuarantineItem>();
         try
         {
-            if (!Directory.Exists(_root))
+            using var root = AutomaticFileAccess.TryAcquire(_root);
+            if (root is null || !root.IsDirectory)
             {
                 return items;
             }
-            foreach (var manifest in Directory.EnumerateFiles(_root, "*.json"))
+            foreach (var manifest in Directory.EnumerateFiles(root.FullPath, "*.json"))
             {
                 try
                 {
-                    if (JsonSerializer.Deserialize<QuarantineItem>(File.ReadAllBytes(manifest)) is { } item)
+                    using var lease = AutomaticFileAccess.TryAcquire(manifest);
+                    if (lease is null || lease.IsDirectory || lease.Length > MaxManifestBytes)
+                    {
+                        continue;
+                    }
+                    using var stream = lease.OpenRead();
+                    var bytes = new byte[checked((int)lease.Length)];
+                    stream.ReadExactly(bytes);
+                    if (lease.IsCurrent()
+                        && JsonSerializer.Deserialize<QuarantineItem>(bytes) is { } item)
                     {
                         items.Add(item);
                     }
@@ -145,6 +160,10 @@ public sealed class Quarantine
                 {
                     // Skip a corrupt manifest.
                 }
+            }
+            if (!root.IsCurrent())
+            {
+                return [];
             }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -164,11 +183,10 @@ public sealed class Quarantine
 
     private void EnsureRoot()
     {
-        if (Directory.Exists(_root))
+        if (!AutomaticFileAccess.TryEnsureDirectory(_root))
         {
-            return;
+            throw new IOException("The quarantine directory could not be acquired safely.");
         }
-        var directory = Directory.CreateDirectory(_root);
         try
         {
             // Restrict to the current user: a quarantined payload can be the original malicious file,
@@ -183,7 +201,11 @@ public sealed class Quarantine
                     current, FileSystemRights.FullControl,
                     InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
                     PropagationFlags.None, AccessControlType.Allow));
-                directory.SetAccessControl(security);
+                var descriptor = security.GetSecurityDescriptorBinaryForm();
+                if (!AutomaticFileAccess.TryApplyProtectedDirectoryDacl(_root, descriptor))
+                {
+                    throw new IOException("The quarantine directory DACL could not be applied safely.");
+                }
             }
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException

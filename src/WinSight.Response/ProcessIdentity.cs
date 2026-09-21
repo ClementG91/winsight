@@ -44,7 +44,4 @@ public interface IProcessInspector
     /// <summary>The identity of the running process with this id, or null when it is not running or
     /// cannot be read. When <paramref name="hashImage"/> is false the hash is left null.</summary>
     ProcessIdentity? Capture(int pid, bool hashImage = false);
-
-    /// <summary>The process's image file name (no path) for the protected-process check, or null.</summary>
-    string? ImageFileName(int pid);
 }

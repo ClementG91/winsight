@@ -60,8 +60,7 @@ public sealed class FileHolderIdentifier
                 // something we can safely act on.
                 continue;
             }
-            var imageFileName = _inspector.ImageFileName(holder.Pid);
-            if (ProtectedProcesses.IsProtected(holder.Pid, imageFileName))
+            if (ProtectedProcesses.IsProtected(identity))
             {
                 refusedProtected = true;
                 continue;

@@ -280,7 +280,7 @@
   <data name="AvWebcamActivated" xml:space="preserve"><value>vient d'activer votre caméra</value></data>
   <data name="AvMicrophoneActivated" xml:space="preserve"><value>vient d'activer votre micro</value></data>
   <data name="RansomwareProtectionShort" xml:space="preserve"><value>Protection</value></data>
-  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Place des fichiers leurres cachés dans vos Documents, Bureau et Images, et vous alerte dès que quelque chose les modifie — c'est le comportement d'un rançongiciel. Rien n'est écrit tant que vous n'activez pas l'option, et les leurres sont retirés quand vous la désactivez ou fermez WinSight.</value></data>
+  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Place des fichiers leurres visibles dans Documents, Bureau, Images, Téléchargements, Vidéos et Musique lorsque ces dossiers existent, puis vous alerte si l'un change. Rien n'est écrit avant l'activation et les leurres inchangés sont retirés à la désactivation ou à la fermeture de WinSight.</value></data>
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Activité possible de rançongiciel</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>Un fichier-appât protégé vient d'être modifié. Rien de légitime n'y touche : c'est le comportement d'un rançongiciel. Déconnectez ce PC du réseau et vérifiez ce qui s'exécute.</value></data>
   <data name="RansomwareBurstDetected" xml:space="preserve"><value>Une rafale inhabituelle de renommages ou de suppressions de fichiers a été détectée. Si vous n'avez pas lancé d'opération en masse, considérez-la comme suspecte.</value></data>
@@ -395,6 +395,8 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>L'élément a changé depuis l'alerte ; rien n'a été supprimé.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight ne peut pas encore annuler cet élément : il s'applique à toute la machine, ou il est d'un type sans suppression réversible.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>L'action n'a pas pu être effectuée.</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Le système a peut-être été modifié, mais le résultat n'a pas pu être entièrement journalisé. ID d'action : {0}. {1}</value></data>
+  <data name="AlertBlockReasserted" xml:space="preserve"><value>Supprimé et mis en quarantaine, mais l'élément de démarrage est aussitôt réapparu : un programme en cours d'exécution le recrée. Traitez ce programme, puis bloquez à nouveau. ID d'action : {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — signature de fichier</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Qui a signé ce fichier</value></data>
   <data name="SignatureFileLabel" xml:space="preserve"><value>Fichier</value></data>

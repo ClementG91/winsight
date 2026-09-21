@@ -119,9 +119,9 @@ public static class PersistenceActionResolver
             && directory.StartsWith(userStartup, StringComparison.OrdinalIgnoreCase)
             ? WinSight.Response.ResponsePrivilege.CurrentUser
             : WinSight.Response.ResponsePrivilege.Service;
-        // A startup file is revalidated by its path: the action moves the file that is still at the
-        // exact location the alert named. Its bytes are preserved in quarantine, so a same-path
-        // replacement is moved reversibly rather than destroyed, and restore refuses an occupied path.
+        // The alert names the path; the mutator additionally compares the captured bytes and marks
+        // that exact open file handle for deletion. A same-path replacement is refused rather than
+        // deleted, and restore uses CreateNew so an occupant can never be overwritten.
         return new PersistenceActionTarget(
             PersistenceActionKind.StartupFile, privilege,
             $"{entry.Vector}/{entry.Name}",

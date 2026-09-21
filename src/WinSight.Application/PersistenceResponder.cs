@@ -5,9 +5,25 @@ using WinSight.Response;
 namespace WinSight.Application;
 
 /// <summary>The live state of a persistence target: its payload to preserve, and its revalidation token.</summary>
-/// <param name="Payload">Opaque bytes that let <see cref="IPersistenceMutator.Restore"/> put it back.</param>
+/// <param name="Payload">Opaque bytes that let <see cref="IPersistenceMutator.RestoreIfFree"/> put it back.</param>
 /// <param name="RevalidationToken">The current data/command, compared against the alert's token.</param>
 public sealed record PersistenceSnapshot(byte[] Payload, string RevalidationToken);
+
+/// <summary>Outcome of an atomic or transaction-backed persistence mutation.</summary>
+public enum PersistenceMutationOutcome
+{
+    Succeeded,
+    TargetNotFound,
+    TargetChanged,
+    AtomicityUnavailable,
+    Failed,
+
+    /// <summary>
+    /// The captured object was removed, and was back by the time the removal was verified: a running
+    /// program is re-creating its entry.
+    /// </summary>
+    Reasserted,
+}
 
 /// <summary>The OS operations a persistence action needs, behind an interface so the flow is testable.</summary>
 public interface IPersistenceMutator
@@ -15,14 +31,21 @@ public interface IPersistenceMutator
     /// <summary>Reads the target's payload and revalidation token, or null when it no longer exists.</summary>
     PersistenceSnapshot? Capture(PersistenceActionTarget target);
 
-    /// <summary>Removes the target (delete the value, or delete the startup file). False on failure.</summary>
-    bool Remove(PersistenceActionTarget target);
+    /// <summary>
+    /// Revalidates the exact captured payload and removes that same object. Implementations must not
+    /// delete a path/value that is seen to have changed after <see cref="Capture"/>. Where the platform
+    /// offers no atomic compare-and-remove (a registry value without TxR) the comparison and the
+    /// removal share one handle and the result is verified; the implementation documents the window.
+    /// </summary>
+    PersistenceMutationOutcome RemoveIfUnchanged(
+        PersistenceActionTarget target, PersistenceSnapshot expected);
 
-    /// <summary>Whether the origin is free to restore into (value absent, or file path unoccupied).</summary>
-    bool OriginIsFree(PersistenceActionTarget target);
-
-    /// <summary>Writes a captured payload back to the origin. False on failure.</summary>
-    bool Restore(PersistenceActionTarget target, byte[] payload);
+    /// <summary>
+    /// Restores only when the origin is free at the mutation boundary, and never overwrites an
+    /// occupant it can see. Where the platform offers no atomic create-if-absent the check and the
+    /// write share one handle and the write is verified; the implementation documents the window.
+    /// </summary>
+    PersistenceMutationOutcome RestoreIfFree(PersistenceActionTarget target, byte[] payload);
 }
 
 /// <summary>
@@ -41,13 +64,13 @@ public sealed class PersistenceResponder
 {
     private readonly IPersistenceMutator _mutator;
     private readonly Quarantine _quarantine;
-    private readonly ActionJournal _journal;
+    private readonly IActionJournal _journal;
     private readonly Func<DateTimeOffset> _clock;
 
     public PersistenceResponder(
         IPersistenceMutator mutator,
         Quarantine? quarantine = null,
-        ActionJournal? journal = null,
+        IActionJournal? journal = null,
         Func<DateTimeOffset>? clock = null)
     {
         _mutator = mutator ?? throw new ArgumentNullException(nameof(mutator));
@@ -64,25 +87,35 @@ public sealed class PersistenceResponder
     {
         ArgumentNullException.ThrowIfNull(target);
         var actionId = Guid.NewGuid();
-        var outcome = BlockCore(target, actionId);
+        var preparedAt = _clock();
+        if (!TryPrepare(actionId, ResponseActionKind.QuarantinePersistence, target.DisplayName, preparedAt))
+        {
+            return AuditUnavailable(actionId, ResponseActionKind.QuarantinePersistence,
+                target.DisplayName, preparedAt);
+        }
+        var (outcome, detail) = BlockCore(target, actionId);
         var result = new ResponseResult(actionId, ResponseActionKind.QuarantinePersistence, outcome,
-            target.DisplayName, _clock(), Reversible: outcome == ResponseOutcome.Succeeded);
-        _journal.TryAppend(new ActionJournalEntry(
-            actionId, ResponseActionKind.QuarantinePersistence, outcome, target.DisplayName, result.AtUtc,
-            result.Reversible));
-        return result;
+            target.DisplayName, _clock(),
+            Reversible: outcome is ResponseOutcome.Succeeded or ResponseOutcome.PartiallyApplied,
+            Detail: detail);
+        return CompleteOrExposeGap(result);
     }
 
-    private ResponseOutcome BlockCore(PersistenceActionTarget target, Guid actionId)
+    /// <summary>What the operator is told when a blocked entry comes straight back.</summary>
+    public const string ReassertedDetail =
+        "the entry was removed and quarantined, but it was re-created immediately: a running program "
+        + "is re-asserting it, so deal with that program before blocking again";
+
+    private (ResponseOutcome Outcome, string? Detail) BlockCore(PersistenceActionTarget target, Guid actionId)
     {
         var snapshot = _mutator.Capture(target);
         if (snapshot is null)
         {
-            return ResponseOutcome.TargetNotFound;
+            return (ResponseOutcome.TargetNotFound, null);
         }
         if (!string.Equals(snapshot.RevalidationToken, target.RevalidationToken, StringComparison.Ordinal))
         {
-            return ResponseOutcome.TargetChanged;
+            return (ResponseOutcome.TargetChanged, null);
         }
         var kind = target.Kind == PersistenceActionKind.RegistryValue
             ? QuarantineItemKind.RegistryValue
@@ -94,15 +127,22 @@ public sealed class PersistenceResponder
         var item = _quarantine.Store(kind, origin, target.DisplayName, actionId, envelope, _clock());
         if (item is null)
         {
-            return ResponseOutcome.Failed;
+            return (ResponseOutcome.Failed, null);
         }
-        if (!_mutator.Remove(target))
+        var removal = _mutator.RemoveIfUnchanged(target, snapshot);
+        if (removal == PersistenceMutationOutcome.Reasserted)
+        {
+            // The copy stays: it is exactly what was removed, and the evidence of what came back.
+            // A restore refuses while the origin is occupied, so it cannot create a duplicate.
+            return (ResponseOutcome.PartiallyApplied, ReassertedDetail);
+        }
+        if (removal != PersistenceMutationOutcome.Succeeded)
         {
             // Do not keep a quarantine copy of something still live: it would restore a duplicate.
             _quarantine.Remove(item.Id);
-            return ResponseOutcome.Failed;
+            return (Map(removal), null);
         }
-        return ResponseOutcome.Succeeded;
+        return (ResponseOutcome.Succeeded, null);
     }
 
     /// <summary>
@@ -112,16 +152,52 @@ public sealed class PersistenceResponder
     public ResponseResult Restore(Guid blockActionId)
     {
         var actionId = Guid.NewGuid();
+        var preparedAt = _clock();
+        var preparedTarget = blockActionId.ToString();
+        if (!TryPrepare(actionId, ResponseActionKind.RestorePersistence, preparedTarget, preparedAt))
+        {
+            return AuditUnavailable(actionId, ResponseActionKind.RestorePersistence,
+                preparedTarget, preparedAt);
+        }
         var (outcome, target) = RestoreCore(blockActionId);
         var result = new ResponseResult(actionId, ResponseActionKind.RestorePersistence, outcome,
             target, _clock(), Reversible: false);
-        _journal.TryAppend(new ActionJournalEntry(
+        var completed = _journal.TryAppend(new ActionJournalEntry(
             actionId, ResponseActionKind.RestorePersistence, outcome, target, result.AtUtc, false));
-        if (outcome == ResponseOutcome.Succeeded)
+        if (outcome == ResponseOutcome.Succeeded && completed)
         {
             _journal.MarkUndone(blockActionId, actionId);
         }
-        return result;
+        return completed ? result : ExposeCompletionGap(result);
+    }
+
+    private bool TryPrepare(
+        Guid actionId, ResponseActionKind kind, string target, DateTimeOffset atUtc) =>
+        _journal.TryAppend(new ActionJournalEntry(
+            actionId, kind, ResponseOutcome.AuditPrepared, target, atUtc,
+            Reversible: false, Phase: ActionJournalPhase.Prepared));
+
+    private static ResponseResult AuditUnavailable(
+        Guid actionId, ResponseActionKind kind, string target, DateTimeOffset atUtc) =>
+        new(actionId, kind, ResponseOutcome.Failed, target, atUtc, Reversible: false,
+            Detail: "action was not attempted because its audit intent could not be written");
+
+    private ResponseResult CompleteOrExposeGap(ResponseResult result) =>
+        _journal.TryAppend(new ActionJournalEntry(
+            result.ActionId, result.Kind, result.Outcome, result.Target, result.AtUtc, result.Reversible))
+            ? result
+            : ExposeCompletionGap(result);
+
+    private static ResponseResult ExposeCompletionGap(ResponseResult result)
+    {
+        var applied = result.Outcome is ResponseOutcome.Succeeded or ResponseOutcome.PartiallyApplied;
+        return result with
+        {
+            Outcome = applied ? ResponseOutcome.PartiallyApplied : result.Outcome,
+            Detail = applied
+                ? "the action may have changed the target, but its completion could not be journalled"
+                : "the refusal/failure completion could not be journalled",
+        };
     }
 
     private (ResponseOutcome Outcome, string Target) RestoreCore(Guid blockActionId)
@@ -149,18 +225,23 @@ public sealed class PersistenceResponder
         {
             return (ResponseOutcome.Failed, item.DisplayName);
         }
-        if (!_mutator.OriginIsFree(envelope.Target))
+        var restoration = _mutator.RestoreIfFree(envelope.Target, envelope.Payload);
+        if (restoration != PersistenceMutationOutcome.Succeeded)
         {
-            // Something else occupies the origin now; overwriting it would destroy that instead.
-            return (ResponseOutcome.TargetChanged, item.DisplayName);
-        }
-        if (!_mutator.Restore(envelope.Target, envelope.Payload))
-        {
-            return (ResponseOutcome.Failed, item.DisplayName);
+            return (Map(restoration), item.DisplayName);
         }
         _quarantine.Remove(item.Id);
         return (ResponseOutcome.Succeeded, item.DisplayName);
     }
+
+    private static ResponseOutcome Map(PersistenceMutationOutcome outcome) => outcome switch
+    {
+        PersistenceMutationOutcome.Succeeded => ResponseOutcome.Succeeded,
+        PersistenceMutationOutcome.TargetNotFound => ResponseOutcome.TargetNotFound,
+        PersistenceMutationOutcome.TargetChanged => ResponseOutcome.TargetChanged,
+        PersistenceMutationOutcome.AtomicityUnavailable => ResponseOutcome.NotSupported,
+        _ => ResponseOutcome.Failed,
+    };
 
     private sealed record QuarantineEnvelope(PersistenceActionTarget Target, byte[] Payload);
 }

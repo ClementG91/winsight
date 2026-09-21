@@ -26,11 +26,19 @@ public sealed class RuleStore
 
     private readonly string _path;
     private readonly Func<DateTimeOffset> _clock;
+    private readonly TimeSpan _lockWait;
 
     public RuleStore(string? path = null, Func<DateTimeOffset>? clock = null)
+        : this(path, clock, LockWait)
     {
+    }
+
+    internal RuleStore(string? path, Func<DateTimeOffset>? clock, TimeSpan lockWait)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lockWait, TimeSpan.Zero);
         _path = path ?? DefaultPath();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _lockWait = lockWait;
     }
 
     /// <summary>Where the rule store lives, beside WinSight's other per-user state.</summary>
@@ -88,7 +96,7 @@ public sealed class RuleStore
         }
         try
         {
-            using var gate = StoreLock.Acquire(_path);
+            using var gate = StoreLock.Acquire(_path, _lockWait);
             var rules = LoadLocked().ToList();
             if (rules.Count >= MaxRules)
             {
@@ -109,7 +117,7 @@ public sealed class RuleStore
     {
         try
         {
-            using var gate = StoreLock.Acquire(_path);
+            using var gate = StoreLock.Acquire(_path, _lockWait);
             var rules = LoadLocked().ToList();
             return rules.RemoveAll(rule => rule.Id == id) > 0 && Save(rules);
         }
@@ -128,7 +136,7 @@ public sealed class RuleStore
     {
         try
         {
-            using var gate = StoreLock.Acquire(_path);
+            using var gate = StoreLock.Acquire(_path, _lockWait);
             return LoadLocked();
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
@@ -149,17 +157,22 @@ public sealed class RuleStore
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(_path) || !File.Exists(_path))
+            using var lease = AutomaticFileAccess.TryAcquire(_path);
+            if (lease is null || lease.IsDirectory)
             {
                 return [];
             }
-            using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > MaxBytes)
+            if (lease.Length > MaxBytes)
             {
                 return [];
             }
-            var bytes = new byte[(int)stream.Length];
+            using var stream = lease.OpenRead();
+            var bytes = new byte[(int)lease.Length];
             stream.ReadExactly(bytes);
+            if (!lease.IsCurrent())
+            {
+                return [];
+            }
             var file = JsonSerializer.Deserialize<RuleFile>(bytes);
             return file is { Version: CurrentVersion, Rules: not null } && file.Rules.Count <= MaxRules
                 ? file.Rules.Where(rule => rule is { HasKey: true }).ToArray()
@@ -191,38 +204,40 @@ public sealed class RuleStore
     private sealed class StoreLock : IDisposable
     {
         private readonly Mutex _mutex;
-        private readonly bool _held;
 
-        private StoreLock(Mutex mutex, bool held)
-        {
-            _mutex = mutex;
-            _held = held;
-        }
+        private StoreLock(Mutex mutex) => _mutex = mutex;
 
-        public static StoreLock Acquire(string path)
+        public static StoreLock Acquire(string path, TimeSpan wait)
         {
-            var key = Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
-            var mutex = new Mutex(initiallyOwned: false, $@"Local\WinSight.ResponseRules.{key}");
+            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
             bool held;
             try
             {
-                held = mutex.WaitOne(LockWait);
+                held = mutex.WaitOne(wait);
             }
             catch (AbandonedMutexException)
             {
                 held = true; // the previous holder died; the atomic write kept the file whole
             }
-            return new StoreLock(mutex, held);
+            if (!held)
+            {
+                mutex.Dispose();
+                throw new IOException("Timed out waiting for the response-rule store lock.");
+            }
+            return new StoreLock(mutex);
         }
 
         public void Dispose()
         {
-            if (_held)
-            {
-                _mutex.ReleaseMutex();
-            }
+            _mutex.ReleaseMutex();
             _mutex.Dispose();
         }
+    }
+
+    internal static string LockNameFor(string path)
+    {
+        var key = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
+        return $@"Local\WinSight.ResponseRules.{key}";
     }
 }

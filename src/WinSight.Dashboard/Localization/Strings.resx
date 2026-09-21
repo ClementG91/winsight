@@ -283,7 +283,7 @@
   <data name="AvWebcamActivated" xml:space="preserve"><value>turned your webcam on</value></data>
   <data name="AvMicrophoneActivated" xml:space="preserve"><value>turned your microphone on</value></data>
   <data name="RansomwareProtectionShort" xml:space="preserve"><value>Protection</value></data>
-  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Places hidden decoy files in your Documents, Desktop and Pictures, and alerts you the moment anything modifies them — that is how ransomware behaves. Nothing is written until you turn this on, and the decoys are removed when you turn it off or close WinSight.</value></data>
+  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Places visible decoy files in Documents, Desktop, Pictures, Downloads, Videos and Music when those folders are available, and alerts you when one changes. Nothing is written until you turn this on, and unchanged decoys are removed when you turn it off or close WinSight.</value></data>
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Possible ransomware activity</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>A protected decoy file was just modified. Nothing legitimate changes it, so this is how ransomware behaves. Disconnect this PC from the network and check what is running.</value></data>
   <data name="RansomwareBurstDetected" xml:space="preserve"><value>An unusual burst of file renames or deletions was detected. If you did not start a bulk operation, treat this as suspicious.</value></data>
@@ -398,6 +398,8 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>The item changed since the alert, so nothing was removed.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight cannot reverse this item yet: it is machine-wide, or of a kind with no reversible removal.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>The action could not be completed.</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>The system may have changed, but the result could not be fully audited. Action ID: {0}. {1}</value></data>
+  <data name="AlertBlockReasserted" xml:space="preserve"><value>Removed and quarantined, but the startup item came straight back: a running program is re-creating it. Deal with that program, then block again. Action ID: {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — file signature</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Who signed this file</value></data>
   <data name="SignatureFileLabel" xml:space="preserve"><value>File</value></data>

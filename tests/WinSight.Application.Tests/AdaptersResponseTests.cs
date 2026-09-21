@@ -68,15 +68,15 @@ public sealed class AdaptersResponseTests : IDisposable
     }
 
     [Fact]
-    public void HoldersNamesTheProcessHoldingAFile()
+    public void HoldersNeverOffersItsOwnProcessForResponse()
     {
         var path = Path.Combine(_root, "held.dat");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite);
 
         var report = Adapters.DescribeHolders(path);
 
-        Assert.Contains(report.Items, item =>
-            item.Fields["kind"] == "fileHolder" && item.Fields["pid"] == Environment.ProcessId.ToString());
+        Assert.Empty(report.Items);
+        Assert.Contains("protected", report.Summary, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(0, report.NotableCount); // holding a file is inventory, not a finding
     }
 
@@ -130,8 +130,9 @@ public sealed class AdaptersResponseTests : IDisposable
     private sealed class FakeMutator : IPersistenceMutator
     {
         public PersistenceSnapshot? Capture(PersistenceActionTarget target) => new([1], @"C:\u.exe");
-        public bool Remove(PersistenceActionTarget target) => true;
-        public bool OriginIsFree(PersistenceActionTarget target) => true;
-        public bool Restore(PersistenceActionTarget target, byte[] payload) => true;
+        public PersistenceMutationOutcome RemoveIfUnchanged(
+            PersistenceActionTarget target, PersistenceSnapshot expected) => PersistenceMutationOutcome.Succeeded;
+        public PersistenceMutationOutcome RestoreIfFree(
+            PersistenceActionTarget target, byte[] payload) => PersistenceMutationOutcome.Succeeded;
     }
 }
