@@ -16,8 +16,9 @@ namespace WinSight.Application;
 /// </param>
 /// <param name="Children">Processes that name this one as their parent, ordered by pid.</param>
 /// <param name="Modules">
-/// Its loaded modules, unsigned ones first. A busy process loads hundreds and all but a handful are
-/// Microsoft-signed, so load order would bury the one worth seeing.
+/// Its loaded modules, flagged ones first (unsigned, or trusted only through a user-installed root).
+/// A busy process loads hundreds and all but a handful are Microsoft-signed, so load order would
+/// bury the one worth seeing.
 /// </param>
 /// <param name="Connections">Its sockets, external and established ones first.</param>
 public sealed record ProcessInsight(
@@ -30,6 +31,9 @@ public sealed record ProcessInsight(
     /// <summary>Loaded modules whose file is unsigned or untrusted.</summary>
     public int UnsignedModuleCount => Modules.Count(module => module.Unsigned);
 
+    /// <summary>Loaded modules whose signature holds only through a user-installed root.</summary>
+    public int UserRootModuleCount => Modules.Count(module => module.TrustedOnlyThroughUserRoot);
+
     /// <summary>Live sockets to an off-box, routable destination.</summary>
     public int EstablishedExternalCount => Connections.Count(IsEstablishedExternal);
 
@@ -38,7 +42,7 @@ public sealed record ProcessInsight(
     /// scanners already use — so the drill-down never disagrees with the list it was opened from.
     /// </summary>
     public bool IsNotable =>
-        Process.Unsigned || UnsignedModuleCount > 0 || EstablishedExternalCount > 0;
+        Process.Flagged || Modules.Any(module => module.Flagged) || EstablishedExternalCount > 0;
 
     internal static bool IsEstablishedExternal(Connection connection) =>
         connection.External
@@ -163,7 +167,7 @@ public static class ProcessInsightBuilder
             .OrderBy(candidate => candidate.Pid)
             .ToArray();
 
-    /// <summary>Unsigned first, then by name so two runs of one snapshot render identically.</summary>
+    /// <summary>Flagged first, then by name so two runs of one snapshot render identically.</summary>
     private static LoadedModule[] RankModules(
         ProcessInfo process,
         IReadOnlyList<LoadedModule> modules) =>
@@ -173,7 +177,7 @@ public static class ProcessInsightBuilder
                 && StableIdentityMatches(
                     process.StartTimestampUtcTicks,
                     module.ProcessStartTimestampUtcTicks))
-            .OrderByDescending(module => module.Unsigned)
+            .OrderByDescending(module => module.Flagged)
             .ThenBy(module => module.ModuleName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(module => module.ModuleName, StringComparer.Ordinal)
             .ToArray();

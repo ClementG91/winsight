@@ -95,6 +95,32 @@ public sealed class InputFilterTriageTests
         Assert.True(InputFilterTriage.IsNotable(concern));
     }
 
+    /// <summary>
+    /// A chain that validates only through a root in the scanning account's own store is one kernel
+    /// code integrity never consults, and minting a "Microsoft Windows" certificate under such a root
+    /// takes no privilege.
+    /// </summary>
+    [Theory]
+    [InlineData("kbdclass", WindowsSigner, InputFilterConcern.Impersonating)]
+    [InlineData("evilkbd", "CN=Contoso Touchpad, O=Contoso", InputFilterConcern.Untrusted)]
+    public void AFilterTrustedOnlyThroughAUserInstalledRootIsNeverVouchedFor(
+        string name, string signer, InputFilterConcern expected)
+    {
+        var signature = new SignatureVerdict(
+            SignatureState.SignedTrusted, signer, SignatureTrustAnchor.UserInstalledRoot);
+        var path = $@"{SystemDirectory}\drivers\{name}.sys";
+        var filter = new InputFilter(
+            InputStack.Keyboard,
+            FilterPosition.Upper,
+            name,
+            path,
+            signature,
+            InputFilterTriage.IsWindowsClassDriver(InputStack.Keyboard, name, path, signature, SystemDirectory));
+
+        Assert.False(filter.IsWindowsClassDriver);
+        Assert.Equal(expected, InputFilterTriage.Concern(filter));
+    }
+
     [Fact]
     public void ASignedThirdPartyDriverIsStillReported()
     {

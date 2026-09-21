@@ -113,6 +113,9 @@ public static class InputFilterTriage
             SignatureState.Unknown => InputFilterConcern.Unverified,
             _ when HasClassDriverName(filter.Stack, filter.Name) => InputFilterConcern.Impersonating,
             SignatureState.Unsigned or SignatureState.SignedUntrusted => InputFilterConcern.Untrusted,
+            // Kernel code integrity never consults a user's root store: this chain validates only for
+            // the account running the scan, which could have installed its root without privilege.
+            _ when filter.Signature.RestsOnUserInstalledTrust => InputFilterConcern.Untrusted,
             _ => InputFilterConcern.ThirdParty,
         };
     }

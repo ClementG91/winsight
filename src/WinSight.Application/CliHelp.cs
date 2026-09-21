@@ -41,7 +41,7 @@ public static partial class CliHelp
           winsight [persistence|av|net|dns|all]   run checks (default: all)
           winsight firewall                       list Windows Firewall rules
           winsight processes                      running processes + signatures
-          winsight modules                        unsigned DLLs loaded into processes
+          winsight modules                        unsigned or user-root-signed DLLs in processes
           winsight extensions                     browser extensions + risky permissions
           winsight certs                          trusted root CAs + rogue-root signals
           winsight hosts                          hosts-file hijack / AV-block detection

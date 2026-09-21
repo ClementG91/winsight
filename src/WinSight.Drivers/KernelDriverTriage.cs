@@ -114,6 +114,9 @@ public static class KernelDriverTriage
             // Unknown means verification could not run, which is not evidence against this driver.
             // The adapter separately raises the aggregate verification-coverage gap.
             SignatureState.Unknown => KernelDriverConcern.Unverified,
+            // Kernel code integrity never consults a user's root store: this chain validates only for
+            // the account running the scan, which could have installed its root without privilege.
+            _ when driver.Signature.RestsOnUserInstalledTrust => KernelDriverConcern.Untrusted,
             _ => KernelDriverConcern.ThirdParty,
         };
     }

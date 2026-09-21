@@ -20,17 +20,21 @@ public static class WindowsImage
 
     /// <summary>
     /// Whether Windows itself provides <paramref name="imagePath"/>: signed by the Windows identity,
-    /// chain validated, and living inside <paramref name="systemDirectory"/>.
+    /// chain validated to a root the machine trusts, and living inside
+    /// <paramref name="systemDirectory"/>.
     /// </summary>
     /// <remarks>
     /// The system directory is passed in rather than read from the environment so the judgement
-    /// stays pure and the near-miss cases can be tested.
+    /// stays pure and the near-miss cases can be tested. A chain that validates only through a root
+    /// in the scanning account's own store does not count: any account can install one, and a
+    /// certificate reading "Microsoft Windows" is trivial to mint under it.
     /// </remarks>
     public static bool IsWindowsProvided(string? imagePath, SignatureVerdict signature, string systemDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(systemDirectory);
 
         return signature.State == SignatureState.SignedTrusted
+            && !signature.RestsOnUserInstalledTrust
             && string.Equals(
                 CertificateSubject.CommonName(signature.Signer), SigningIdentity, StringComparison.OrdinalIgnoreCase)
             && IsInside(imagePath, systemDirectory);

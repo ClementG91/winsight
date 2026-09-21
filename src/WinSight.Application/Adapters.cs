@@ -413,6 +413,22 @@ public static partial class Adapters
         _ => "a privileged process",
     };
 
+    /// <summary>The words every scan uses for a signature that holds only through a user-installed root.</summary>
+    private const string UserRootTrustNote = "signature valid ONLY through a user-installed root";
+
+    /// <summary>
+    /// Appends <see cref="UserRootTrustNote"/> to a finding's detail when it applies. Said in the
+    /// text, not only in a field: an item flagged with nothing but a path reads as a false alarm.
+    /// </summary>
+    private static string WithUserRootNote(string detail, bool trustedOnlyThroughUserRoot) =>
+        trustedOnlyThroughUserRoot ? $"{detail} [{UserRootTrustNote}]" : detail;
+
+    private static string UserRootSuffix(int count) =>
+        count == 0 ? string.Empty : $", {count} trusted only through a user-installed root";
+
+    private static string UserRootClause(SignatureVerdict signature) =>
+        signature.RestsOnUserInstalledTrust ? $", {UserRootTrustNote}" : string.Empty;
+
     private static string PersistenceStatusLabel(
         PersistenceStatus status,
         SignatureTrustAnchor anchor = SignatureTrustAnchor.Unspecified,
@@ -420,7 +436,7 @@ public static partial class Adapters
         {
             PersistenceStatus.FileMissing => "file missing, signature not checked",
             PersistenceStatus.SignatureValid when anchor == SignatureTrustAnchor.UserInstalledRoot =>
-                "signature valid ONLY through a user-installed root",
+                UserRootTrustNote,
             PersistenceStatus.SignatureValid when revocation == RevocationStanding.Revoked =>
                 "signature valid but the certificate is REVOKED",
             PersistenceStatus.SignatureValid => "signature valid",
@@ -717,13 +733,13 @@ public static partial class Adapters
         var acquisition = new ProcessLister(SharedVerifier).SnapshotWithCoverage(cancellationToken);
         var procs = acquisition.Items;
         var b = new ToolReport.Builder("processes");
-        foreach (var p in procs.Where(p => !flaggedOnly || p.Unsigned)
-                     .OrderByDescending(p => p.Unsigned).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (var p in procs.Where(p => !flaggedOnly || p.Flagged)
+                     .OrderByDescending(p => p.Flagged).ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
         {
             b.Add(
-                p.Unsigned ? Severity.Notable : Severity.Info,
+                p.Flagged ? Severity.Notable : Severity.Info,
                 $"{p.Name} (pid {p.Pid})",
-                p.Path ?? "<no image>",
+                WithUserRootNote(p.Path ?? "<no image>", p.TrustedOnlyThroughUserRoot),
                 new Dictionary<string, string?>
                 {
                     ["pid"] = p.Pid.ToString(),
@@ -733,12 +749,16 @@ public static partial class Adapters
                     ["commandLine"] = p.CommandLine,
                     ["signature"] = p.Signature.State.ToString(),
                     ["signer"] = p.Signature.Signer,
+                    ["userInstalledTrust"] = p.TrustedOnlyThroughUserRoot ? "true" : null,
                 });
         }
         AddCoverageFinding(b, acquisition);
         AddSignatureCoverageFinding(
             b, procs.Where(process => process.Path is not null).Select(process => process.Signature));
-        return b.Build($"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned{CoverageSuffix(acquisition)}");
+        return b.Build(
+            $"{procs.Count} process(es), {procs.Count(p => p.Unsigned)} unsigned"
+            + UserRootSuffix(procs.Count(p => p.TrustedOnlyThroughUserRoot))
+            + CoverageSuffix(acquisition));
     }
 
     /// <summary>
@@ -1103,7 +1123,7 @@ public static partial class Adapters
             b.Add(
                 isNotable ? Severity.Notable : Severity.Info,
                 $"{filter.Stack}/{filter.Name}",
-                $"{filter.Position} filter — {Explain(concern)}{SignerSuffix(filter)}",
+                $"{filter.Position} filter — {Explain(concern)}{SignerSuffix(filter)}{UserRootClause(filter.Signature)}",
                 new Dictionary<string, string?>
                 {
                     ["stack"] = filter.Stack.ToString(),
@@ -1173,7 +1193,7 @@ public static partial class Adapters
             b.Add(
                 KernelDriverTriage.IsNotable(concern) ? Severity.Notable : Severity.Info,
                 $"{driver.Kind}/{driver.Name}",
-                $"{displayedPath}  [{StartLabel(driver.Start)}, {Explain(concern)}{SignerSuffix(driver)}]",
+                $"{displayedPath}  [{StartLabel(driver.Start)}, {Explain(concern)}{SignerSuffix(driver)}{UserRootClause(driver.Signature)}]",
                 new Dictionary<string, string?>
                 {
                     ["name"] = driver.Name,
@@ -1678,10 +1698,11 @@ public static partial class Adapters
     {
         var acquisition = new ModuleLister(SharedVerifier).SnapshotWithCoverage(cancellationToken);
         var modules = acquisition.Items;
-        var flagged = modules.Where(m => m.Unsigned).ToList();
+        var flagged = modules.Where(m => m.Flagged).ToList();
         var b = new ToolReport.Builder("modules");
         // The security signal is an unsigned/untrusted DLL loaded into a running
-        // process (injection / search-order hijack). Listing every loaded module would
+        // process (injection / search-order hijack), or one whose signature holds only
+        // through a root the user could have installed. Listing every loaded module would
         // be pure noise, so items are the flagged modules; the summary carries totals.
         // (`--flagged` is implied here, the tool only ever reports notable modules.)
         _ = flaggedOnly;
@@ -1692,7 +1713,7 @@ public static partial class Adapters
             b.Add(
                 Severity.Notable,
                 $"{m.ProcessName} (pid {m.Pid}) ← {m.ModuleName}",
-                m.Path ?? "<unknown>",
+                WithUserRootNote(m.Path ?? "<unknown>", m.TrustedOnlyThroughUserRoot),
                 new Dictionary<string, string?>
                 {
                     ["pid"] = m.Pid.ToString(),
@@ -1701,6 +1722,7 @@ public static partial class Adapters
                     ["path"] = m.Path,
                     ["signature"] = m.Signature.State.ToString(),
                     ["signer"] = m.Signature.Signer,
+                    ["userInstalledTrust"] = m.TrustedOnlyThroughUserRoot ? "true" : null,
                 });
         }
         AddCoverageFinding(b, acquisition);
@@ -1708,7 +1730,9 @@ public static partial class Adapters
             b, modules.Where(module => module.Path is not null).Select(module => module.Signature));
         var processCount = modules.Select(m => m.Pid).Distinct().Count();
         return b.Build(
-            $"{modules.Count} loaded module(s) across {processCount} process(es), {flagged.Count} unsigned{CoverageSuffix(acquisition)}");
+            $"{modules.Count} loaded module(s) across {processCount} process(es), {flagged.Count(m => m.Unsigned)} unsigned"
+            + UserRootSuffix(flagged.Count(m => m.TrustedOnlyThroughUserRoot))
+            + CoverageSuffix(acquisition));
     }
 
     public static ToolReport Firewall(bool flaggedOnly)
@@ -1820,12 +1844,14 @@ public static partial class Adapters
                      .OrderByDescending(c => c.Noteworthy).ThenByDescending(c => c.External))
         {
             var report = c.ImagePath is not null && vt.TryGetValue(c.ImagePath, out var v) ? v : null;
+            var userRootTrust = c.ImagePath is not null && c.Signature.RestsOnUserInstalledTrust;
+            var owner = WithUserRootNote($"{c.Process} (pid {c.Pid}), {c.State}", userRootTrust);
             b.Add(
                 c.Noteworthy ? Severity.Notable : Severity.Info,
                 $"{c.Protocol} {c.Remote}",
                 report is not null
-                    ? $"{c.Process} (pid {c.Pid}), {c.State}  [VT {report.Malicious}/{report.Total}]"
-                    : $"{c.Process} (pid {c.Pid}), {c.State}",
+                    ? $"{owner}  [VT {report.Malicious}/{report.Total}]"
+                    : owner,
                 new Dictionary<string, string?>
                 {
                     ["protocol"] = c.Protocol,
@@ -1836,6 +1862,7 @@ public static partial class Adapters
                     ["process"] = c.Process,
                     ["image"] = c.ImagePath,
                     ["signature"] = c.Signature.State.ToString(),
+                    ["userInstalledTrust"] = userRootTrust ? "true" : null,
                     ["external"] = c.External.ToString(),
                     ["vtMalicious"] = report?.Malicious.ToString(),
                     ["vtTotal"] = report?.Total.ToString(),

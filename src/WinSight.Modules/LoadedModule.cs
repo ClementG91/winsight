@@ -29,4 +29,14 @@ public sealed record LoadedModule(
     public bool Unsigned =>
         Path is not null &&
         Signature.State is SignatureState.Unsigned or SignatureState.SignedUntrusted;
+
+    /// <summary>
+    /// A loaded module trusted only through a root an unprivileged account can install. User-mode
+    /// code loading enforces no signature at all, so this is how an injected DLL reads as validly
+    /// signed; a triage hint, since an enterprise root looks like this too.
+    /// </summary>
+    public bool TrustedOnlyThroughUserRoot => Path is not null && Signature.RestsOnUserInstalledTrust;
+
+    /// <summary>Worth a look: <see cref="Unsigned"/> or <see cref="TrustedOnlyThroughUserRoot"/>.</summary>
+    public bool Flagged => Unsigned || TrustedOnlyThroughUserRoot;
 }

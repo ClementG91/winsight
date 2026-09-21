@@ -32,4 +32,14 @@ public sealed record ProcessInfo(
     public bool Unsigned =>
         Path is not null &&
         Signature.State is SignatureState.Unsigned or SignatureState.SignedUntrusted;
+
+    /// <summary>
+    /// A running process whose image is trusted only through a root an unprivileged account can
+    /// install. Worth the same look as an unsigned one: minting that signature takes no privilege,
+    /// and it reads as valid everywhere else. A triage hint - an enterprise root looks like this too.
+    /// </summary>
+    public bool TrustedOnlyThroughUserRoot => Path is not null && Signature.RestsOnUserInstalledTrust;
+
+    /// <summary>Worth a look: <see cref="Unsigned"/> or <see cref="TrustedOnlyThroughUserRoot"/>.</summary>
+    public bool Flagged => Unsigned || TrustedOnlyThroughUserRoot;
 }

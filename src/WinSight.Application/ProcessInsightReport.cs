@@ -18,7 +18,8 @@ namespace WinSight.Application;
 ///
 /// <b>Why modules are counted but not listed.</b> A busy process loads hundreds, and all but a
 /// handful are Microsoft-signed. Listing them makes the view unreadable and buries the outlier, so
-/// the count is reported and only the unsigned ones are named — the same reasoning that grades
+/// the count is reported and only the unsigned ones, and those trusted only through a root the user
+/// could have installed, are named — the same reasoning that grades
 /// hijack findings by exploitability rather than listing every unquoted path.
 /// </remarks>
 public static class ProcessInsightReport
@@ -56,7 +57,7 @@ public static class ProcessInsightReport
     {
         var process = insight.Process;
         builder.Add(
-            process.Unsigned ? Severity.Notable : Severity.Info,
+            process.Flagged ? Severity.Notable : Severity.Info,
             $"{process.Name} (pid {process.Pid})",
             process.Path is null
                 // A protected or system process exposes no image path. Saying so beats an empty
@@ -103,11 +104,13 @@ public static class ProcessInsightReport
 
     private static void AddUnsignedModules(ToolReport.Builder builder, ProcessInsight insight)
     {
-        foreach (var module in insight.Modules.Where(module => module.Unsigned))
+        foreach (var module in insight.Modules.Where(module => module.Flagged))
         {
             builder.Add(
                 Severity.Notable,
-                $"unsigned module {module.ModuleName}",
+                module.Unsigned
+                    ? $"unsigned module {module.ModuleName}"
+                    : $"module {module.ModuleName} trusted only through a user-installed root",
                 $"{module.Path} [{Describe(module)}]",
                 new Dictionary<string, string?>
                 {
@@ -195,6 +198,10 @@ public static class ProcessInsightReport
         {
             parts.Add($"{insight.UnsignedModuleCount} unsigned");
         }
+        if (insight.UserRootModuleCount > 0)
+        {
+            parts.Add($"{insight.UserRootModuleCount} trusted only through a user-installed root");
+        }
         if (insight.EstablishedExternalCount > 0)
         {
             parts.Add($"{insight.EstablishedExternalCount} established external");
@@ -213,6 +220,9 @@ public static class ProcessInsightReport
 
     private static string Describe(WinSight.Core.SignatureVerdict verdict) => verdict.State switch
     {
+        WinSight.Core.SignatureState.SignedTrusted when verdict.RestsOnUserInstalledTrust => verdict.Signer is null
+            ? "signature valid ONLY through a user-installed root"
+            : $"signed by {verdict.Signer}, valid ONLY through a user-installed root",
         WinSight.Core.SignatureState.SignedTrusted => verdict.Signer is null
             ? "signature valid"
             : $"signed by {verdict.Signer}",

@@ -3,6 +3,7 @@ using WinSight.Core;
 using WinSight.Modules;
 using WinSight.NetMonitor;
 using WinSight.Processes;
+using WinSight.Reporting;
 
 using Xunit;
 
@@ -240,6 +241,30 @@ public sealed class ProcessInsightTests
             externalConnection ? [Conn(4242)] : []);
 
         Assert.True(insight!.IsNotable);
+    }
+
+    /// <summary>
+    /// A signature valid only through a root the user could have installed is flagged in the
+    /// process and module scans, so the drill-down opened from them must agree and name it.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TrustThatRestsOnAUserInstalledRootMakesTheProcessNotable(bool onTheImage)
+    {
+        var userRoot = new SignatureVerdict(
+            SignatureState.SignedTrusted, "CN=Microsoft Windows", SignatureTrustAnchor.UserInstalledRoot);
+        var insight = ProcessInsightBuilder.Build(
+            4242,
+            [Process(4242, signature: onTheImage ? userRoot : Trusted)],
+            onTheImage ? [] : [Module(4242, "implant.dll", userRoot, @"C:\Users\me\AppData\Local\implant.dll")],
+            []);
+
+        Assert.True(insight!.IsNotable);
+        Assert.Equal(onTheImage ? 0 : 1, insight.UserRootModuleCount);
+        var report = ProcessInsightReport.Render(4242, insight);
+        Assert.Contains(report.Items, item =>
+            item.Severity == Severity.Notable && item.Detail.Contains("user-installed root", StringComparison.Ordinal));
     }
 
     // ---- Robustness: the snapshots are taken at different moments ------------------------------

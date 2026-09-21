@@ -32,12 +32,14 @@ public sealed record Connection(
 
     /// <summary>
     /// A triage hint: an ESTABLISHED connection to the outside world owned by a
-    /// process whose executable is unsigned, untrusted, or unresolved.
+    /// process whose executable is unsigned, untrusted, unresolved, or trusted only through a
+    /// root an unprivileged account can install.
     /// </summary>
     public bool Noteworthy =>
         External &&
         State.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) &&
         (ImagePath is null ||
+         Signature.RestsOnUserInstalledTrust ||
          Signature.State is SignatureState.Unsigned
              or SignatureState.SignedUntrusted
              or SignatureState.Missing);
