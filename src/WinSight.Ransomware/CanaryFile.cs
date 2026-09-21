@@ -20,6 +20,11 @@ internal sealed record CanaryFileRecord(string Path, CanaryFileIdentity Identity
 /// </summary>
 internal static class CanaryFile
 {
+    internal static CanaryFileIdentity? Identity(AutomaticFileAccess.LocalPathLease lease) =>
+        lease.TryGetExtendedIdentity(out var volume, out var low, out var high, out var created)
+            ? new CanaryFileIdentity(volume, low, high, created)
+            : null;
+
     internal static CanaryFileIdentity? Identity(SafeFileHandle handle)
     {
         if (!GetFileInformationByHandle(handle, out var info)
@@ -38,33 +43,26 @@ internal static class CanaryFile
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(record.Path))
+            using var lease = AutomaticFileAccess.TryAcquireForDelete(record.Path);
+            if (lease is null || Identity(lease) != record.Identity)
             {
                 return false;
             }
-            // OPEN_REPARSE_POINT rejects a final symlink instead of following its target. No
-            // FILE_SHARE_WRITE/DELETE: concurrent writers and path substitutions cannot intervene
-            // after this open. If a writer already exists, opening fails and we preserve the file.
-            using var handle = CreateFileW(record.Path, 0x80000000 | 0x00010000,
-                FileShare.Read, IntPtr.Zero, FileMode.Open, 0x00200000, IntPtr.Zero);
-            if (handle.IsInvalid || Identity(handle) != record.Identity)
-            {
-                return false;
-            }
-            using var stream = new FileStream(handle, FileAccess.Read);
             var expected = CanaryDocument.For(System.IO.Path.GetExtension(record.Path));
-            if (stream.Length != expected.Length)
+            if (lease.Length != expected.Length)
             {
                 return false;
             }
             var actual = new byte[expected.Length];
-            stream.ReadExactly(actual);
+            using (var stream = lease.OpenRead())
+            {
+                stream.ReadExactly(actual);
+            }
             if (!actual.AsSpan().SequenceEqual(expected))
             {
                 return false;
             }
-            var disposition = new FileDisposition { DeleteFile = true };
-            return SetFileInformationByHandle(handle, 4, ref disposition, 1);
+            return lease.TryDelete();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or System.Security.SecurityException or ArgumentException)
@@ -99,18 +97,6 @@ internal static class CanaryFile
         internal ulong FileIdHigh;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FileDisposition
-    {
-        [MarshalAs(UnmanagedType.U1)]
-        internal bool DeleteFile;
-    }
-
-    [DllImport("kernel32.dll", ExactSpelling = true, CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFileW(string fileName, uint desiredAccess,
-        FileShare shareMode, IntPtr securityAttributes, FileMode creationDisposition,
-        uint flagsAndAttributes, IntPtr templateFile);
-
     [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation info);
@@ -120,8 +106,4 @@ internal static class CanaryFile
     private static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int informationClass,
         out FileIdInformation information, uint bufferSize);
 
-    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetFileInformationByHandle(SafeFileHandle file, int informationClass,
-        ref FileDisposition information, uint bufferSize);
 }

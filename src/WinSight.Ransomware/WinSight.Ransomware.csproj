@@ -11,5 +11,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="WinSight.Ransomware.Tests" />
     <InternalsVisibleTo Include="WinSight.Application.Tests" />
+    <InternalsVisibleTo Include="WinSight.RansomwareHotPathProbe" />
   </ItemGroup>
 </Project>

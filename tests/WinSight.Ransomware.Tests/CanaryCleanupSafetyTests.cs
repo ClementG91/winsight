@@ -300,6 +300,53 @@ public sealed class CanaryCleanupSafetyTests
         });
     }
 
+    [Fact]
+    public void ManifestLockTimeoutPlantsNothingAndDoesNotClaimSessionOwnership()
+    {
+        var directory = Directory.CreateTempSubdirectory("winsight-canary-lock-").FullName;
+        var manifest = Path.Combine(directory, "manifest.json");
+        using var lockHeld = new ManualResetEventSlim();
+        using var releaseLock = new ManualResetEventSlim();
+        Exception? holderFailure = null;
+        var holder = new Thread(() =>
+        {
+            try
+            {
+                using var mutex = new Mutex(false, CanaryManager.ManifestLockNameFor(manifest));
+                if (!mutex.WaitOne(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("Test holder could not acquire the canary-manifest mutex.");
+                }
+                lockHeld.Set();
+                releaseLock.Wait(CancellationToken.None);
+                mutex.ReleaseMutex();
+            }
+            catch (Exception ex)
+            {
+                holderFailure = ex;
+                lockHeld.Set();
+            }
+        });
+        holder.Start();
+        var manager = new CanaryManager(new byte[32], manifest, TimeSpan.FromMilliseconds(100));
+        try
+        {
+            Assert.True(lockHeld.Wait(TimeSpan.FromSeconds(5)));
+            Assert.Null(holderFailure);
+
+            Assert.Throws<IOException>(() => manager.Plant([directory]));
+            Assert.Empty(Directory.GetFiles(directory));
+        }
+        finally
+        {
+            manager.EndSessionWithoutCleanup();
+            releaseLock.Set();
+            Assert.True(holder.Join(TimeSpan.FromSeconds(5)));
+            Directory.Delete(directory, recursive: true);
+        }
+        Assert.Null(holderFailure);
+    }
+
     private static void Cleanup(CanaryManager manager, string directory, string manifest, bool crossRun)
     {
         if (crossRun)

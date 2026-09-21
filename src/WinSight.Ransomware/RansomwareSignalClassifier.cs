@@ -11,8 +11,9 @@ public static class RansomwareSignalClassifier
     /// canary is always <see cref="RansomwareSignalKind.CanaryTouched"/> — a decoy has no legitimate
     /// reason to change. A rename or delete of an ordinary file is a burst signal. A create/change is
     /// a signal only when the content <paramref name="looksEncrypted"/>, which the caller determines
-    /// via <see cref="RansomwareEntropySampler"/> (it skips formats that are compressed by design, so
-    /// saving a .docx or a .jpg never counts).
+    /// via <see cref="RansomwareEntropySampler"/>. A compressed format needs both a missing file
+    /// signature and high entropy, so saving a healthy .docx or .jpg never counts while encrypting
+    /// one in place can.
     /// </summary>
     public static RansomwareSignalKind? Classify(
         WatcherChangeTypes changeType, bool isCanary, bool looksEncrypted = false)

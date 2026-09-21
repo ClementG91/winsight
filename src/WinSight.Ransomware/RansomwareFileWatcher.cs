@@ -247,15 +247,14 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     private FileSystemWatcher? TryCreate(string directory)
     {
-        if (string.IsNullOrWhiteSpace(directory)
-            || !AutomaticFileAccess.IsLocal(directory)
-            || !Directory.Exists(directory))
+        using var lease = AutomaticFileAccess.TryAcquire(directory);
+        if (lease is null || !lease.IsDirectory)
         {
             return null;
         }
         try
         {
-            var watcher = new FileSystemWatcher(directory)
+            var watcher = new FileSystemWatcher(lease.FullPath)
             {
                 IncludeSubdirectories = true,
                 NotifyFilter = NotifyFilters.FileName | NotifyFilters.LastWrite | NotifyFilters.DirectoryName,
@@ -266,6 +265,11 @@ public sealed class RansomwareFileWatcher : IDisposable
             watcher.Deleted += OnChanged;
             watcher.Renamed += OnChanged;
             watcher.Error += OnError;
+            if (!lease.IsCurrent())
+            {
+                watcher.Dispose();
+                return null;
+            }
             // Deliberately NOT enabled here; Start enables them all once registration is complete.
             return watcher;
         }
@@ -322,7 +326,11 @@ public sealed class RansomwareFileWatcher : IDisposable
         var identity = e is RenamedEventArgs renamed ? renamed.OldFullPath : e.FullPath;
         try
         {
-            if (!_pending.TryAdd(new PendingChange(e.ChangeType, identity, e.FullPath)))
+            // Stamped here, on arrival, not when the drain thread gets to it: the drain reads each
+            // written file for entropy, one at a time, and under the disk load a mass encryption
+            // causes it falls behind. Stamping at processing time spread events that arrived within
+            // a second across the backlog, past the window, exactly when the burst was real.
+            if (!_pending.TryAdd(new PendingChange(e.ChangeType, identity, e.FullPath, _clock())))
             {
                 Interlocked.Increment(ref _dropped);
             }
@@ -374,8 +382,8 @@ public sealed class RansomwareFileWatcher : IDisposable
                 return;
             }
 
-            // Only score content for a create/change of an ordinary file; the sampler's own
-            // extension gate then skips formats that are compressed by design.
+            // Only inspect content for a create/change of an ordinary file. The sampler scores
+            // plain files directly and applies signature + entropy gates to supported containers.
             var looksEncrypted = !isCanary
                 && change.ChangeType is WatcherChangeTypes.Created or WatcherChangeTypes.Changed
                 && _looksEncrypted(change.FullPath);
@@ -389,7 +397,7 @@ public sealed class RansomwareFileWatcher : IDisposable
             // The path is passed so the detector counts distinct files: Windows reports several
             // change notifications for one file being written, and counting raw events made a single
             // large save look like a burst.
-            if (_detector.Observe(kind.Value, _clock(), change.IdentityPath))
+            if (_detector.Observe(kind.Value, change.ObservedAt, change.IdentityPath))
             {
                 Publish(new RansomwareDetectedEventArgs(kind.Value, change.FullPath));
             }
@@ -461,8 +469,10 @@ public sealed class RansomwareFileWatcher : IDisposable
 
     /// <param name="IdentityPath">The path that decides whether this is a decoy (old path on rename).</param>
     /// <param name="FullPath">The path reported to the operator.</param>
+    /// <param name="ObservedAt">When Windows delivered the change, which is what the burst window measures.</param>
     private readonly record struct PendingChange(
         WatcherChangeTypes ChangeType,
         string IdentityPath,
-        string FullPath);
+        string FullPath,
+        DateTimeOffset ObservedAt);
 }
