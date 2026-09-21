@@ -22,13 +22,36 @@ public enum CodeIntegrityOptions : uint
     /// <summary>User-mode code integrity (WDAC for applications) is on.</summary>
     UserModeEnabled = 0x0004,
 
+    /// <summary>
+    /// User-mode code integrity is in audit mode: executables are allowed to run and load, and
+    /// audit events are recorded (<c>CODEINTEGRITY_OPTION_UMCI_AUDITMODE_ENABLED</c>).
+    /// </summary>
+    UserModeAuditMode = 0x0008,
+
+    /// <summary>
+    /// Binaries run from the paths listed under <c>HKLM\SYSTEM\CurrentControlSet\Control\CI\TRSData</c>
+    /// (<c>TestPath</c>) are allowed even when they fail user-mode code integrity
+    /// (<c>CODEINTEGRITY_OPTION_UMCI_EXCLUSIONPATHS_ENABLED</c>).
+    /// </summary>
+    UserModeExclusionPaths = 0x0010,
+
     /// <summary>Kernel debugging is permitted, which relaxes what the kernel will accept.</summary>
     DebugModeEnabled = 0x0080,
+
+    /// <summary>
+    /// Flight-signed content - signed by the Microsoft Development Root Certificate Authority 2014 -
+    /// is accepted (<c>CODEINTEGRITY_OPTION_FLIGHTING_ENABLED</c>). Set on Windows Insider builds.
+    /// </summary>
+    FlightSigning = 0x0200,
 
     /// <summary>Hypervisor-enforced kernel code integrity — "memory integrity" in Settings.</summary>
     HypervisorEnforced = 0x0400,
 
-    /// <summary>HVCI is in audit mode: violations are logged, not blocked.</summary>
+    /// <summary>
+    /// HVCI audit events are recorded for kernel components that are not compatible with it. The
+    /// kernel documents this bit as independent of <see cref="HypervisorEnforced"/>: set alone, HVCI
+    /// only audits; set with it, HVCI enforces and also audits.
+    /// </summary>
     HypervisorAuditMode = 0x0800,
 
     /// <summary>HVCI strict mode.</summary>

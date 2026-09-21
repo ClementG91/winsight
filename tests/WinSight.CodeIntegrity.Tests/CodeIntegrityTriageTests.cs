@@ -81,19 +81,44 @@ public sealed class CodeIntegrityTriageTests
         Assert.Equal(IntegrityConcern.Hardening, finding.Concern);
     }
 
+    /// <summary>
+    /// The HVCI audit bit is documented as independent of the enabled bit. Alone, HVCI only
+    /// audits - the false-comfort case, configured while enforcing nothing. This used to be reported
+    /// as plain "off".
+    /// </summary>
     [Fact]
-    public void MemoryIntegrityInAuditModeIsNotTreatedAsEnforcing()
+    public void MemoryIntegrityThatOnlyAuditsIsNotTreatedAsEnforcing()
     {
-        // The false-comfort case: it reads as enabled everywhere in the UI while blocking nothing.
-        var state = State(
-            CodeIntegrityOptions.Enabled
-                | CodeIntegrityOptions.HypervisorEnforced
-                | CodeIntegrityOptions.HypervisorAuditMode);
+        var state = State(CodeIntegrityOptions.Enabled | CodeIntegrityOptions.HypervisorAuditMode);
 
         var finding = Find(state, "memory-integrity");
 
         Assert.Equal(IntegrityConcern.Hardening, finding.Concern);
+        Assert.Equal("audit", finding.State);
         Assert.Contains("AUDIT", finding.Detail, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// With the enabled bit, HVCI enforces; the audit bit adds logging for incompatible components.
+    /// This used to be reported as "enforcing nothing" - a false alarm on an enforcing machine.
+    /// </summary>
+    [Theory]
+    [InlineData(false, "enforcing")]
+    [InlineData(true, "strict")]
+    public void MemoryIntegrityThatEnforcesAndAlsoAuditsIsEnforcing(bool strict, string expectedState)
+    {
+        var options = CodeIntegrityOptions.Enabled
+            | CodeIntegrityOptions.HypervisorEnforced
+            | CodeIntegrityOptions.HypervisorAuditMode;
+        if (strict)
+        {
+            options |= CodeIntegrityOptions.HypervisorStrictMode;
+        }
+
+        var finding = Find(State(options), "memory-integrity");
+
+        Assert.Equal(IntegrityConcern.Healthy, finding.Concern);
+        Assert.Equal(expectedState, finding.State);
     }
 
     [Fact]
@@ -139,7 +164,68 @@ public sealed class CodeIntegrityTriageTests
     {
         var state = State(CodeIntegrityOptions.Enabled | CodeIntegrityOptions.UserModeEnabled);
 
-        Assert.Equal(IntegrityConcern.Healthy, Find(state, "user-mode-code-integrity").Concern);
+        var finding = Find(state, "user-mode-code-integrity");
+
+        Assert.Equal(IntegrityConcern.Healthy, finding.Concern);
+        Assert.Equal("enforced", finding.State);
+    }
+
+    /// <summary>
+    /// The false assurance this scan used to give: WDAC in audit mode allows every executable and
+    /// only logs, and it was reported as enforced. Audit wins over exclusions - nothing is enforced.
+    /// </summary>
+    [Theory]
+    [InlineData(CodeIntegrityOptions.UserModeEnabled | CodeIntegrityOptions.UserModeAuditMode)]
+    [InlineData(CodeIntegrityOptions.UserModeAuditMode)]
+    [InlineData(CodeIntegrityOptions.UserModeEnabled | CodeIntegrityOptions.UserModeAuditMode | CodeIntegrityOptions.UserModeExclusionPaths)]
+    public void UserModeCodeIntegrityInAuditModeIsNotReportedAsEnforced(CodeIntegrityOptions userMode)
+    {
+        var finding = Find(State(CodeIntegrityOptions.Enabled | userMode), "user-mode-code-integrity");
+
+        Assert.Equal(IntegrityConcern.Hardening, finding.Concern);
+        Assert.Equal("audit", finding.State);
+        Assert.True(CodeIntegrityTriage.IsNotable(finding.Concern));
+    }
+
+    /// <summary>Exclusion paths let anything run from them past an enforced policy.</summary>
+    [Fact]
+    public void UserModeCodeIntegrityWithExclusionPathsSaysSo()
+    {
+        var state = State(
+            CodeIntegrityOptions.Enabled
+                | CodeIntegrityOptions.UserModeEnabled
+                | CodeIntegrityOptions.UserModeExclusionPaths);
+
+        var finding = Find(state, "user-mode-code-integrity");
+
+        Assert.Equal(IntegrityConcern.Hardening, finding.Concern);
+        Assert.Equal("exclusions", finding.State);
+        Assert.Contains("TRSData", finding.Detail, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FlightSigningIsReportedOnlyWhenSet()
+    {
+        var without = CodeIntegrityTriage.Evaluate(State(CodeIntegrityOptions.Enabled));
+        Assert.DoesNotContain(without, finding => finding.Name == "flight-signing");
+
+        var with = State(CodeIntegrityOptions.Enabled | CodeIntegrityOptions.FlightSigning);
+        Assert.Equal(IntegrityConcern.Hardening, Find(with, "flight-signing").Concern);
+    }
+
+    /// <summary>The kernel silent: nothing optional may be inferred from an unread word.</summary>
+    [Fact]
+    public void NoOptionalFindingIsReportedWhenTheKernelDidNotAnswer()
+    {
+        var state = State(
+            CodeIntegrityOptions.UserModeEnabled | CodeIntegrityOptions.FlightSigning | CodeIntegrityOptions.DebugModeEnabled,
+            optionsRead: false);
+
+        var names = CodeIntegrityTriage.Evaluate(state).Select(finding => finding.Name).ToList();
+
+        Assert.DoesNotContain("user-mode-code-integrity", names);
+        Assert.DoesNotContain("flight-signing", names);
+        Assert.DoesNotContain("kernel-debug-mode", names);
     }
 
     [Fact]

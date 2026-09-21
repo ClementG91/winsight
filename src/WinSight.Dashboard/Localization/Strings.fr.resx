@@ -366,6 +366,7 @@
   <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Débogueur noyau</value></data>
   <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Mode de débogage noyau</value></data>
   <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>Intégrité du code en mode utilisateur</value></data>
+  <data name="IntegrityProtectionFlightSigning" xml:space="preserve"><value>Signature « flight » (versions d’évaluation)</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>Le noyau n’a pas communiqué ses options d’intégrité du code : le contrôle de signature des pilotes est indéterminé — ce n’est pas la même chose que désactivé.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>Le contrôle de signature des pilotes est actif : le noyau refuse les pilotes non signés.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>Le contrôle de signature des pilotes est DÉSACTIVÉ : le noyau chargera des pilotes non signés. Tout pilote non signé signalé ailleurs doit être lu à cette lumière.</value></data>
@@ -374,7 +375,7 @@
   <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>La signature de test est désactivée : un pilote doit donc porter une signature en laquelle Windows a confiance.</value></data>
   <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>Impossible d’établir si l’intégrité de la mémoire fonctionne.</value></data>
   <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) ne fonctionne pas. Elle est désactivée sur de nombreuses machines saines, mais lorsqu’elle est active, contourner la signature des pilotes ne suffit plus à exécuter du code dans le noyau.</value></data>
-  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) est en mode AUDIT : les violations sont journalisées mais restées autorisées. Elle apparaît activée alors qu’elle n’applique rien.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) est uniquement en mode AUDIT : les composants du noyau qui seraient incompatibles sont journalisés, mais rien n’est appliqué.</value></data>
   <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) s’applique, en mode strict.</value></data>
   <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) s’applique.</value></data>
   <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>Le démarrage sécurisé est actif : le micrologiciel vérifie la chaîne de démarrage avant le lancement de Windows.</value></data>
@@ -385,6 +386,9 @@
   <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>Impossible d’établir si un débogueur noyau est attaché.</value></data>
   <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>Le mode de débogage noyau est autorisé, ce qui assouplit ce que le noyau accepte de charger et permet à un débogueur de lire et de modifier la mémoire du noyau.</value></data>
   <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est appliquée, en plus de la signature des pilotes.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityAudit" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est en mode AUDIT : les violations de la stratégie sont journalisées, pas bloquées. Elle paraît configurée alors qu’elle ne bloque rien.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityExclusions" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est appliquée, mais des chemins d’exclusion sont configurés (HKLM\SYSTEM\CurrentControlSet\Control\CI\TRSData, TestPath) : les programmes lancés depuis ces chemins sont autorisés même s’ils violent la stratégie.</value></data>
+  <data name="IntegrityStateFlightSigningOn" xml:space="preserve"><value>La signature « flight » est activée : le noyau accepte aussi le code signé par la racine de développement de Microsoft. Normal sur une version Windows Insider ; sinon, elle devrait être désactivée.</value></data>
   <data name="AlertWindowTitle" xml:space="preserve"><value>WinSight — nouvel élément de démarrage</value></data>
   <data name="AlertHeading" xml:space="preserve"><value>Un nouvel élément de démarrage est apparu</value></data>
   <data name="AlertItemLabel" xml:space="preserve"><value>Élément</value></data>

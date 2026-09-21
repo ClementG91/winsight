@@ -369,6 +369,7 @@
   <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Kernel debugger</value></data>
   <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Kernel debug mode</value></data>
   <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>User-mode code integrity</value></data>
+  <data name="IntegrityProtectionFlightSigning" xml:space="preserve"><value>Flight signing</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>The kernel did not report its code-integrity options, so driver signing enforcement is undetermined — not the same as off.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>Driver signature enforcement is on: the kernel refuses unsigned drivers.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>Driver signature enforcement is OFF: the kernel will load unsigned drivers. Any unsigned driver reported elsewhere should be read in that light.</value></data>
@@ -377,7 +378,7 @@
   <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>Test signing is off, so a driver must carry a signature Windows trusts.</value></data>
   <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>Whether memory integrity is running could not be established.</value></data>
   <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>Memory integrity (HVCI) is not running. It is off on many healthy machines, but with it on, a driver-signing bypass alone is not enough to run code in the kernel.</value></data>
-  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>Memory integrity (HVCI) is in AUDIT mode: violations are logged but still allowed. It reads as enabled while enforcing nothing.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>Memory integrity (HVCI) is in AUDIT mode only: kernel components that would be incompatible are logged, but nothing is enforced.</value></data>
   <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>Memory integrity (HVCI) is enforcing, in strict mode.</value></data>
   <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>Memory integrity (HVCI) is enforcing.</value></data>
   <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>Secure Boot is on: the firmware verifies the boot chain before Windows starts.</value></data>
@@ -388,6 +389,9 @@
   <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>Whether a kernel debugger is attached could not be established.</value></data>
   <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>Kernel debug mode is permitted, which relaxes what the kernel will load and lets a debugger read and change kernel memory.</value></data>
   <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>Application code integrity (WDAC) is enforced as well as driver signing.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityAudit" xml:space="preserve"><value>Application code integrity (WDAC) is in AUDIT mode: policy violations are logged, not blocked. It reads as configured while blocking nothing.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityExclusions" xml:space="preserve"><value>Application code integrity (WDAC) is enforced, but exclusion paths are configured (HKLM\SYSTEM\CurrentControlSet\Control\CI\TRSData, TestPath): programs run from them are allowed even when they fail the policy.</value></data>
+  <data name="IntegrityStateFlightSigningOn" xml:space="preserve"><value>Flight signing is enabled: the kernel also accepts code signed by Microsoft's development root. Normal on Windows Insider builds; otherwise it should be off.</value></data>
   <data name="AlertWindowTitle" xml:space="preserve"><value>WinSight — new startup item</value></data>
   <data name="AlertHeading" xml:space="preserve"><value>A new startup item appeared</value></data>
   <data name="AlertItemLabel" xml:space="preserve"><value>Item</value></data>

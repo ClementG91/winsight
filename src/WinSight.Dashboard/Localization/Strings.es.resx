@@ -366,6 +366,7 @@
   <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Depurador del núcleo</value></data>
   <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Modo de depuración del núcleo</value></data>
   <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>Integridad del código en modo usuario</value></data>
+  <data name="IntegrityProtectionFlightSigning" xml:space="preserve"><value>Firma «flight» (versiones de prueba)</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>El núcleo no comunicó sus opciones de integridad de código, por lo que el control de firma de controladores queda indeterminado: no es lo mismo que desactivado.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>El control de firma de controladores está activo: el núcleo rechaza los controladores sin firmar.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>El control de firma de controladores está DESACTIVADO: el núcleo cargará controladores sin firmar. Cualquier controlador sin firmar detectado en otro lugar debe leerse a esa luz.</value></data>
@@ -374,7 +375,7 @@
   <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>La firma de prueba está desactivada, por lo que un controlador debe llevar una firma en la que Windows confíe.</value></data>
   <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>No se pudo establecer si la integridad de la memoria está en funcionamiento.</value></data>
   <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>La integridad de la memoria (HVCI) no está en funcionamiento. Está desactivada en muchas máquinas sanas, pero con ella activa, eludir la firma de controladores ya no basta para ejecutar código en el núcleo.</value></data>
-  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>La integridad de la memoria (HVCI) está en modo AUDITORÍA: las infracciones se registran pero se siguen permitiendo. Aparece como activada sin aplicar nada.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>La integridad de la memoria (HVCI) está solo en modo AUDITORÍA: se registran los componentes del kernel que serían incompatibles, pero no se aplica nada.</value></data>
   <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>La integridad de la memoria (HVCI) se aplica, en modo estricto.</value></data>
   <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>La integridad de la memoria (HVCI) se aplica.</value></data>
   <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>El arranque seguro está activo: el firmware verifica la cadena de arranque antes de que se inicie Windows.</value></data>
@@ -385,6 +386,9 @@
   <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>No se pudo establecer si hay un depurador del núcleo conectado.</value></data>
   <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>El modo de depuración del núcleo está permitido, lo que relaja lo que el núcleo aceptará cargar y permite a un depurador leer y modificar la memoria del núcleo.</value></data>
   <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>La integridad del código de las aplicaciones (WDAC) se aplica además de la firma de controladores.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityAudit" xml:space="preserve"><value>La integridad del código de las aplicaciones (WDAC) está en modo AUDITORÍA: las infracciones de la directiva se registran, no se bloquean. Parece configurada sin bloquear nada.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityExclusions" xml:space="preserve"><value>La integridad del código de las aplicaciones (WDAC) se aplica, pero hay rutas de exclusión configuradas (HKLM\SYSTEM\CurrentControlSet\Control\CI\TRSData, TestPath): los programas ejecutados desde ellas se permiten aunque incumplan la directiva.</value></data>
+  <data name="IntegrityStateFlightSigningOn" xml:space="preserve"><value>La firma «flight» está habilitada: el kernel también acepta código firmado por la raíz de desarrollo de Microsoft. Es normal en compilaciones de Windows Insider; si no, debería estar desactivada.</value></data>
   <data name="AlertWindowTitle" xml:space="preserve"><value>WinSight — nuevo elemento de inicio</value></data>
   <data name="AlertHeading" xml:space="preserve"><value>Apareció un nuevo elemento de inicio</value></data>
   <data name="AlertItemLabel" xml:space="preserve"><value>Elemento</value></data>

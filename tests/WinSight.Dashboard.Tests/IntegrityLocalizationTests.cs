@@ -39,7 +39,7 @@ public sealed class IntegrityLocalizationTests
             .ToArray();
 
         // The enumeration must not have quietly gone empty, or this test passes by finding nothing.
-        Assert.Equal(7, keys.Length);
+        Assert.Equal(8, keys.Length);
         Assert.DoesNotContain(keys, key => Resources.GetString(key, CultureInfo.InvariantCulture) is null);
     }
 
@@ -54,7 +54,7 @@ public sealed class IntegrityLocalizationTests
 
         // A lower bound, not an equality: adding a sub-case should fail below, on its missing key,
         // with a message that names it - not here, on an arithmetic mismatch.
-        Assert.True(keys.Length >= 19, $"only {keys.Length} sub-cases reached");
+        Assert.True(keys.Length >= 22, $"only {keys.Length} sub-cases reached");
         Assert.DoesNotContain(keys, key => Resources.GetString(key, CultureInfo.InvariantCulture) is null);
     }
 
@@ -135,22 +135,23 @@ public sealed class IntegrityLocalizationTests
 
     /// <summary>
     /// Every finding the triage can produce, by driving it over machine states that reach each
-    /// branch: the kernel silent, then every combination of the options the triage reads, crossed
-    /// with the three readings of Secure Boot and of the kernel debugger.
+    /// branch: the kernel silent, then every combination of the named options, crossed with the
+    /// three readings of Secure Boot and of the kernel debugger.
     /// </summary>
+    /// <remarks>
+    /// The combinations are generated from the enum rather than listed here, so an option added to
+    /// <see cref="CodeIntegrityOptions"/> is covered without anyone remembering to add it.
+    /// </remarks>
     private static List<IntegrityFinding> ReachableFindings()
     {
-        CodeIntegrityOptions[] combinations =
-        [
-            CodeIntegrityOptions.None,
-            CodeIntegrityOptions.Enabled,
-            CodeIntegrityOptions.TestSign,
-            CodeIntegrityOptions.UserModeEnabled,
-            CodeIntegrityOptions.DebugModeEnabled,
-            CodeIntegrityOptions.HypervisorEnforced,
-            CodeIntegrityOptions.HypervisorEnforced | CodeIntegrityOptions.HypervisorAuditMode,
-            CodeIntegrityOptions.HypervisorEnforced | CodeIntegrityOptions.HypervisorStrictMode,
-        ];
+        var flags = Enum.GetValues<CodeIntegrityOptions>()
+            .Where(option => option != CodeIntegrityOptions.None)
+            .ToArray();
+        var combinations = Enumerable.Range(0, 1 << flags.Length)
+            .Select(mask => flags
+                .Where((_, bit) => (mask & (1 << bit)) != 0)
+                .Aggregate(CodeIntegrityOptions.None, (options, flag) => options | flag))
+            .ToArray();
         ProtectionReading[] readings =
             [ProtectionReading.On, ProtectionReading.Off, ProtectionReading.Unknown];
 
