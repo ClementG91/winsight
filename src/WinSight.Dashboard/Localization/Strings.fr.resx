@@ -214,6 +214,15 @@
   <data name="ModuleLoadedByProcess" xml:space="preserve"><value>{0} (PID {1}) ← {2}</value></data>
   <data name="StaticMapping" xml:space="preserve"><value>Mappage statique</value></data>
   <data name="HostExternalRedirect" xml:space="preserve"><value>Redirige un nom d’hôte vers une adresse externe (détournement possible)</value></data>
+  <data name="HostsUnreadableTitle" xml:space="preserve"><value>Fichier hosts illisible</value></data>
+  <data name="HostsUnreadableDetail" xml:space="preserve"><value>{0} existe mais l’accès a été refusé ; son contenu est inconnu.</value></data>
+  <data name="HostsMalformedTitle" xml:space="preserve"><value>Le fichier hosts contient des enregistrements mal formés</value></data>
+  <data name="HostsMalformedDetail" xml:space="preserve"><value>{0} ligne(s) active(s) n’ont pas pu être interprétées comme des correspondances IP-hôte.</value></data>
+  <data name="HostsRelocatedTitle" xml:space="preserve"><value>Base hosts déplacée</value></data>
+  <data name="HostsRelocatedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath dirige Windows vers {0} au lieu de {1} ; les entrées affichées sont lues à cet endroit.</value></data>
+  <data name="HostsRelocatedUnresolvedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath vaut « {0} », qui n’est pas un chemin local que WinSight peut résoudre ; Windows lit son fichier hosts à cet endroit, pas dans {1}.</value></data>
+  <data name="HostsLocationUnverifiedTitle" xml:space="preserve"><value>Emplacement du fichier hosts non confirmé</value></data>
+  <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>Tcpip\Parameters n’a pas pu être lu ; l’emplacement standard {0} a été supposé.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Bloque un domaine de sécurité ou de mise à jour (contournement de protection possible)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>La racine de confiance contient une clé privée et peut créer des certificats approuvés</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Algorithme de signature faible ({0}) sur un certificat non auto-signé du magasin racine</value></data>

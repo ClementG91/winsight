@@ -127,8 +127,45 @@ public sealed class DashboardFindingPresenterTests
     {
         WithCulture(culture, text =>
         {
-            var item = Item(Severity.Notable, new() { ["isSink"] = "False" });
+            var item = Item(Severity.Notable, new()
+            {
+                ["hostname"] = "login.mybank.example",
+                ["ip"] = "203.0.113.66",
+                ["isSink"] = "False",
+            });
             Assert.StartsWith(expected, DashboardFindingPresenter.Present("hosts", item, text).Detail);
+        });
+    }
+
+    /// <summary>
+    /// A row about the hosts file itself is not a mapping. It used to fall into the redirect branch
+    /// and read "redirects a hostname to an external address" - for an unreadable file, malformed
+    /// records, or a relocated database.
+    /// </summary>
+    [Theory]
+    [InlineData("en", "hostsUnreadable", "exists but access was denied")]
+    [InlineData("fr", "hostsUnreadable", "l’accès a été refusé")]
+    [InlineData("en", "acquisitionCoverage", "could not be interpreted")]
+    [InlineData("es", "acquisitionCoverage", "no se pudieron interpretar")]
+    [InlineData("en", "hostsLocation", "DataBasePath points Windows at")]
+    [InlineData("fr", "hostsLocation", "DataBasePath dirige Windows vers")]
+    [InlineData("en", "hostsLocationUnverified", "the standard location")]
+    public void AHostsFileRowIsNeverPresentedAsARedirect(string culture, string kind, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["kind"] = kind,
+                ["path"] = @"D:\relocated\hosts",
+                ["standardPath"] = @"C:\Windows\System32\drivers\etc\hosts",
+                ["malformedLines"] = "3",
+            });
+
+            var detail = DashboardFindingPresenter.Present("hosts", item, text).Detail;
+
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+            Assert.DoesNotContain(text["HostExternalRedirect"], detail, StringComparison.Ordinal);
         });
     }
 

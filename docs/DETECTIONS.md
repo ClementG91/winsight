@@ -139,8 +139,10 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
   `%LOCALAPPDATA%` and friends expand to the wrong profile and such an entry can read as
   `FileMissing`. A bare module name registered under a 32-bit view is not looked for in
   `SysWOW64`, where a 32-bit process would load it.
-- **The hosts file is read at its default location.** `Tcpip\Parameters\DataBasePath` can move the
-  file Windows actually uses; a relocated database is not detected.
+- **A relocated hosts database is followed only to a local path.** When
+  `Tcpip\Parameters\DataBasePath` moves the file Windows uses, the relocation is reported and the
+  hosts file is read from the new directory. A share, a relative path or a variable other than
+  `%SystemRoot%`/`%windir%` is reported as relocated but not read.
 - **Camera and microphone evidence is what Windows' consent store records.** Access that bypasses
   the capability broker (legacy DirectShow capture, a driver) leaves no consent-store record and is
   not seen. Only class-level keyboard/mouse filter drivers are read, not per-device `Enum`

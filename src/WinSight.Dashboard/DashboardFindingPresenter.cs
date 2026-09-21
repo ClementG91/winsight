@@ -228,12 +228,42 @@ public static class DashboardFindingPresenter
 
     private static FindingPresentation Hosts(ReportItem item, LocalizationManager text)
     {
+        // Only a mapping row speaks as a mapping. The rows about the file itself - unreadable,
+        // malformed, relocated - used to fall into the redirect branch below and read "redirects a
+        // hostname to an external address", which is not what any of them says.
+        if (Field(item, "hostname") is null)
+        {
+            return HostsFileRow(item, text);
+        }
         var detail = item.Severity == Severity.Info
             ? text["StaticMapping"]
             : BoolField(item, "isSink")
                 ? text["HostSecurityBlackhole"]
                 : text["HostExternalRedirect"];
         return new FindingPresentation(item.Title, detail);
+    }
+
+    private static FindingPresentation HostsFileRow(ReportItem item, LocalizationManager text)
+    {
+        var path = Field(item, "path") ?? text["UnknownValue"];
+        var standard = Field(item, "standardPath") ?? text["UnknownValue"];
+        return Field(item, "kind") switch
+        {
+            "hostsUnreadable" => new FindingPresentation(
+                text["HostsUnreadableTitle"], text.Format("HostsUnreadableDetail", path)),
+            "acquisitionCoverage" => new FindingPresentation(
+                text["HostsMalformedTitle"],
+                text.Format("HostsMalformedDetail", Field(item, "malformedLines") ?? text["UnknownValue"])),
+            "hostsLocation" => new FindingPresentation(
+                text["HostsRelocatedTitle"],
+                Field(item, "path") is null
+                    ? text.Format(
+                        "HostsRelocatedUnresolvedDetail", Field(item, "registered") ?? text["UnknownValue"], standard)
+                    : text.Format("HostsRelocatedDetail", path, standard)),
+            "hostsLocationUnverified" => new FindingPresentation(
+                text["HostsLocationUnverifiedTitle"], text.Format("HostsLocationUnverifiedDetail", path)),
+            _ => new FindingPresentation(item.Title, item.Detail),
+        };
     }
 
     private static FindingPresentation Certificate(ReportItem item, LocalizationManager text)

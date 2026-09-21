@@ -217,6 +217,15 @@
   <data name="ModuleLoadedByProcess" xml:space="preserve"><value>{0} (PID {1}) ← {2}</value></data>
   <data name="StaticMapping" xml:space="preserve"><value>Static mapping</value></data>
   <data name="HostExternalRedirect" xml:space="preserve"><value>Redirects a hostname to an external address (possible hijack)</value></data>
+  <data name="HostsUnreadableTitle" xml:space="preserve"><value>Hosts file could not be read</value></data>
+  <data name="HostsUnreadableDetail" xml:space="preserve"><value>{0} exists but access was denied; its contents are unknown.</value></data>
+  <data name="HostsMalformedTitle" xml:space="preserve"><value>Hosts file contains malformed records</value></data>
+  <data name="HostsMalformedDetail" xml:space="preserve"><value>{0} active line(s) could not be interpreted as IP-to-host mappings.</value></data>
+  <data name="HostsRelocatedTitle" xml:space="preserve"><value>Hosts database relocated</value></data>
+  <data name="HostsRelocatedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath points Windows at {0} instead of {1}; the entries shown are read from there.</value></data>
+  <data name="HostsRelocatedUnresolvedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath is &quot;{0}&quot;, which is not a local path WinSight can resolve; Windows reads its hosts file from there, not from {1}.</value></data>
+  <data name="HostsLocationUnverifiedTitle" xml:space="preserve"><value>Hosts file location not confirmed</value></data>
+  <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>Tcpip\Parameters could not be read, so the standard location {0} was assumed.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Blackholes a security or update domain (possible protection bypass)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>Trusted root holds a private key and can mint trusted certificates</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Weak signature algorithm ({0}) on a non-self-signed root-store certificate</value></data>

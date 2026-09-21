@@ -214,6 +214,15 @@
   <data name="ModuleLoadedByProcess" xml:space="preserve"><value>{0} (PID {1}) ← {2}</value></data>
   <data name="StaticMapping" xml:space="preserve"><value>Asignación estática</value></data>
   <data name="HostExternalRedirect" xml:space="preserve"><value>Redirige un nombre de host a una dirección externa (posible secuestro)</value></data>
+  <data name="HostsUnreadableTitle" xml:space="preserve"><value>No se pudo leer el archivo hosts</value></data>
+  <data name="HostsUnreadableDetail" xml:space="preserve"><value>{0} existe, pero se denegó el acceso; su contenido es desconocido.</value></data>
+  <data name="HostsMalformedTitle" xml:space="preserve"><value>El archivo hosts contiene registros mal formados</value></data>
+  <data name="HostsMalformedDetail" xml:space="preserve"><value>{0} línea(s) activa(s) no se pudieron interpretar como asignaciones de IP a host.</value></data>
+  <data name="HostsRelocatedTitle" xml:space="preserve"><value>Base de datos hosts reubicada</value></data>
+  <data name="HostsRelocatedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath dirige Windows a {0} en lugar de {1}; las entradas mostradas se leen desde allí.</value></data>
+  <data name="HostsRelocatedUnresolvedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath es «{0}», que no es una ruta local que WinSight pueda resolver; Windows lee su archivo hosts desde allí, no desde {1}.</value></data>
+  <data name="HostsLocationUnverifiedTitle" xml:space="preserve"><value>Ubicación del archivo hosts no confirmada</value></data>
+  <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>No se pudo leer Tcpip\Parameters; se supuso la ubicación estándar {0}.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Bloquea un dominio de seguridad o actualización (posible evasión de protección)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>La raíz de confianza contiene una clave privada y puede crear certificados de confianza</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Algoritmo de firma débil ({0}) en un certificado no autofirmado del almacén raíz</value></data>

@@ -1,3 +1,6 @@
+using System.Net;
+using System.Net.Sockets;
+
 namespace WinSight.Hosts;
 
 /// <summary>
@@ -9,13 +12,6 @@ namespace WinSight.Hosts;
 /// <param name="Hostname">The overridden hostname.</param>
 public sealed record HostEntry(string IpAddress, string Hostname)
 {
-    // Blocking a domain to a sink address is the common, benign ad/tracker-blocklist
-    // pattern, only noteworthy when the blocked domain is security/update related.
-    private static readonly HashSet<string> SinkAddresses = new(StringComparer.Ordinal)
-    {
-        "0.0.0.0", "127.0.0.1", "::1", "::",
-    };
-
     // Domains a malware host-file edit typically targets: AV vendors, OS/update, and
     // the big identity/software providers.
     private static readonly string[] SensitiveKeywords =
@@ -26,7 +22,29 @@ public sealed record HostEntry(string IpAddress, string Hostname)
     };
 
     /// <summary>True when the target is a loopback/sink address (a block, not a redirect).</summary>
-    public bool IsSink => SinkAddresses.Contains(IpAddress);
+    /// <remarks>
+    /// Blocking a domain to a sink address is the common, benign ad/tracker-blocklist pattern, only
+    /// noteworthy when the blocked domain is security/update related. The address is parsed, not
+    /// compared as text: <c>127.1</c>, <c>0</c>, <c>127.0.0.2</c> and <c>::ffff:127.0.0.1</c> all
+    /// point nowhere, and a list of four spellings reported each of them as a redirect to an
+    /// external address.
+    /// </remarks>
+    public bool IsSink => IPAddress.TryParse(IpAddress, out var address) && IsSinkAddress(address);
+
+    /// <summary>
+    /// Loopback (127.0.0.0/8, ::1), unspecified (::) or "this network" (0.0.0.0/8): nothing
+    /// off the machine answers at any of them.
+    /// </summary>
+    internal static bool IsSinkAddress(IPAddress address)
+    {
+        ArgumentNullException.ThrowIfNull(address);
+        var candidate = address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+        if (IPAddress.IsLoopback(candidate) || candidate.Equals(IPAddress.IPv6Any))
+        {
+            return true;
+        }
+        return candidate.AddressFamily == AddressFamily.InterNetwork && candidate.GetAddressBytes()[0] == 0;
+    }
 
     /// <summary>True when the hostname looks security- or update-related.</summary>
     public bool IsSensitive =>
