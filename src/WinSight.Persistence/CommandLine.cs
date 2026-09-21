@@ -192,7 +192,9 @@ public static class CommandLine
         foreach (var entry in path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var directory = entry.Trim('"');
-            if (directory.Length == 0 || !seen.Add(directory))
+            // A relative entry ("." or "tools") is relative to the directory of whichever process
+            // launches the command, not to WinSight's; it has no answer here.
+            if (directory.Length == 0 || !Path.IsPathFullyQualified(directory) || !seen.Add(directory))
             {
                 continue;
             }
@@ -207,6 +209,14 @@ public static class CommandLine
 
     private static ExecutableResolution Probe(string candidate)
     {
+        // Every candidate generator yields fully qualified paths; this keeps it so. A relative path
+        // would be resolved against the scanner's working directory, which says nothing about the
+        // file Windows loads.
+        if (!Path.IsPathFullyQualified(candidate))
+        {
+            return new(null, null, ImageResolutionStatus.Unresolved);
+        }
+
         string full;
         try
         {
@@ -252,7 +262,21 @@ public static class CommandLine
     /// then <c>\SystemRoot\</c> and <c>\??\</c> prefixes stripped/mapped, and a
     /// System-root-relative fallback for the common bare "system32\drivers\x.sys".
     /// </summary>
-    public static IEnumerable<string> NtPathCandidates(string exe)
+    /// <remarks>
+    /// <b>Only fully qualified candidates.</b> The token used to be probed first as written, so a
+    /// relative one - <c>System32\drivers\x.sys</c>, the form 210 driver registrations use on the
+    /// development machine - was resolved against whatever directory WinSight happened to run in,
+    /// before the Windows directory. That directory has nothing to do with where Windows loads from.
+    /// Measured: the 3ware driver read SignatureValid from <c>C:\Windows</c> and Unsigned, with an
+    /// image under a temporary folder, when the scan ran from a folder holding a dummy
+    /// <c>System32\drivers\3ware.sys</c> - so the verdict followed the launch folder, and a signed
+    /// file planted there could answer for a registration. The same held for what a stripped
+    /// <c>\??\</c> prefix left behind (<c>GLOBALROOT\...</c>, <c>UNC\...</c>).
+    /// </remarks>
+    public static IEnumerable<string> NtPathCandidates(string exe) =>
+        RawNtPathCandidates(exe).Where(Path.IsPathFullyQualified);
+
+    private static IEnumerable<string> RawNtPathCandidates(string exe)
     {
         yield return exe;
 
@@ -289,6 +313,8 @@ public static class CommandLine
 
     // Unquoted commands may contain a space in the path (e.g. C:\Program Files\...).
     // Grow the candidate token by token and return the longest prefix that is a file.
+    // Only a fully qualified prefix is looked up: a relative one would be answered by
+    // whatever the scanner's working directory happens to hold (see NtPathCandidates).
     private static string FirstToken(string s)
     {
         var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -300,9 +326,10 @@ public static class CommandLine
                 candidate.Append(' ');
             }
             candidate.Append(parts[i]);
-            if (AutomaticFileAccess.FileExists(candidate.ToString()))
+            var prefix = candidate.ToString();
+            if (Path.IsPathFullyQualified(prefix) && AutomaticFileAccess.FileExists(prefix))
             {
-                return candidate.ToString();
+                return prefix;
             }
         }
 
