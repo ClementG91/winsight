@@ -1,5 +1,8 @@
+using System.Diagnostics;
+
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.NetMonitor;
 
@@ -29,6 +32,7 @@ public sealed partial class OutboundObserverService : BackgroundService
 {
     /// <summary>How long a policy snapshot is reused before the store is read again.</summary>
     private static readonly TimeSpan PolicyRefreshInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan SensorHealthRefreshInterval = TimeSpan.FromSeconds(1);
 
     private readonly IOutboundConnectionWatcher _watcher;
     private readonly FirewallPolicyStore _store;
@@ -46,6 +50,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     // The reload in flight. Tracked rather than fired and forgotten: a background file read must not
     // outlive the service that started it, or shutdown races its own store.
     private Task _refresh = Task.CompletedTask;
+    private long _sensorHealthSampledAt;
 
     public OutboundObserverService(
         IOutboundConnectionWatcher watcher,
@@ -106,6 +111,10 @@ public sealed partial class OutboundObserverService : BackgroundService
             _log.MarkObserverUnavailable();
             LogUnavailable();
         }
+        finally
+        {
+            SynchronizeSensorLoss(force: true);
+        }
     }
 
     /// <summary>
@@ -116,6 +125,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     public void OnConnection(OutboundConnectionEvent connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        SynchronizeSensorLoss();
 
         // The connection arrives already attributed: the watcher captured the executable when the
         // kernel announced the process, while it was still alive.
@@ -132,7 +142,18 @@ public sealed partial class OutboundObserverService : BackgroundService
         {
             if (_log.Observe(path, connection.Remote, _time.GetUtcNow()))
             {
-                LogFirstSeen();
+                var evictedApps = _log.DroppedApps;
+                if (evictedApps == 0)
+                {
+                    LogFirstSeen();
+                }
+                else if (IsPowerOfTwo(evictedApps))
+                {
+                    // Once the bounded log starts rotating, one event per distinct executable is
+                    // itself a log-amplification primitive. Exponential checkpoints keep pressure
+                    // visible while limiting a service lifetime to at most 31 such warnings.
+                    LogCapacityPressure(evictedApps, _log.EvictedObservations);
+                }
             }
         }
         catch (ArgumentException)
@@ -159,8 +180,32 @@ public sealed partial class OutboundObserverService : BackgroundService
     /// </remarks>
     public void OnUnattributedConnection(int processId, string? imageName)
     {
+        SynchronizeSensorLoss();
         _log.RecordUnattributed();
         LogUnattributed(processId, imageName ?? "unknown");
+    }
+
+    private void SynchronizeSensorLoss(bool force = false)
+    {
+        if (_watcher is not ISensorHealthSource source)
+        {
+            return;
+        }
+
+        var sampledAt = Volatile.Read(ref _sensorHealthSampledAt);
+        var now = Stopwatch.GetTimestamp();
+        if (!force
+            && sampledAt != 0
+            && Stopwatch.GetElapsedTime(sampledAt, now) < SensorHealthRefreshInterval)
+        {
+            return;
+        }
+        if (!force && Interlocked.CompareExchange(ref _sensorHealthSampledAt, now, sampledAt) != sampledAt)
+        {
+            return;
+        }
+        Volatile.Write(ref _sensorHealthSampledAt, now);
+        _log.RecordLostEvents(source.SensorHealth.LostEvents);
     }
 
     /// <summary>
@@ -269,6 +314,9 @@ public sealed partial class OutboundObserverService : BackgroundService
     [LoggerMessage(Level = LogLevel.Information, Message = "[FW_OBSERVER_FIRST_SEEN] An application with no policy reached the network.")]
     private partial void LogFirstSeen();
 
+    [LoggerMessage(Level = LogLevel.Warning, Message = "[FW_OBSERVER_CAPACITY_PRESSURE] The pending-app window is rotating: {EvictedApps} identities and {EvictedObservations} aggregated observations are no longer represented.")]
+    private partial void LogCapacityPressure(int evictedApps, int evictedObservations);
+
     [LoggerMessage(Level = LogLevel.Warning, Message = "[FW_OBSERVER_UNAVAILABLE] Outbound observation is unavailable; the firewall service continues without it.")]
     private partial void LogUnavailable();
 
@@ -276,4 +324,7 @@ public sealed partial class OutboundObserverService : BackgroundService
     // a bare name is not sensitive the way a user's directory layout is.
     [LoggerMessage(Level = LogLevel.Information, Message = "[FW_OBSERVER_UNATTRIBUTED] A connection from pid {ProcessId} ({ImageName}) could not be attributed to a rulable executable.")]
     private partial void LogUnattributed(int processId, string imageName);
+
+    private static bool IsPowerOfTwo(int value) =>
+        value > 0 && (value & (value - 1)) == 0;
 }

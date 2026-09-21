@@ -68,26 +68,34 @@ public sealed class PendingOutboundLogTests
         Assert.Equal(PendingOutboundLog.MaxPendingApps, log.Snapshot().Count);
     }
 
-    // Evicting to make room would let a flood of noise push the one interesting app out of the
-    // list, which is exactly what an attacker would want. Refuse the new instead.
+    // Keeping the first full set forever lets an attacker pre-fill every slot and permanently hide
+    // anything that starts afterwards. A later genuine app must receive a bounded visibility slot.
     [Fact]
-    public void Observe_WhenFull_KeepsTheAppsAlreadyRecorded()
+    public void Observe_WhenFull_AdmitsTheNewAppAndEvictsTheLeastRecent()
     {
         var log = new PendingOutboundLog();
-        log.Observe(@"C:\apps\first.exe", "1.2.3.4:443", T0);
-        for (var i = 0; i < PendingOutboundLog.MaxPendingApps + 50; i++)
+        for (var i = 0; i < PendingOutboundLog.MaxPendingApps; i++)
         {
-            log.Observe($@"C:\flood\f{i}.exe", "1.2.3.4:443", T0.AddSeconds(1));
+            log.Observe($@"C:\poison\p{i}.exe", "1.2.3.4:443", T0);
         }
 
-        Assert.Contains(log.Snapshot(), app =>
-            app.ExecutablePath.Equals(@"C:\apps\first.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.True(log.Observe(@"C:\apps\genuine.exe", "5.6.7.8:443", T0.AddSeconds(1)));
+
+        var snapshot = log.Snapshot();
+        Assert.Equal(PendingOutboundLog.MaxPendingApps, snapshot.Count);
+        Assert.Contains(snapshot, app =>
+            app.ExecutablePath.Equals(@"C:\apps\genuine.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(snapshot, app =>
+            app.ExecutablePath.Equals(@"C:\poison\p0.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(1, log.DroppedApps);
+        Assert.Equal(1, log.EvictedObservations);
     }
 
     // A tool that hides its own blind spot is worse than one without the feature: the caller must
-    // be able to say "and more were not recorded" rather than show a truncated list as complete.
+    // be able to say "and more are no longer represented" rather than present a rotating sample
+    // as complete.
     [Fact]
-    public void Observe_WhenFull_CountsWhatItRefused_RatherThanDroppingSilently()
+    public void Observe_WhenFull_CountsWhatItEvicted_RatherThanDroppingSilently()
     {
         var log = new PendingOutboundLog();
         for (var i = 0; i < PendingOutboundLog.MaxPendingApps; i++)
@@ -103,6 +111,47 @@ public sealed class PendingOutboundLogTests
         Assert.Equal(2, log.UnrecordedObservations);
     }
 
+    // Recency is based on actual arrival order, not caller timestamps. An active identity earns its
+    // place while one-shot flood entries rotate out first.
+    [Fact]
+    public void Observe_WhenFull_RetainsAnAppObservedAgainRecently()
+    {
+        var log = new PendingOutboundLog();
+        log.Observe(@"C:\apps\active.exe", "1.2.3.4:443", T0);
+        for (var i = 0; i < PendingOutboundLog.MaxPendingApps - 1; i++)
+        {
+            log.Observe($@"C:\flood\f{i}.exe", "1.2.3.4:443", T0);
+        }
+
+        log.Observe(@"C:\apps\active.exe", "9.9.9.9:443", T0.AddSeconds(-1));
+        log.Observe(@"C:\apps\new.exe", "5.6.7.8:443", T0.AddSeconds(1));
+
+        var snapshot = log.Snapshot();
+        Assert.Contains(snapshot, app =>
+            app.ExecutablePath.Equals(@"C:\apps\active.exe", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(snapshot, app =>
+            app.ExecutablePath.Equals(@"C:\flood\f0.exe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void Observe_WhenFull_AggregatesEveryObservationRemovedByEviction()
+    {
+        var log = new PendingOutboundLog();
+        log.Observe(@"C:\apps\victim.exe", "1.2.3.4:443", T0);
+        log.Observe(@"C:\apps\victim.exe", "5.6.7.8:443", T0);
+        log.Observe(@"C:\apps\victim.exe", "9.9.9.9:443", T0);
+        for (var i = 0; i < PendingOutboundLog.MaxPendingApps - 1; i++)
+        {
+            log.Observe($@"C:\flood\f{i}.exe", "1.2.3.4:443", T0);
+        }
+
+        log.Observe(@"C:\apps\new.exe", "5.6.7.8:443", T0);
+
+        Assert.Equal(1, log.DroppedApps);
+        Assert.Equal(3, log.EvictedObservations);
+        Assert.Equal(3, log.UnrecordedObservations);
+    }
+
     [Fact]
     public void ObservationGaps_CombineUnattributedTrafficAndTerminalObserverFailure()
     {
@@ -115,6 +164,18 @@ public sealed class PendingOutboundLogTests
 
         Assert.Equal(3, log.UnrecordedObservations);
         Assert.Equal(0, log.DroppedApps);
+    }
+
+    [Fact]
+    public void ObservationGaps_SaturateInsteadOfOverflowing()
+    {
+        var log = new PendingOutboundLog();
+
+        log.RecordLostEvents(long.MaxValue);
+        log.RecordUnattributed();
+        log.MarkObserverUnavailable();
+
+        Assert.Equal(int.MaxValue, log.UnrecordedObservations);
     }
 
     // A full log must still count new connections from apps it already knows.
@@ -200,5 +261,33 @@ public sealed class PendingOutboundLogTests
 
         Assert.Equal(40, log.Snapshot().Count);
         Assert.Equal(8 * 200, log.Snapshot().Sum(app => app.Observations));
+    }
+
+    [Fact]
+    public async Task Observe_ConcurrentCapacityRotation_KeepsBothIndexesConsistent()
+    {
+        const int workers = 8;
+        const int observationsPerWorker = 500;
+        var log = new PendingOutboundLog();
+
+        await Task.WhenAll(Enumerable.Range(0, workers).Select(worker => Task.Run(() =>
+        {
+            for (var i = 0; i < observationsPerWorker; i++)
+            {
+                Assert.True(log.Observe(
+                    $@"C:\apps\worker-{worker}-app-{i}.exe",
+                    "1.2.3.4:443",
+                    T0.AddTicks(i)));
+            }
+        })));
+
+        var snapshot = log.Snapshot();
+        var evicted = (workers * observationsPerWorker) - PendingOutboundLog.MaxPendingApps;
+        Assert.Equal(PendingOutboundLog.MaxPendingApps, snapshot.Count);
+        Assert.Equal(PendingOutboundLog.MaxPendingApps,
+            snapshot.Select(app => app.ExecutablePath).Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(evicted, log.DroppedApps);
+        Assert.Equal(evicted, log.EvictedObservations);
+        Assert.Equal(evicted, log.UnrecordedObservations);
     }
 }

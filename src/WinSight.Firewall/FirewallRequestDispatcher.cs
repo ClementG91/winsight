@@ -368,9 +368,9 @@ public sealed class FirewallRequestDispatcher
     private async Task<FirewallCommandResponse> EmergencyDisableAsync(
         FirewallCommandRequest request, CancellationToken cancellationToken)
     {
-        // The emergency path always returns the machine to audit-only, whatever the
-        // stored mode was, and removes any engine state. It must succeed even from a
-        // corrupt store, which LoadOrAuditAsync already guarantees.
+        // The emergency path always attempts removal of WinSight-owned WFP state. Corrupt content
+        // in trusted storage is replaced with AuditOnly. Untrusted storage is never touched: after
+        // cleanup the authority raises a coded, audited partial-recovery failure instead.
         _ = await _authority.EmergencyDisableAsync(cancellationToken).ConfigureAwait(false);
 
         return Success(request) with { Status = await DescribeStatusAsync(cancellationToken).ConfigureAwait(false) };

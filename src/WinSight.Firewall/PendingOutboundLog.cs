@@ -24,14 +24,18 @@ public sealed record PendingOutboundApp(
 ///
 /// Two properties matter more than they look:
 ///
-/// <b>It is bounded.</b> Observations arrive from an ETW callback on every outbound connect, so an
-/// unbounded set is a memory-growth primitive that any process could drive. At
-/// <see cref="MaxPendingApps"/> distinct apps, further <em>new</em> apps are refused rather than
-/// evicting existing ones — evicting would let a flood of noise push the one interesting app out of
-/// the list, which is precisely what an attacker would want.
+/// <b>It is bounded and rotating.</b> Observations arrive from an ETW callback on every outbound
+/// connect, so an unbounded set is a memory-growth primitive that any process could drive. At
+/// <see cref="MaxPendingApps"/> distinct apps, a new identity replaces the least recently observed
+/// identity. Keeping the first full set forever would be worse: an attacker could pre-fill every
+/// slot and permanently blind the operator to every application that starts afterwards. LRU gives
+/// every arrival a bounded opportunity to be seen while naturally retaining applications that keep
+/// talking. No bounded sample can retain every identity during an unbounded flood, so evictions and
+/// their aggregated observations remain explicit coverage loss.
 ///
 /// <b>It never drops silently.</b> Capacity drops, connections without a safe executable identity,
-/// and a terminal observer failure all contribute to <see cref="UnrecordedObservations"/>, so a
+/// native ETW loss, and a terminal observer failure all contribute to
+/// <see cref="UnrecordedObservations"/>, so a
 /// caller never presents a quiet or truncated list as complete. <see cref="DroppedApps"/> remains
 /// available separately for capacity diagnostics.
 /// </remarks>
@@ -43,23 +47,38 @@ public sealed class PendingOutboundLog
     /// </summary>
     public const int MaxPendingApps = 128;
 
-    private readonly Dictionary<string, PendingOutboundApp> _pending =
+    private readonly Dictionary<string, PendingEntry> _pending =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly LinkedList<string> _recency = [];
     private readonly Lock _gate = new();
-    private int _dropped;
+    private long _dropped;
+    private long _evictedObservations;
     private int _unattributed;
+    private long _lostEvents;
     private bool _observerUnavailable;
 
-    /// <summary>How many distinct apps could not be recorded because the log was full.</summary>
+    /// <summary>How many unresolved app identities were evicted because the log was full.</summary>
     public int DroppedApps
     {
-        get { lock (_gate) { return _dropped; } }
+        get { lock (_gate) { return ClampToInt(_dropped); } }
+    }
+
+    /// <summary>Aggregated observations removed with capacity-evicted identities.</summary>
+    public int EvictedObservations
+    {
+        get { lock (_gate) { return ClampToInt(_evictedObservations); } }
     }
 
     /// <summary>Connections observed without an absolute executable identity safe for policy.</summary>
     public int UnattributedObservations
     {
         get { lock (_gate) { return _unattributed; } }
+    }
+
+    /// <summary>Native ETW events the outbound session reports losing under load.</summary>
+    public long LostEvents
+    {
+        get { lock (_gate) { return _lostEvents; } }
     }
 
     /// <summary>
@@ -74,9 +93,24 @@ public sealed class PendingOutboundLog
         {
             lock (_gate)
             {
-                var total = (long)_dropped + _unattributed + (_observerUnavailable ? 1 : 0);
-                return total >= int.MaxValue ? int.MaxValue : (int)total;
+                var total = SaturatingAdd(_evictedObservations, _unattributed);
+                total = SaturatingAdd(total, _lostEvents);
+                total = SaturatingAdd(total, _observerUnavailable ? 1 : 0);
+                return ClampToInt(total);
             }
+        }
+    }
+
+    /// <summary>
+    /// Records the session's cumulative native loss counter. The maximum is retained because
+    /// status polling and event callbacks may race, and an older snapshot must never reduce loss.
+    /// </summary>
+    public void RecordLostEvents(long cumulativeLostEvents)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(cumulativeLostEvents);
+        lock (_gate)
+        {
+            _lostEvents = Math.Max(_lostEvents, cumulativeLostEvents);
         }
     }
 
@@ -116,22 +150,27 @@ public sealed class PendingOutboundLog
         {
             if (_pending.TryGetValue(path, out var existing))
             {
-                _pending[path] = existing with
+                existing.App = existing.App with
                 {
                     LastRemote = remote,
-                    LastSeenUtc = seenUtc > existing.LastSeenUtc ? seenUtc : existing.LastSeenUtc,
-                    Observations = existing.Observations + 1,
+                    LastSeenUtc = seenUtc > existing.App.LastSeenUtc ? seenUtc : existing.App.LastSeenUtc,
+                    Observations = existing.App.Observations < int.MaxValue
+                        ? existing.App.Observations + 1
+                        : int.MaxValue,
                 };
+                MarkMostRecent(existing);
                 return false;
             }
 
             if (_pending.Count >= MaxPendingApps)
             {
-                _dropped++;
-                return false;
+                EvictLeastRecent();
             }
 
-            _pending[path] = new PendingOutboundApp(path, remote, seenUtc, seenUtc, Observations: 1);
+            var recencyNode = _recency.AddLast(path);
+            _pending[path] = new PendingEntry(
+                new PendingOutboundApp(path, remote, seenUtc, seenUtc, Observations: 1),
+                recencyNode);
             return true;
         }
     }
@@ -146,7 +185,13 @@ public sealed class PendingOutboundLog
         var path = OutboundPolicyEvaluator.CanonicalPath(executablePath);
         lock (_gate)
         {
-            return _pending.Remove(path);
+            if (!_pending.Remove(path, out var removed))
+            {
+                return false;
+            }
+
+            _recency.Remove(removed.RecencyNode);
+            return true;
         }
     }
 
@@ -159,9 +204,45 @@ public sealed class PendingOutboundLog
         lock (_gate)
         {
             return _pending.Values
+                .Select(entry => entry.App)
                 .OrderByDescending(app => app.LastSeenUtc)
                 .ThenBy(app => app.ExecutablePath, StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
+    }
+
+    private void MarkMostRecent(PendingEntry entry)
+    {
+        _recency.Remove(entry.RecencyNode);
+        _recency.AddLast(entry.RecencyNode);
+    }
+
+    private void EvictLeastRecent()
+    {
+        var node = _recency.First
+            ?? throw new InvalidOperationException("A full pending log has no eviction candidate.");
+        if (!_pending.Remove(node.Value, out var evicted))
+        {
+            throw new InvalidOperationException("Pending-log recency index is inconsistent.");
+        }
+
+        _recency.Remove(node);
+        _dropped = SaturatingAdd(_dropped, 1);
+        _evictedObservations = SaturatingAdd(_evictedObservations, evicted.App.Observations);
+    }
+
+    private static int ClampToInt(long value) =>
+        value >= int.MaxValue ? int.MaxValue : (int)value;
+
+    private static long SaturatingAdd(long left, long right) =>
+        left >= long.MaxValue - right ? long.MaxValue : left + right;
+
+    private sealed class PendingEntry(
+        PendingOutboundApp app,
+        LinkedListNode<string> recencyNode)
+    {
+        public PendingOutboundApp App { get; set; } = app;
+
+        public LinkedListNode<string> RecencyNode { get; } = recencyNode;
     }
 }

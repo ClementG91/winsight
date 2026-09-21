@@ -5,9 +5,10 @@ using WinSight.Firewall;
 namespace WinSight.FirewallService;
 
 /// <summary>
-/// The service's sole machine-policy/WFP mutation authority. Every mutation is
-/// serialized, freshly validates storage, and creates the native backend lazily only
-/// after that validation. CLI processes never construct a second authority.
+/// The service's sole machine-policy/WFP mutation authority. Every mutation is serialized and
+/// freshly validates storage before using it. The sole exception is emergency cleanup: an
+/// authenticated administrator may remove WinSight-owned WFP state without trusting or touching
+/// the policy file. CLI processes never construct a second authority.
 /// </summary>
 /// <remarks>
 /// Teardown is asynchronous and this type therefore exposes <b>only</b> <see cref="IAsyncDisposable"/>.
@@ -123,7 +124,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
                 try
                 {
                     exactlyVerified = await VerifyRuntimeStatusAsync(
-                        GetReconcilerAfterTrust(), configuration.Policies, cancellationToken)
+                        GetReconciler(), configuration.Policies, cancellationToken)
                         .ConfigureAwait(false);
                 }
                 finally
@@ -169,7 +170,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
                 .Append(normalized).ToList();
             if (configuration.Mode == OutboundFirewallMode.Enforcement)
             {
-                var reconciler = GetReconcilerAfterTrust();
+                var reconciler = GetReconciler();
                 try
                 {
                     await ReconcileAndVerifyAsync(reconciler, policies, cancellationToken).ConfigureAwait(false);
@@ -221,7 +222,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
             var remaining = configuration.Policies.Where(policy => !PathEquals(policy.ExecutablePath, path)).ToList();
             if (configuration.Mode == OutboundFirewallMode.Enforcement)
             {
-                var reconciler = GetReconcilerAfterTrust();
+                var reconciler = GetReconciler();
                 try
                 {
                     await ReconcileAndVerifyAsync(reconciler, remaining, cancellationToken).ConfigureAwait(false);
@@ -271,14 +272,14 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
             var configuration = (await TrustedLoadAsync(cancellationToken).ConfigureAwait(false)).Configuration;
             if (configuration.Mode != OutboundFirewallMode.Enforcement)
             {
-                await GetReconcilerAfterTrust().CleanupAllAsync(cancellationToken).ConfigureAwait(false);
+                await GetReconciler().CleanupAllAsync(cancellationToken).ConfigureAwait(false);
                 SetEffectiveState(FirewallEnforcementState.AuditOnly);
                 return;
             }
             IWinSightWfpReconciler? reconciler = null;
             try
             {
-                reconciler = GetReconcilerAfterTrust();
+                reconciler = GetReconciler();
                 // Boot persistence is part of the same serialized authority transition as WFP.
                 // A failure also drives the complete owned namespace through cleanup.
                 _startMode.SetAutomatic();
@@ -319,7 +320,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
             var enforcing = configuration with { Mode = OutboundFirewallMode.Enforcement };
             // Auto-start is established first: reporting Active while the service remains
             // demand-start would silently lose enforcement after reboot.
-            var reconciler = GetReconcilerAfterTrust();
+            var reconciler = GetReconciler();
             try
             {
                 _startMode.SetAutomatic();
@@ -370,17 +371,12 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         var result = OutboundFirewallConfiguration.Empty;
         await LockedTransitionAsync(async () =>
         {
-            // Emergency disable is the one transition allowed to recover corrupt trusted content:
-            // it deletes the owned WFP namespace and atomically replaces the unreadable intent with
-            // an explicit empty AuditOnly document. Every other operation rejects that content.
+            // Emergency disable must be able to remove WinSight-owned WFP state even when policy
+            // storage is untrusted. The store result is used only to decide whether durable intent
+            // may be repaired; it never gates cleanup and untrusted content is never opened.
             var emergencyLoad = await _store.LoadOrAuditAsync(cancellationToken).ConfigureAwait(false);
-            if (!emergencyLoad.StorageTrusted)
-            {
-                throw new FirewallStorageTrustException(
-                    emergencyLoad.Diagnostic ?? "StorageInspectionFailed");
-            }
             var configuration = emergencyLoad.Configuration;
-            var reconciler = GetReconcilerAfterTrust();
+            var reconciler = GetReconciler();
             try
             {
                 await reconciler.CleanupAllAsync(cancellationToken).ConfigureAwait(false);
@@ -392,6 +388,20 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
                 if (cleanupFailure is OperationCanceledException) throw;
                 throw new FirewallTransitionException("EmergencyCleanupFailed", cleanupFailure);
             }
+
+            if (!emergencyLoad.StorageTrusted)
+            {
+                // Runtime recovery succeeded, but durable intent cannot be touched through an
+                // untrusted path. Demand-start prevents automatic re-entry; the coded failure is
+                // deliberately propagated so the dispatcher writes a sanitized audit event.
+                SetEffectiveState(FirewallEnforcementState.AuditOnly);
+                SetDemandStartOrThrow();
+                throw new FirewallTransitionException(
+                    "EmergencyStorageUntrusted",
+                    new FirewallStorageTrustException(
+                        emergencyLoad.Diagnostic ?? "StorageInspectionFailed"));
+            }
+
             result = configuration with { Mode = OutboundFirewallMode.AuditOnly };
             try
             {
@@ -407,9 +417,21 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
             // At this point filters are gone and AuditOnly is durable. If SCM refuses demand-start,
             // fail and publish Degraded, but never reapply filters or restore Enforcement intent.
             SetEffectiveState(FirewallEnforcementState.AuditOnly);
-            _startMode.SetDemandStart();
+            SetDemandStartOrThrow();
         }, cancellationToken).ConfigureAwait(false);
         return result;
+    }
+
+    private void SetDemandStartOrThrow()
+    {
+        try
+        {
+            _startMode.SetDemandStart();
+        }
+        catch (Exception failure) when (IsTransitionFailure(failure))
+        {
+            throw new FirewallTransitionException("EmergencyStartModeFailed", failure);
+        }
     }
 
     private static async Task RestoreEnforcementOrThrowAsync(
@@ -430,7 +452,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         }
     }
 
-    private IWinSightWfpReconciler GetReconcilerAfterTrust() =>
+    private IWinSightWfpReconciler GetReconciler() =>
         _reconciler ??= _reconcilerFactory()
             ?? throw new InvalidOperationException("The WFP reconciler factory returned null.");
 
@@ -443,7 +465,7 @@ public sealed class EnforcementCoordinator : IFirewallMutationAuthority, IAsyncD
         var failures = new List<Exception>();
         try
         {
-            await (reconciler ?? GetReconcilerAfterTrust())
+            await (reconciler ?? GetReconciler())
                 .CleanupAllAsync(CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception rollbackFailure) when (IsTransitionFailure(rollbackFailure))
