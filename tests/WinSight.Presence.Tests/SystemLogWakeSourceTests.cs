@@ -66,6 +66,34 @@ public sealed class SystemLogWakeSourceTests
         Assert.Null(SystemLogWakeSource.ParseXml(ResumeXml, timeCreated: null));
     }
 
+    /// <summary>
+    /// A repeated data name - two unnamed elements are enough - used to throw out of the parser
+    /// and past the event-log catch, ending the scan. The first occurrence wins.
+    /// </summary>
+    [Fact]
+    public void ParseXml_ToleratesRepeatedDataNames()
+    {
+        const string xml = """
+            <Event>
+              <EventData>
+                <Data>first unnamed</Data>
+                <Data>second unnamed</Data>
+                <Data Name="WakeSourceType">5</Data>
+                <Data Name="WakeSourceType">1</Data>
+                <Data Name="WakeSourceText">USB Keyboard</Data>
+              </EventData>
+            </Event>
+            """;
+
+        var record = SystemLogWakeSource.ParseXml(xml, DateTime.UtcNow);
+
+        Assert.NotNull(record);
+        Assert.Equal("USB Keyboard", record.Source);
+        Assert.Equal(
+            SystemLogWakeSource.ParseXml(ResumeXml, DateTime.UtcNow)!.Cause,
+            record.Cause);
+    }
+
     [Fact]
     public void ParseXml_TreatsUnknownOrInvalidFieldsConservatively()
     {

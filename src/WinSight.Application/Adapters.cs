@@ -1039,7 +1039,7 @@ public static partial class Adapters
 
     private static string Describe(WakeRecord wake)
     {
-        var asleep = wake.Asleep is { } duration ? $" after {duration:hh\\:mm} asleep" : string.Empty;
+        var asleep = wake.Asleep is { } duration ? $" after {SleepDuration(duration)} asleep" : string.Empty;
         return wake.Cause switch
         {
             WakeCause.PhysicalInput => $"woken by {wake.Source ?? "a button or input device"}{asleep} — somebody was at the machine",
@@ -1049,6 +1049,20 @@ public static partial class Adapters
             _ => $"woken{asleep}, cause not recorded by Windows",
         };
     }
+
+    /// <summary>
+    /// A sleep length that keeps its days. The <c>hh\:mm</c> format it replaced shows the hours
+    /// component only, so a machine asleep for 30 hours read "06:00" - a weekend reported as a nap,
+    /// on the one check that asks how long somebody was away.
+    /// </summary>
+    internal static string SleepDuration(TimeSpan duration) =>
+        duration.TotalDays >= 1
+            ? string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{(int)duration.TotalDays} d {duration.Hours:D2}:{duration.Minutes:D2}")
+            : string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"{duration.Hours:D2}:{duration.Minutes:D2}");
 
     public static ToolReport Hosts(bool flaggedOnly)
     {

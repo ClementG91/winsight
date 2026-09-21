@@ -158,12 +158,14 @@ public sealed class SystemLogWakeSource : IWakeEventSource
             return null;
         }
 
-        var data = root.Descendants()
-            .Where(element => element.Name.LocalName == "Data")
-            .ToDictionary(
-                element => element.Attribute("Name")?.Value ?? string.Empty,
-                element => element.Value,
-                StringComparer.Ordinal);
+        // First occurrence wins. ToDictionary threw on a repeated name - two unnamed <Data> elements
+        // are enough - and the exception escaped the event-log catch, ending the whole scan on one
+        // record the parser only needed three named fields from.
+        var data = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var element in root.Descendants().Where(element => element.Name.LocalName == "Data"))
+        {
+            data.TryAdd(element.Attribute("Name")?.Value ?? string.Empty, element.Value);
+        }
 
         var woke = timeCreated?.ToUniversalTime();
         if (woke is null)
