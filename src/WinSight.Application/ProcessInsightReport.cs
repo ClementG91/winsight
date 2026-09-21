@@ -73,6 +73,8 @@ public static class ProcessInsightReport
                 ["commandLine"] = process.CommandLine,
                 ["signature"] = process.Signature.State.ToString(),
                 ["signer"] = process.Signature.Signer,
+                ["userInstalledTrust"] = process.TrustedOnlyThroughUserRoot ? "true" : null,
+                ["microsoftSigned"] = Adapters.MicrosoftSignedField(process.Signature),
             });
     }
 
@@ -118,6 +120,8 @@ public static class ProcessInsightReport
                     ["path"] = module.Path,
                     ["signature"] = module.Signature.State.ToString(),
                     ["signer"] = module.Signature.Signer,
+                    ["userInstalledTrust"] = module.TrustedOnlyThroughUserRoot ? "true" : null,
+                    ["microsoftSigned"] = Adapters.MicrosoftSignedField(module.Signature),
                 });
         }
     }

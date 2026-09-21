@@ -6,14 +6,15 @@ public enum ReportFilterToken
     /// <summary>Items whose file carries no valid trusted signature (unsigned or untrusted).</summary>
     Unsigned,
 
-    /// <summary>Items not signed by Microsoft (a different or absent signer).</summary>
+    /// <summary>Items not proven to carry Microsoft's own trusted signature.</summary>
     NonMicrosoft,
 }
 
 /// <summary>
 /// Filters a tool's report items by signature triage tokens (#unsigned, #nonMicrosoft), so a long list
-/// can be cut to what matters. Pure and reusable: it reads only the structured fields every adapter
-/// already emits (<c>signature</c> = the Authenticode state, <c>signer</c> = the certificate subject).
+/// can be cut to what matters. Pure and reusable: it reads only structured fields the adapters emit
+/// (<c>signature</c> = the Authenticode state, <c>microsoftSigned</c> = Microsoft's own trusted
+/// signature, established from the whole verdict).
 /// </summary>
 /// <remarks>
 /// Tokens combine with AND: <c>#unsigned #nonMicrosoft</c> keeps items that are both. Severity is not a
@@ -53,7 +54,15 @@ public static class ReportItemFilter
         && !state.Equals("SignedTrusted", StringComparison.OrdinalIgnoreCase)
         && !state.Equals("Unknown", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Anything not proven to be Microsoft's own signature. The proof is the <c>microsoftSigned</c>
+    /// field, which the adapters set from the whole verdict: an exact Microsoft signing identity on a
+    /// chain the machine trusts. Reading "Microsoft" out of the signer text instead hid a self-signed
+    /// "CN=Microsoft ..." certificate - or one minted under a user-installed root - from exactly the
+    /// view meant to surface it. An item that does not carry the field is kept, so a tool that never
+    /// established the fact cannot have its rows filtered away by it.
+    /// </summary>
     private static bool IsNonMicrosoft(ReportItem item) =>
-        !(item.Fields.TryGetValue("signer", out var signer) && signer is not null
-          && signer.Contains("Microsoft", StringComparison.OrdinalIgnoreCase));
+        !(item.Fields.TryGetValue("microsoftSigned", out var microsoft)
+          && string.Equals(microsoft, "true", StringComparison.Ordinal));
 }

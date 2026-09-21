@@ -113,7 +113,9 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   item's original location.
 
   `--unsigned` and `--nonmicrosoft` narrow any scan to unsigned/untrusted items, or to items not
-  signed by Microsoft; they stack with each other and with `--flagged`.
+  proven to carry Microsoft's own signature (an exact Microsoft signing identity on a chain the
+  machine trusts, not a signer name that merely reads "Microsoft"); they stack with each other and
+  with `--flagged`.
 - **MCP server** - `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. Six
   tools, three resources and two guided prompts; no network listener. See
   [`docs/MCP.md`](docs/MCP.md).

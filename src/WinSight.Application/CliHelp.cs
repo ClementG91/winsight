@@ -67,7 +67,7 @@ public static partial class CliHelp
         Options:
           --flagged     only noteworthy items
           --unsigned    only items whose file is unsigned or untrusted
-          --nonmicrosoft only items not signed by Microsoft
+          --nonmicrosoft only items not proven signed by Microsoft itself
           --json        machine-readable output (versioned envelope, schemaVersion 1)
           --no-network  never contact VirusTotal, whatever WINSIGHT_VT_KEY is set to
           --confirm     required by every response command (process actions, restore, revoke)

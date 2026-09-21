@@ -265,6 +265,11 @@ public static partial class Adapters
                     // null-valued fields, so a clean entry costs nothing on the wire.
                     ["commandLineConcern"] = e.Abuse == InterpreterAbuse.None ? null : e.Abuse.ToString(),
                     ["signer"] = e.Signature.Signer,
+                    ["userInstalledTrust"] = e.ImageStatus == ImageResolutionStatus.Present
+                        && e.Signature.RestsOnUserInstalledTrust ? "true" : null,
+                    ["microsoftSigned"] = e.ImageStatus == ImageResolutionStatus.Present
+                        ? MicrosoftSignedField(e.Signature)
+                        : null,
                     // Null rather than "Unspecified" when nothing was established, so a consumer
                     // tests for the key's presence and the MCP projector drops it from a clean
                     // entry rather than paying for a word that means "no answer".
@@ -428,6 +433,16 @@ public static partial class Adapters
 
     private static string UserRootClause(SignatureVerdict signature) =>
         signature.RestsOnUserInstalledTrust ? $", {UserRootTrustNote}" : string.Empty;
+
+    /// <summary>
+    /// <c>"true"</c> when the verdict is Microsoft's own signature - an exact Microsoft signing
+    /// identity on a chain the machine trusts - and null otherwise. Emitted so the
+    /// <c>--nonmicrosoft</c> view filter reads a fact established from the whole verdict, rather
+    /// than finding "Microsoft" somewhere in the signer text, which any self-signed certificate can
+    /// carry.
+    /// </summary>
+    internal static string? MicrosoftSignedField(SignatureVerdict signature) =>
+        CertificateSubject.IsMicrosoft(signature) ? "true" : null;
 
     private static string PersistenceStatusLabel(
         PersistenceStatus status,
@@ -750,6 +765,7 @@ public static partial class Adapters
                     ["signature"] = p.Signature.State.ToString(),
                     ["signer"] = p.Signature.Signer,
                     ["userInstalledTrust"] = p.TrustedOnlyThroughUserRoot ? "true" : null,
+                    ["microsoftSigned"] = MicrosoftSignedField(p.Signature),
                 });
         }
         AddCoverageFinding(b, acquisition);
@@ -1134,6 +1150,7 @@ public static partial class Adapters
                     ["imageSource"] = filter.ImageSource.ToString(),
                     ["signature"] = filter.Signature.State.ToString(),
                     ["signer"] = filter.Signature.Signer,
+                    ["microsoftSigned"] = MicrosoftSignedField(filter.Signature),
                     ["concern"] = concern.ToString(),
                 });
         }
@@ -1204,6 +1221,7 @@ public static partial class Adapters
                     ["imageSource"] = driver.ImageSource.ToString(),
                     ["signature"] = driver.Signature.State.ToString(),
                     ["signer"] = driver.Signature.Signer,
+                    ["microsoftSigned"] = MicrosoftSignedField(driver.Signature),
                     ["windowsProvided"] = driver.IsWindowsProvided.ToString(),
                     ["concern"] = concern.ToString(),
                 });
@@ -1723,6 +1741,7 @@ public static partial class Adapters
                     ["signature"] = m.Signature.State.ToString(),
                     ["signer"] = m.Signature.Signer,
                     ["userInstalledTrust"] = m.TrustedOnlyThroughUserRoot ? "true" : null,
+                    ["microsoftSigned"] = MicrosoftSignedField(m.Signature),
                 });
         }
         AddCoverageFinding(b, acquisition);
@@ -1862,7 +1881,9 @@ public static partial class Adapters
                     ["process"] = c.Process,
                     ["image"] = c.ImagePath,
                     ["signature"] = c.Signature.State.ToString(),
+                    ["signer"] = c.Signature.Signer,
                     ["userInstalledTrust"] = userRootTrust ? "true" : null,
+                    ["microsoftSigned"] = c.ImagePath is null ? null : MicrosoftSignedField(c.Signature),
                     ["external"] = c.External.ToString(),
                     ["vtMalicious"] = report?.Malicious.ToString(),
                     ["vtTotal"] = report?.Total.ToString(),

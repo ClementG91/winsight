@@ -45,6 +45,8 @@ public static partial class Adapters
                 ["anchor"] = report.Anchor.ToString(),
                 ["revocation"] = report.Revocation.ToString(),
                 ["userInstalledTrust"] = report.RestsOnUserInstalledTrust ? "true" : "false",
+                ["microsoftSigned"] = MicrosoftSignedField(
+                    new SignatureVerdict(report.State, report.Signer, report.Anchor, report.Revocation)),
                 ["md5"] = report.Md5,
                 ["sha1"] = report.Sha1,
                 ["sha256"] = report.Sha256,
