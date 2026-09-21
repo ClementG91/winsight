@@ -324,11 +324,13 @@
   <data name="InputConcernThirdParty" xml:space="preserve"><value>pilote tiers sur le chemin des entrées</value></data>
   <data name="InputConcernUntrusted" xml:space="preserve"><value>NON SIGNÉ ou non approuvé, et voit chaque frappe au clavier</value></data>
   <data name="InputConcernMissing" xml:space="preserve"><value>filtre déclaré dont le fichier pilote est absent</value></data>
+  <data name="InputConcernUnresolvable" xml:space="preserve"><value>image déclarée hors de tout chemin local, donc non vérifiable</value></data>
   <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>fourni par Windows</value></data>
   <data name="DriverConcernThirdParty" xml:space="preserve"><value>signé par un tiers</value></data>
   <data name="DriverConcernUntrusted" xml:space="preserve"><value>code noyau NON SIGNÉ ou non approuvé</value></data>
   <data name="DriverConcernUnverified" xml:space="preserve"><value>signature non vérifiable</value></data>
   <data name="DriverConcernMissing" xml:space="preserve"><value>pilote déclaré dont le fichier image est absent</value></data>
+  <data name="DriverConcernUnresolvable" xml:space="preserve"><value>image déclarée hors de tout chemin local, donc non vérifiable</value></data>
   <data name="HijackKindUnquotedServicePath" xml:space="preserve"><value>Chemin de service non entre guillemets</value></data>
   <data name="HijackKindWritableServiceDirectory" xml:space="preserve"><value>Répertoire de service inscriptible</value></data>
   <data name="HijackKindWritablePathEntry" xml:space="preserve"><value>Entrée PATH inscriptible</value></data>

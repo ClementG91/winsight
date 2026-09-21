@@ -28,10 +28,17 @@ public enum FilterPosition
 /// <param name="ImagePath">The resolved driver file, or null when it could not be located.</param>
 /// <param name="Signature">The Authenticode standing of that file.</param>
 /// <param name="IsWindowsClassDriver">True for the class driver Windows itself installs.</param>
+/// <param name="ImageSource">
+/// Whether the image came from the service's registered <c>ImagePath</c>, from the default Windows
+/// uses when there is none, or could not be located at all.
+/// </param>
+/// <param name="RegisteredImagePath">The service's <c>ImagePath</c> as registered, or null when absent.</param>
 public sealed record InputFilter(
     InputStack Stack,
     FilterPosition Position,
     string Name,
     string? ImagePath,
     SignatureVerdict Signature,
-    bool IsWindowsClassDriver);
+    bool IsWindowsClassDriver,
+    DriverImageSource ImageSource = DriverImageSource.Registered,
+    string? RegisteredImagePath = null);

@@ -52,6 +52,11 @@ public enum DriverStart
 /// </param>
 /// <param name="Signature">The Authenticode standing of that file.</param>
 /// <param name="IsWindowsProvided">True when Windows itself ships the image.</param>
+/// <param name="ImageSource">
+/// Whether the image came from the registered <c>ImagePath</c>, from the default Windows uses when
+/// there is none, or could not be located at all - in which case
+/// <paramref name="ExpectedImagePath"/> holds the value as registered.
+/// </param>
 public sealed record KernelDriver(
     string Name,
     DriverKind Kind,
@@ -59,4 +64,5 @@ public sealed record KernelDriver(
     string? ImagePath,
     string? ExpectedImagePath,
     SignatureVerdict Signature,
-    bool IsWindowsProvided);
+    bool IsWindowsProvided,
+    DriverImageSource ImageSource = DriverImageSource.Registered);

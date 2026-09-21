@@ -1110,6 +1110,8 @@ public static partial class Adapters
                     ["position"] = filter.Position.ToString(),
                     ["name"] = filter.Name,
                     ["image"] = filter.ImagePath,
+                    ["registeredImage"] = filter.RegisteredImagePath,
+                    ["imageSource"] = filter.ImageSource.ToString(),
                     ["signature"] = filter.Signature.State.ToString(),
                     ["signer"] = filter.Signature.Signer,
                     ["concern"] = concern.ToString(),
@@ -1125,6 +1127,8 @@ public static partial class Adapters
             InputFilterConcern.Expected => "the class driver Windows installs",
             InputFilterConcern.ThirdParty => "a third-party driver that can see every keystroke",
             InputFilterConcern.Untrusted => "UNSIGNED or untrusted, and can see every keystroke",
+            InputFilterConcern.Unresolvable =>
+                "its registered image is not a local path, so it could not be verified, and it can see every keystroke",
             _ => "listed here but its driver file is missing",
         };
 
@@ -1140,8 +1144,9 @@ public static partial class Adapters
     /// A driver has the same authority as Windows itself, which is why an unsigned or
     /// untrusted one is the loudest single finding WinSight produces and why a rootkit's
     /// residue shows up here. Several hundred are registered on a normal machine, so
-    /// <c>--flagged</c> deliberately narrows to the two conditions nothing explains away:
-    /// a signature that did not stand up, and a registration whose image is gone.
+    /// <c>--flagged</c> deliberately narrows to the conditions nothing explains away:
+    /// a signature that did not stand up, a registration whose image is gone, and one whose
+    /// image is registered where no local path reaches, so it could not be checked at all.
     /// </remarks>
     public static ToolReport Drivers(bool flaggedOnly, CancellationToken cancellationToken = default)
     {
@@ -1173,6 +1178,7 @@ public static partial class Adapters
                     ["start"] = driver.Start.ToString(),
                     ["image"] = driver.ImagePath,
                     ["expectedImage"] = driver.ExpectedImagePath,
+                    ["imageSource"] = driver.ImageSource.ToString(),
                     ["signature"] = driver.Signature.State.ToString(),
                     ["signer"] = driver.Signature.Signer,
                     ["windowsProvided"] = driver.IsWindowsProvided.ToString(),
@@ -1182,7 +1188,7 @@ public static partial class Adapters
         AddCoverageFinding(b, acquisition);
         AddSignatureCoverageFinding(
             b, drivers.Where(driver => driver.ImagePath is not null).Select(driver => driver.Signature));
-        return b.Build($"{drivers.Count} kernel driver(s) registered, {notable} unsigned, untrusted or orphaned{CoverageSuffix(acquisition)}");
+        return b.Build($"{drivers.Count} kernel driver(s) registered, {notable} unsigned, untrusted, orphaned or unresolvable{CoverageSuffix(acquisition)}");
 
         // Each line states what was established, not what it implies: Windows attests
         // plenty of drivers it did not write, so "signed by somebody other than Windows"
@@ -1193,6 +1199,7 @@ public static partial class Adapters
             KernelDriverConcern.ThirdParty => "signed by a publisher other than Windows",
             KernelDriverConcern.Untrusted => "UNSIGNED or untrusted kernel code",
             KernelDriverConcern.Unverified => "signature could not be verified",
+            KernelDriverConcern.Unresolvable => "registered image is not a local path, so it could not be verified",
             _ => "registered, but its image file is gone",
         };
 

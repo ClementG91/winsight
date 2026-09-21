@@ -327,11 +327,13 @@
   <data name="InputConcernThirdParty" xml:space="preserve"><value>third-party driver on the input path</value></data>
   <data name="InputConcernUntrusted" xml:space="preserve"><value>UNSIGNED or untrusted, and can see every keystroke</value></data>
   <data name="InputConcernMissing" xml:space="preserve"><value>registered filter whose driver file is missing</value></data>
+  <data name="InputConcernUnresolvable" xml:space="preserve"><value>image registered outside any local path, so it could not be verified</value></data>
   <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>shipped by Windows</value></data>
   <data name="DriverConcernThirdParty" xml:space="preserve"><value>signed by a third party</value></data>
   <data name="DriverConcernUntrusted" xml:space="preserve"><value>UNSIGNED or untrusted kernel code</value></data>
   <data name="DriverConcernUnverified" xml:space="preserve"><value>signature could not be verified</value></data>
   <data name="DriverConcernMissing" xml:space="preserve"><value>registered driver whose image file is missing</value></data>
+  <data name="DriverConcernUnresolvable" xml:space="preserve"><value>image registered outside any local path, so it could not be verified</value></data>
   <data name="HijackKindUnquotedServicePath" xml:space="preserve"><value>Unquoted service path</value></data>
   <data name="HijackKindWritableServiceDirectory" xml:space="preserve"><value>Writable service directory</value></data>
   <data name="HijackKindWritablePathEntry" xml:space="preserve"><value>Writable PATH entry</value></data>

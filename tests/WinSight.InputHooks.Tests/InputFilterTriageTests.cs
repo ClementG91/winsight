@@ -74,6 +74,32 @@ public sealed class InputFilterTriageTests
             InputFilterTriage.Concern(Filter("ghostkbd", SignatureState.Missing)));
     }
 
+    /// <summary>
+    /// An image registered where no local path reaches was never looked at. It used to be replaced
+    /// by the same-named file in the drivers folder, so under the class driver's own name it was
+    /// verified as the in-box driver and reported as expected.
+    /// </summary>
+    [Theory]
+    [InlineData("kbdclass")]
+    [InlineData("evilkbd")]
+    public void AnImageNoLocalPathReachesIsNeverExpected(string name)
+    {
+        var filter = new InputFilter(
+            InputStack.Keyboard,
+            FilterPosition.Upper,
+            name,
+            ImagePath: null,
+            SignatureVerdict.Unknown,
+            InputFilterTriage.IsWindowsClassDriver(InputStack.Keyboard, name),
+            DriverImageSource.Unresolvable,
+            RegisteredImagePath: $@"\Device\HarddiskVolume3\x\{name}.sys");
+
+        var concern = InputFilterTriage.Concern(filter);
+
+        Assert.Equal(InputFilterConcern.Unresolvable, concern);
+        Assert.True(InputFilterTriage.IsNotable(concern));
+    }
+
     [Fact]
     public void AnUnverifiableDriverIsNotTreatedAsSuspicious()
     {

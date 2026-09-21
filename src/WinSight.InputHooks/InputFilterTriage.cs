@@ -16,6 +16,12 @@ public enum InputFilterConcern
 
     /// <summary>The class key names a filter whose driver file could not be found.</summary>
     Missing,
+
+    /// <summary>
+    /// The filter's image is registered where no local path reaches (a share, a device or volume
+    /// name), so it could not be verified at all.
+    /// </summary>
+    Unresolvable,
 }
 
 /// <summary>
@@ -53,6 +59,11 @@ public static class InputFilterTriage
     {
         ArgumentNullException.ThrowIfNull(filter);
 
+        // First, whatever the name: an image nobody could look at is never the expected one.
+        if (filter.ImageSource == DriverImageSource.Unresolvable)
+        {
+            return InputFilterConcern.Unresolvable;
+        }
         if (filter.IsWindowsClassDriver)
         {
             return InputFilterConcern.Expected;

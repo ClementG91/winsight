@@ -1,3 +1,4 @@
+using WinSight.Core;
 using WinSight.InputHooks;
 using Xunit;
 
@@ -117,7 +118,7 @@ public sealed class DriverPathResolutionTests
     [InlineData("..")]
     public void AFilterNameThatIsReallyAPathIsRefused(string name)
     {
-        var (path, unreadable) = InputFilterScanner.ResolveDriverPath(name);
+        var (path, _, _, unreadable) = InputFilterScanner.ResolveDriverPath(name);
 
         Assert.Null(path);
         Assert.True(unreadable);
@@ -130,11 +131,14 @@ public sealed class DriverPathResolutionTests
     [Fact]
     public void AnUnknownServiceResolvesToNothingWithoutClaimingAFailure()
     {
-        var (path, unreadable) = InputFilterScanner.ResolveDriverPath(
+        var (path, source, registered, unreadable) = InputFilterScanner.ResolveDriverPath(
             "winsight-no-such-filter-driver");
 
         Assert.Null(path);
         Assert.False(unreadable);
+        // No service, so no ImagePath: the drivers-folder default is the only place Windows would look.
+        Assert.Equal(DriverImageSource.Default, source);
+        Assert.Null(registered);
     }
 
     /// <summary>
@@ -144,11 +148,14 @@ public sealed class DriverPathResolutionTests
     [Fact]
     public void TheWindowsKeyboardClassDriverResolvesToItsFile()
     {
-        var (path, unreadable) = InputFilterScanner.ResolveDriverPath("kbdclass");
+        var (path, source, registered, unreadable) = InputFilterScanner.ResolveDriverPath("kbdclass");
 
         Assert.False(unreadable);
         Assert.NotNull(path);
         Assert.True(File.Exists(path));
         Assert.EndsWith("kbdclass.sys", path, StringComparison.OrdinalIgnoreCase);
+        // Found through the service's own ImagePath, not through the default it happens to match.
+        Assert.Equal(DriverImageSource.Registered, source);
+        Assert.NotNull(registered);
     }
 }

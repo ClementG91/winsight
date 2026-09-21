@@ -52,7 +52,7 @@ public static class DashboardFindingPresenter
         var detail = string.IsNullOrWhiteSpace(concern)
             ? signature
             : $"{signature}; {text.GetOrFallback($"InputConcern{concern}", concern)}";
-        var image = Field(item, "image");
+        var image = FirstNonEmpty(item, "image", "registeredImage");
         return new FindingPresentation(
             name,
             string.IsNullOrWhiteSpace(image) ? detail : $"{image}  [{detail}]");

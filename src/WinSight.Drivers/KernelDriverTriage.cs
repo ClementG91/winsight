@@ -20,6 +20,13 @@ public enum KernelDriverConcern
 
     /// <summary>A driver registration whose image file is not on disk.</summary>
     Missing,
+
+    /// <summary>
+    /// A registration whose image is named by something no local path reaches (a share, a device
+    /// or volume name), so it could not be verified. In-box and vendor drivers do not register
+    /// their images this way.
+    /// </summary>
+    Unresolvable,
 }
 
 /// <summary>
@@ -97,6 +104,10 @@ public static class KernelDriverTriage
     {
         ArgumentNullException.ThrowIfNull(driver);
 
+        if (driver.ImageSource == DriverImageSource.Unresolvable)
+        {
+            return KernelDriverConcern.Unresolvable;
+        }
         if (driver.IsWindowsProvided)
         {
             return KernelDriverConcern.WindowsProvided;
@@ -113,8 +124,14 @@ public static class KernelDriverTriage
     }
 
     /// <summary>Whether a finding should survive the flagged-only filter.</summary>
+    /// <remarks>
+    /// An unresolvable image is notable although nothing was proven against it: it is the one way
+    /// a registration can keep its image out of reach of every check here, and legitimate drivers
+    /// have no reason to use it. Before it had its own answer it surfaced as a missing image - or,
+    /// when a same-named file existed in System32\drivers, as that file.
+    /// </remarks>
     public static bool IsNotable(KernelDriverConcern concern) =>
-        concern is KernelDriverConcern.Untrusted or KernelDriverConcern.Missing;
+        concern is KernelDriverConcern.Untrusted or KernelDriverConcern.Missing or KernelDriverConcern.Unresolvable;
 
     /// <summary>
     /// The common name from an X.500 certificate subject, or null when there is none.
