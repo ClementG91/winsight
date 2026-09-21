@@ -105,4 +105,36 @@ public sealed class WatchCoverageHonestyTests
             }
         }
     }
+
+    [Fact]
+    public void EveryLossSignalForcesReconciliationAndFailedRecoveryReducesCoverage()
+    {
+        var directory = TempDir();
+        var target = PersistenceWatchTarget.FileSystem(directory);
+        using var watcher = new FileSystemPersistenceWatcher([target]);
+        var changed = new List<IReadOnlyList<PersistenceWatchTarget>>();
+        watcher.SurfaceChanged += (_, args) => changed.Add(args.ChangedTargets);
+        try
+        {
+            watcher.Start();
+            Assert.Equal(1, watcher.ArmedLocations);
+
+            watcher.CompleteLossRecovery(target, rearmed: true);
+
+            Assert.Equal(1, watcher.ArmedLocations);
+            Assert.Equal(target, Assert.Single(Assert.Single(changed)));
+            Assert.Equal(1, watcher.LostObservationCount);
+
+            watcher.CompleteLossRecovery(target, rearmed: false);
+
+            Assert.Equal(0, watcher.ArmedLocations);
+            Assert.Equal(2, changed.Count);
+            Assert.Equal(2, watcher.LostObservationCount);
+            Assert.Equal(1, watcher.LostWatchCount);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
 }

@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
 using System.Text;
+
+using WinSight.Core;
 
 namespace WinSight.Persistence;
 
@@ -17,6 +20,7 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     // v3 preserves argument case/whitespace, location and source ownership. Older lossy identities
     // cannot be migrated faithfully: reseed them silently once instead of reporting every entry.
     private const string Header = "#winsight-guardian-baseline v3";
+    private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(30);
 
     private readonly string _path;
 
@@ -35,12 +39,14 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     {
         try
         {
-            if (!File.Exists(_path) || new FileInfo(_path).Length > MaxBaselineBytes)
+            using var lease = AutomaticFileAccess.TryAcquire(_path);
+            if (lease is null || lease.IsDirectory || lease.Length > MaxBaselineBytes)
             {
                 return null;
             }
 
-            using var reader = new StreamReader(_path, Encoding.UTF8);
+            using var stream = lease.OpenRead(FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream, Encoding.UTF8);
             if (reader.ReadLine() != Header)
             {
                 return null; // unknown/corrupt format: safest to treat as a first run
@@ -72,6 +78,10 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
                 }
             }
 
+            if (!lease.IsCurrent())
+            {
+                return null;
+            }
             return lines == 0 || result.Count > 0 ? result : null;
         }
         catch (Exception ex) when (ex is IOException
@@ -98,13 +108,8 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
             throw new InvalidDataException(
                 $"The Guardian baseline has {baseline.Count} entries, above the {MaxBaselineEntries} limit.");
         }
+        using (BaselineLock.Acquire(_path))
         {
-            var directory = Path.GetDirectoryName(_path);
-            if (!string.IsNullOrEmpty(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
             var builder = new StringBuilder();
             builder.Append(Header).Append('\n');
             var written = 0;
@@ -125,12 +130,65 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
             {
                 throw new InvalidDataException("The encoded Guardian baseline exceeds the file size limit.");
             }
-            var temp = _path + ".tmp";
-            File.WriteAllText(temp, builder.ToString(), Encoding.UTF8);
-            File.Move(temp, _path, overwrite: true);
+            // The central writer creates a unique handle-relative temp file, flushes it and renames
+            // it over the target atomically. An empty baseline reseeds silently, and whatever
+            // arrived before a crash is absorbed without an alert.
+            if (!AtomicFile.TryWrite(_path, Encoding.UTF8.GetBytes(builder.ToString())))
+            {
+                throw new IOException("The Guardian baseline could not be written safely.");
+            }
         }
     }
 
     private static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
     private static string Decode(string value) => Encoding.UTF8.GetString(Convert.FromBase64String(value));
+
+    /// <summary>Stable per-path mutex name, exposed internally for the real concurrency test.</summary>
+    internal static string LockNameFor(string path)
+    {
+        var canonical = Path.GetFullPath(path).ToUpperInvariant();
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32];
+        return $@"Local\WinSight.PersistenceBaseline.{key}";
+    }
+
+    private sealed class BaselineLock : IDisposable
+    {
+        private readonly Mutex _mutex;
+        private readonly bool _held;
+
+        private BaselineLock(Mutex mutex, bool held)
+        {
+            _mutex = mutex;
+            _held = held;
+        }
+
+        public static BaselineLock Acquire(string path)
+        {
+            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
+            bool held;
+            try
+            {
+                held = mutex.WaitOne(LockWait);
+            }
+            catch (AbandonedMutexException)
+            {
+                held = true;
+            }
+            if (!held)
+            {
+                mutex.Dispose();
+                throw new IOException("Timed out waiting for another Guardian baseline writer.");
+            }
+            return new BaselineLock(mutex, held: true);
+        }
+
+        public void Dispose()
+        {
+            if (_held)
+            {
+                _mutex.ReleaseMutex();
+            }
+            _mutex.Dispose();
+        }
+    }
 }

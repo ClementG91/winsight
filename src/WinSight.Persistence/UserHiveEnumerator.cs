@@ -124,36 +124,43 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
         || sid.Equals(".DEFAULT", StringComparison.OrdinalIgnoreCase)
         || !sid.StartsWith("S-1-5-21-", StringComparison.OrdinalIgnoreCase);
 
+    /// <remarks>
+    /// Read through the 64-bit view only. WOW64 redirects parts of <c>HKLM\SOFTWARE</c>, never a
+    /// user's own <c>SOFTWARE\Microsoft\Windows\CurrentVersion</c> keys, so the 32-bit view opens the
+    /// same physical key. Reading both reported every other account's startup item twice, the
+    /// second copy under a <c>WOW6432Node</c> location that does not exist - the defect already fixed
+    /// for <c>HKCU</c> in <see cref="RunKeyEnumerator"/>, left in place for every other profile.
+    /// </remarks>
     private List<RawAutostart> ReadHive(string sid)
     {
+        // The location keeps its "[Registry64]" suffix so the identity Guardian baselined for an
+        // existing entry does not change and re-announce it after an upgrade.
+        const RegistryView view = RegistryView.Registry64;
         var entries = new List<RawAutostart>();
-        foreach (var view in new[] { RegistryView.Registry64, RegistryView.Registry32 })
+        RegistryKey? hive;
+        try
         {
-            RegistryKey? hive;
-            try
-            {
-                using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
-                hive = users.OpenSubKey(sid);
-            }
-            catch (Exception ex) when (ex is UnauthorizedAccessException
-                                         or System.Security.SecurityException
-                                         or IOException)
-            {
-                Unreadable(sid);
-                continue;
-            }
-            if (hive is null)
-            {
-                Unreadable(sid);
-                continue;
-            }
+            using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
+            hive = users.OpenSubKey(sid);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or IOException)
+        {
+            Unreadable(sid);
+            return entries;
+        }
+        if (hive is null)
+        {
+            Unreadable(sid);
+            return entries;
+        }
 
-            using (hive)
+        using (hive)
+        {
+            foreach (var sub in SubKeys)
             {
-                foreach (var sub in SubKeys)
-                {
-                    entries.AddRange(ReadValues(hive, sid, view, sub));
-                }
+                entries.AddRange(ReadValues(hive, sid, view, sub));
             }
         }
         return entries;

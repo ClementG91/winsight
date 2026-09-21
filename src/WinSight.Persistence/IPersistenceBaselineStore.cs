@@ -14,6 +14,9 @@ public interface IPersistenceBaselineStore
     /// </summary>
     IReadOnlySet<PersistenceIdentity>? Load();
 
-    /// <summary>Saves the current baseline, replacing any previous one. Best-effort; failures are swallowed.</summary>
+    /// <summary>
+    /// Saves the current baseline, replacing any previous one. Implementations report failures; the
+    /// monitor owns the retry/error boundary so persistence loss is observable.
+    /// </summary>
     void Save(IReadOnlyCollection<PersistenceIdentity> baseline);
 }

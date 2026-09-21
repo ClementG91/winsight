@@ -1,3 +1,5 @@
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>
@@ -5,7 +7,8 @@ namespace WinSight.Persistence;
 /// <see cref="PersistenceMonitor"/> can watch the registry and the filesystem together. It forwards
 /// every child's <see cref="SurfaceChanged"/>, starts and disposes them all, and owns nothing else.
 /// </summary>
-public sealed class CompositePersistenceChangeSource : IPersistenceChangeSource, IPersistenceWatchCoverage
+public sealed class CompositePersistenceChangeSource :
+    IPersistenceChangeSource, IPersistenceWatchCoverage, IPersistenceWatchDiagnostics
 {
     private readonly IReadOnlyList<IPersistenceChangeSource> _sources;
     private readonly Lock _gate = new();
@@ -26,6 +29,48 @@ public sealed class CompositePersistenceChangeSource : IPersistenceChangeSource,
     /// <inheritdoc />
     public int ArmedLocations =>
         _sources.OfType<IPersistenceWatchCoverage>().Sum(source => source.ArmedLocations);
+
+    /// <inheritdoc />
+    public int LostObservationCount =>
+        _sources.OfType<IPersistenceWatchDiagnostics>().Sum(source => source.LostObservationCount);
+
+    /// <inheritdoc />
+    public int NotificationFailures =>
+        _sources.OfType<IPersistenceWatchDiagnostics>().Sum(source => source.NotificationFailures);
+
+    /// <inheritdoc />
+    public SensorHealthSnapshot SensorHealth
+    {
+        get
+        {
+            var snapshots = _sources
+                .OfType<ISensorHealthSource>()
+                .Select(source => source.SensorHealth)
+                .ToArray();
+            var requested = snapshots.Sum(snapshot => snapshot.RequestedSources);
+            var active = snapshots.Sum(snapshot => snapshot.ActiveSources);
+            var lifecycle = snapshots.Length == 0
+                ? SensorLifecycle.NotStarted
+                : snapshots.Any(snapshot => snapshot.Lifecycle == SensorLifecycle.Running)
+                    ? SensorLifecycle.Running
+                    : snapshots.All(snapshot => snapshot.Lifecycle == SensorLifecycle.NotStarted)
+                        ? SensorLifecycle.NotStarted
+                        : snapshots.All(snapshot => snapshot.Lifecycle == SensorLifecycle.Stopped)
+                            ? SensorLifecycle.Stopped
+                            : SensorLifecycle.Failed;
+            return new SensorHealthSnapshot(
+                "Persistence",
+                lifecycle,
+                requested,
+                active,
+                snapshots.Sum(snapshot => snapshot.ObservedEvents),
+                snapshots.Sum(snapshot => snapshot.LostEvents),
+                snapshots.Sum(snapshot => snapshot.RecoveryAttempts),
+                snapshots.Sum(snapshot => snapshot.SuccessfulRecoveries),
+                snapshots.Sum(snapshot => snapshot.DeliveryFailures),
+                snapshots.FirstOrDefault(snapshot => snapshot.FailureCode is not null).FailureCode);
+        }
+    }
 
     public CompositePersistenceChangeSource(params IPersistenceChangeSource[] sources)
         : this((IEnumerable<IPersistenceChangeSource>)sources)

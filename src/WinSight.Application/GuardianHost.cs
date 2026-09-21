@@ -79,12 +79,29 @@ public static class GuardianHost
         {
             parts.Add($"{diagnostics.UnlistedArrivals} arrival(s) reported but not kept in the in-app list");
         }
+        if (diagnostics.SourceHealth is { } source
+            && (source.CoverageIncomplete || source.RecoveryAttempts > 0))
+        {
+            parts.Add(
+                $"sensors {source.ActiveSources}/{source.RequestedSources}, "
+                + $"observed {source.ObservedEvents}, lost {source.LostEvents}, "
+                + $"recoveries {source.SuccessfulRecoveries}/{source.RecoveryAttempts}, "
+                + $"delivery failures {source.DeliveryFailures}");
+        }
+        else if (diagnostics.SourceLostObservations > 0)
+        {
+            parts.Add($"{diagnostics.SourceLostObservations} watcher loss signal(s), reconciled state may miss transient changes");
+        }
+        if (diagnostics.SourceHealth is null && diagnostics.SourceNotificationFailures > 0)
+        {
+            parts.Add($"{diagnostics.SourceNotificationFailures} source notification failure(s)");
+        }
         return parts.Count == 0 ? null : "Guardian: " + string.Join("; ", parts);
     }
 
     /// <summary>Whether the operator can usefully ask Guardian to retry now.</summary>
     public static bool CanRetry(PersistenceMonitorDiagnostics diagnostics) =>
-        diagnostics.IsDegraded || diagnostics.AutomaticRetriesExhausted;
+        diagnostics.RetryableFailurePending || diagnostics.AutomaticRetriesExhausted;
 
     /// <summary>A journal line for a contained monitor failure, bounded and free of stack traces.</summary>
     public static SecurityAlert FaultAlert(PersistenceMonitorFault fault)

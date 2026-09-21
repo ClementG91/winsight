@@ -62,6 +62,55 @@ public sealed class RegistryScopeTests
     }
 
     /// <summary>
+    /// Another account's startup item is reported once, at the key where it actually lives.
+    /// </summary>
+    /// <remarks>
+    /// The hive was read under both registry views. A user's own <c>SOFTWARE</c> keys are not
+    /// redirected by WOW64, so both reads returned the same value: every entry in every other
+    /// profile appeared twice, the second copy under a <c>WOW6432Node</c> path that does not exist.
+    /// The test user's own hive stands in for "another account" by telling the enumerator that the
+    /// current user is someone else. The marker goes in <c>RunServices</c>, which Windows NT reads
+    /// for coverage but never executes.
+    /// </remarks>
+    [Fact]
+    public void AnotherAccountsStartupItemIsReportedOnceAtItsRealLocation()
+    {
+        const string sub = @"SOFTWARE\Microsoft\Windows\CurrentVersion\RunServices";
+        var name = $"WinSightHiveProbe-{Guid.NewGuid():N}";
+        var existed = Registry.CurrentUser.OpenSubKey(sub) is { } present && Dispose(present);
+        using (var key = Registry.CurrentUser.CreateSubKey(sub, writable: true))
+        {
+            key.SetValue(name, @"C:\winsight-probe\not-a-real-program.exe");
+        }
+        try
+        {
+            var entries = new UserHiveEnumerator(() => "S-1-5-21-0-0-0-0").Enumerate()
+                .Where(entry => entry.Name == name)
+                .ToList();
+
+            var entry = Assert.Single(entries);
+            Assert.DoesNotContain("WOW6432Node", entry.Location, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            using (var key = Registry.CurrentUser.OpenSubKey(sub, writable: true))
+            {
+                key?.DeleteValue(name, throwOnMissingValue: false);
+            }
+            if (!existed)
+            {
+                Registry.CurrentUser.DeleteSubKey(sub, throwOnMissingSubKey: false);
+            }
+        }
+
+        static bool Dispose(RegistryKey key)
+        {
+            key.Dispose();
+            return true;
+        }
+    }
+
+    /// <summary>
     /// A profile whose hive is not loaded is a place persistence can sit that this scan did not
     /// look at. Loading NTUSER.DAT is privileged and modifies the machine, so a read-only tool
     /// counts the gap instead - which is what makes it appear in the coverage line at all.

@@ -1,3 +1,5 @@
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>Raised when a genuinely new persistence entry has been surfaced.</summary>
@@ -46,6 +48,18 @@ public sealed record PersistenceMonitorDiagnostics(
     /// notified; only the in-app list is incomplete.
     /// </summary>
     public int UnlistedArrivals { get; init; }
+
+    /// <summary>OS watcher loss/error signals observed since this monitor started.</summary>
+    public int SourceLostObservations { get; init; }
+
+    /// <summary>Change-source notifications a subscriber failed to handle.</summary>
+    public int SourceNotificationFailures { get; init; }
+
+    /// <summary>Whether an operator-triggered retry can still make progress.</summary>
+    public bool RetryableFailurePending { get; init; }
+
+    /// <summary>Provider-neutral source lifecycle, loss and recovery counters when available.</summary>
+    public SensorHealthSnapshot? SourceHealth { get; init; }
 }
 
 /// <summary>
@@ -177,8 +191,13 @@ public sealed class PersistenceMonitor : IDisposable
     {
         get
         {
+            var sourceDiagnostics = _source as IPersistenceWatchDiagnostics;
+            var sourceHealth = (_source as ISensorHealthSource)?.SensorHealth;
+            var lostObservations = sourceDiagnostics?.LostObservationCount ?? 0;
+            var sourceNotificationFailures = sourceDiagnostics?.NotificationFailures ?? 0;
             lock (_gate)
             {
+                var retryable = _undelivered.Count > 0 || _scanRetryNeeded || _saveRetryNeeded;
                 return new PersistenceMonitorDiagnostics(
                     _undelivered.Count,
                     _scanFailures,
@@ -189,8 +208,15 @@ public sealed class PersistenceMonitor : IDisposable
                     _disposed && !_cleanupDone,
                     _lastFault)
                 {
-                    IsDegraded = _undelivered.Count > 0 || _scanRetryNeeded || _saveRetryNeeded,
+                    IsDegraded = retryable
+                        || sourceHealth?.CoverageIncomplete == true
+                        || lostObservations > 0
+                        || sourceNotificationFailures > 0,
                     UnlistedArrivals = _core.Log.DroppedChanges,
+                    SourceLostObservations = lostObservations,
+                    SourceNotificationFailures = sourceNotificationFailures,
+                    RetryableFailurePending = retryable,
+                    SourceHealth = sourceHealth,
                 };
             }
         }
