@@ -159,7 +159,7 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
                 {
                     continue;
                 }
-                if (File.Exists(full))
+                if (AutomaticFileAccess.FileExists(full))
                 {
                     return (full, false);
                 }

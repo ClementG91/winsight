@@ -30,7 +30,8 @@ public static class FindingActions
                     continue;
                 }
                 var fullPath = Path.GetFullPath(candidate);
-                if (File.Exists(fullPath) || Directory.Exists(fullPath))
+                if (AutomaticFileAccess.FileExists(fullPath)
+                    || AutomaticFileAccess.DirectoryExists(fullPath))
                 {
                     return fullPath;
                 }

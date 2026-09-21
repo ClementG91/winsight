@@ -152,10 +152,9 @@ public sealed class CachingSignatureVerifierContentTests : IDisposable
             candidate => SwapPreservingMetadata(candidate, "UNSIGNED-EVIL!!"));
         var cache = new CachingSignatureVerifier(inner, verifyContent: true);
 
-        // The first answer describes the content the fake verifier just inspected. The mutation
-        // happens before the cache can take its post-verification fingerprint, so that answer must
-        // not become a cache entry for the replacement now present at the same path.
-        Assert.Equal(Trusted, cache.Verify(path));
+        // A mutation before the post-verification fingerprint means the answer cannot safely be
+        // attributed to the object now at the path. It must not be returned even once.
+        Assert.Equal(SignatureVerdict.Unknown, cache.Verify(path));
         Assert.Equal("UNSIGNED-EVIL!!", File.ReadAllText(path));
 
         Assert.Equal(SignatureVerdict.Unsigned, cache.Verify(path));

@@ -4,6 +4,8 @@ using System.IO;
 using System.Resources;
 using System.Security;
 
+using WinSight.Core;
+
 namespace WinSight.Dashboard;
 
 public sealed record UiLanguage(string Code, string NativeName)
@@ -18,6 +20,8 @@ public sealed record UiLanguage(string Code, string NativeName)
 /// </summary>
 public sealed class LocalizationManager : INotifyPropertyChanged
 {
+    private const int MaximumPreferenceBytes = 128;
+
     private static readonly ResourceManager Resources = new(
         "WinSight.Dashboard.Localization.Strings",
         typeof(LocalizationManager).Assembly);
@@ -107,7 +111,15 @@ public sealed class LocalizationManager : INotifyPropertyChanged
     {
         try
         {
-            return File.Exists(PreferencePath) ? File.ReadAllText(PreferencePath).Trim() : null;
+            using var lease = AutomaticFileAccess.TryAcquire(PreferencePath);
+            if (lease is null || lease.IsDirectory || lease.Length > MaximumPreferenceBytes)
+            {
+                return null;
+            }
+            using var stream = lease.OpenRead(FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream);
+            var preference = reader.ReadToEnd().Trim();
+            return lease.IsCurrent() ? preference : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
         {
@@ -119,9 +131,7 @@ public sealed class LocalizationManager : INotifyPropertyChanged
     {
         try
         {
-            var directory = Path.GetDirectoryName(PreferencePath)!;
-            Directory.CreateDirectory(directory);
-            File.WriteAllText(PreferencePath, code);
+            _ = AtomicFile.TryWrite(PreferencePath, System.Text.Encoding.UTF8.GetBytes(code));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
         {

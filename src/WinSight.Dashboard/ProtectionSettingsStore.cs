@@ -1,5 +1,7 @@
 using System.IO;
 
+using WinSight.Core;
+
 namespace WinSight.Dashboard;
 
 /// <summary>
@@ -39,17 +41,22 @@ public sealed class ProtectionSettingsStore
         {
             try
             {
-                if (!File.Exists(_path) || new FileInfo(_path).Length > MaximumBytes)
+                using var lease = AutomaticFileAccess.TryAcquire(_path);
+                if (lease is null || lease.IsDirectory || lease.Length > MaximumBytes)
                 {
                     return false;
                 }
-                foreach (var line in File.ReadAllLines(_path))
+                using var stream = lease.OpenRead(FileOptions.SequentialScan);
+                using var reader = new StreamReader(stream);
+                var enabled = false;
+                while (reader.ReadLine() is { } line)
                 {
                     if (line.Trim().Equals(EnabledMarker, StringComparison.OrdinalIgnoreCase))
                     {
-                        return true;
+                        enabled = true;
                     }
                 }
+                return enabled && lease.IsCurrent();
             }
             catch (Exception ex) when (ex is IOException
                                          or UnauthorizedAccessException
@@ -66,22 +73,12 @@ public sealed class ProtectionSettingsStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
             // Replaced atomically: a torn write read back as "off" and silently left ransomware
             // protection disabled after the next launch.
-            var temp = $"{_path}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                File.WriteAllText(temp, enabled ? EnabledMarker + Environment.NewLine : string.Empty);
-                File.Move(temp, _path, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(temp))
-                {
-                    File.Delete(temp);
-                }
-            }
+            _ = AtomicFile.TryWrite(
+                _path,
+                System.Text.Encoding.UTF8.GetBytes(
+                    enabled ? EnabledMarker + Environment.NewLine : string.Empty));
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException

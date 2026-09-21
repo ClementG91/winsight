@@ -77,6 +77,27 @@ public static class UserInstalledRoots
             : SignatureTrustAnchor.Unspecified;
     }
 
+    /// <summary>
+    /// Classifies the trust anchor from a signer certificate extracted from already acquired bytes,
+    /// avoiding a second path resolution after WinVerifyTrust evaluated the file handle.
+    /// </summary>
+    internal static SignatureTrustAnchor TrustAnchorFor(
+        X509Certificate2 signer, RootSnapshot snapshot)
+    {
+        ArgumentNullException.ThrowIfNull(signer);
+        if (!snapshot.IsComplete || ReadChainRoot(signer) is not { } root)
+        {
+            return SignatureTrustAnchor.Unspecified;
+        }
+        if (snapshot.UserThumbprints.Contains(root))
+        {
+            return SignatureTrustAnchor.UserInstalledRoot;
+        }
+        return snapshot.MachineThumbprints.Contains(root)
+            ? SignatureTrustAnchor.MachineRoot
+            : SignatureTrustAnchor.Unspecified;
+    }
+
     private static string? ReadChainRoot(string path)
     {
         try
@@ -84,6 +105,21 @@ public static class UserInstalledRoots
 #pragma warning disable SYSLIB0057 // CreateFromSignedFile is the Authenticode leaf reader.
             using var leaf = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
 #pragma warning restore SYSLIB0057
+            return ReadChainRoot(leaf);
+        }
+        catch (Exception ex) when (ex is CryptographicException
+                                     or IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private static string? ReadChainRoot(X509Certificate2 leaf)
+    {
+        try
+        {
             using var chain = new X509Chain();
             chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
             chain.ChainPolicy.DisableCertificateDownloads = true;
@@ -96,10 +132,11 @@ public static class UserInstalledRoots
                 | X509VerificationFlags.IgnoreCertificateAuthorityRevocationUnknown
                 | X509VerificationFlags.IgnoreRootRevocationUnknown;
             _ = chain.Build(leaf);
-            return chain.ChainElements.Count > 0 ? chain.ChainElements[^1].Certificate.Thumbprint : null;
+            return chain.ChainElements.Count > 0
+                ? chain.ChainElements[^1].Certificate.Thumbprint
+                : null;
         }
         catch (Exception ex) when (ex is CryptographicException
-                                     or IOException
                                      or UnauthorizedAccessException
                                      or System.Security.SecurityException)
         {

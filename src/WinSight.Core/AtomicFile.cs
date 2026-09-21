@@ -17,51 +17,9 @@ public static class AtomicFile
     /// the path is not local or the write could not be completed; the previous file is left intact.
     /// </summary>
     public static bool TryWrite(string path, ReadOnlySpan<byte> bytes)
-    {
-        if (!AutomaticFileAccess.IsLocal(path))
-        {
-            return false;
-        }
-        var temp = $"{path}.{Guid.NewGuid():N}.tmp";
-        try
-        {
-            var directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temp, path, overwrite: true);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            TryDelete(temp);
-            return false;
-        }
-    }
+        => AutomaticFileAccess.TryWriteAtomic(path, bytes);
 
     /// <summary>Best-effort removal of a stray temporary file; failure is not fatal.</summary>
     public static void TryDelete(string path)
-    {
-        try
-        {
-            if (AutomaticFileAccess.IsLocal(path) && File.Exists(path))
-            {
-                File.Delete(path);
-            }
-        }
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            // A stray temporary file is inert.
-        }
-    }
+        => _ = AutomaticFileAccess.TryDeleteFile(path);
 }

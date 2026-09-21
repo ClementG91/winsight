@@ -52,11 +52,24 @@ public sealed class HostsReader(string? path = null)
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(_path))
+            using var lease = AutomaticFileAccess.TryAcquire(_path);
+            if (lease is null)
+            {
+                return AutomaticFileAccess.IsLocal(_path)
+                    ? new HostsSnapshot([], Unreadable: false, Missing: true, MalformedLines: 0)
+                    : new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
+            }
+            if (lease.IsDirectory)
             {
                 return new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
             }
-            var parsed = ParseWithCoverage(File.ReadLines(_path));
+            using var stream = lease.OpenRead();
+            using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+            var parsed = ParseWithCoverage(ReadLines(reader));
+            if (!lease.IsCurrent())
+            {
+                return new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
+            }
             return new HostsSnapshot(parsed.Entries, Unreadable: false, Missing: false, parsed.MalformedLines);
         }
         catch (FileNotFoundException)
@@ -81,6 +94,14 @@ public sealed class HostsReader(string? path = null)
     /// </summary>
     public static IReadOnlyList<HostEntry> Parse(IEnumerable<string> lines) =>
         ParseWithCoverage(lines).Entries;
+
+    private static IEnumerable<string> ReadLines(StreamReader reader)
+    {
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
+        }
+    }
 
     internal static (IReadOnlyList<HostEntry> Entries, int MalformedLines) ParseWithCoverage(
         IEnumerable<string> lines)

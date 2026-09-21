@@ -27,25 +27,24 @@ public sealed class CatalogSignatureVerifier : ISignatureVerifier
         {
             return SignatureVerdict.Missing;
         }
-        if (!AutomaticFileAccess.IsLocal(path))
+        using var lease = AutomaticFileAccess.TryAcquire(path);
+        if (lease is null)
+        {
+            return AutomaticFileAccess.IsLocal(path)
+                ? SignatureVerdict.Missing
+                : SignatureVerdict.Unknown;
+        }
+        if (lease.IsDirectory)
         {
             return SignatureVerdict.Unknown;
-        }
-        if (!File.Exists(path))
-        {
-            return SignatureVerdict.Missing;
         }
 
         try
         {
-            using var stream = new FileStream(
-                path,
-                FileMode.Open,
-                FileAccess.Read,
-                FileShare.Read,
-                bufferSize: 1,
-                FileOptions.RandomAccess);
-            return VerifyOpenFile(path, stream.SafeFileHandle, batch, cancellationToken);
+            using var stream = lease.OpenRead(FileOptions.RandomAccess);
+            var verdict = VerifyOpenFile(
+                lease.FullPath, stream.SafeFileHandle, batch, cancellationToken);
+            return lease.IsCurrent() ? verdict : SignatureVerdict.Unknown;
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException

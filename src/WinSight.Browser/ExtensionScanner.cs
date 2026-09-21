@@ -140,7 +140,8 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         try
         {
             return versions
-                .Where(d => File.Exists(System.IO.Path.Combine(d, "manifest.json")))
+                .Where(d => AutomaticFileAccess.FileExists(
+                    System.IO.Path.Combine(d, "manifest.json")))
                 .OrderByDescending(Directory.GetLastWriteTimeUtc)
                 .FirstOrDefault();
         }
@@ -219,7 +220,7 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         try
         {
             var messages = System.IO.Path.Combine(versionDir, "_locales", locale, "messages.json");
-            if (!AutomaticFileAccess.IsLocal(messages) || !File.Exists(messages))
+            if (!AutomaticFileAccess.FileExists(messages))
             {
                 return raw;
             }
@@ -285,14 +286,20 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
 
     private static string[] SafeEnumerate(string dir, out bool unreadable)
     {
-        if (!AutomaticFileAccess.IsLocal(dir))
-        {
-            unreadable = true;
-            return [];
-        }
         try
         {
-            var result = Directory.GetDirectories(dir);
+            using var lease = AutomaticFileAccess.TryAcquire(dir);
+            if (lease is null || !lease.IsDirectory)
+            {
+                unreadable = true;
+                return [];
+            }
+            var result = Directory.GetDirectories(lease.FullPath);
+            if (!lease.IsCurrent())
+            {
+                unreadable = true;
+                return [];
+            }
             unreadable = false;
             return result;
         }
@@ -305,15 +312,16 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
 
     private static bool DirectoryPresent(string path, out bool unreadable)
     {
-        if (!AutomaticFileAccess.IsLocal(path))
-        {
-            unreadable = true;
-            return false;
-        }
         try
         {
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null)
+            {
+                unreadable = !AutomaticFileAccess.IsLocal(path);
+                return false;
+            }
             unreadable = false;
-            return (File.GetAttributes(path) & FileAttributes.Directory) != 0;
+            return lease.IsDirectory && lease.IsCurrent();
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -331,9 +339,18 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
 
     private static JsonDocument? ParseJson(string path)
     {
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096,
-            FileOptions.SequentialScan);
-        return stream.Length <= MaximumJsonBytes ? JsonDocument.Parse(stream) : null;
+        using var lease = AutomaticFileAccess.TryAcquire(path);
+        if (lease is null || lease.IsDirectory || lease.Length > MaximumJsonBytes)
+        {
+            return null;
+        }
+        using var stream = lease.OpenRead();
+        var document = JsonDocument.Parse(stream);
+        if (lease.IsCurrent())
+        {
+            return document;
+        }
+        document.Dispose();
+        return null;
     }
 }

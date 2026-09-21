@@ -109,7 +109,9 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             options,
             path => fingerprints[path] = Fingerprint(path));
 
-        foreach (var path in paths)
+        // Distinct, so a file named by many entries is looked up, verified and stored once; the
+        // results are keyed case-insensitively and answer every mention.
+        foreach (var path in paths.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!AutomaticFileAccess.IsLocal(path))
             {
@@ -138,8 +140,13 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             foreach (var path in misses)
             {
                 var verdict = fresh.TryGetValue(path, out var v) ? v : SignatureVerdict.Unknown;
-                results[path] = verdict;
-                StoreIfUnchanged(path, verdict, preVerificationFingerprints[path], roots);
+                // A verdict produced while the object behind the path changed is not a verdict
+                // for the file now named by that path. Refusing to cache it was necessary but not
+                // sufficient: returning it once still exposed a stale authorization decision.
+                results[path] = StoreIfUnchanged(
+                    path, verdict, preVerificationFingerprints[path], roots)
+                    ? verdict
+                    : SignatureVerdict.Unknown;
             }
         }
         return results;
@@ -179,17 +186,12 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
         }
     }
 
-    private void StoreIfUnchanged(
+    private bool StoreIfUnchanged(
         string path,
         SignatureVerdict verdict,
         FileFingerprint? preVerificationFingerprint,
         UserInstalledRoots.RootSnapshot roots)
     {
-        // Do not retain answers from a batch that could not establish its trust-store state.
-        if (!roots.IsComplete)
-        {
-            return;
-        }
         var postVerificationFingerprint = Fingerprint(path);
         // The verifier works on a path, so the file can be replaced after WinVerifyTrust returns
         // but before this cache entry is written. Never bind that old verdict to the replacement.
@@ -203,7 +205,15 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
             postVerificationFingerprint is null ||
             preVerificationFingerprint != postVerificationFingerprint)
         {
-            return;
+            return false;
+        }
+
+        // Do not retain answers from a batch that could not establish its trust-store state. The
+        // file itself was nevertheless stable across verification, so the fresh answer remains
+        // usable for this call.
+        if (!roots.IsComplete)
+        {
+            return true;
         }
 
         lock (_sync)
@@ -227,6 +237,7 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
                 Stopwatch.GetTimestamp(),
                 node);
         }
+        return true;
     }
 
     private void Remove(string path, CacheEntry? entry)
@@ -243,23 +254,49 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory)
             {
                 return null;
             }
-            var file = new FileInfo(path);
+            // One handle owns the entire observation. FileInfo followed by File.OpenRead was two
+            // independent path resolutions and could combine metadata from one object with the
+            // digest of its replacement. Denying write/delete sharing also prevents an in-place
+            // mutation while SHA-256 is reading the stream.
+            var length = lease.Length;
+            var creationTimeUtc = lease.CreationTimeUtc;
+            var lastWriteTimeUtc = lease.LastWriteTimeUtc;
             // A null hash in content mode means the file could not be read: treat that as no
             // fingerprint at all rather than silently falling back to forgeable metadata, which
             // would reopen the exact window this mode exists to close.
             if (!_verifyContent)
             {
-                return new FileFingerprint(file.Length, file.CreationTimeUtc, file.LastWriteTimeUtc, null);
+                return lease.IsCurrent()
+                    ? new FileFingerprint(
+                        length,
+                        creationTimeUtc,
+                        lastWriteTimeUtc,
+                        lease.VolumeSerialNumber,
+                        lease.FileIndex,
+                        null)
+                    : null;
             }
-            return HashUtil.Sha256File(path) is { } hash
-                ? new FileFingerprint(file.Length, file.CreationTimeUtc, file.LastWriteTimeUtc, hash)
+            using var stream = lease.OpenRead();
+            var hash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(stream)).ToLowerInvariant();
+            return lease.IsCurrent()
+                ? new FileFingerprint(
+                    length,
+                    creationTimeUtc,
+                    lastWriteTimeUtc,
+                    lease.VolumeSerialNumber,
+                    lease.FileIndex,
+                    hash)
                 : null;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
         {
             return null;
         }
@@ -276,9 +313,15 @@ public sealed class CachingSignatureVerifier : ISignatureVerifier
     /// Null in metadata mode. When present it is what actually decides identity, so a same-length
     /// timestomped replacement no longer matches.
     /// </param>
+    /// <remarks>
+    /// Volume serial and file index bind even metadata mode to the acquired object rather than to
+    /// forgeable path timestamps alone.
+    /// </remarks>
     private sealed record FileFingerprint(
         long Length,
         DateTime CreationTimeUtc,
         DateTime LastWriteTimeUtc,
+        uint VolumeSerialNumber,
+        ulong FileIndex,
         string? ContentSha256);
 }

@@ -125,11 +125,16 @@ public static class CrashReporter
     /// <summary>Writes one report and returns its path.</summary>
     internal static string Write(string directory, string content)
     {
-        Directory.CreateDirectory(directory);
         var path = Path.Combine(
             directory,
             $"crash-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-        File.WriteAllText(path, content, Encoding.UTF8);
+        if (!AutomaticFileAccess.TryCreateNewFile(
+                path,
+                Encoding.UTF8.GetBytes(content),
+                createParentDirectories: true))
+        {
+            throw new IOException("The crash report could not be written safely.");
+        }
         return path;
     }
 
@@ -147,7 +152,7 @@ public static class CrashReporter
         {
             try
             {
-                File.Delete(file);
+                _ = AutomaticFileAccess.TryDeleteFile(file);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

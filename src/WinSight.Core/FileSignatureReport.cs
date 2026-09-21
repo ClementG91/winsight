@@ -50,31 +50,61 @@ public sealed class FileSignatureReporter
         {
             return null;
         }
-        var verdict = _verifier.Verify(path, cancellationToken);
-        var (md5, sha1, sha256) = Hashes(path, cancellationToken);
-        return new FileSignatureReport(
-            path, verdict.State, verdict.Signer, verdict.Anchor, verdict.Revocation, md5, sha1, sha256);
-    }
-
-    private static (string? Md5, string? Sha1, string? Sha256) Hashes(string path, CancellationToken cancellationToken)
-    {
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-            // MD5 and SHA-1 are weak for security decisions and are used here only as file identifiers:
-            // they are the hashes VirusTotal and other tools key on, so a signature window must show them.
-#pragma warning disable CA5350, CA5351
-            var md5 = Convert.ToHexString(MD5.HashData(stream));
-            stream.Position = 0;
-            var sha1 = Convert.ToHexString(SHA1.HashData(stream));
-#pragma warning restore CA5350, CA5351
-            stream.Position = 0;
-            var sha256 = Convert.ToHexString(SHA256.HashData(stream));
-            return (md5, sha1, sha256);
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory)
+            {
+                return null;
+            }
+            // Keep one handle-bound object from before the trust decision until every displayed
+            // hash has been computed. Reads use that acquired object; identity revalidation catches
+            // Windows rename semantics that can replace the path entry despite a read-shared handle.
+            using var stream = lease.OpenRead();
+            var verdict = _verifier.Verify(lease.FullPath, cancellationToken);
+            if (!lease.IsCurrent())
+            {
+                return null;
+            }
+            var (md5, sha1, sha256) = Hashes(stream, cancellationToken);
+            if (!lease.IsCurrent())
+            {
+                return null;
+            }
+            return new FileSignatureReport(
+                lease.FullPath,
+                verdict.State,
+                verdict.Signer,
+                verdict.Anchor,
+                verdict.Revocation,
+                md5,
+                sha1,
+                sha256);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
         {
-            return (null, null, null);
+            return null;
         }
+    }
+
+    private static (string Md5, string Sha1, string Sha256) Hashes(
+        FileStream stream,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        // MD5 and SHA-1 are weak for security decisions and are used here only as file identifiers:
+        // they are the hashes VirusTotal and other tools key on, so a signature window must show them.
+#pragma warning disable CA5350, CA5351
+        var md5 = Convert.ToHexString(MD5.HashData(stream));
+        cancellationToken.ThrowIfCancellationRequested();
+        stream.Position = 0;
+        var sha1 = Convert.ToHexString(SHA1.HashData(stream));
+#pragma warning restore CA5350, CA5351
+        cancellationToken.ThrowIfCancellationRequested();
+        stream.Position = 0;
+        var sha256 = Convert.ToHexString(SHA256.HashData(stream));
+        return (md5, sha1, sha256);
     }
 }

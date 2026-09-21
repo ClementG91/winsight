@@ -5,7 +5,7 @@ namespace WinSight.Application;
 
 /// <summary>
 /// The What's Your Sign? surface: one file's Authenticode standing for the <c>sign</c> verb, and the
-/// lifecycle commands that add or remove the per-user Explorer verb. Kept beside the main adapter
+/// manual lifecycle commands that add or remove the per-user Explorer verb. Kept beside the main adapter
 /// rather than inside it, because this is the file-inspection entry point, not a machine scan.
 /// </summary>
 public static partial class Adapters
@@ -74,7 +74,9 @@ public static partial class Adapters
 
     /// <summary>
     /// Installs or removes the per-user Explorer "Check signature with WinSight" verb. A lifecycle
-    /// command the installer and uninstaller call, not a scanner, so it stays out of the help catalog.
+    /// command for portable installs and repair, listed in the help catalog under Maintenance.
+    /// The installer itself uses an HKA-scoped declarative registry entry so uninstall targets the
+    /// same current-user or all-users hive.
     /// </summary>
     public static int SetSignatureVerb(bool register)
     {
@@ -88,7 +90,7 @@ public static partial class Adapters
                 Console.WriteLine("Explorer signature verb removed for the current user.");
                 return CliContract.Clean;
             }
-            if (!File.Exists(dashboard))
+            if (!AutomaticFileAccess.FileExists(dashboard))
             {
                 Console.Error.WriteLine("winsight-dashboard.exe was not found next to winsight.exe");
                 return CliContract.UsageError;

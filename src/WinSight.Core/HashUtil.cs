@@ -10,12 +10,14 @@ public static class HashUtil
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory)
             {
                 return null;
             }
-            using var stream = File.OpenRead(path);
-            return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            using var stream = lease.OpenRead();
+            var hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+            return lease.IsCurrent() ? hash : null;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {

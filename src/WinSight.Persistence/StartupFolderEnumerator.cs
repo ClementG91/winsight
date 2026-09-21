@@ -157,12 +157,27 @@ public sealed class StartupFolderEnumerator : IAutostartEnumerator
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(dir))
+            using var lease = AutomaticFileAccess.TryAcquire(dir);
+            if (lease is null)
+            {
+                if (!AutomaticFileAccess.IsLocal(dir))
+                {
+                    Interlocked.Increment(ref _unreadable);
+                }
+                return [];
+            }
+            if (!lease.IsDirectory)
             {
                 Interlocked.Increment(ref _unreadable);
                 return [];
             }
-            return Directory.GetFiles(dir);
+            var files = Directory.GetFiles(lease.FullPath);
+            if (!lease.IsCurrent())
+            {
+                Interlocked.Increment(ref _unreadable);
+                return [];
+            }
+            return files;
         }
         catch (DirectoryNotFoundException)
         {

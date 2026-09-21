@@ -109,18 +109,24 @@ public sealed class VirusTotalQuotaLimiter
 
     private QuotaState Load()
     {
-        if (!File.Exists(_path))
+        using var lease = AutomaticFileAccess.TryAcquire(_path);
+        if (lease is null)
         {
             return new QuotaState();
         }
 
-        if (new FileInfo(_path).Length > MaximumStateBytes)
+        if (lease.IsDirectory || lease.Length > MaximumStateBytes)
         {
             throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
         }
 
-        var state = JsonSerializer.Deserialize<QuotaState>(File.ReadAllText(_path), JsonOptions)
+        using var stream = lease.OpenRead(FileOptions.SequentialScan);
+        var state = JsonSerializer.Deserialize<QuotaState>(stream, JsonOptions)
                     ?? throw new InvalidDataException("VirusTotal quota state is empty.");
+        if (!lease.IsCurrent())
+        {
+            throw new InvalidDataException("VirusTotal quota state changed while it was read.");
+        }
         if (state.DayCount < 0 || state.MonthCount < 0 ||
             state.RecentRequests is null || state.RecentRequests.Count > 64)
         {
@@ -154,38 +160,14 @@ public sealed class VirusTotalQuotaLimiter
 
     private void Save(QuotaState state)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
+        var payload = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
+        if (payload.Length > MaximumStateBytes)
         {
-            var payload = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
-            if (payload.Length > MaximumStateBytes)
-            {
-                throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
-            }
-            using (var stream = new FileStream(
-                       temporaryPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       bufferSize: 4096,
-                       FileOptions.WriteThrough))
-            {
-                stream.Write(payload);
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temporaryPath, _path, overwrite: true);
+            throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
         }
-        finally
+        if (!AtomicFile.TryWrite(_path, payload))
         {
-            try
-            {
-                File.Delete(temporaryPath);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // The authoritative state was either moved atomically or left intact.
-            }
+            throw new IOException("The VirusTotal quota state could not be written safely.");
         }
     }
 

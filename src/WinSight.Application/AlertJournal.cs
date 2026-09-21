@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using WinSight.Core;
+
 namespace WinSight.Application;
 
 /// <summary>One recorded security detection: what fired, when, and on what.</summary>
@@ -94,23 +96,11 @@ public static class AlertJournal
         {
             lock (Gate)
             {
-                var directory = Path.GetDirectoryName(path);
-                if (!string.IsNullOrEmpty(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
                 PreserveOversizedJournal(path);
                 var payload = System.Text.Encoding.UTF8.GetBytes(Format(alert) + Environment.NewLine);
-                using (var stream = new FileStream(
-                           path,
-                           FileMode.Append,
-                           FileAccess.Write,
-                           FileShare.Read,
-                           bufferSize: 4096,
-                           FileOptions.WriteThrough))
+                if (!AutomaticFileAccess.TryAppendFile(path, payload))
                 {
-                    stream.Write(payload);
-                    stream.Flush(flushToDisk: true);
+                    throw new IOException("The alert journal could not be appended safely.");
                 }
                 if (LineCounts.TryGetValue(path, out var known))
                 {
@@ -151,17 +141,24 @@ public static class AlertJournal
         {
             lock (Gate)
             {
-                if (!File.Exists(path))
+                using var lease = AutomaticFileAccess.TryAcquire(path);
+                if (lease is null)
                 {
-                    return new AlertJournalSnapshot([], Unreadable: false, MalformedEntries: 0);
+                    return new AlertJournalSnapshot(
+                        [],
+                        Unreadable: !AutomaticFileAccess.IsLocal(path),
+                        MalformedEntries: 0);
                 }
-                if (new FileInfo(path).Length > MaximumJournalBytes)
+                if (lease.IsDirectory || lease.Length > MaximumJournalBytes)
                 {
                     return new AlertJournalSnapshot([], Unreadable: true, MalformedEntries: 0);
                 }
                 var malformed = 0;
                 var entries = new List<SecurityAlert>();
-                foreach (var line in File.ReadLines(path))
+                using var stream = lease.OpenRead(FileOptions.SequentialScan);
+                using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
+                string? line;
+                while ((line = reader.ReadLine()) is not null)
                 {
                     if (Parse(line) is { } alert)
                     {
@@ -171,6 +168,10 @@ public static class AlertJournal
                     {
                         malformed++;
                     }
+                }
+                if (!lease.IsCurrent())
+                {
+                    return new AlertJournalSnapshot([], Unreadable: true, MalformedEntries: 0);
                 }
                 return new AlertJournalSnapshot(
                     entries.AsEnumerable().Reverse().Take(max).ToArray(),
@@ -253,38 +254,42 @@ public static class AlertJournal
             return;
         }
 
-        var lines = File.ReadAllLines(path);
-        LineCounts[path] = lines.Length;
-        if (lines.Length <= MaxEntries)
+        using var lease = AutomaticFileAccess.TryAcquire(path);
+        if (lease is null || lease.IsDirectory || lease.Length > MaximumJournalBytes)
+        {
+            LineCounts.Remove(path);
+            return;
+        }
+        var lines = new List<string>();
+        using (var stream = lease.OpenRead(FileOptions.SequentialScan))
+        using (var reader = new StreamReader(stream, System.Text.Encoding.UTF8))
+        {
+            while (reader.ReadLine() is { } line)
+            {
+                lines.Add(line);
+            }
+        }
+        if (!lease.IsCurrent())
+        {
+            LineCounts.Remove(path);
+            return;
+        }
+        // Release the read lease after validating its identity; the central atomic writer replaces
+        // the entry relative to an acquired parent and must not retain this obsolete snapshot.
+        lease.Dispose();
+        LineCounts[path] = lines.Count;
+        if (lines.Count <= MaxEntries)
         {
             return;
         }
-        var temporaryPath = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        try
+        var builder = new System.Text.StringBuilder();
+        foreach (var line in lines.Skip(lines.Count - MaxEntries))
         {
-            using (var stream = new FileStream(
-                       temporaryPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       bufferSize: 4096,
-                       FileOptions.WriteThrough))
-            using (var writer = new StreamWriter(stream))
-            {
-                foreach (var line in lines.Skip(lines.Length - MaxEntries))
-                {
-                    writer.WriteLine(line);
-                }
-                writer.Flush();
-                stream.Flush(flushToDisk: true);
-            }
-            File.Move(temporaryPath, path, overwrite: true);
-            LineCounts[path] = MaxEntries;
+            builder.AppendLine(line);
         }
-        finally
+        if (AtomicFile.TryWrite(path, System.Text.Encoding.UTF8.GetBytes(builder.ToString())))
         {
-            try { File.Delete(temporaryPath); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            LineCounts[path] = MaxEntries;
         }
     }
 
@@ -292,17 +297,19 @@ public static class AlertJournal
     {
         try
         {
-            if (!File.Exists(path))
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory || lease.Length > MaximumJournalBytes)
             {
                 return 0;
             }
             var lines = 0;
-            using var reader = new StreamReader(path, System.Text.Encoding.UTF8);
+            using var stream = lease.OpenRead(FileOptions.SequentialScan);
+            using var reader = new StreamReader(stream, System.Text.Encoding.UTF8);
             while (reader.ReadLine() is not null)
             {
                 lines++;
             }
-            return lines;
+            return lease.IsCurrent() ? lines : 0;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -312,7 +319,8 @@ public static class AlertJournal
 
     private static void PreserveOversizedJournal(string path)
     {
-        if (!File.Exists(path) || new FileInfo(path).Length <= MaximumJournalBytes)
+        using var lease = AutomaticFileAccess.TryAcquireForDelete(path);
+        if (lease is null || lease.Length <= MaximumJournalBytes)
         {
             return;
         }
@@ -320,7 +328,10 @@ public static class AlertJournal
         LineCounts.Remove(path);
         var preserved = path + ".oversized-" + DateTime.UtcNow.ToString(
             "yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
-        File.Move(path, preserved);
+        if (!lease.TryRename(preserved))
+        {
+            throw new IOException("The oversized alert journal could not be preserved safely.");
+        }
         PurgeOldPreservedJournals(path);
     }
 
@@ -349,8 +360,7 @@ public static class AlertJournal
                 .Skip(KeepPreserved);
             foreach (var stale in preserved)
             {
-                try { File.Delete(stale); }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+                _ = AutomaticFileAccess.TryDeleteFile(stale);
             }
         }
         catch (Exception ex) when (ex is IOException

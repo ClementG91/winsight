@@ -176,11 +176,7 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
                 continue;
             }
             expected ??= full;
-            if (!AutomaticFileAccess.IsLocal(full))
-            {
-                continue;
-            }
-            if (File.Exists(full))
+            if (AutomaticFileAccess.FileExists(full))
             {
                 return (full, full);
             }

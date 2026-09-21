@@ -27,7 +27,7 @@ public static class SignaturePathGuard
                 return null;
             }
             var full = Path.GetFullPath(raw);
-            return File.Exists(full) ? full : null;
+            return AutomaticFileAccess.FileExists(full) ? full : null;
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException
                                      or System.Security.SecurityException or NotSupportedException)

@@ -217,16 +217,17 @@ public static class CommandLine
             return new(null, null, ImageResolutionStatus.Unresolved);
         }
 
-        if (!AutomaticFileAccess.IsLocal(full))
-        {
-            return new(null, full, ImageResolutionStatus.Unresolved);
-        }
-
         try
         {
-            var attributes = File.GetAttributes(full);
-            return (attributes & FileAttributes.Directory) == 0
-                ? new(full, full, ImageResolutionStatus.Present)
+            using var lease = AutomaticFileAccess.TryAcquire(full);
+            if (lease is not null)
+            {
+                return !lease.IsDirectory && lease.IsCurrent()
+                    ? new(full, full, ImageResolutionStatus.Present)
+                    : new(null, full, ImageResolutionStatus.Unresolved);
+            }
+            return AutomaticFileAccess.IsLocal(full)
+                ? new(null, full, ImageResolutionStatus.FileMissing)
                 : new(null, full, ImageResolutionStatus.Unresolved);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
@@ -299,8 +300,7 @@ public static class CommandLine
                 candidate.Append(' ');
             }
             candidate.Append(parts[i]);
-            if (AutomaticFileAccess.IsLocal(candidate.ToString())
-                && File.Exists(candidate.ToString()))
+            if (AutomaticFileAccess.FileExists(candidate.ToString()))
             {
                 return candidate.ToString();
             }
