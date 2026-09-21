@@ -78,6 +78,43 @@ public sealed class CertStoreAuditorTests
         });
     }
 
+    /// <summary>
+    /// Windows merges the machine roots into the current user's view of Root, so each machine root
+    /// used to be reported twice. It is now reported under the machine store only.
+    /// </summary>
+    [Fact]
+    public void Snapshot_ReportsEachMachineRootOnce()
+    {
+        var certs = new CertStoreAuditor().Snapshot();
+
+        var machine = certs.Where(c => c.Store == @"LocalMachine\Root")
+            .Select(c => c.Thumbprint)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        Assert.NotEmpty(machine);
+        Assert.DoesNotContain(certs, c => c.Store == @"CurrentUser\Root" && machine.Contains(c.Thumbprint));
+        Assert.All(
+            certs.Where(c => c.Store == @"CurrentUser\Root"),
+            c => Assert.True(c.IsUserInstalled, c.Subject));
+    }
+
+    [Theory]
+    [InlineData("ABCDEF", true)]
+    [InlineData("abcdef", true)]
+    [InlineData("123456", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void AUserViewEntryIsSkippedOnlyWhenTheMachineStoreHasIt(string? thumbprint, bool merged)
+    {
+        var machine = new HashSet<string>(["ABCDEF"], StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(merged, CertStoreAuditor.IsMergedMachineRoot(thumbprint, machine));
+    }
+
+    /// <summary>An unreadable machine store leaves nothing known to be merged: report the user view whole.</summary>
+    [Fact]
+    public void WithoutAMachineStoreNothingIsSkipped() =>
+        Assert.False(CertStoreAuditor.IsMergedMachineRoot("ABCDEF", new HashSet<string>()));
+
     private static TrustedCertificate Root(
         bool hasPrivateKey, string sigAlg, int keyBits, bool isRsa, bool isSelfSigned = true) =>
         new(

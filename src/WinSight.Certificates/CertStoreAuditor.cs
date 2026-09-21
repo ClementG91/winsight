@@ -29,6 +29,7 @@ public sealed class CertStoreAuditor
         // be read, and the audit then makes no user-installed claim at all rather than declaring
         // every public root user-installed.
         var userInstalled = UserInstalledRoots.Thumbprints;
+        var machineRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, location, label) in Stores)
         {
             using var store = new X509Store(name, location);
@@ -50,6 +51,15 @@ public sealed class CertStoreAuditor
                 {
                     try
                     {
+                        if (location == StoreLocation.CurrentUser
+                            && IsMergedMachineRoot(cert.Thumbprint, machineRoots))
+                        {
+                            continue;
+                        }
+                        if (location == StoreLocation.LocalMachine && cert.Thumbprint is { Length: > 0 } machine)
+                        {
+                            machineRoots.Add(machine);
+                        }
                         results.Add(Describe(
                             cert,
                             label,
@@ -66,6 +76,22 @@ public sealed class CertStoreAuditor
         }
         return new AcquisitionSnapshot<TrustedCertificate>(
             results, unreadableStores, unreadableCertificates);
+    }
+
+    /// <summary>
+    /// Whether an entry of the current user's view of <c>Root</c> is a machine root Windows merged
+    /// into it, already reported under <c>LocalMachine\Root</c>.
+    /// </summary>
+    /// <remarks>
+    /// Reading both stores reported every machine root twice, doubling the list and its counts. The
+    /// user view now contributes only what the user alone trusts. When the machine store could not
+    /// be read, <paramref name="machineRoots"/> is empty, nothing is known to be merged, and the user
+    /// view is reported whole.
+    /// </remarks>
+    internal static bool IsMergedMachineRoot(string? thumbprint, IReadOnlySet<string> machineRoots)
+    {
+        ArgumentNullException.ThrowIfNull(machineRoots);
+        return !string.IsNullOrEmpty(thumbprint) && machineRoots.Contains(thumbprint);
     }
 
     private static TrustedCertificate Describe(X509Certificate2 cert, string store, bool userInstalled)

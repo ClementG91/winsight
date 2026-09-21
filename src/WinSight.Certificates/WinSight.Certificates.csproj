@@ -3,6 +3,7 @@
     <RootNamespace>WinSight.Certificates</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Certificates.Tests" />
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
 </Project>
