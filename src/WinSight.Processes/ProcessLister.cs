@@ -25,7 +25,13 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
     public AcquisitionSnapshot<ProcessInfo> SnapshotWithCoverage(
         CancellationToken cancellationToken = default)
     {
-        var raw = new List<(int Pid, string Name, string? Path, int ParentPid, string? Command)>();
+        var raw = new List<(
+            int Pid,
+            string Name,
+            string? Path,
+            int ParentPid,
+            string? Command,
+            long? StartTimestampUtcTicks)>();
         var unreadableSources = 0;
         var unreadableItems = 0;
         try
@@ -38,7 +44,7 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
             using var searcher = new ManagementObjectSearcher(
                 scope,
                 new ObjectQuery(
-                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine FROM Win32_Process"),
+                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine, CreationDate FROM Win32_Process"),
                 new System.Management.EnumerationOptions
                 {
                     Timeout = QueryTimeout,
@@ -61,8 +67,9 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                             continue;
                         }
                         var parentReadable = TryToUint(o["ParentProcessId"], out var parentId);
+                        var startReadable = TryToUtcTicks(o["CreationDate"], out var startTimestampUtcTicks);
                         var name = o["Name"] as string;
-                        if (!parentReadable || string.IsNullOrWhiteSpace(name))
+                        if (!parentReadable || !startReadable || string.IsNullOrWhiteSpace(name))
                         {
                             unreadableItems++;
                         }
@@ -71,7 +78,8 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                             string.IsNullOrWhiteSpace(name) ? $"(pid {processId})" : name,
                             o["ExecutablePath"] as string,
                             parentReadable ? checked((int)parentId) : 0,
-                            o["CommandLine"] as string));
+                            o["CommandLine"] as string,
+                            startReadable ? startTimestampUtcTicks : null));
                     }
                     catch (Exception ex) when (ex is ManagementException or OverflowException)
                     {
@@ -89,7 +97,13 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
     }
 
     private List<ProcessInfo> Build(
-        List<(int Pid, string Name, string? Path, int ParentPid, string? Command)> raw,
+        List<(
+            int Pid,
+            string Name,
+            string? Path,
+            int ParentPid,
+            string? Command,
+            long? StartTimestampUtcTicks)> raw,
         CancellationToken cancellationToken)
     {
         var verdicts = _verifier.VerifyMany(
@@ -97,11 +111,14 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
             cancellationToken);
 
         return raw.Select(r => new ProcessInfo(
-            r.Pid, r.Name, r.Path, r.ParentPid, r.Command,
-            r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
-                ? v
-                // WMI withheld the image path; no on-disk file was observed to be missing.
-                : SignatureVerdict.Unknown)).ToList();
+                r.Pid, r.Name, r.Path, r.ParentPid, r.Command,
+                r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
+                    ? v
+                    // WMI withheld the image path; no on-disk file was observed to be missing.
+                    : SignatureVerdict.Unknown)
+        {
+            StartTimestampUtcTicks = r.StartTimestampUtcTicks,
+        }).ToList();
     }
 
     /// <summary>
@@ -132,5 +149,24 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                 result = 0;
                 return false;
         }
+    }
+
+    internal static bool TryToUtcTicks(object? value, out long result)
+    {
+        if (value is string dmtf && !string.IsNullOrWhiteSpace(dmtf))
+        {
+            try
+            {
+                result = ManagementDateTimeConverter.ToDateTime(dmtf).ToUniversalTime().Ticks;
+                return true;
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or FormatException)
+            {
+                // Partial or malformed CIM datetime: identity is unavailable, never fabricated.
+            }
+        }
+
+        result = 0;
+        return false;
     }
 }

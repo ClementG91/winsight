@@ -24,6 +24,9 @@ public sealed record Connection(
     string? ImagePath,
     SignatureVerdict Signature)
 {
+    /// <summary>UTC creation time of the process observed while enriching this connection row.</summary>
+    public long? ProcessStartTimestampUtcTicks { get; init; }
+
     /// <summary>True when the remote is an off-box, routable destination.</summary>
     public bool External => NetstatParser.IsExternal(NetstatParser.RemoteAddress(Remote));
 

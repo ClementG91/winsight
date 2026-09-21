@@ -19,6 +19,9 @@ public sealed record LoadedModule(
     string? Path,
     SignatureVerdict Signature)
 {
+    /// <summary>UTC creation time of the host process observed during module enumeration.</summary>
+    public long? ProcessStartTimestampUtcTicks { get; init; }
+
     /// <summary>
     /// A loaded module whose file is unsigned or untrusted, worth a look. Modules
     /// with no resolvable path are not flagged.

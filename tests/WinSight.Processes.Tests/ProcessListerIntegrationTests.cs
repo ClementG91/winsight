@@ -30,7 +30,8 @@ public sealed class ProcessListerIntegrationTests
 
         // The current test process must be in the snapshot with a resolvable, signed-or-known image.
         var self = System.Environment.ProcessId;
-        Assert.Contains(processes, p => p.Pid == self);
+        var current = Assert.Single(processes, p => p.Pid == self);
+        Assert.NotNull(current.StartTimestampUtcTicks);
     }
 
     [Fact]

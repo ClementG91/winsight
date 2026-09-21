@@ -35,7 +35,7 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
         Volatile.Write(ref _fellBackToNetstat, fellBack ? 1 : 0);
 
         // Resolve each owning process once, then verify every distinct image in one batch.
-        var byPid = new Dictionary<int, (string Name, string? Path)>();
+        var byPid = new Dictionary<int, (string Name, string? Path, long? StartTimestampUtcTicks)>();
         foreach (var r in rows)
         {
             if (!byPid.ContainsKey(r.Pid))
@@ -64,7 +64,10 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
                 // executable. Preserve that distinction for JSON and report consumers.
                 : SignatureVerdict.Unknown;
             connections.Add(new Connection(
-                r.Protocol, r.Local, r.Remote, r.State, r.Pid, proc.Name, proc.Path, signature));
+                    r.Protocol, r.Local, r.Remote, r.State, r.Pid, proc.Name, proc.Path, signature)
+            {
+                ProcessStartTimestampUtcTicks = proc.StartTimestampUtcTicks,
+            });
         }
         return connections;
     }
@@ -174,11 +177,13 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
         }
     }
 
-    private static (string Name, string? Path) ResolveProcess(int pid)
+    private static (string Name, string? Path, long? StartTimestampUtcTicks) ResolveProcess(int pid)
     {
         try
         {
             using var p = Process.GetProcessById(pid);
+            var startedBefore = SafeStartTimestampUtcTicks(p);
+            var name = p.ProcessName;
             string? path = null;
             try
             {
@@ -188,11 +193,28 @@ public sealed class ConnectionMonitor(ISignatureVerifier? verifier = null)
             {
                 // Protected/elevated process, name only, no path.
             }
-            return (p.ProcessName, path);
+            var startedAfter = SafeStartTimestampUtcTicks(p);
+            var stableStart = startedBefore is not null && startedBefore == startedAfter
+                ? startedBefore
+                : null;
+            return (name, path, stableStart);
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or Win32Exception)
         {
-            return ($"(pid {pid})", null); // process already exited
+            return ($"(pid {pid})", null, null); // process already exited
+        }
+    }
+
+    private static long? SafeStartTimestampUtcTicks(Process process)
+    {
+        try
+        {
+            return process.StartTime.ToUniversalTime().Ticks;
+        }
+        catch (Exception ex) when (
+            ex is Win32Exception or InvalidOperationException or NotSupportedException)
+        {
+            return null;
         }
     }
 }

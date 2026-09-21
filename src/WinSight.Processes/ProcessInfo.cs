@@ -20,6 +20,12 @@ public sealed record ProcessInfo(
     SignatureVerdict Signature)
 {
     /// <summary>
+    /// UTC creation timestamp used with <see cref="Pid"/> as the stable process identity. Null means
+    /// Windows did not expose enough evidence for a safe cross-snapshot join.
+    /// </summary>
+    public long? StartTimestampUtcTicks { get; init; }
+
+    /// <summary>
     /// A running process whose on-disk image is unsigned or untrusted, worth a look.
     /// Processes with no resolvable image (protected/system) are not flagged.
     /// </summary>

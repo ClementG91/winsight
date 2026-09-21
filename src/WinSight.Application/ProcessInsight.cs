@@ -81,10 +81,9 @@ public sealed record ProcessInsightCoverage(
 /// when the snapshots disagree — is exercised by tests instead of by whatever happens to be running.
 ///
 /// <b>The snapshots are not atomic.</b> Processes, modules and connections are three separate scans
-/// taken seconds apart, so they disagree routinely: a module can name a pid that has since exited,
-/// and a process can appear that had no modules read. Neither is an error. The join is built on what
-/// is consistent and never throws on the rest — a drill-down that fails because a process exited
-/// mid-scan would fail exactly when a short-lived process is the thing being investigated.
+/// taken seconds apart, so they disagree routinely and Windows may recycle a PID between them. Rows
+/// are joined only when PID and process creation time both match. Missing identity evidence excludes
+/// the row rather than attributing it to whichever process currently owns the same number.
 /// </remarks>
 public static class ProcessInsightBuilder
 {
@@ -108,7 +107,10 @@ public static class ProcessInsightBuilder
         ArgumentNullException.ThrowIfNull(modules);
         ArgumentNullException.ThrowIfNull(connections);
 
-        var process = processes.FirstOrDefault(candidate => candidate.Pid == pid);
+        var process = processes
+            .Where(candidate => candidate.Pid == pid)
+            .OrderByDescending(candidate => candidate.StartTimestampUtcTicks ?? long.MinValue)
+            .FirstOrDefault();
         if (process is null)
         {
             return null;
@@ -117,9 +119,9 @@ public static class ProcessInsightBuilder
         return new ProcessInsight(
             process,
             FindParent(process, processes),
-            FindChildren(pid, processes),
-            RankModules(pid, modules),
-            RankConnections(pid, connections));
+            FindChildren(process, processes),
+            RankModules(process, modules),
+            RankConnections(process, connections));
     }
 
     /// <summary>
@@ -131,32 +133,66 @@ public static class ProcessInsightBuilder
     /// built from an unguarded lookup recurses forever, and a lineage line says a process launched
     /// itself.
     /// </remarks>
-    private static ProcessInfo? FindParent(ProcessInfo process, IReadOnlyList<ProcessInfo> processes) =>
-        process.ParentPid == process.Pid
-            ? null
-            : processes.FirstOrDefault(candidate => candidate.Pid == process.ParentPid);
+    private static ProcessInfo? FindParent(ProcessInfo process, IReadOnlyList<ProcessInfo> processes)
+    {
+        if (process.ParentPid == process.Pid || process.StartTimestampUtcTicks is not { } childStart)
+        {
+            return null;
+        }
 
-    private static ProcessInfo[] FindChildren(int pid, IReadOnlyList<ProcessInfo> processes) =>
-        processes
-            .Where(candidate => candidate.ParentPid == pid && candidate.Pid != pid)
+        return processes
+            .Where(candidate =>
+                candidate.Pid == process.ParentPid
+                && candidate.StartTimestampUtcTicks is { } parentStart
+                && parentStart <= childStart)
+            .OrderByDescending(candidate => candidate.StartTimestampUtcTicks)
+            .FirstOrDefault();
+    }
+
+    private static ProcessInfo[] FindChildren(
+        ProcessInfo process,
+        IReadOnlyList<ProcessInfo> processes) =>
+        process.StartTimestampUtcTicks is not { } parentStart
+            ? []
+            : processes
+            .Where(candidate =>
+                candidate.ParentPid == process.Pid
+                && candidate.Pid != process.Pid
+                && candidate.StartTimestampUtcTicks is { } childStart
+                && childStart >= parentStart)
             .OrderBy(candidate => candidate.Pid)
             .ToArray();
 
     /// <summary>Unsigned first, then by name so two runs of one snapshot render identically.</summary>
-    private static LoadedModule[] RankModules(int pid, IReadOnlyList<LoadedModule> modules) =>
+    private static LoadedModule[] RankModules(
+        ProcessInfo process,
+        IReadOnlyList<LoadedModule> modules) =>
         modules
-            .Where(module => module.Pid == pid)
+            .Where(module =>
+                module.Pid == process.Pid
+                && StableIdentityMatches(
+                    process.StartTimestampUtcTicks,
+                    module.ProcessStartTimestampUtcTicks))
             .OrderByDescending(module => module.Unsigned)
             .ThenBy(module => module.ModuleName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(module => module.ModuleName, StringComparer.Ordinal)
             .ToArray();
 
     /// <summary>Live external sockets first: they are why this view gets opened.</summary>
-    private static Connection[] RankConnections(int pid, IReadOnlyList<Connection> connections) =>
+    private static Connection[] RankConnections(
+        ProcessInfo process,
+        IReadOnlyList<Connection> connections) =>
         connections
-            .Where(connection => connection.Pid == pid)
+            .Where(connection =>
+                connection.Pid == process.Pid
+                && StableIdentityMatches(
+                    process.StartTimestampUtcTicks,
+                    connection.ProcessStartTimestampUtcTicks))
             .OrderByDescending(ProcessInsight.IsEstablishedExternal)
             .ThenBy(connection => connection.Remote, StringComparer.OrdinalIgnoreCase)
             .ThenBy(connection => connection.Remote, StringComparer.Ordinal)
             .ToArray();
+
+    private static bool StableIdentityMatches(long? left, long? right) =>
+        left is not null && left == right;
 }
