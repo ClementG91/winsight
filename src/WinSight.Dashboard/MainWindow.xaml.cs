@@ -382,6 +382,11 @@ public partial class MainWindow : Window, IDisposable
             _avWatch.Health(enabled: _cameraMicStarted),
             RansomwareHost.Health(ransomware, requestedWhenOff: 0),
         };
+        var attributionHealth = _attribution?.Health;
+        if (attributionHealth is not null)
+        {
+            monitors.Add(AttributionNote.Monitor(attributionHealth));
+        }
 
         var health = new RealTimeProtectionHealth(monitors);
         ProtectionHealthDot.Fill = new System.Windows.Media.SolidColorBrush(
@@ -401,6 +406,10 @@ public partial class MainWindow : Window, IDisposable
         if (GuardianHost.DiagnosticsLine(guardianDiagnostics) is { } guardianLine)
         {
             tooltip.Add(guardianLine);
+        }
+        if (attributionHealth is not null)
+        {
+            tooltip.Add(AttributionNote.DiagnosticsLine(attributionHealth));
         }
         if (AlertJournal.WriteFailures > 0)
         {
@@ -1267,6 +1276,9 @@ public partial class MainWindow : Window, IDisposable
         WindowState = WindowState.Normal;
         Activate();
     }
+
+    /// <summary>Raises the dashboard from the tray or behind other windows, as a second launch asks.</summary>
+    internal void BringToFront() => ShowFromTray();
 
     /// <summary>
     /// Opens the dashboard on the detection whose balloon was just clicked.

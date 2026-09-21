@@ -5,6 +5,8 @@ namespace WinSight.Dashboard;
 
 public partial class App : System.Windows.Application
 {
+    private DashboardSingleInstance? _instance;
+
     private void Application_Startup(object sender, StartupEventArgs e)
     {
         // First thing: without this a crash leaves no trace at all — no message, no log — which
@@ -35,8 +37,23 @@ public partial class App : System.Windows.Application
             new SignatureWindow(startup.SignaturePath, WinSight.Application.Adapters.ReportSignature).Show();
             return;
         }
+        if (startup.StartMonitors)
+        {
+            // One interactive dashboard per user and session: a second one duplicated every monitor,
+            // alert window and journal entry. A second launch raises the first and ends here.
+            _instance = DashboardSingleInstance.Acquire();
+            if (!_instance.IsPrimary)
+            {
+                _instance.Dispose();
+                _instance = null;
+                Shutdown(0);
+                return;
+            }
+            Exit += (_, _) => _instance?.Dispose();
+        }
         var window = new MainWindow(startup.StartMonitors);
         window.Show();
+        _instance?.OnActivationRequested(() => window.Dispatcher.BeginInvoke(window.BringToFront));
 
         // Exercises construction, XAML loading, bindings, layout and tray setup in CI
         // without requiring an interactive test driver. A startup crash is a failed
