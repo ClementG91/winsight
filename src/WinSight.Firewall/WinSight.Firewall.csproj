@@ -3,6 +3,7 @@
     <RootNamespace>WinSight.Firewall</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="WinSight.Firewall.Tests" />
     <PackageReference Include="System.Management" />
     <ProjectReference Include="..\WinSight.Core\WinSight.Core.csproj" />
   </ItemGroup>
