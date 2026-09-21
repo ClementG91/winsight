@@ -527,6 +527,7 @@ public static partial class Adapters
         // volume is spelled \Device\HarddiskVolumeN — the failure being total and silent, since a
         // startup-folder write would simply never be recorded and the watch would look quiet.
         var scope = new AttributionScope();
+        var watcher = new WriteAttributionWatcher(scope.ShouldRecord);
 
         Console.WriteLine("Watching registry writes and startup-folder writes (ETW), Ctrl+C to stop.");
         var attributed = 0;
@@ -535,7 +536,7 @@ public static partial class Adapters
         return RunEtwWatch(
             () =>
             {
-                new WriteAttributionWatcher(scope.ShouldRecord).Watch(
+                watcher.Watch(
                     observation =>
                     {
                         attributed++;
@@ -569,7 +570,8 @@ public static partial class Adapters
                     $"attributed {attributed}, unknown process {unknownProcess}, unresolved target {unresolvedTarget}");
             },
             Console.Error,
-            cts.Token);
+            cts.Token,
+            () => watcher.SensorHealth);
     }
 
     /// <summary>Runs the live DNS (ETW) watcher, printing queries until Ctrl+C.</summary>
@@ -581,14 +583,16 @@ public static partial class Adapters
             e.Cancel = true;
             cts.Cancel();
         };
+        var watcher = new DnsEtwWatcher();
         Console.WriteLine("Watching DNS queries (ETW), Ctrl+C to stop.");
         return RunEtwWatch(
-            () => new DnsEtwWatcher().Watch(
+            () => watcher.Watch(
                 e => Console.WriteLine(
                     $"  {e.Type,-5} {UntrustedDisplayText.Neutralize(e.Name)}  (pid {e.ProcessId})"),
                 cts.Token),
             Console.Error,
-            cts.Token);
+            cts.Token,
+            () => watcher.SensorHealth);
     }
 
     /// <summary>
@@ -598,7 +602,8 @@ public static partial class Adapters
     internal static int RunEtwWatch(
         Action watch,
         TextWriter error,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<SensorHealthSnapshot>? sensorHealth = null)
     {
         ArgumentNullException.ThrowIfNull(watch);
         ArgumentNullException.ThrowIfNull(error);
@@ -608,7 +613,7 @@ public static partial class Adapters
             watch();
             if (cancellationToken.IsCancellationRequested)
             {
-                return 0;
+                return CompleteEtwWatch(error, sensorHealth);
             }
 
             // A live ETW pump is expected to block until the caller cancels it. A spontaneous
@@ -621,7 +626,7 @@ public static partial class Adapters
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return 0;
+            return CompleteEtwWatch(error, sensorHealth);
         }
         catch (Exception ex) when (!EtwFailure.IsCatastrophic(ex))
         {
@@ -629,6 +634,27 @@ public static partial class Adapters
             error.WriteLine($"[{EtwFailure.Token(failure)}] Live ETW observation is unavailable.");
             return CliContract.ObservationFailed;
         }
+    }
+
+    private static int CompleteEtwWatch(
+        TextWriter error,
+        Func<SensorHealthSnapshot>? sensorHealth)
+    {
+        if (sensorHealth is null)
+        {
+            return CliContract.Clean;
+        }
+
+        var health = sensorHealth();
+        if (!health.CoverageIncomplete)
+        {
+            return CliContract.Clean;
+        }
+
+        error.WriteLine(
+            $"[SENSOR_COVERAGE_INCOMPLETE] observed={health.ObservedEvents} "
+            + $"lost={health.LostEvents} deliveryFailures={health.DeliveryFailures}");
+        return CliContract.ObservationIncomplete;
     }
 
     /// <summary>

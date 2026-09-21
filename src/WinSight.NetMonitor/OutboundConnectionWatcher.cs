@@ -2,6 +2,8 @@ using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Parsers.Kernel;
 using Microsoft.Diagnostics.Tracing.Session;
 
+using WinSight.Core;
+
 namespace WinSight.NetMonitor;
 
 /// <summary>An outbound connection attempt observed via ETW, already attributed to its program.</summary>
@@ -51,8 +53,12 @@ public interface IOutboundConnectionWatcher
         CancellationToken token);
 }
 
-public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher
+public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher, ISensorHealthSource
 {
+    private readonly EtwSensorHealthTracker _health = new("Outbound ETW");
+
+    public SensorHealthSnapshot SensorHealth => _health.SensorHealth;
+
     /// <summary>
     /// Opens the trace session and invokes <paramref name="onEvent"/> for each attributed outbound
     /// connection until cancelled. Blocking; run on its own thread. Throws
@@ -78,11 +84,47 @@ public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher
         ArgumentNullException.ThrowIfNull(onEvent);
         token.ThrowIfCancellationRequested();
 
+        TraceEventSession? session = null;
+        try
+        {
+            // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
+            // silently replaces a concurrent WinSight observer. Proven dead WinSight sessions are
+            // conservatively reclaimed before creation.
+            session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Outbound);
+            _health.Running(session);
+            WatchSession(session, onEvent, onUnattributed, token);
+            if (token.IsCancellationRequested)
+            {
+                _health.Stopped();
+            }
+            else
+            {
+                _health.FailedUnexpectedReturn();
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _health.Stopped();
+            throw;
+        }
+        catch (Exception ex) when (!EtwFailure.IsCatastrophic(ex))
+        {
+            _health.Failed(ex);
+            throw;
+        }
+        finally
+        {
+            session?.Dispose();
+        }
+    }
+
+    private void WatchSession(
+        TraceEventSession session,
+        Action<OutboundConnectionEvent> onEvent,
+        Action<int, string?>? onUnattributed,
+        CancellationToken token)
+    {
         var index = new ProcessPathIndex();
-        // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
-        // silently replaces a concurrent WinSight observer. Proven dead WinSight sessions are
-        // conservatively reclaimed before creation.
-        using var session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Outbound);
         using var stop = token.Register(() =>
         {
             try
@@ -135,12 +177,30 @@ public sealed class OutboundConnectionWatcher : IOutboundConnectionWatcher
             // could name is a fact about the machine, not an absence of one.
             if (index.Resolve(connect.ProcessID) is { } path)
             {
-                onEvent(new OutboundConnectionEvent(
-                    connect.ProcessID, path, connect.daddr.ToString(), connect.dport));
+                _health.Observed();
+                try
+                {
+                    onEvent(new OutboundConnectionEvent(
+                        connect.ProcessID, path, connect.daddr.ToString(), connect.dport));
+                }
+                catch
+                {
+                    _health.DeliveryFailed();
+                    throw;
+                }
             }
             else
             {
-                onUnattributed?.Invoke(connect.ProcessID, index.ResolveImage(connect.ProcessID)?.Value);
+                _health.Observed();
+                try
+                {
+                    onUnattributed?.Invoke(connect.ProcessID, index.ResolveImage(connect.ProcessID)?.Value);
+                }
+                catch
+                {
+                    _health.DeliveryFailed();
+                    throw;
+                }
             }
         };
 

@@ -53,6 +53,8 @@ public static class AttributionNote
         { Failure: EtwFailureCode.Unexpected } => "attribution unavailable (ETW failure)",
         // Started, then stopped or faulted. Distinct from never having started: something went wrong.
         { Running: false } => "attribution stopped",
+        { EventsLost: > 0 } lost =>
+            $"attribution coverage incomplete ({lost.EventsLost} ETW event(s) lost)",
         // The honest "unknown": watching, and nothing observed accounts for this target. The writer
         // may have acted before the session opened, or through a path the filter does not record.
         _ => "attribution watching, no matching write seen",
@@ -80,5 +82,43 @@ public static class AttributionNote
             ? $"{author.ExecutablePath} (pid {author.ProcessId})"
             : $"{author.ExecutablePath} (pid {author.ProcessId}, full path unknown)";
         return $"{line} — written by {by}";
+    }
+
+    /// <summary>Maps attribution's provider-specific counters into the shared protection badge.</summary>
+    public static MonitorHealth Monitor(AttributionHealth health)
+    {
+        ArgumentNullException.ThrowIfNull(health);
+        return health.Running
+            ? MonitorHealth.For(
+                "Attribution",
+                enabled: true,
+                armed: 1,
+                requested: 1,
+                lostObservations: health.CoverageIncomplete)
+            : MonitorHealth.For("Attribution", enabled: true, armed: 0, requested: 1);
+    }
+
+    /// <summary>Bounded culture-independent detail for the protection tooltip.</summary>
+    public static string DiagnosticsLine(AttributionHealth health)
+    {
+        ArgumentNullException.ThrowIfNull(health);
+        var parts = new List<string>
+        {
+            $"{health.Attributed} attributed",
+            $"{health.Unattributed} unattributed",
+        };
+        if (health.EventsLost > 0)
+        {
+            parts.Add($"{health.EventsLost} ETW event(s) lost");
+        }
+        if (health.Sensor is { DeliveryFailures: > 0 } sensor)
+        {
+            parts.Add($"{sensor.DeliveryFailures} delivery failure(s)");
+        }
+        if (health.Failure != EtwFailureCode.None)
+        {
+            parts.Add(EtwFailure.Token(health.Failure));
+        }
+        return "Attribution: " + string.Join(", ", parts);
     }
 }

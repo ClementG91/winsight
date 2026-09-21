@@ -1,6 +1,7 @@
 using Microsoft.Diagnostics.Tracing.Parsers;
 using Microsoft.Diagnostics.Tracing.Session;
 
+using WinSight.Core;
 using WinSight.NetMonitor;
 
 namespace WinSight.Attribution;
@@ -28,9 +29,13 @@ namespace WinSight.Attribution;
 /// so nothing is recorded by accident. Registry writes are not filtered: they are orders of
 /// magnitude rarer and are where persistence actually lives.
 /// </remarks>
-public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = null) : IWriteWatcher
+public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = null) :
+    IWriteWatcher, ISensorHealthSource
 {
     private readonly Func<string, bool> _fileFilter = fileFilter ?? (static _ => false);
+    private readonly EtwSensorHealthTracker _health = new("Write attribution ETW");
+
+    public SensorHealthSnapshot SensorHealth => _health.SensorHealth;
 
     /// <summary>
     /// Opens the trace session and invokes <paramref name="onWrite"/> for each attributed write
@@ -56,13 +61,48 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
         ArgumentNullException.ThrowIfNull(onWrite);
         token.ThrowIfCancellationRequested();
 
+        TraceEventSession? session = null;
+        try
+        {
+            // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
+            // silently replaces another live WinSight owner.
+            session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Attribution);
+            _health.Running(session);
+            WatchSession(session, onWrite, onUnattributed, token);
+            if (token.IsCancellationRequested)
+            {
+                _health.Stopped();
+            }
+            else
+            {
+                _health.FailedUnexpectedReturn();
+            }
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            _health.Stopped();
+            throw;
+        }
+        catch (Exception ex) when (!EtwFailure.IsCatastrophic(ex))
+        {
+            _health.Failed(ex);
+            throw;
+        }
+        finally
+        {
+            session?.Dispose();
+        }
+    }
+
+    private void WatchSession(
+        TraceEventSession session,
+        Action<WriteObservation> onWrite,
+        Action<UnattributedWrite>? onUnattributed,
+        CancellationToken token)
+    {
         var processes = new ProcessPathIndex();
         var normalizer = new KernelPathNormalizer(
             VolumeMap.Current(), CurrentUserSid(), CurrentControlSet());
-
-        // A private, collision-safe name, so WinSight never takes the shared NT Kernel Logger or
-        // silently replaces another live WinSight owner.
-        using var session = EtwSessionLifecycle.OpenNative(EtwSessionProfile.Attribution);
         using var stop = token.Register(() =>
         {
             try
@@ -109,12 +149,40 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
             processes.Prune(process.TimeStamp.ToUniversalTime());
         };
 
+        void PublishMiss(UnattributedWrite miss)
+        {
+            _health.Observed();
+            try
+            {
+                onUnattributed?.Invoke(miss);
+            }
+            catch
+            {
+                _health.DeliveryFailed();
+                throw;
+            }
+        }
+
+        void PublishWrite(WriteObservation observation)
+        {
+            _health.Observed();
+            try
+            {
+                onWrite(observation);
+            }
+            catch
+            {
+                _health.DeliveryFailed();
+                throw;
+            }
+        }
+
         void Record(int processId, DateTime timeStamp, string? target)
         {
             var whenUtc = timeStamp.ToUniversalTime();
             if (target is null)
             {
-                onUnattributed?.Invoke(
+                PublishMiss(
                     new UnattributedWrite(whenUtc, processId, null, UnattributedReason.UnresolvedTarget));
                 return;
             }
@@ -124,12 +192,12 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
             // the blind spot is visible rather than silent.
             if (processes.ResolveImage(processId) is { } image)
             {
-                onWrite(new WriteObservation(
+                PublishWrite(new WriteObservation(
                     whenUtc, processId, image.Value, target, PathIsExact: image.IsFullPath));
             }
             else
             {
-                onUnattributed?.Invoke(
+                PublishMiss(
                     new UnattributedWrite(whenUtc, processId, target, UnattributedReason.UnknownProcess));
             }
         }
@@ -153,14 +221,14 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
             var kernelKey = keys.Resolve(e.KeyHandle, e.KeyName);
             if (kernelKey is null)
             {
-                onUnattributed?.Invoke(new UnattributedWrite(
+                PublishMiss(new UnattributedWrite(
                     e.TimeStamp.ToUniversalTime(), e.ProcessID, null, UnattributedReason.UnresolvedTarget));
                 return;
             }
             var target = normalizer.NormalizeRegistryKey(kernelKey);
             if (target is null)
             {
-                onUnattributed?.Invoke(new UnattributedWrite(
+                PublishMiss(new UnattributedWrite(
                     e.TimeStamp.ToUniversalTime(), e.ProcessID, kernelKey, UnattributedReason.UnresolvedTarget));
                 return;
             }

@@ -1,5 +1,6 @@
 using System.Security.Principal;
 
+using WinSight.Core;
 using WinSight.NetMonitor;
 
 namespace WinSight.Attribution;
@@ -42,6 +43,16 @@ public sealed record AttributionHealth(
     /// six-argument constructor and six-value <c>Deconstruct</c> remain binary/source compatible.
     /// </summary>
     public EtwFailureCode Failure { get; init; } = EtwFailureCode.None;
+
+    /// <summary>Provider-neutral ETW lifecycle/loss accounting when the watcher supports it.</summary>
+    public SensorHealthSnapshot? Sensor { get; init; }
+
+    /// <summary>ETW events the native session reports losing under load.</summary>
+    public long EventsLost => Sensor?.LostEvents ?? 0;
+
+    /// <summary>True when running attribution has any measured blind spot.</summary>
+    public bool CoverageIncomplete =>
+        Unattributed > 0 || Sensor?.CoverageIncomplete == true;
 
     /// <summary>Every write seen but not attributed, for a one-line "how blind am I?" answer.</summary>
     public long Unattributed => UnknownProcess + UnannouncedKey + UntranslatablePath;
@@ -116,6 +127,7 @@ public sealed class AttributionHost : IDisposable
                     _refused)
                 {
                     Failure = _failure,
+                    Sensor = (_watcher as ISensorHealthSource)?.SensorHealth,
                 };
             }
         }
