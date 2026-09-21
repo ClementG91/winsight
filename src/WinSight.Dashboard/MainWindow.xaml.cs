@@ -139,7 +139,28 @@ public partial class MainWindow : Window, IDisposable
         if (startMonitors)
         {
             Loaded += (_, _) => StartGuardian();
+            CrashReporter.Recovered += OnRecoveredFromUiError;
         }
+    }
+
+    /// <summary>
+    /// Says that a failing UI handler was absorbed and monitoring continues. The notice is the point:
+    /// absorbing silently would trade one invisible failure for another.
+    /// </summary>
+    private void OnRecoveredFromUiError(string? report)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+        _balloonAlert = null; // nothing to navigate to
+        _trayIcon.ShowBalloonTip(
+            8000,
+            Text["RecoveredBalloonTitle"],
+            report is null
+                ? Text["RecoveredBalloonBodyNoReport"]
+                : Text.Format("RecoveredBalloonBody", CrashReporter.LogDirectory),
+            Forms.ToolTipIcon.Warning);
     }
 
     /// <summary>
@@ -1396,6 +1417,7 @@ public partial class MainWindow : Window, IDisposable
             return;
         }
 
+        CrashReporter.Recovered -= OnRecoveredFromUiError;
         _scanCancellation?.Dispose();
         _guardianBalloonTimer.Stop();
         _guardianBalloonTimer.Tick -= FlushGuardianBalloon;

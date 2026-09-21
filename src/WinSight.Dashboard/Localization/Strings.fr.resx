@@ -95,6 +95,9 @@
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
   <data name="TrayRetryGuardian" xml:space="preserve"><value>Relancer Guardian</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, sécurité locale</value></data>
+  <data name="RecoveredBalloonTitle" xml:space="preserve"><value>WinSight a surmonté une erreur</value></data>
+  <data name="RecoveredBalloonBody" xml:space="preserve"><value>Une action de la fenêtre a échoué ; la surveillance en temps réel continue. Un rapport a été enregistré dans {0}.</value></data>
+  <data name="RecoveredBalloonBodyNoReport" xml:space="preserve"><value>Une action de la fenêtre a échoué ; la surveillance en temps réel continue. Aucun rapport n’a pu être enregistré.</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight continue dans la zone de notification.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Analyse terminée.</value></data>
   <data name="ScanCancelledSummary" xml:space="preserve"><value>Analyse arrêtée proprement entre deux étapes.</value></data>

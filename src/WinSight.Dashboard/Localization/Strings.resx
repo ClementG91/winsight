@@ -95,6 +95,9 @@
   <data name="TrayExit" xml:space="preserve"><value>Exit</value></data>
   <data name="TrayRetryGuardian" xml:space="preserve"><value>Retry Guardian</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, local security</value></data>
+  <data name="RecoveredBalloonTitle" xml:space="preserve"><value>WinSight recovered from an error</value></data>
+  <data name="RecoveredBalloonBody" xml:space="preserve"><value>An action in the window failed; real-time monitoring continues. A report was saved in {0}.</value></data>
+  <data name="RecoveredBalloonBodyNoReport" xml:space="preserve"><value>An action in the window failed; real-time monitoring continues. No report could be saved.</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight is still running in the notification area.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Analysis complete.</value></data>
   <data name="ScanCancelledSummary" xml:space="preserve"><value>Analysis stopped safely between two steps.</value></data>

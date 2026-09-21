@@ -54,6 +54,13 @@ public partial class App : System.Windows.Application
         var window = new MainWindow(startup.StartMonitors);
         window.Show();
         _instance?.OnActivationRequested(() => window.Dispatcher.BeginInvoke(window.BringToFront));
+        if (startup.StartMonitors)
+        {
+            // From here on the process hosts real-time monitoring, so a failing UI handler is
+            // absorbed rather than allowed to switch it all off. Not before: a dashboard that fails
+            // while starting is not worth keeping half-built.
+            CrashReporter.EnableRecovery();
+        }
 
         // Exercises construction, XAML loading, bindings, layout and tray setup in CI
         // without requiring an interactive test driver. A startup crash is a failed
