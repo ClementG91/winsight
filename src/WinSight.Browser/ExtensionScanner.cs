@@ -31,13 +31,25 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var roaming = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        // Pre-release channels install side by side with their own user data, and are where a
+        // developer or tester is most likely to have loaded something unreviewed; they were not read.
         var browsers = new (string Name, string Base)[]
         {
             ("Chrome", System.IO.Path.Combine(local, "Google", "Chrome", "User Data")),
+            ("Chrome Beta", System.IO.Path.Combine(local, "Google", "Chrome Beta", "User Data")),
+            ("Chrome Dev", System.IO.Path.Combine(local, "Google", "Chrome Dev", "User Data")),
+            ("Chrome Canary", System.IO.Path.Combine(local, "Google", "Chrome SxS", "User Data")),
+            ("Chromium", System.IO.Path.Combine(local, "Chromium", "User Data")),
             ("Edge", System.IO.Path.Combine(local, "Microsoft", "Edge", "User Data")),
+            ("Edge Beta", System.IO.Path.Combine(local, "Microsoft", "Edge Beta", "User Data")),
+            ("Edge Dev", System.IO.Path.Combine(local, "Microsoft", "Edge Dev", "User Data")),
+            ("Edge Canary", System.IO.Path.Combine(local, "Microsoft", "Edge SxS", "User Data")),
             ("Brave", System.IO.Path.Combine(local, "BraveSoftware", "Brave-Browser", "User Data")),
+            ("Brave Beta", System.IO.Path.Combine(local, "BraveSoftware", "Brave-Browser-Beta", "User Data")),
+            ("Brave Nightly", System.IO.Path.Combine(local, "BraveSoftware", "Brave-Browser-Nightly", "User Data")),
             ("Vivaldi", System.IO.Path.Combine(local, "Vivaldi", "User Data")),
             ("Opera", System.IO.Path.Combine(roaming, "Opera Software", "Opera Stable")),
+            ("Opera GX", System.IO.Path.Combine(roaming, "Opera Software", "Opera GX Stable")),
         };
 
         var roots = new List<Root>();
@@ -173,8 +185,14 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
             var version = DisplayString(root, "version");
             var permissions = ReadStringArray(root, "permissions")
                 .Concat(ReadStringArray(root, "optional_permissions")).Distinct().ToList();
+            // Content-script match patterns are host access too: an extension whose content script
+            // matches <all_urls> reads and rewrites every page without any host_permissions entry,
+            // and was graded as if it could touch nothing.
             var hosts = ReadStringArray(root, "host_permissions")
-                .Concat(ReadStringArray(root, "optional_host_permissions")).Distinct().ToList();
+                .Concat(ReadStringArray(root, "optional_host_permissions"))
+                .Concat(ReadContentScriptMatches(root))
+                .Distinct()
+                .ToList();
 
             return new BrowserExtension(browser, id, name, version, permissions, hosts, versionDir);
         }
@@ -260,6 +278,32 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         return value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : throw new JsonException("An extension string field has an invalid type.");
+    }
+
+    /// <summary>
+    /// The <c>matches</c> patterns of every entry in <c>content_scripts</c>. A malformed section is
+    /// a malformed manifest, as for the permission arrays.
+    /// </summary>
+    private static List<string> ReadContentScriptMatches(JsonElement manifest)
+    {
+        var matches = new List<string>();
+        if (!manifest.TryGetProperty("content_scripts", out var scripts))
+        {
+            return matches;
+        }
+        if (scripts.ValueKind != JsonValueKind.Array)
+        {
+            throw new JsonException("An extension's content_scripts field is not an array.");
+        }
+        foreach (var script in scripts.EnumerateArray())
+        {
+            if (script.ValueKind != JsonValueKind.Object)
+            {
+                throw new JsonException("An extension content script is not an object.");
+            }
+            matches.AddRange(ReadStringArray(script, "matches"));
+        }
+        return matches;
     }
 
     private static List<string> ReadStringArray(JsonElement obj, string property)
