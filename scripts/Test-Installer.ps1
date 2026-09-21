@@ -14,6 +14,9 @@ param(
     [ValidateSet("english", "french", "spanish")]
     [string]$InstallerLanguage = "english",
 
+    [ValidateSet("CurrentUser", "AllUsers")]
+    [string]$InstallScope = "CurrentUser",
+
     [switch]$RequireSigned,
 
     [string]$ExpectedPublisher
@@ -81,12 +84,63 @@ $tempRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $installDirectory = Join-Path $tempRoot "winsight-installer-test-$Architecture-$([Guid]::NewGuid().ToString('N'))"
 $uninstaller = Join-Path $installDirectory "unins000.exe"
 
+# The Explorer "Check signature with WinSight" verb is per-user. A real install on the machine running
+# this test would own it already, so its command is remembered and put back afterwards rather than
+# destroyed by the test's uninstall.
+function Get-SignatureVerbCommand
+{
+    $hive = if ($InstallScope -eq "AllUsers") {
+        [Microsoft.Win32.RegistryHive]::LocalMachine
+    } else {
+        [Microsoft.Win32.RegistryHive]::CurrentUser
+    }
+    # Through the registry API: the '*' class key is a wildcard to the PowerShell provider, and
+    # StrictMode refuses a property read on the null an absent key returns.
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $key = $base.OpenSubKey('Software\Classes\*\shell\WinSight.Signature\command')
+        if ($null -eq $key) { return $null }
+        try { return $key.GetValue('') } finally { $key.Dispose() }
+    } finally {
+        $base.Dispose()
+    }
+}
+function Set-SignatureVerbCommand
+{
+    param([Parameter(Mandatory)][string]$Command)
+    $hive = if ($InstallScope -eq "AllUsers") {
+        [Microsoft.Win32.RegistryHive]::LocalMachine
+    } else {
+        [Microsoft.Win32.RegistryHive]::CurrentUser
+    }
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hive, [Microsoft.Win32.RegistryView]::Registry64)
+    try {
+        $verb = $base.CreateSubKey('Software\Classes\*\shell\WinSight.Signature', $true)
+        try {
+            $verb.SetValue('', 'Check signature with WinSight')
+            if ($Command -match '^"(?<exe>[^"]+)"')
+            {
+                $verb.SetValue('Icon', "`"$($Matches.exe)`",0")
+            }
+            $commandKey = $verb.CreateSubKey('command', $true)
+            try { $commandKey.SetValue('', $Command) } finally { $commandKey.Dispose() }
+        } finally {
+            $verb.Dispose()
+        }
+    } finally {
+        $base.Dispose()
+    }
+}
+$previousSignatureVerb = Get-SignatureVerbCommand
+
 try
 {
+    $scopeArgument = if ($InstallScope -eq "AllUsers") { "/ALLUSERS" } else { "/CURRENTUSER" }
     $install = Start-Process -FilePath $installer -ArgumentList @(
         "/VERYSILENT",
         "/SUPPRESSMSGBOXES",
         "/NORESTART",
+        $scopeArgument,
         "/LANG=$InstallerLanguage",
         "/DIR=`"$installDirectory`""
     ) -Wait -PassThru
@@ -147,6 +201,14 @@ try
             throw "Installed brand asset is missing: $assetPath"
         }
     }
+
+    # Setup's default tasks register the verb; it must point at this installation's dashboard.
+    $registeredVerb = Get-SignatureVerbCommand
+    $expectedVerb = "`"$dashboard`" --signature `"%1`""
+    if ($registeredVerb -ne $expectedVerb)
+    {
+        throw "Explorer signature verb was not registered for this installation (found '$registeredVerb')."
+    }
 }
 finally
 {
@@ -162,6 +224,17 @@ finally
         if ($uninstall.ExitCode -ne 0)
         {
             throw "Uninstaller failed with exit code $($uninstall.ExitCode)."
+        }
+
+        # Uninstall must not leave a context-menu entry pointing at a deleted executable.
+        $leftoverVerb = Get-SignatureVerbCommand
+        if ($null -ne $previousSignatureVerb)
+        {
+            Set-SignatureVerbCommand -Command $previousSignatureVerb
+        }
+        if ($null -ne $leftoverVerb)
+        {
+            throw "Uninstall left the Explorer signature verb behind: '$leftoverVerb'."
         }
     }
 
@@ -200,4 +273,4 @@ finally
     }
 }
 
-Write-Output "$Architecture installer lifecycle and en/fr/es dashboard smoke tests passed."
+Write-Output "$Architecture $InstallScope installer lifecycle and en/fr/es dashboard smoke tests passed."
