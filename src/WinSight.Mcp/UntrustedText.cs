@@ -76,9 +76,9 @@ public static class UntrustedText
                 '\n' => @"\n",
                 '\r' => @"\r",
                 '\t' => @"\t",
-                <= char.MaxValue when MustEscape((char)rune.Value) =>
-                    @"\u" + rune.Value.ToString(
-                        "x4", System.Globalization.CultureInfo.InvariantCulture),
+                _ when MustEscape(rune) => rune.IsBmp
+                    ? @"\u" + rune.Value.ToString("x4", System.Globalization.CultureInfo.InvariantCulture)
+                    : @"\U" + rune.Value.ToString("x8", System.Globalization.CultureInfo.InvariantCulture),
                 _ => rune.ToString(),
             };
             if (builder.Length + escaped.Length > MaxValueLength)
@@ -99,16 +99,45 @@ public static class UntrustedText
     /// Characters that must never survive into the model's context as themselves.
     /// </summary>
     /// <remarks>
-    /// Control characters, the bidirectional and zero-width formatting marks that let a name render
-    /// as something other than what it is, and the delimiter characters themselves - so a value
-    /// cannot forge a boundary and appear to close the untrusted region it sits in.
+    /// Decided by Unicode category rather than by a list, across every plane: control characters,
+    /// every format character (bidirectional and zero-width marks, soft hyphen, word joiners, and
+    /// the invisible TAG characters U+E0000-U+E007F that a model reads as text while a person sees
+    /// nothing), line and paragraph separators, and private-use code points. Also escaped: the
+    /// invisible characters Unicode files under other categories (variation selectors, the
+    /// combining grapheme joiner, Hangul fillers), the no-break space, and the delimiter characters
+    /// and their look-alikes, so a value cannot forge a boundary and appear to close the untrusted
+    /// region it sits in.
+    ///
+    /// The list this replaced covered fifteen BMP characters. U+2028 and U+2029 - which break a line
+    /// as surely as <c>\n</c> - passed through, and so did every character outside the BMP, which is
+    /// where the TAG block lives. The display escaper beside the CLI already worked by category; the
+    /// surface facing a language model had the weaker of the two.
     /// </remarks>
-    private static bool MustEscape(char character) =>
-        char.IsControl(character)
-        || character is '\u200b' or '\u200c' or '\u200d' or '\u200e' or '\u200f'
-            or '\u202a' or '\u202b' or '\u202c' or '\u202d' or '\u202e'
-            or '\u2066' or '\u2067' or '\u2068' or '\u2069' or '\ufeff'
-            or '\u00a0' or '\u2039' or '\u203a';
+    private static bool MustEscape(Rune rune)
+    {
+        var category = Rune.GetUnicodeCategory(rune);
+        if (category is System.Globalization.UnicodeCategory.Control
+            or System.Globalization.UnicodeCategory.Format
+            or System.Globalization.UnicodeCategory.LineSeparator
+            or System.Globalization.UnicodeCategory.ParagraphSeparator
+            or System.Globalization.UnicodeCategory.PrivateUse)
+        {
+            return true;
+        }
+        return rune.Value switch
+        {
+            // Invisible, but not Format: variation selectors, the combining grapheme joiner and the
+            // Hangul fillers render as nothing and are the usual padding for look-alike names.
+            >= 0xfe00 and <= 0xfe0f or >= 0xe0100 and <= 0xe01ef => true,
+            0x034f or 0x115f or 0x1160 or 0x3164 or 0xffa0 => true,
+            0x00a0 => true,
+            // The delimiters' own characters, and angle brackets a model could read as them.
+            0x2039 or 0x203a or 0x2329 or 0x232a or 0x27e8 or 0x27e9 or 0x3008 or 0x3009
+                or 0x276c or 0x276d or 0x276e or 0x276f or 0x2770 or 0x2771
+                or 0xfe64 or 0xfe65 or 0xff1c or 0xff1e => true,
+            _ => false,
+        };
+    }
 
     /// <summary>Neutralises a value and marks its boundaries.</summary>
     public static string Wrap(string? value) =>

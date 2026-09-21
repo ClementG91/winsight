@@ -44,7 +44,10 @@ public static class PersistenceMonitorPresenter
     {
         ArgumentNullException.ThrowIfNull(detection);
         var entry = detection.Entry;
-        var target = entry.ImagePath ?? entry.ExpectedImagePath ?? entry.Command;
+        // The executable, never the raw command: this line is journalled and served to MCP clients
+        // as prose, outside the sensitive-evidence gate that withholds command lines, and an entry
+        // with no resolvable image fell back to its whole command, arguments and payload included.
+        var target = entry.ImagePath ?? entry.ExpectedImagePath ?? Adapters.CommandHead(entry.Command);
         var line = $"{entry.Name} — {target} [{StatusLabel(entry.Status)}{AbuseSuffix(entry)}]";
         return AttributionNote.Describe(
             line, attribute?.Invoke(entry.Location, detection.FirstSeenUtc), health);
