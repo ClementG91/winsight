@@ -17,6 +17,7 @@ public sealed class McpScanService : IDisposable
 {
     private static readonly TimeSpan QueueTimeout = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan DefaultScanTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan JournalTimeout = TimeSpan.FromSeconds(15);
     private readonly SemaphoreSlim _scanGate = new(1, 1);
     private readonly TimeSpan _scanTimeout;
     private int _stalledScan;
@@ -51,6 +52,37 @@ public sealed class McpScanService : IDisposable
                     allowNetworkLookups: false,
                     cancellationToken: scanCancellation)],
             cancellationToken);
+
+    /// <summary>
+    /// Reads WinSight's own alert journal - history, not a scan of the machine.
+    /// </summary>
+    /// <remarks>
+    /// It does not queue behind the single-scan gate. The journal is a small local file whose read
+    /// competes with nothing a scan does, and behind the gate "what did WinSight flag while I was
+    /// away?" failed with "another scan is already running" for as long as any scan ran - the moment
+    /// it is most likely to be asked. It keeps a bound of its own.
+    /// </remarks>
+    public Task<IReadOnlyList<ToolReport>> ReadAlertsAsync(CancellationToken cancellationToken) =>
+        ReadJournalAsync(() => Adapters.Alerts(), cancellationToken);
+
+    internal static async Task<IReadOnlyList<ToolReport>> ReadJournalAsync(
+        Func<ToolReport> read,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(read);
+        cancellationToken.ThrowIfCancellationRequested();
+        try
+        {
+            var report = await Task.Run(read, CancellationToken.None)
+                .WaitAsync(JournalTimeout, cancellationToken)
+                .ConfigureAwait(false);
+            return [report];
+        }
+        catch (TimeoutException)
+        {
+            throw new McpException("WinSight's alert journal could not be read in time. Retry shortly.");
+        }
+    }
 
     /// <summary>
     /// Gathers the per-process drill-down under the same single-scan gate and timeout as a scanner.

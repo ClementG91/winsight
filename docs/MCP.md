@@ -135,9 +135,12 @@ are advisory context a model may compress or lose behind a long conversation, wh
 selected by the user at the moment they ask and puts the rule in the same turn as the request.
 
 `includeEvidence=true` is required for item-level results. Evidence is capped at
-200 items per report, user-profile paths are replaced with environment placeholders,
-and command/command-line fields are omitted. Only one scan runs at a time and a scan
-has a 90-second safety limit.
+200 items per report, user-profile paths are replaced with environment placeholders -
+as whole paths only, so another account's `C:\Users\name2` is never turned into this
+user's placeholder plus a fragment of that name - and command/command-line fields are
+omitted. Only one scan runs at a time and a scan has a 90-second safety limit.
+`winsight_alerts` reads WinSight's own journal rather than scanning, so it is not queued
+behind a running scan; it has a bound of its own.
 
 That limit is a cooperative cancellation boundary, not a way for managed code to terminate an
 arbitrary Windows provider safely. WinSight cancels the actual scan and keeps the single-scan gate

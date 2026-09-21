@@ -75,6 +75,35 @@ public sealed class McpResultProjectorTests
         Assert.Equal("%USERPROFILE%\\payload.exe", finding.Fields["image"]);
     }
 
+    private static readonly (System.Text.RegularExpressions.Regex Path, string Token)[] Folders =
+        McpResultProjector.BuildRedactions(new Dictionary<string, string>
+        {
+            [@"C:\Users\alex"] = "%USERPROFILE%",
+            [@"C:\Users\alex\AppData\Local"] = "%LOCALAPPDATA%",
+        });
+
+    [Theory]
+    [InlineData(@"C:\Users\alex\payload.exe", @"%USERPROFILE%\payload.exe")]
+    [InlineData(@"C:\Users\alex", "%USERPROFILE%")]
+    [InlineData(@"c:\users\ALEX\x.dll", @"%USERPROFILE%\x.dll")]
+    [InlineData(@"""C:\Users\alex\x.exe"" /run", @"""%USERPROFILE%\x.exe"" /run")]
+    [InlineData(@"C:\Users\alex\AppData\Local\Temp\x", @"%LOCALAPPDATA%\Temp\x")]
+    [InlineData(@"a;C:\Users\alex;b", "a;%USERPROFILE%;b")]
+    public void AProfileFolderIsRedactedAsAWholePath(string value, string expected) =>
+        Assert.Equal(expected, McpResultProjector.Redact(value, Folders));
+
+    /// <summary>
+    /// A plain substring replacement turned another account's folder into this one's token plus
+    /// the rest of that account's name: C:\Users\alex2\notes.txt became %USERPROFILE%2\notes.txt.
+    /// </summary>
+    [Theory]
+    [InlineData(@"C:\Users\alex2\notes.txt")]
+    [InlineData(@"C:\Users\alex.old\notes.txt")]
+    [InlineData(@"C:\Users\alex-backup\x")]
+    [InlineData(@"XC:\Users\alex\x")]
+    public void ALongerNameThatMerelyStartsWithTheProfileIsLeftAlone(string value) =>
+        Assert.Equal(value, McpResultProjector.Redact(value, Folders));
+
     [Fact]
     public void SensitiveEvidence_RequiresServerSideGate()
     {

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using WinSight.Reporting;
 
 namespace WinSight.Mcp;
@@ -219,18 +220,47 @@ internal static class McpResultProjector
     // The user's folder paths are stable for the process lifetime, so the redaction table
     // is built and length-ordered once (longest key first, so nested paths win) instead of
     // being rebuilt for every field of every finding.
-    private static readonly (string Path, string Token)[] PathRedactions =
+    private static readonly (Regex Path, string Token)[] PathRedactions = BuildRedactions(
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             [Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData)] = "%LOCALAPPDATA%",
             [Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)] = "%APPDATA%",
             [Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)] = "%USERPROFILE%",
             [Path.GetFullPath(Path.GetTempPath()).TrimEnd(Path.DirectorySeparatorChar)] = "%TEMP%",
+        });
+
+    /// <summary>
+    /// One pattern per folder, matching it only as a whole path: not inside a longer name, and not
+    /// followed by more characters of its last component.
+    /// </summary>
+    /// <remarks>
+    /// A plain substring replacement turned <c>C:\Users\alex2\notes.txt</c> into
+    /// <c>%USERPROFILE%2\notes.txt</c> - part of another account's name left in the clear, and its
+    /// file presented as this user's. The folder must now end at a separator, a quote, whitespace,
+    /// a list delimiter or the end of the value.
+    /// </remarks>
+    internal static (Regex Path, string Token)[] BuildRedactions(IReadOnlyDictionary<string, string> folders) =>
+        folders
+            .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
+            .OrderByDescending(pair => pair.Key.Length)
+            .Select(pair => (
+                new Regex(
+                    $@"(?<![\w.-]){Regex.Escape(pair.Key.TrimEnd('\\', '/'))}(?=$|[\\/""'\s;,|)\]>])",
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+                    TimeSpan.FromSeconds(1)),
+                pair.Value))
+            .ToArray();
+
+    /// <summary>Replaces each folder by its token, whole paths only. Internal for tests.</summary>
+    internal static string Redact(string value, (Regex Path, string Token)[] redactions)
+    {
+        var protectedValue = value;
+        foreach (var (path, token) in redactions)
+        {
+            protectedValue = path.Replace(protectedValue, token.Replace("$", "$$", StringComparison.Ordinal));
         }
-        .Where(pair => !string.IsNullOrWhiteSpace(pair.Key))
-        .OrderByDescending(pair => pair.Key.Length)
-        .Select(pair => (pair.Key, pair.Value))
-        .ToArray();
+        return protectedValue;
+    }
 
     private static string ProtectRequired(string value, bool includeSensitive) =>
         Protect((string?)value, includeSensitive) ?? string.Empty;
@@ -242,11 +272,6 @@ internal static class McpResultProjector
             return value;
         }
 
-        var protectedValue = value;
-        foreach (var (path, token) in PathRedactions)
-        {
-            protectedValue = protectedValue.Replace(path, token, StringComparison.OrdinalIgnoreCase);
-        }
-        return protectedValue;
+        return Redact(value, PathRedactions);
     }
 }
