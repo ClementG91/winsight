@@ -237,7 +237,7 @@ internal static class McpResultProjector
     /// A plain substring replacement turned <c>C:\Users\alex2\notes.txt</c> into
     /// <c>%USERPROFILE%2\notes.txt</c> - part of another account's name left in the clear, and its
     /// file presented as this user's. The folder must now end at a separator, a quote, whitespace,
-    /// a list delimiter or the end of the value.
+    /// a list delimiter, a colon, a sentence-ending period or the end of the value.
     /// </remarks>
     internal static (Regex Path, string Token)[] BuildRedactions(IReadOnlyDictionary<string, string> folders) =>
         folders
@@ -245,7 +245,7 @@ internal static class McpResultProjector
             .OrderByDescending(pair => pair.Key.Length)
             .Select(pair => (
                 new Regex(
-                    $@"(?<![\w.-]){Regex.Escape(pair.Key.TrimEnd('\\', '/'))}(?=$|[\\/""'\s;,|)\]>])",
+                    $@"(?<![\w.-]){Regex.Escape(pair.Key.TrimEnd('\\', '/'))}(?=$|[\\/""'\s;:,|)\]>]|\.(?:\s|$))",
                     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                     TimeSpan.FromSeconds(1)),
                 pair.Value))

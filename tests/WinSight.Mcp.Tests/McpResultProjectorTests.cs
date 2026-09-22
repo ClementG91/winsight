@@ -89,6 +89,8 @@ public sealed class McpResultProjectorTests
     [InlineData(@"""C:\Users\alex\x.exe"" /run", @"""%USERPROFILE%\x.exe"" /run")]
     [InlineData(@"C:\Users\alex\AppData\Local\Temp\x", @"%LOCALAPPDATA%\Temp\x")]
     [InlineData(@"a;C:\Users\alex;b", "a;%USERPROFILE%;b")]
+    [InlineData(@"found under C:\Users\alex.", "found under %USERPROFILE%.")]
+    [InlineData(@"C:\Users\alex: access denied", "%USERPROFILE%: access denied")]
     public void AProfileFolderIsRedactedAsAWholePath(string value, string expected) =>
         Assert.Equal(expected, McpResultProjector.Redact(value, Folders));
 
