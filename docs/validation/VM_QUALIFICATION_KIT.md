@@ -889,26 +889,41 @@ if ($before.Count -ne 0) { throw 'ETW snapshot is not clean.' }
 
 ### Dashboard attribution
 
-The dashboard has no single-instance mutex. The elevated console passes its token to child
-processes:
+The dashboard is single-instance per user and session (WS-31): a second launch raises the first and
+exits 0 before starting any monitor, so two dashboards of one account never run side by side. Live-
+session preservation is therefore proven against the other Attribution owner, the elevated
+`winsight attribution --watch` watcher. The elevated console passes its token to child processes:
 
 ```powershell
 Assert-CandidateFiles
 $dashboardOne = Start-Process -FilePath $Dashboard -PassThru
-Assert-CandidateFiles
-$dashboardTwo = Start-Process -FilePath $Dashboard -PassThru
 Start-Sleep -Seconds 15
 
 function Get-AttributionSession([Diagnostics.Process]$Process) {
     $Process.Refresh()
-    if ($Process.HasExited) { throw "Dashboard $($Process.Id) stopped." }
+    if ($Process.HasExited) { throw "Process $($Process.Id) stopped." }
     Get-WinSightEtwSessionForProcess -Family Attribution -ProcessId $Process.Id
 }
 $sessionOne = Get-AttributionSession $dashboardOne
-$sessionTwo = Get-AttributionSession $dashboardTwo
+
+# A second launch hands over to the first and leaves without a session of its own.
+Assert-CandidateFiles
+$secondLaunch = Start-Process -FilePath $Dashboard -PassThru
+if (-not $secondLaunch.WaitForExit(120000) -or $secondLaunch.ExitCode -ne 0) {
+    throw 'A second dashboard launch did not hand over and exit 0.'
+}
+$attribution = @(Get-WinSightEtwSessionNames | Where-Object { $_ -cmatch '^WinSight-Attribution' })
+if ($attribution.Count -ne 1 -or $attribution[0] -cne $sessionOne) {
+    throw "Single instance violated: $($attribution -join ', ')"
+}
+
+Assert-CandidateFiles
+$watcher = Start-Process -FilePath $Cli -ArgumentList @('attribution', '--watch') -PassThru
+Start-Sleep -Seconds 10
+$watcherSession = Get-AttributionSession $watcher
 ```
 
-Close the first window with **X**: the captured process and `$sessionOne` must remain. Only then
+Close the dashboard window with **X**: the captured process and `$sessionOne` must remain. Only then
 force-stop **that captured process**:
 
 ```powershell
@@ -922,20 +937,21 @@ if ((Get-WinSightEtwSessionNames) -notcontains $sessionOne) {
 }
 
 Assert-CandidateFiles
-$dashboardThree = Start-Process -FilePath $Dashboard -PassThru
+$dashboardTwo = Start-Process -FilePath $Dashboard -PassThru
 Start-Sleep -Seconds 15
-$sessionThree = Get-AttributionSession $dashboardThree
-$dashboardTwo.Refresh()
-if ($dashboardTwo.HasExited -or
+$sessionTwo = Get-AttributionSession $dashboardTwo
+$watcher.Refresh()
+if ($watcher.HasExited -or
     (Get-WinSightEtwSessionNames) -contains $sessionOne -or
-    (Get-WinSightEtwSessionNames) -notcontains $sessionTwo) {
+    (Get-WinSightEtwSessionNames) -notcontains $watcherSession) {
     throw 'Orphan recovery or live-session preservation failed.'
 }
 ```
 
-Repeat two kill/relaunch cycles using captured `Process` objects. The session count must never exceed
-the number of live dashboards. Close survivors through the tray **Exit** command, wait for
-`HasExited`, then require zero attribution sessions.
+Repeat two kill/relaunch cycles of the dashboard using captured `Process` objects. The Attribution
+session count must never exceed the live owners, the dashboard and the watcher. Close the dashboard
+through the tray **Exit** command and wait for `HasExited`; send Ctrl+C to the watcher's console as in
+the DNS section below and require exit 0; then require zero attribution sessions.
 
 ### DNS
 

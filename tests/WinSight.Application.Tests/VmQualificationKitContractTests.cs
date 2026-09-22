@@ -32,6 +32,25 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("protected-candidate.sha256", kit, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The dashboard became single-instance (WS-31) while the kit still launched two of them side by
+    /// side and stated that there was no single-instance mutex, so its attribution gate failed on the
+    /// product doing what it had been changed to do. The protocol now proves the hand-over, and keeps
+    /// live-session preservation against the other Attribution owner, the CLI watcher.
+    /// </summary>
+    [Fact]
+    public void KitDashboardAttributionFollowsTheSingleInstanceDashboard()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.DoesNotContain("no single-instance mutex", kit, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("single-instance per user and session", kit, StringComparison.Ordinal);
+        Assert.Contains("A second dashboard launch did not hand over and exit 0.", kit, StringComparison.Ordinal);
+        Assert.Contains("-ArgumentList @('attribution', '--watch')", kit, StringComparison.Ordinal);
+        Assert.Contains("-notcontains $watcherSession", kit, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void KitUsesTheExactEtwModuleAndProvidesFinalAuditOnlyIpcLifecycle()
     {
