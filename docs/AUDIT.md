@@ -15,11 +15,11 @@ Explorer, MCP, smoke tests EN/FR/ES, désinstallation sans résidu) sur l'arbre 
 
 **Qualifié en VM le 22 septembre** (§17.1, candidat `5347a1b` construit localement, x64) : installeur
 en portée utilisateur, scanners élevés, verbes de réponse, Guardian (Bloquer, Restaurer, Autoriser,
-Révoquer), récupération ETW DNS et service, contrat et pré-armement WFP, frontière de confiance, IPC
-locale.
+Révoquer), attribution du tableau de bord et récupération ETW (DNS, service), contrat et pré-armement
+WFP, frontière de confiance, IPC locale, absence de résidu.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : armement WFP complet (porte 33,
-deux décisions d'opérateur), attribution du tableau de bord en VM (porte 21, VM instable), IPC par
+interrompue par un gel de la VM), IPC par
 ouverture de session réseau, installation « tous les utilisateurs », mise à niveau, ARM64 natif,
 signature Authenticode, essai d'endurance (soak), dossiers redirigés par OneDrive (Known Folder
 Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesuré et ce qui ne l'a pas été.
@@ -56,8 +56,8 @@ Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesur
 - **Différenciation réelle.** Un triage unifié, local et compréhensible pour un non-spécialiste, avec
   des verdicts gradués (exploitabilité réelle, ancre de confiance, abus d'interpréteur signé) et une
   interface MCP sûre — aucune alternative ne réunit tout cela.
-- **Priorités.** (1) terminer la qualification VM : armement WFP (porte 33) et attribution du tableau
-  de bord (porte 21), sur une VM qui dispose de VT-x ou sous Hyper-V ; (2) WS-70, fausses alertes
+- **Priorités.** (1) terminer la qualification VM : armement WFP (porte 33), sur une VM qui dispose
+  de VT-x ou sous Hyper-V ; (2) WS-70, fausses alertes
   Guardian au premier lancement élevé ; (3) vérifier le comportement sur dossiers OneDrive ;
   (4) réduire le paquet installé (431 Mo, WS-53) ; (5) mode pare-feu « demander après la première
   connexion ».
@@ -541,9 +541,7 @@ mesure.
 ## 16. Tests missing
 
 - Environnement OneDrive (Known Folder Move) pour la couche d'accès fichiers et les leurres.
-- Passation entre deux lancements réels du tableau de bord (instance unique) : écrite dans le kit
-  (porte 21), pas encore conclue en VM ; parcours « Bloquer » avec un programme qui réinscrit sa
-  valeur.
+- Parcours « Bloquer » avec un programme qui réinscrit sa valeur.
 - Guardian : lancement élevé après une ligne de base construite sans élévation (WS-70).
 - Débit ETW soutenu et pertes sous charge ; endurance de sept jours du tableau de bord.
 - Installation tous utilisateurs, mise à niveau depuis v0.12/v0.13, désinstallation avec service.
@@ -610,8 +608,8 @@ restauration de `S0-clean-before-winsight`. Aucune authentification dans l'invit
 | 23 service sortant (orphelin, redémarrage par le SCM, AuditOnly, IPC, HTTP 200), 24 état ETW final, 99 résidus | PASS | passe 4, kit corrigé (WS-72) |
 | 30-32 WFP : autotest du contrat, témoin négatif, pré-armement | PASS | passe 3 |
 | 34 frontière de confiance (propriétaire étranger), 35 IPC locale (7 vérifications) | PASS | passe 3 |
-| 21 attribution du tableau de bord | non conclue | kit corrigé (WS-71) ; la passe 4 a échoué sur un défaut du harnais (tableau d'un seul élément déroulé), corrigé ; les passes 5 et 6 ont gelé l'invité avant la fin |
-| 33 WFP complet (armement puis désarmement d'urgence) | non exécutée | exige deux décisions d'opérateur dans le tableau de bord |
+| 21 attribution du tableau de bord | PASS | passe 7, kit corrigé (WS-71) : second lancement rendu à la première instance (sortie 0, aucune session), fenêtre masquée par X, orphelin repris à la relance, session vivante de `attribution --watch` préservée sur deux cycles, Ctrl+C sans résidu, sortie par le vrai menu de l'icône de notification |
+| 33 WFP complet (armement puis désarmement d'urgence) | non conclue | les deux décisions d'opérateur sont prises par un script hôte qui pilote les vraies commandes (`operator-automation.ps1`, tracé dans les preuves) ; passe 11 : le blocage de `curl.exe` a bien été enregistré par le tableau de bord, puis l'invité a gelé avant l'armement |
 | 36 IPC par ouverture de session réseau | NOT_RUN | exige une seconde machine et un compte à mot de passe |
 
 Aucun défaut du produit n'a fait échouer une porte. La campagne a produit un constat produit
@@ -620,8 +618,8 @@ l'invité) et deux corrections du kit (WS-71, WS-72). Les autres échecs venaien
 l'environnement :
 
 - **Environnement.** VirtualBox n'obtient pas VT-x sur cet hôte (Hyper-V et HVCI actifs) et tourne
-  en mode NEM : la VM est lente, son horloge dérive, elle perd des frappes, et elle a gelé deux fois
-  (passes 5 et 6, la seconde pendant la porte 01, avant tout composant WinSight). Le snapshot
+  en mode NEM : la VM est lente, son horloge dérive, elle perd des frappes, et elle a gelé trois fois
+  (passes 5, 6 et 11 ; celle de la passe 6 pendant la porte 01, avant tout composant WinSight). Le snapshot
   d'origine datait d'une semaine : chaque restauration relançait la mise à jour cumulative de
   septembre, qui saturait l'invité (`persistence` à 34 min au lieu de 15 s sur l'hôte). Un nouveau
   snapshot `S0-autorun-2026-09-22` (mises à jour installées puis suspendues 35 jours, file ngen
@@ -631,6 +629,14 @@ l'environnement :
   récupération SCM, `@()` autour d'une liste d'un élément, et écran de l'invité maintenu allumé
   (`SetThreadExecutionState`) — l'écran éteint bloquait les appels UI Automation vers le tableau de
   bord (hypothèse la plus probable : la porte 12 a repris à la seconde où l'écran s'est rallumé).
+  Nouveau `operator-automation.ps1` : quand ce fichier accompagne le candidat, le harnais lui confie
+  les décisions d'opérateur (portes 33 et sortie par l'icône de notification de la porte 21) ; il
+  n'agit que par les vraies commandes du produit et le consigne dans `operator-automation.txt`, donc
+  une campagne automatisée ne peut pas être prise pour une campagne conduite par un humain.
+- **Suite.** Une bascule vers Hyper-V est préparée (`hyperv/` à côté des preuves : guide,
+  création de la VM de génération 2 depuis le disque exporté, pilote de qualification avec un disque
+  de données en guise de dossier partagé). Elle demande des étapes administrateur sur l'hôte, donc
+  l'opérateur, et devrait supprimer les gels.
 
 ---
 
@@ -638,8 +644,8 @@ l'environnement :
 
 ### Maintenant — bugs, sécurité, fiabilité
 
-- Relire et fusionner la branche d'audit par thème ; terminer la qualification VM x64 (portes 21 et
-  33, §17.1) sur une VM avec VT-x ou sous Hyper-V, puis ARM64.
+- Relire et fusionner la branche d'audit par thème ; terminer la qualification VM x64 (porte 33,
+  §17.1) sur une VM avec VT-x ou sous Hyper-V, puis ARM64.
 - WS-70 (couverture de la ligne de base Guardian) ; WS-40 (OneDrive) ; restes de WS-48, WS-55 et
   WS-61 ; WS-69.
 - Mettre à jour `PRODUCTION_READINESS.md` avec le nouveau candidat qualifié.
