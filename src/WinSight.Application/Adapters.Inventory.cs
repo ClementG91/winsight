@@ -32,11 +32,19 @@ public static partial class Adapters
                     ["hasPrivateKey"] = c.HasPrivateKey.ToString(),
                     ["isSelfSigned"] = c.IsSelfSigned.ToString(),
                     ["notAfter"] = c.NotAfter.ToString("o"),
+                    ["role"] = c.Role.ToString(),
+                    // What the dashboard needs to say why, in the operator's language, without
+                    // re-deriving it: the user-only fact has no other field to be read from.
+                    ["userInstalled"] = c.IsUserInstalled ? "true" : null,
                     ["risks"] = c.Risks.Count > 0 ? string.Join("; ", c.Risks) : null,
                 });
         }
         AddCoverageFinding(b, acquisition);
-        return b.Build($"{certs.Count} trusted root(s), {certs.Count(c => c.Notable)} flagged{CoverageSuffix(acquisition)}");
+        var roots = certs.Count(c => c.Role == CertificateTrustRole.Root);
+        var publishers = certs.Count(c => c.Role == CertificateTrustRole.TrustedPublisher);
+        var distrusted = certs.Count(c => c.Role == CertificateTrustRole.Disallowed);
+        return b.Build($"{roots} trusted root(s), {publishers} trusted publisher(s), {distrusted} distrusted, "
+            + $"{certs.Count(c => c.Notable)} flagged{CoverageSuffix(acquisition)}");
     }
 
     public static ToolReport Extensions(bool flaggedOnly, CancellationToken cancellationToken = default)

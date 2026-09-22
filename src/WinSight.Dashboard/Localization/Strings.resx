@@ -233,6 +233,9 @@
   <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>Tcpip\Parameters could not be read, so the standard location {0} was assumed.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Blackholes a security or update domain (possible protection bypass)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>Trusted root holds a private key and can mint trusted certificates</value></data>
+  <data name="CertificateUserRootRisk" xml:space="preserve"><value>trusted for this user only: a root any program can install without elevation</value></data>
+  <data name="CertificateUserTrustedPublisherRisk" xml:space="preserve"><value>trusted publisher for this user only: any program can add one without elevation</value></data>
+  <data name="CertificatePublisherPrivateKeyRisk" xml:space="preserve"><value>the private key of this trusted publisher is on this computer: it can sign code that runs without warning</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Weak signature algorithm ({0}) on a non-self-signed root-store certificate</value></data>
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Undersized RSA key ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, {1}-bit key</value></data>

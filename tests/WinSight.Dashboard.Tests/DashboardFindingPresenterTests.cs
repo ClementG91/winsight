@@ -198,6 +198,34 @@ public sealed class DashboardFindingPresenterTests
         });
     }
 
+    /// <summary>
+    /// The user-only fact had no field, so a flagged user-installed root fell back to the English
+    /// report text; a user-only trusted publisher is new (WS-55).
+    /// </summary>
+    [Theory]
+    [InlineData("en", "Root", "trusted for this user only: a root any program can install without elevation")]
+    [InlineData("fr", "Root", "approuvée pour cet utilisateur seulement : une racine que tout programme peut installer sans élévation")]
+    [InlineData("es", "TrustedPublisher", "editor de confianza solo para este usuario: cualquier programa puede añadir uno sin elevación")]
+    [InlineData("fr", "TrustedPublisher", "éditeur approuvé pour cet utilisateur seulement : tout programme peut en ajouter un sans élévation")]
+    public void AUserOnlyCertificateSaysSoInTheOperatorsLanguage(string culture, string role, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["role"] = role,
+                ["userInstalled"] = "true",
+                ["hasPrivateKey"] = "False",
+                ["isSelfSigned"] = "True",
+                ["signatureAlgorithm"] = "sha256RSA",
+                ["keyBits"] = "4096",
+                ["isRsa"] = "True",
+            });
+
+            Assert.Equal(expected, DashboardFindingPresenter.Present("certificates", item, text).Detail);
+        });
+    }
+
     [Theory]
     [InlineData("en", "replaces the machine's COM class with another program")]
     [InlineData("fr", "remplace la classe COM de la machine par un autre programme")]

@@ -325,11 +325,16 @@ public static class DashboardFindingPresenter
         }
 
         var risks = new List<string>();
+        var publisher = Field(item, "role") == "TrustedPublisher";
+        if (BoolField(item, "userInstalled"))
+        {
+            risks.Add(text[publisher ? "CertificateUserTrustedPublisherRisk" : "CertificateUserRootRisk"]);
+        }
         if (BoolField(item, "hasPrivateKey"))
         {
-            risks.Add(text["CertificatePrivateKeyRisk"]);
+            risks.Add(text[publisher ? "CertificatePublisherPrivateKeyRisk" : "CertificatePrivateKeyRisk"]);
         }
-        if (!BoolField(item, "isSelfSigned") && IsWeakSignature(Field(item, "signatureAlgorithm")))
+        if (!publisher && !BoolField(item, "isSelfSigned") && IsWeakSignature(Field(item, "signatureAlgorithm")))
         {
             risks.Add(text.Format("CertificateWeakSignatureRisk", Field(item, "signatureAlgorithm")));
         }

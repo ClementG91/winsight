@@ -230,6 +230,9 @@
   <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>Tcpip\Parameters n’a pas pu être lu ; l’emplacement standard {0} a été supposé.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Bloque un domaine de sécurité ou de mise à jour (contournement de protection possible)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>La racine de confiance contient une clé privée et peut créer des certificats approuvés</value></data>
+  <data name="CertificateUserRootRisk" xml:space="preserve"><value>approuvée pour cet utilisateur seulement : une racine que tout programme peut installer sans élévation</value></data>
+  <data name="CertificateUserTrustedPublisherRisk" xml:space="preserve"><value>éditeur approuvé pour cet utilisateur seulement : tout programme peut en ajouter un sans élévation</value></data>
+  <data name="CertificatePublisherPrivateKeyRisk" xml:space="preserve"><value>la clé privée de cet éditeur approuvé est sur cet ordinateur : elle peut signer du code qui s&apos;exécute sans avertissement</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Algorithme de signature faible ({0}) sur un certificat non auto-signé du magasin racine</value></data>
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clé RSA trop courte ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, clé de {1} bits</value></data>

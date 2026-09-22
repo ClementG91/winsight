@@ -16,10 +16,11 @@ namespace WinSight.Certificates;
 /// <param name="IsSelfSigned">Whether the certificate is self-signed (Subject == Issuer).</param>
 /// <param name="NotAfter">Expiry.</param>
 /// <param name="IsUserInstalled">
-/// Trusted for this user only, i.e. present in <c>CurrentUser\Root</c> and absent from
-/// <c>LocalMachine\Root</c>. Windows' own root program updates land machine-wide, so a root that
-/// exists only in the user view is one somebody put there - which needs no elevation at all.
+/// Trusted for this user only, i.e. present in the <c>CurrentUser</c> view of the store and absent
+/// from the <c>LocalMachine</c> one. Windows' own root program updates land machine-wide, so an entry
+/// that exists only in the user view is one somebody put there - which needs no elevation at all.
 /// </param>
+/// <param name="Role">What the store it came from makes Windows do with it.</param>
 public sealed record TrustedCertificate(
     string Store,
     string Subject,
@@ -31,7 +32,8 @@ public sealed record TrustedCertificate(
     bool HasPrivateKey,
     bool IsSelfSigned,
     DateTime NotAfter,
-    bool IsUserInstalled = false)
+    bool IsUserInstalled = false,
+    CertificateTrustRole Role = CertificateTrustRole.Root)
 {
     /// <summary>
     /// Concrete reasons this trusted root warrants review, empty for a clean root.
@@ -41,7 +43,19 @@ public sealed record TrustedCertificate(
         get
         {
             var risks = new List<string>();
-            if (IsUserInstalled)
+            if (Role == CertificateTrustRole.Disallowed)
+            {
+                // A distrust entry only ever removes trust.
+                return risks;
+            }
+            if (IsUserInstalled && Role == CertificateTrustRole.TrustedPublisher)
+            {
+                // The publisher-trust twin of the user-installed root: any account can add one to
+                // its own view with no prompt, and code signed by that publisher then runs without
+                // the warnings other signed code gets.
+                risks.Add("trusted publisher for this user only - an unprivileged program can add one");
+            }
+            else if (IsUserInstalled)
             {
                 // The signal the three checks below all miss. This type's own summary claims to
                 // catch Superfish / eDellRoot-class rogue roots, and a freshly generated
@@ -56,7 +70,12 @@ public sealed record TrustedCertificate(
                 // and local development tools legitimately install roots this way.
                 risks.Add("trusted for this user only - a root an unprivileged program can install");
             }
-            if (HasPrivateKey)
+            if (HasPrivateKey && Role == CertificateTrustRole.TrustedPublisher)
+            {
+                // Whoever holds the key signs code this machine runs without a prompt.
+                risks.Add("trusted publisher's private key is on this machine (can sign code it trusts)");
+            }
+            else if (HasPrivateKey)
             {
                 // A legitimate public root never ships its private key to your machine.
                 // Its presence means arbitrary trusted certificates can be minted locally.
@@ -68,7 +87,9 @@ public sealed record TrustedCertificate(
             // long-established public root (DigiCert, Baltimore, Comodo…) is SHA-1
             // self-signed, so flagging those is pure noise. A weak signature on a
             // NON-self-signed cert sitting in the root store, however, is genuinely odd.
-            if (!IsSelfSigned && IsWeakSignature(SignatureAlgorithm))
+            // Root-store reasoning only: a publisher certificate is a leaf, where an old SHA-1
+            // signature is common and says nothing about what the store makes Windows trust.
+            if (Role == CertificateTrustRole.Root && !IsSelfSigned && IsWeakSignature(SignatureAlgorithm))
             {
                 risks.Add($"weak signature algorithm ({SignatureAlgorithm}) on a non-self-signed root-store cert");
             }

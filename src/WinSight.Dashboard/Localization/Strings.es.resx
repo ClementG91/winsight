@@ -230,6 +230,9 @@
   <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>No se pudo leer Tcpip\Parameters; se supuso la ubicación estándar {0}.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Bloquea un dominio de seguridad o actualización (posible evasión de protección)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>La raíz de confianza contiene una clave privada y puede crear certificados de confianza</value></data>
+  <data name="CertificateUserRootRisk" xml:space="preserve"><value>de confianza solo para este usuario: una raíz que cualquier programa puede instalar sin elevación</value></data>
+  <data name="CertificateUserTrustedPublisherRisk" xml:space="preserve"><value>editor de confianza solo para este usuario: cualquier programa puede añadir uno sin elevación</value></data>
+  <data name="CertificatePublisherPrivateKeyRisk" xml:space="preserve"><value>la clave privada de este editor de confianza está en este equipo: puede firmar código que se ejecuta sin advertencia</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Algoritmo de firma débil ({0}) en un certificado no autofirmado del almacén raíz</value></data>
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clave RSA demasiado corta ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, clave de {1} bits</value></data>
