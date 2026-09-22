@@ -51,6 +51,27 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("-notcontains $watcherSession", kit, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The service is installed with restart-on-failure recovery, first restart after 5 seconds. The
+    /// kit killed it and then started it itself after a rehash of the candidate: when the rehash took
+    /// longer than the recovery delay, the SCM had already brought the service back and the explicit
+    /// start failed with ERROR_SERVICE_ALREADY_RUNNING, so a service that recovered was reported as
+    /// one that could not be restarted. The kit now waits for, and so proves, the SCM's own restart.
+    /// </summary>
+    [Fact]
+    public void KitLetsTheScmRecoveryActionRestartTheKilledService()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.DoesNotContain("throw 'Restart service failed.'", kit, StringComparison.Ordinal);
+        Assert.Contains(
+            "The SCM recovery action did not restart the service under a new PID.",
+            kit,
+            StringComparison.Ordinal);
+        Assert.Contains("The restarted service is not the candidate.", kit, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void KitUsesTheExactEtwModuleAndProvidesFinalAuditOnlyIpcLifecycle()
     {

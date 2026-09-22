@@ -1047,9 +1047,9 @@ if ($svcKill.ProcessId -ne $serviceProcess.Id -or
 Stop-Process -InputObject $serviceProcess -Force
 ```
 
-Wait for SCM to report Stopped, require the orphan, restart, require a new PID/session and absence of
-the old one, AuditOnly with empty WFP state, available IPC, and HTTP 200 through System32
-`curl.exe`. Then stop and uninstall:
+Wait for SCM to report Stopped, require the orphan, let the SCM recovery action restart the service,
+require a new PID/session and absence of the old one, AuditOnly with empty WFP state, available IPC,
+and HTTP 200 through System32 `curl.exe`. Then stop and uninstall:
 
 ```powershell
 $deadline = (Get-Date).AddSeconds(30)
@@ -1063,10 +1063,12 @@ if ((Get-WinSightEtwSessionNames) -notcontains $oldOutbound) {
     throw 'Expected outbound orphan is missing: run is inconclusive.'
 }
 
-Assert-CandidateFiles
-& $ScExe start WinSightFirewall
-if ($LASTEXITCODE -ne 0) { throw 'Restart service failed.' }
-$deadline = (Get-Date).AddSeconds(30)
+# Do not start it yourself. The service is installed with restart-on-failure recovery (the first
+# restart after 5 seconds), so the SCM brings it back on its own and that restart is part of what
+# this gate proves. An explicit `sc start` here raced it: whenever anything in between took longer
+# than 5 seconds, the SCM had already restarted the service and the start failed with
+# ERROR_SERVICE_ALREADY_RUNNING (1056), a harness failure on a product that had recovered.
+$deadline = (Get-Date).AddSeconds(90)
 do {
     $svcNew = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'"
     if ($svcNew.State -eq 'Running' -and
@@ -1075,8 +1077,11 @@ do {
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
 if ($svcNew.State -ne 'Running' -or $svcNew.ProcessId -eq $serviceProcess.Id) {
-    throw 'Service not restarted under a new PID.'
+    throw 'The SCM recovery action did not restart the service under a new PID.'
 }
+Assert-CandidateFiles
+if ((Resolve-Path -LiteralPath (Get-Process -Id ([int]$svcNew.ProcessId) -ErrorAction Stop).Path).Path -cne
+    $canonicalServicePath) { throw 'The restarted service is not the candidate.' }
 Start-Sleep -Seconds 10
 $newOutbound = Get-WinSightEtwSessionForProcess `
     -Family Outbound -ProcessId ([int]$svcNew.ProcessId)
