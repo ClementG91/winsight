@@ -16,11 +16,11 @@ Explorer, MCP, smoke tests EN/FR/ES, désinstallation sans résidu) sur l'arbre 
 **Qualifié en VM le 22 septembre** (§17.1, candidat `5347a1b` construit localement, x64) : installeur
 en portée utilisateur, scanners élevés, verbes de réponse, Guardian (Bloquer, Restaurer, Autoriser,
 Révoquer), attribution du tableau de bord et récupération ETW (DNS, service), contrat et pré-armement
-WFP, frontière de confiance, IPC locale, absence de résidu.
+WFP, armement WFP complet et désarmement d'urgence (Hyper-V, 35 vérifications), frontière de confiance,
+IPC locale, absence de résidu.
 
-**Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : armement WFP complet (porte 33,
-interrompue par un gel de la VM), IPC par
-ouverture de session réseau, installation « tous les utilisateurs », mise à niveau, ARM64 natif,
+**Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : IPC par ouverture de session
+réseau, installation « tous les utilisateurs », mise à niveau, ARM64 natif,
 signature Authenticode, essai d'endurance (soak), dossiers redirigés par OneDrive (Known Folder
 Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesuré et ce qui ne l'a pas été.
 
@@ -56,10 +56,10 @@ Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesur
 - **Différenciation réelle.** Un triage unifié, local et compréhensible pour un non-spécialiste, avec
   des verdicts gradués (exploitabilité réelle, ancre de confiance, abus d'interpréteur signé) et une
   interface MCP sûre — aucune alternative ne réunit tout cela.
-- **Priorités.** (1) terminer la qualification VM : armement WFP (porte 33), sur une VM qui dispose
-  de VT-x ou sous Hyper-V ; (2) WS-70, fausses alertes
-  Guardian au premier lancement élevé ; (3) vérifier le comportement sur dossiers OneDrive ;
-  (4) réduire le paquet installé (431 Mo, WS-53) ; (5) mode pare-feu « demander après la première
+- **Priorités.** (1) WS-70, fausses alertes
+  Guardian au premier lancement élevé ; (2) qualification ARM64 et installeur « tous les
+  utilisateurs » ; (3) vérifier le comportement sur dossiers OneDrive ; (4) réduire le paquet
+  installé (431 Mo, WS-53) ; (5) mode pare-feu « demander après la première
   connexion ».
 
 ---
@@ -609,7 +609,7 @@ restauration de `S0-clean-before-winsight`. Aucune authentification dans l'invit
 | 30-32 WFP : autotest du contrat, témoin négatif, pré-armement | PASS | passe 3 |
 | 34 frontière de confiance (propriétaire étranger), 35 IPC locale (7 vérifications) | PASS | passe 3 |
 | 21 attribution du tableau de bord | PASS | passe 7, kit corrigé (WS-71) : second lancement rendu à la première instance (sortie 0, aucune session), fenêtre masquée par X, orphelin repris à la relance, session vivante de `attribution --watch` préservée sur deux cycles, Ctrl+C sans résidu, sortie par le vrai menu de l'icône de notification |
-| 33 WFP complet (armement puis désarmement d'urgence) | non conclue | les deux décisions d'opérateur sont prises par un script hôte qui pilote les vraies commandes (`operator-automation.ps1`, tracé dans les preuves) ; passe 11 : le blocage de `curl.exe` a bien été enregistré par le tableau de bord, puis l'invité a gelé avant l'armement |
+| 33 WFP complet (armement puis désarmement d'urgence) | PASS | sous Hyper-V (`hv-run3-gate33`, 23 septembre), 35 vérifications : blocage de `curl.exe` effectif et témoin PowerShell intact, état WFP exact, arrêt du service qui efface l'état dynamique, redémarrage qui le recrée, désarmement d'urgence vers AuditOnly sans état WFP, désinstallation sans service résiduel. Les deux décisions d'opérateur ont été prises par `operator-automation.ps1` (sélecteur de fichier réel, confirmations réelles), tracé dans les preuves |
 | 36 IPC par ouverture de session réseau | NOT_RUN | exige une seconde machine et un compte à mot de passe |
 
 Aucun défaut du produit n'a fait échouer une porte. La campagne a produit un constat produit
@@ -633,10 +633,10 @@ l'environnement :
   les décisions d'opérateur (portes 33 et sortie par l'icône de notification de la porte 21) ; il
   n'agit que par les vraies commandes du produit et le consigne dans `operator-automation.txt`, donc
   une campagne automatisée ne peut pas être prise pour une campagne conduite par un humain.
-- **Suite.** Une bascule vers Hyper-V est préparée (`hyperv/` à côté des preuves : guide,
-  création de la VM de génération 2 depuis le disque exporté, pilote de qualification avec un disque
-  de données en guise de dossier partagé). Elle demande des étapes administrateur sur l'hôte, donc
-  l'opérateur, et devrait supprimer les gels.
+- **Hyper-V.** La porte 33 a été conduite sous Hyper-V (`hyperv/` à côté des preuves : guide,
+  VM de génération 2 créée depuis le disque exporté de VirtualBox, pilote avec un disque de données
+  `WINSIGHTQ` en guise de dossier partagé, sans compte ni mot de passe invité). Aucun gel : c'est
+  désormais l'environnement recommandé ; les étapes administrateur restent celles de l'opérateur.
 
 ---
 
@@ -644,8 +644,8 @@ l'environnement :
 
 ### Maintenant — bugs, sécurité, fiabilité
 
-- Relire et fusionner la branche d'audit par thème ; terminer la qualification VM x64 (porte 33,
-  §17.1) sur une VM avec VT-x ou sous Hyper-V, puis ARM64.
+- Relire et fusionner la branche d'audit par thème ; qualification x64 faite (§17.1, sauf IPC réseau
+  qui exige une seconde machine) ; ARM64, installeur « tous les utilisateurs » et mise à niveau.
 - WS-70 (couverture de la ligne de base Guardian) ; WS-40 (OneDrive) ; restes de WS-48, WS-55 et
   WS-61 ; WS-69.
 - Mettre à jour `PRODUCTION_READINESS.md` avec le nouveau candidat qualifié.
