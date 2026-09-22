@@ -13,8 +13,14 @@
 performance, et cycle complet de l'installeur x64 en portée utilisateur (installation, verbe
 Explorer, MCP, smoke tests EN/FR/ES, désinstallation sans résidu) sur l'arbre final.
 
-**Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : qualification privilégiée en VM
-(WFP/SCM, frontière IPC, installation « tous les utilisateurs », mise à niveau), ARM64 natif,
+**Qualifié en VM le 22 septembre** (§17.1, candidat `5347a1b` construit localement, x64) : installeur
+en portée utilisateur, scanners élevés, verbes de réponse, Guardian (Bloquer, Restaurer, Autoriser,
+Révoquer), récupération ETW DNS et service, contrat et pré-armement WFP, frontière de confiance, IPC
+locale.
+
+**Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : armement WFP complet (porte 33,
+deux décisions d'opérateur), attribution du tableau de bord en VM (porte 21, VM instable), IPC par
+ouverture de session réseau, installation « tous les utilisateurs », mise à niveau, ARM64 natif,
 signature Authenticode, essai d'endurance (soak), dossiers redirigés par OneDrive (Known Folder
 Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesuré et ce qui ne l'a pas été.
 
@@ -29,8 +35,9 @@ Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesur
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **52 défauts** (48 corrigés dans le code et testés, 3 corrigés
-  en partie, 1 rendu explicite dans la documentation), dont 9 de sévérité *High* :
+- **Problèmes trouvés.** L'audit a traité **54 défauts** (50 corrigés et testés, dont deux dans le kit
+  de qualification VM, 3 corrigés en partie, 1 rendu explicite dans la documentation), dont 9 de
+  sévérité *High* :
   faux positif et faux négatif du scanner hijack, Guardian aveugle aux clés Run absentes ou
   recréées, fuites de lignes de commande vers le modèle via MCP, courses TOCTOU dans les actions de
   réponse (réutilisation de PID, suppression/restauration de persistance, liste de processus protégés
@@ -49,10 +56,11 @@ Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesur
 - **Différenciation réelle.** Un triage unifié, local et compréhensible pour un non-spécialiste, avec
   des verdicts gradués (exploitabilité réelle, ancre de confiance, abus d'interpréteur signé) et une
   interface MCP sûre — aucune alternative ne réunit tout cela.
-- **Priorités.** (1) requalifier en VM les changements privilégiés et la nouvelle couche d'accès
-  fichiers ; (2) vérifier le comportement sur dossiers OneDrive ; (3) réduire le paquet installé
-  (431 Mo, WS-53) ; (4) mode pare-feu « demander après la première connexion » ; (5) index WinSxS
-  persistant (WS-51).
+- **Priorités.** (1) terminer la qualification VM : armement WFP (porte 33) et attribution du tableau
+  de bord (porte 21), sur une VM qui dispose de VT-x ou sous Hyper-V ; (2) WS-70, fausses alertes
+  Guardian au premier lancement élevé ; (3) vérifier le comportement sur dossiers OneDrive ;
+  (4) réduire le paquet installé (431 Mo, WS-53) ; (5) mode pare-feu « demander après la première
+  connexion ».
 
 ---
 
@@ -239,6 +247,8 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-62 | Low | Supply chain | Le workflow de release restaurait le cache `setup-dotnet` dans un build de tag | empoisonnement de cache théorique | `release.yml` | cache désactivé pour les releases, test de contrat | Corrigé |
 | WS-67 | Low | Maintenabilité | `Adapters.cs` : 1 958 lignes pour tous les scans | revue et diff difficiles | `Application/Adapters*.cs` | 11 fichiers partiels par domaine (85 à 411 lignes), déplacement pur | Corrigé |
 | WS-68 | Low | Tableau de bord | Les lignes hosts « fichier illisible » et « enregistrements mal formés » présentées comme « redirection externe » | message contraire aux faits | `DashboardFindingPresenter.cs` | présentation propre et localisée | Corrigé |
+| WS-71 | Low | Validation | Kit VM, §6 : « no single-instance mutex » et deux tableaux de bord lancés côte à côte, alors que le tableau de bord est à instance unique depuis WS-31 ; la porte échouait sur le comportement voulu (« Dashboard … stopped ») | requalification bloquée à tort | `docs/validation/VM_QUALIFICATION_KIT.md` | la porte prouve la passation (second lancement : sortie 0, aucune session) et la préservation d'une session vivante face à `attribution --watch` ; test de contrat | Corrigé |
+| WS-72 | Low | Validation | Kit VM, §6 : `sc start` explicite après l'arrêt brutal du service, en course avec l'action de récupération du SCM (redémarrage à 5 s) ; dès que le re-hachage intermédiaire dépassait 5 s, l'échec 1056 faisait passer un service rétabli pour un service qui ne redémarre pas | faux échec ; récupération SCM jamais qualifiée | `docs/validation/VM_QUALIFICATION_KIT.md` | attendre, et donc prouver, le redémarrage par le SCM sous un nouveau PID, puis vérifier que c'est le candidat ; test de contrat | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -258,6 +268,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-64 | Info | Réponse | Fenêtre résiduelle de quelques microsecondes entre comparaison et changement pour une valeur de registre sans TxR | valeur concurrente supprimée sans quarantaine | `THREAT_MODEL.md` | aucune primitive Windows ne ferme cette fenêtre | Documenté |
 | WS-65 | Info | Pare-feu | Aucune invite avant la première connexion | pas d'équivalent LuLu | `WFP_DESIGN.md` | décision « après coup » via les événements WFP (§11) | Documenté |
 | WS-69 | Low | Maintenabilité | Fichiers au-delà de 800 lignes : `MainWindow.xaml.cs` (1 449), `WfpProvisioning.cs` (1 300), `Enumerators.cs` (1 154), `EnforcementCoordinator.cs` (808) | revue et diff difficiles | ces fichiers | découper comme `Adapters.cs` ; le code WFP après requalification VM | Ouvert |
+| WS-70 | Medium | Guardian | La ligne de base persistée ne mémorise pas quelles sources étaient lisibles. Les éléments disparus d'une source devenue illisible sont bien conservés, mais tout élément d'une source devenue lisible est annoncé comme nouveau : en VM, le premier tableau de bord élevé a annoncé ~60 tâches planifiées et services Windows déjà présents | rafale de fausses alertes au moment précis où l'utilisateur suit le conseil d'élever pour l'attribution ; fatigue d'alerte | `Persistence/PersistenceMonitorCore.cs`, `FilePersistenceBaselineStore.cs` | persister avec la ligne de base les portées lues (source × emplacement) et absorber sans annonce les éléments d'une portée qui n'était pas couverte ; format de fichier rétrocompatible | Ouvert |
 
 ---
 
@@ -325,7 +336,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 368 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 370 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -530,8 +541,10 @@ mesure.
 ## 16. Tests missing
 
 - Environnement OneDrive (Known Folder Move) pour la couche d'accès fichiers et les leurres.
-- Deux vrais processus de tableau de bord (instance unique) et parcours « Bloquer » avec un
-  programme qui réinscrit sa valeur.
+- Passation entre deux lancements réels du tableau de bord (instance unique) : écrite dans le kit
+  (porte 21), pas encore conclue en VM ; parcours « Bloquer » avec un programme qui réinscrit sa
+  valeur.
+- Guardian : lancement élevé après une ligne de base construite sans élévation (WS-70).
 - Débit ETW soutenu et pertes sous charge ; endurance de sept jours du tableau de bord.
 - Installation tous utilisateurs, mise à niveau depuis v0.12/v0.13, désinstallation avec service.
 - Qualification ARM64 native des chemins privilégiés.
@@ -541,7 +554,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 368 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 370 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -577,6 +590,47 @@ ci-dessous, par thème, avec la justification.
 | Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1` | WS-13 |
 | Mesure | `scripts/Measure-Performance.ps1` | outil de mesure reproductible (D3) |
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
+| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs` | WS-71, WS-72 |
+
+### 17.1 Qualification VM du 22 septembre 2026
+
+Candidat : `5347a1b`, construit localement (`Build-Release.ps1 -DisableSignature`, x64 non signé) —
+une **répétition**, pas une preuve attestée par la CI. VM `WinSight-Qualification-Fresh` (Windows 11
+26200), pilotée entièrement depuis l'hôte : restauration de snapshot, tâche d'ouverture de session
+qui lance le harnais élevé, résultats sur le dossier partagé, scellement SHA-256 hors de la VM, puis
+restauration de `S0-clean-before-winsight`. Aucune authentification dans l'invité. Preuves :
+`<vol>\WinSight-Host-Evidence\v0.13.0-audit-5347a1b\run1…run6` (chacune avec `SHA256SUMS.txt`).
+
+| Porte | Résultat | Note |
+|---|---|---|
+| 01 identité et racine protégée, 02 Authenticode/PE, 03 contrat CLI, 04 cycle de l'installeur (portée utilisateur), 05 MCP en lecture seule | PASS | passe 3 |
+| 06 scanners en lecture seule (17), 07 preuve MSIX, 08 verbes de réponse, 09 détenteurs, 10 verbe de signature | PASS | passe 3 ; `persistence` élevé : 6 min 23 s pour les 17 scanners |
+| 11-13 Guardian : Bloquer/Restaurer, Autoriser/silence/Révoquer, nettoyage | PASS | passe 3 ; la 12 a attendu 51 min que l'écran de l'invité se rallume (harnais, voir ci-dessous) |
+| 14 langues EN/FR/ES, 20 état ETW initial, 22 DNS (orphelin, reprise, Ctrl+C) | PASS | passe 3 |
+| 23 service sortant (orphelin, redémarrage par le SCM, AuditOnly, IPC, HTTP 200), 24 état ETW final, 99 résidus | PASS | passe 4, kit corrigé (WS-72) |
+| 30-32 WFP : autotest du contrat, témoin négatif, pré-armement | PASS | passe 3 |
+| 34 frontière de confiance (propriétaire étranger), 35 IPC locale (7 vérifications) | PASS | passe 3 |
+| 21 attribution du tableau de bord | non conclue | kit corrigé (WS-71) ; la passe 4 a échoué sur un défaut du harnais (tableau d'un seul élément déroulé), corrigé ; les passes 5 et 6 ont gelé l'invité avant la fin |
+| 33 WFP complet (armement puis désarmement d'urgence) | non exécutée | exige deux décisions d'opérateur dans le tableau de bord |
+| 36 IPC par ouverture de session réseau | NOT_RUN | exige une seconde machine et un compte à mot de passe |
+
+Aucun défaut du produit n'a fait échouer une porte. La campagne a produit un constat produit
+(WS-70 : fausses arrivées Guardian au premier lancement élevé, relevées dans le journal d'alertes de
+l'invité) et deux corrections du kit (WS-71, WS-72). Les autres échecs venaient du harnais ou de
+l'environnement :
+
+- **Environnement.** VirtualBox n'obtient pas VT-x sur cet hôte (Hyper-V et HVCI actifs) et tourne
+  en mode NEM : la VM est lente, son horloge dérive, elle perd des frappes, et elle a gelé deux fois
+  (passes 5 et 6, la seconde pendant la porte 01, avant tout composant WinSight). Le snapshot
+  d'origine datait d'une semaine : chaque restauration relançait la mise à jour cumulative de
+  septembre, qui saturait l'invité (`persistence` à 34 min au lieu de 15 s sur l'hôte). Un nouveau
+  snapshot `S0-autorun-2026-09-22` (mises à jour installées puis suspendues 35 jours, file ngen
+  vidée, 6 Go de RAM) a ramené la porte 06 à 6 min 23 s.
+- **Harnais** (hors dépôt, `qualify.ps1` sur le dossier partagé, versions archivées avec les
+  preuves) : porte 21 alignée sur l'instance unique, nettoyage en `finally`, porte 23 alignée sur la
+  récupération SCM, `@()` autour d'une liste d'un élément, et écran de l'invité maintenu allumé
+  (`SetThreadExecutionState`) — l'écran éteint bloquait les appels UI Automation vers le tableau de
+  bord (hypothèse la plus probable : la porte 12 a repris à la seconde où l'écran s'est rallumé).
 
 ---
 
@@ -584,8 +638,10 @@ ci-dessous, par thème, avec la justification.
 
 ### Maintenant — bugs, sécurité, fiabilité
 
-- Relire et fusionner la branche d'audit par thème ; requalifier en VM (x64, puis ARM64).
-- WS-40 (OneDrive) ; restes de WS-48, WS-55 et WS-61 ; WS-69.
+- Relire et fusionner la branche d'audit par thème ; terminer la qualification VM x64 (portes 21 et
+  33, §17.1) sur une VM avec VT-x ou sous Hyper-V, puis ARM64.
+- WS-70 (couverture de la ligne de base Guardian) ; WS-40 (OneDrive) ; restes de WS-48, WS-55 et
+  WS-61 ; WS-69.
 - Mettre à jour `PRODUCTION_READINESS.md` avec le nouveau candidat qualifié.
 
 ### Ensuite — fonctionnalités différenciantes
