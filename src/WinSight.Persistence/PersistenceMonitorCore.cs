@@ -12,6 +12,10 @@ public sealed class PersistenceMonitorCore
     private readonly HashSet<PersistenceIdentity> _baseline = new();
     private readonly Lock _gate = new();
     private bool _seeded;
+    // What the baseline has seen in full (WS-70); null when unknown - seeded from bare entries, or
+    // restored from a baseline saved without coverage - which keeps the pre-coverage rule.
+    private PersistenceCoverageMap? _coverage;
+    private int _absorbed;
 
     public PersistenceMonitorCore(PersistenceChangeLog? log = null)
     {
@@ -36,6 +40,21 @@ public sealed class PersistenceMonitorCore
         get { lock (_gate) { return _baseline.ToArray(); } }
     }
 
+    /// <summary>What the baseline has seen in full, persisted with it; null while unknown.</summary>
+    public PersistenceCoverageMap? CurrentCoverage
+    {
+        get { lock (_gate) { return _coverage; } }
+    }
+
+    /// <summary>
+    /// Entries baselined without an alert because their location was read in full for the first time
+    /// (for instance the first elevated launch after unelevated ones).
+    /// </summary>
+    public int AbsorbedOnCoverageGain
+    {
+        get { lock (_gate) { return _absorbed; } }
+    }
+
     /// <summary>
     /// Seeds the baseline from an initial full scan WITHOUT surfacing anything. Pre-existing
     /// persistence is not news; without this every machine would alert on first launch. Idempotent:
@@ -51,6 +70,24 @@ public sealed class PersistenceMonitorCore
                 return;
             }
             SeedLocked(initialScan);
+        }
+    }
+
+    /// <summary>
+    /// Seeds the baseline from an initial scan together with what that scan could read in full, so a
+    /// later scan that reads more baselines the difference instead of announcing it.
+    /// </summary>
+    public void SeedBaseline(PersistenceScanResult initialScan)
+    {
+        ArgumentNullException.ThrowIfNull(initialScan);
+        lock (_gate)
+        {
+            if (_seeded)
+            {
+                return;
+            }
+            SeedLocked(initialScan.Entries);
+            _coverage = PersistenceCoverageMap.FromScan(initialScan);
         }
     }
 
@@ -89,9 +126,16 @@ public sealed class PersistenceMonitorCore
             if (!_seeded)
             {
                 SeedLocked(scan.Entries);
+                _coverage = PersistenceCoverageMap.FromScan(scan);
                 return Array.Empty<PersistenceEvent>();
             }
-            return ReconcileLocked(scan.Entries, nowUtc, id => scan.ConfirmsAbsence(id.Source, id.Location));
+            var detected = ReconcileLocked(scan.Entries, nowUtc,
+                id => scan.ConfirmsAbsence(id.Source, id.Location), NewlyVisibleIn(scan, _coverage));
+            if (_coverage is not null)
+            {
+                _coverage = _coverage.Merge(PersistenceCoverageMap.FromScan(scan));
+            }
+            return detected;
         }
     }
 
@@ -126,6 +170,18 @@ public sealed class PersistenceMonitorCore
     public IReadOnlyList<PersistenceEvent> ReconcileFromPersistedBaseline(
         IReadOnlySet<PersistenceIdentity> persistedBaseline,
         PersistenceScanResult currentScan,
+        DateTimeOffset nowUtc) =>
+        ReconcileFromPersistedBaseline(persistedBaseline, persistedCoverage: null, currentScan, nowUtc);
+
+    /// <summary>
+    /// Restores a baseline saved with its coverage. An entry at a location this scan read in full and
+    /// the saved baseline never had is baselined, not announced (WS-70); with no saved coverage every
+    /// new entry is announced, as before, and coverage is tracked from this scan on.
+    /// </summary>
+    public IReadOnlyList<PersistenceEvent> ReconcileFromPersistedBaseline(
+        IReadOnlySet<PersistenceIdentity> persistedBaseline,
+        PersistenceCoverageMap? persistedCoverage,
+        PersistenceScanResult currentScan,
         DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(persistedBaseline);
@@ -135,14 +191,30 @@ public sealed class PersistenceMonitorCore
             _baseline.Clear();
             _baseline.UnionWith(persistedBaseline);
             _seeded = true;
-            return ReconcileLocked(currentScan.Entries, nowUtc,
-                id => currentScan.ConfirmsAbsence(id.Source, id.Location));
+            var detected = ReconcileLocked(currentScan.Entries, nowUtc,
+                id => currentScan.ConfirmsAbsence(id.Source, id.Location),
+                NewlyVisibleIn(currentScan, persistedCoverage));
+            var scanned = PersistenceCoverageMap.FromScan(currentScan);
+            _coverage = persistedCoverage is null ? scanned : persistedCoverage.Merge(scanned);
+            return detected;
         }
     }
 
+    /// <summary>
+    /// Entries the scan saw at a location read in full, which the baseline had never read in full:
+    /// they were there before and simply could not be seen. Null when the baseline's coverage is
+    /// unknown, which leaves every arrival announced.
+    /// </summary>
+    private static Func<PersistenceIdentity, bool>? NewlyVisibleIn(
+        PersistenceScanResult scan, PersistenceCoverageMap? baselineCoverage) =>
+        baselineCoverage is null
+            ? null
+            : id => scan.ConfirmsAbsence(id.Source, id.Location) && !baselineCoverage.Covers(id.Source, id.Location);
+
     private IReadOnlyList<PersistenceEvent> ReconcileLocked(
         IReadOnlyList<AutostartEntry> freshScan, DateTimeOffset nowUtc,
-        Func<PersistenceIdentity, bool>? confirmsAbsence)
+        Func<PersistenceIdentity, bool>? confirmsAbsence,
+        Func<PersistenceIdentity, bool>? newlyVisible = null)
     {
         var diff = PersistenceDiffEngine.Diff(_baseline, freshScan);
         foreach (var removed in diff.Removed)
@@ -164,6 +236,11 @@ public sealed class PersistenceMonitorCore
             // does not re-diff and re-count the same arrival on every subsequent scan.
             var identity = PersistenceIdentity.FromEntry(entry);
             _baseline.Add(identity);
+            if (newlyVisible?.Invoke(identity) == true)
+            {
+                _absorbed++;
+                continue;
+            }
             // The log is a bounded display list that nothing acknowledges. Reporting only what it had
             // room for silenced every arrival after the 256th in a long session, while the baseline
             // absorbed them. The arrival is reported either way; a full list only counts it.

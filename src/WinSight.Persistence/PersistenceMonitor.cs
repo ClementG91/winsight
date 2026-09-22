@@ -261,7 +261,7 @@ public sealed class PersistenceMonitor : IDisposable
                     RecordFault(PersistenceMonitorOperation.Scan, ex);
                     throw;
                 }
-                var persisted = _baselineStore?.Load();
+                var persisted = _baselineStore?.LoadWithCoverage();
                 lock (_gate)
                 {
                     if (_disposed)
@@ -270,11 +270,12 @@ public sealed class PersistenceMonitor : IDisposable
                     }
                     if (persisted is not null)
                     {
-                        EnqueueLocked(_core.ReconcileFromPersistedBaseline(persisted, scan, _clock()));
+                        EnqueueLocked(_core.ReconcileFromPersistedBaseline(
+                            persisted.Identities, persisted.Coverage, scan, _clock()));
                     }
                     else
                     {
-                        _core.SeedBaseline(scan.Entries);
+                        _core.SeedBaseline(scan);
                     }
                 }
                 TrySaveBaseline();
@@ -504,16 +505,18 @@ public sealed class PersistenceMonitor : IDisposable
         lock (_saveGate)
         {
             IReadOnlyCollection<PersistenceIdentity> snapshot;
+            PersistenceCoverageMap? coverage;
             lock (_gate)
             {
                 var undelivered = _undelivered.Select(pending => pending.Event.Identity).ToHashSet();
                 snapshot = undelivered.Count == 0
                     ? _core.CurrentBaseline
                     : _core.CurrentBaseline.Where(id => !undelivered.Contains(id)).ToArray();
+                coverage = _core.CurrentCoverage;
             }
             try
             {
-                _baselineStore.Save(snapshot);
+                _baselineStore.Save(snapshot, coverage);
                 lock (_gate)
                 {
                     _saveRetryNeeded = false;

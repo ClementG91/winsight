@@ -19,4 +19,18 @@ public interface IPersistenceBaselineStore
     /// monitor owns the retry/error boundary so persistence loss is observable.
     /// </summary>
     void Save(IReadOnlyCollection<PersistenceIdentity> baseline);
+
+    /// <summary>
+    /// Loads the baseline with the coverage it was saved under (WS-70). Coverage is null for a
+    /// baseline saved without it, which keeps the pre-coverage behaviour for that one read.
+    /// </summary>
+    PersistedBaseline? LoadWithCoverage() => Load() is { } identities ? new PersistedBaseline(identities, null) : null;
+
+    /// <summary>Saves the baseline together with the coverage it reflects.</summary>
+    void Save(IReadOnlyCollection<PersistenceIdentity> baseline, PersistenceCoverageMap? coverage) => Save(baseline);
 }
+
+/// <summary>A persisted baseline and, when it was saved with one, its coverage.</summary>
+public sealed record PersistedBaseline(
+    IReadOnlySet<PersistenceIdentity> Identities,
+    PersistenceCoverageMap? Coverage);

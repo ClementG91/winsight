@@ -35,7 +35,13 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         "WinSight",
         "guardian-baseline.tsv");
 
-    public IReadOnlySet<PersistenceIdentity>? Load()
+    public IReadOnlySet<PersistenceIdentity>? Load() => LoadWithCoverage()?.Identities;
+
+    /// <summary>
+    /// Loads the identities and, after them, the coverage lines (WS-70). A file written without a
+    /// coverage marker - every v0.13 baseline - loads with null coverage.
+    /// </summary>
+    public PersistedBaseline? LoadWithCoverage()
     {
         try
         {
@@ -53,11 +59,30 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
             }
 
             var result = new HashSet<PersistenceIdentity>();
+            Dictionary<string, IReadOnlyList<string>>? coverage = null;
             string? line;
             var lines = 0;
+            var identityLines = 0;
             while ((line = reader.ReadLine()) is not null)
             {
-                if (++lines > MaxBaselineEntries)
+                if (++lines > MaxBaselineEntries * 2)
+                {
+                    return null;
+                }
+                if (line == CoverageMarker)
+                {
+                    coverage ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                    continue;
+                }
+                if (line.StartsWith(CoveredPrefix, StringComparison.Ordinal))
+                {
+                    if (coverage is not null)
+                    {
+                        TryReadCovered(line, coverage);
+                    }
+                    continue;
+                }
+                if (++identityLines > MaxBaselineEntries)
                 {
                     return null;
                 }
@@ -82,7 +107,11 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
             {
                 return null;
             }
-            return lines == 0 || result.Count > 0 ? result : null;
+            if (identityLines > 0 && result.Count == 0)
+            {
+                return null; // lines present but none readable: corrupt, reseed
+            }
+            return new PersistedBaseline(result, coverage is null ? null : new PersistenceCoverageMap(coverage));
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -99,7 +128,14 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     /// Failures are thrown rather than swallowed: the monitor records them and retries, so a baseline
     /// that silently stopped persisting is visible instead of looking like working cross-run detection.
     /// </remarks>
-    public void Save(IReadOnlyCollection<PersistenceIdentity> baseline)
+    public void Save(IReadOnlyCollection<PersistenceIdentity> baseline) => Save(baseline, coverage: null);
+
+    /// <summary>Writes the baseline and, when given, the coverage it reflects, in one atomic file.</summary>
+    /// <remarks>
+    /// Coverage lines follow the identities under a marker line. None of them has the six fields of
+    /// an identity, so a v0.13 reader skips them and still loads the baseline after a downgrade.
+    /// </remarks>
+    public void Save(IReadOnlyCollection<PersistenceIdentity> baseline, PersistenceCoverageMap? coverage)
     {
         ArgumentNullException.ThrowIfNull(baseline);
         if (baseline.Count > MaxBaselineEntries)
@@ -125,6 +161,19 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
                     .Append(Encode(id.Location)).Append('\t').Append(Encode(id.Source)).Append('\n');
                 written++;
             }
+            if (coverage is not null)
+            {
+                builder.Append(CoverageMarker).Append('\n');
+                foreach (var (source, scopes) in coverage.Sources)
+                {
+                    builder.Append(CoveredPrefix).Append(Encode(source));
+                    foreach (var scope in scopes)
+                    {
+                        builder.Append('\t').Append(Encode(scope));
+                    }
+                    builder.Append('\n');
+                }
+            }
 
             if (builder.Length > MaxBaselineBytes - 3)
             {
@@ -137,6 +186,25 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
             {
                 throw new IOException("The Guardian baseline could not be written safely.");
             }
+        }
+    }
+
+    // Coverage: a marker, then one line per source seen in full: the source, then the scopes it could
+    // not read (none: complete). Everything encoded, like the identities.
+    private const string CoverageMarker = "@coverage";
+    private const string CoveredPrefix = "@covered\t";
+
+    private static void TryReadCovered(string line, Dictionary<string, IReadOnlyList<string>> coverage)
+    {
+        var parts = line[CoveredPrefix.Length..].Split('\t');
+        try
+        {
+            coverage[Decode(parts[0])] = parts.Skip(1).Select(Decode).ToArray();
+        }
+        catch (FormatException)
+        {
+            // A corrupt line loses coverage for that one source. Only whoever can write this file can
+            // corrupt it, and they could as well add their own identity: no new exposure.
         }
     }
 

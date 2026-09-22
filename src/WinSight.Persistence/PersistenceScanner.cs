@@ -249,13 +249,6 @@ public sealed record PersistenceScanResult(
         }
         return PartialSources is not null
             && PartialSources.TryGetValue(source, out var scopes)
-            && !scopes.Any(scope => Covers(scope, location));
-    }
-
-    private static bool Covers(string scope, string location)
-    {
-        var trimmed = scope.TrimEnd('\\');
-        return location.StartsWith(trimmed, StringComparison.OrdinalIgnoreCase)
-            && (location.Length == trimmed.Length || location[trimmed.Length] is '\\' or ' ');
+            && !scopes.Any(scope => PersistenceCoverageMap.ScopeCovers(scope, location));
     }
 }
