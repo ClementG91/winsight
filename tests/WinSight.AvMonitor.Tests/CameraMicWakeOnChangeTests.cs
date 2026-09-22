@@ -76,6 +76,76 @@ public sealed class CameraMicWakeOnChangeTests
         Assert.True(signal.Disposed, "the unusable signal was leaked instead of disposed");
     }
 
+    /// <summary>
+    /// Each poll reads the whole consent store; at one a second an idle watch cost about 1.7% of a
+    /// core. While the signal vouches for every hive it watches, the fallback poll is the slow one.
+    /// </summary>
+    [Fact]
+    public void AnObservingSignalSlowsTheFallbackPoll()
+    {
+        var reader = new CountingReader();
+        var signal = new FakeSignal { Observing = true };
+        var monitor = new CameraMicMonitor(
+            reader, TimeSpan.FromMilliseconds(20), () => signal, observedInterval: TimeSpan.FromSeconds(30));
+
+        RunFor(monitor, TimeSpan.FromMilliseconds(600));
+
+        Assert.InRange(reader.Reads, 1, 2);
+    }
+
+    /// <summary>
+    /// The moment the signal cannot vouch for itself - a watch that stopped re-arming - the loop is
+    /// back on the fast poll, so detection never waits on a silent watch.
+    /// </summary>
+    [Fact]
+    public void ASignalThatStopsVouchingRestoresTheFastPoll()
+    {
+        var reader = new CountingReader();
+        var signal = new FakeSignal { Observing = true };
+        var monitor = new CameraMicMonitor(
+            reader, TimeSpan.FromMilliseconds(20), () => signal, observedInterval: TimeSpan.FromSeconds(30));
+        using var stop = new CancellationTokenSource();
+        var thread = new Thread(() => monitor.Watch(_ => { }, stop.Token)) { IsBackground = true };
+        thread.Start();
+        try
+        {
+            Assert.True(SpinWait.SpinUntil(() => reader.Reads >= 1, TimeSpan.FromSeconds(10)));
+            signal.Observing = false;
+            signal.Trigger(); // the wait in progress was the slow one; this ends it
+
+            Assert.True(
+                SpinWait.SpinUntil(() => reader.Reads >= 10, TimeSpan.FromSeconds(10)),
+                "the loop stayed on the slow poll after the signal stopped vouching for itself");
+        }
+        finally
+        {
+            stop.Cancel();
+            thread.Join(TimeSpan.FromSeconds(30));
+        }
+    }
+
+    [Fact]
+    public void ASignalThatDoesNotVouchKeepsTheFastPoll()
+    {
+        var reader = new CountingReader();
+        var monitor = new CameraMicMonitor(
+            reader, TimeSpan.FromMilliseconds(20), () => new FakeSignal(), observedInterval: TimeSpan.FromSeconds(30));
+
+        RunFor(monitor, TimeSpan.FromMilliseconds(600));
+
+        Assert.True(reader.Reads >= 5, $"only {reader.Reads} read(s) in 600 ms");
+    }
+
+    private static void RunFor(CameraMicMonitor monitor, TimeSpan duration)
+    {
+        using var stop = new CancellationTokenSource();
+        var thread = new Thread(() => monitor.Watch(_ => { }, stop.Token)) { IsBackground = true };
+        thread.Start();
+        Thread.Sleep(duration);
+        stop.Cancel();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(30)), "the watch did not stop on cancellation");
+    }
+
     private static StepReader ReaderTurningTheCameraOn()
     {
         var active = new DeviceUsage(DeviceKind.Webcam, @"C:\app\spy.exe", Packaged: false,
@@ -133,9 +203,27 @@ public sealed class CameraMicWakeOnChangeTests
     private sealed class FakeSignal : IChangeSignal
     {
         private readonly AutoResetEvent _event = new(false);
+        private volatile bool _observing;
         public bool Disposed { get; private set; }
+        public bool Observing { get => _observing; set => _observing = value; }
+        public bool IsObserving => _observing;
         public WaitHandle? Start() => _event;
         public void Trigger() => _event.Set();
         public void Dispose() { Disposed = true; _event.Dispose(); }
+    }
+
+    private sealed class CountingReader : ICapabilityAccessReader
+    {
+        private int _reads;
+
+        public int Reads => Volatile.Read(ref _reads);
+
+        public AcquisitionSnapshot<DeviceUsage> ReadWithCoverage() => ReadWithProvenance().ToCoverage();
+
+        public CapabilityAccessSnapshot ReadWithProvenance()
+        {
+            Interlocked.Increment(ref _reads);
+            return new CapabilityAccessSnapshot([], []);
+        }
     }
 }

@@ -28,9 +28,17 @@ public sealed class RegistryKeyWatcher : IDisposable
     private RegistryKey? _key;
     private Thread? _thread;
     private bool _disposed;
+    private int _watching;
 
     /// <summary>Raised on every observed change to the watched subtree. Never after disposal.</summary>
     public event Action? Changed;
+
+    /// <summary>
+    /// True while the notification is armed and the watch loop runs. False before it is first armed,
+    /// after disposal, and once the loop has stopped because the notification could not be re-armed
+    /// - a silent stop a caller relying on this watch must not mistake for a quiet key.
+    /// </summary>
+    public bool IsWatching => Volatile.Read(ref _watching) == 1;
 
     public RegistryKeyWatcher(RegistryHive hive, string path)
     {
@@ -70,24 +78,32 @@ public sealed class RegistryKeyWatcher : IDisposable
     {
         using var change = new AutoResetEvent(false);
         var handles = new[] { _stop.WaitHandle, change };
-        while (!_stop.IsSet)
+        try
         {
-            if (RegNotifyChangeKeyValue(_key!.Handle, bWatchSubtree: true, Filter, change.SafeWaitHandle, fAsynchronous: true) != 0)
+            while (!_stop.IsSet)
             {
-                return;
+                if (RegNotifyChangeKeyValue(_key!.Handle, bWatchSubtree: true, Filter, change.SafeWaitHandle, fAsynchronous: true) != 0)
+                {
+                    return;
+                }
+                Volatile.Write(ref _watching, 1);
+                if (WaitHandle.WaitAny(handles) == 0)
+                {
+                    return; // stop signalled
+                }
+                try
+                {
+                    Changed?.Invoke();
+                }
+                catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
+                {
+                    // A faulting subscriber must not blind the watch: re-arm and keep observing.
+                }
             }
-            if (WaitHandle.WaitAny(handles) == 0)
-            {
-                return; // stop signalled
-            }
-            try
-            {
-                Changed?.Invoke();
-            }
-            catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
-            {
-                // A faulting subscriber must not blind the watch: re-arm and keep observing.
-            }
+        }
+        finally
+        {
+            Volatile.Write(ref _watching, 0);
         }
     }
 

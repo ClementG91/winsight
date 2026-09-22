@@ -41,6 +41,59 @@ public sealed class RegistryKeyWatcherRealTests
         }
     }
 
+    /// <summary>
+    /// A caller that polls rarely because the watch is armed must be able to tell when it no
+    /// longer is. Deleting the watched key ends the watch: the pending notification fires, re-arming
+    /// on the deleted key fails, and the loop stops - silently, before this was observable.
+    /// </summary>
+    [Fact]
+    public void IsWatchingFollowsTheWatchFromArmedToStopped()
+    {
+        var sub = $@"Software\WinSight.Tests\KeyWatch\{Guid.NewGuid():N}";
+        Registry.CurrentUser.CreateSubKey(sub).Dispose();
+        try
+        {
+            var watcher = new RegistryKeyWatcher(RegistryHive.CurrentUser, sub);
+            Assert.False(watcher.IsWatching);
+
+            Assert.True(watcher.Start());
+            Assert.True(SpinWait.SpinUntil(() => watcher.IsWatching, TimeSpan.FromSeconds(5)), "never armed");
+
+            Registry.CurrentUser.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
+            Assert.True(
+                SpinWait.SpinUntil(() => !watcher.IsWatching, TimeSpan.FromSeconds(10)),
+                "the watch of a deleted key still claims to be armed");
+
+            watcher.Dispose();
+            Assert.False(watcher.IsWatching);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
+        }
+    }
+
+    [Fact]
+    public void IsWatchingIsFalseAfterDisposal()
+    {
+        var sub = $@"Software\WinSight.Tests\KeyWatch\{Guid.NewGuid():N}";
+        Registry.CurrentUser.CreateSubKey(sub).Dispose();
+        try
+        {
+            var watcher = new RegistryKeyWatcher(RegistryHive.CurrentUser, sub);
+            Assert.True(watcher.Start());
+            Assert.True(SpinWait.SpinUntil(() => watcher.IsWatching, TimeSpan.FromSeconds(5)), "never armed");
+
+            watcher.Dispose();
+
+            Assert.False(watcher.IsWatching);
+        }
+        finally
+        {
+            Registry.CurrentUser.DeleteSubKeyTree(sub, throwOnMissingSubKey: false);
+        }
+    }
+
     [Fact]
     public void StartReturnsFalseForAMissingKey()
     {
