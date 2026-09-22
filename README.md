@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/ClementG91/winsight/actions/workflows/ci.yml"><img src="https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
+  <a href="https://www.bestpractices.dev/projects/14751"><img src="https://www.bestpractices.dev/projects/14751/badge" alt="OpenSSF Best Practices" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2022H2%2B%20%2F%2011-informational" alt="Platform: Windows 10 22H2 or later" />
   <img src="https://img.shields.io/badge/.NET-10.0_LTS-512bd4" alt=".NET 10 LTS" />
   <img src="https://img.shields.io/badge/production%20readiness-not%20established-critical" alt="Production readiness not established" />
