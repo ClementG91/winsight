@@ -151,6 +151,14 @@ VirusTotal regardless of the CLI/dashboard opt-in key.
   entries.** Neither names an image, and every entry in a persistence report is graded by the image
   model, so reporting them would flag the filter Windows itself ships on every machine. Consumers -
   the side that actually runs something - are reported in full.
+- **A per-user COM class that copies the machine's registration is not reported.** When
+  `HKCU\Software\Classes\CLSID` names the same server as `HKLM` for the same class and view, the
+  per-user copy changes nothing COM loads; on the audit machine that was 3,842 of 3,896 per-user
+  classes, and dropping them took the persistence report from 4,541 to 698 entries. A per-user value
+  that sends a machine class to *another* server is the COM hijack itself (T1546.015): it is
+  reported with `overridesMachineClass` and flagged even when validly signed, unless the signer is
+  Microsoft. A per-user class the machine does not register at all is still reported, unflagged,
+  because a phantom class that something references is a hijack too.
 - **A COM-handler scheduled task whose CLSID resolves to no file is counted, not reported.** Windows
   ships such tasks; reporting the bare GUID would flag them everywhere. They appear in the
   unreadable-locations count instead.

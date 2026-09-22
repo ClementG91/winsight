@@ -138,6 +138,7 @@
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Access denied, signature not checked</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Verification error</value></data>
   <data name="PersistencePrivilegedForeignCode" xml:space="preserve"><value>third-party code loaded into a privileged process</value></data>
+  <data name="PersistenceOverridesMachineClass" xml:space="preserve"><value>replaces the machine&apos;s COM class with another program</value></data>
 
   <!-- Shown beside the signature verdict, never instead of it: these entries are flagged because of
        their command line while their file signature is perfectly valid, so the status alone reads

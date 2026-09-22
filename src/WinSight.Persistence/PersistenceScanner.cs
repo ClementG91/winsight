@@ -157,7 +157,7 @@ public sealed class PersistenceScanner
                 resolution.Status,
                 verdict,
                 OriginalFileNameOf(image, originalNames))
-            { Source = source });
+            { Source = source, OverridesMachineClass = raw.OverridesMachineClass });
         }
         return new PersistenceScanResult(
             results,

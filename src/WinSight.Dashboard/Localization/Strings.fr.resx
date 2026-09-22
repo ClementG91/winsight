@@ -138,6 +138,7 @@
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Accès refusé, signature non vérifiée</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Erreur de vérification</value></data>
   <data name="PersistencePrivilegedForeignCode" xml:space="preserve"><value>code tiers chargé dans un processus privilégié</value></data>
+  <data name="PersistenceOverridesMachineClass" xml:space="preserve"><value>remplace la classe COM de la machine par un autre programme</value></data>
 
   <data name="PersistenceAbuseRemotePayload" xml:space="preserve"><value>un interpréteur Windows signé pointe vers un emplacement distant : ce qui s'exécute n'est pas sur cette machine</value></data>
   <data name="PersistenceAbusePerUserPayload" xml:space="preserve"><value>un interpréteur Windows signé pointe vers un fichier situé dans un emplacement utilisateur ou temporaire</value></data>

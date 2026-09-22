@@ -198,6 +198,30 @@ public sealed class DashboardFindingPresenterTests
         });
     }
 
+    [Theory]
+    [InlineData("en", "replaces the machine's COM class with another program")]
+    [InlineData("fr", "remplace la classe COM de la machine par un autre programme")]
+    [InlineData("es", "sustituye la clase COM del equipo por otro programa")]
+    public void AComClassOverrideSaysSoBesideAValidSignature(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["status"] = "SignatureValid",
+                ["image"] = @"C:\Users\me\AppData\Roaming\helper.dll",
+                ["vector"] = "ComHijack",
+                ["name"] = "{11111111-1111-1111-1111-111111111111} [InprocServer32]",
+                ["overridesMachineClass"] = "true",
+            });
+
+            var detail = DashboardFindingPresenter.Present("persistence", item, text).Detail;
+
+            Assert.Contains(text["PersistenceStatusSignatureValid"], detail, StringComparison.Ordinal);
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+        });
+    }
+
     /// <summary>
     /// The cache snapshot says nothing about where an answer came from, and every record used to
     /// read "resolved over the network".

@@ -67,7 +67,12 @@ public static partial class Adapters
             var privileged = foreignCodeInPrivilegedHost
                 ? $"third-party code loaded by {PrivilegedHostLabel(e.Vector)}"
                 : null;
-            var reasons = string.Join("; ", new[] { verdict, abuse, privileged }
+            // A per-user COM registration that redirects a machine class is the hijack itself; say
+            // so beside the signature for the same reason as above.
+            var overrides = e.Vector == AutostartVector.ComHijack && e.OverridesMachineClass
+                ? "overrides the machine's COM class with another server"
+                : null;
+            var reasons = string.Join("; ", new[] { verdict, abuse, privileged, overrides }
                 .Where(reason => !string.IsNullOrEmpty(reason)));
             var detail = $"{displayedPath}  [{reasons}]";
             b.Add(
@@ -107,6 +112,7 @@ public static partial class Adapters
                     // that rebuilds the line from fields - the dashboard - can still say why it is
                     // flagged beside a valid signature.
                     ["privilegedHost"] = foreignCodeInPrivilegedHost ? e.Vector.ToString() : null,
+                    ["overridesMachineClass"] = e.Vector == AutostartVector.ComHijack && e.OverridesMachineClass ? "true" : null,
                     // Null rather than "Unspecified" when nothing was established, so a consumer
                     // tests for the key's presence and the MCP projector drops it from a clean
                     // entry rather than paying for a word that means "no answer".

@@ -190,6 +190,10 @@ public static class DashboardFindingPresenter
         {
             suffix = $"{suffix}; {text["PersistencePrivilegedForeignCode"]}";
         }
+        if (Field(item, "overridesMachineClass") is not null)
+        {
+            suffix = $"{suffix}; {text["PersistenceOverridesMachineClass"]}";
+        }
         var vector = Field(item, "vector");
         var name = Field(item, "name");
         var localizedVector = string.IsNullOrWhiteSpace(vector)
