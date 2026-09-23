@@ -338,7 +338,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 452 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 453 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -556,7 +556,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 452 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 453 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
