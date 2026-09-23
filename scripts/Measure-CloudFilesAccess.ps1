@@ -243,7 +243,8 @@ try
             attributesAfter = ('0x{0:X8}' -f $after[0])
             exit = if ($finished) { $process.ExitCode } else { "timeout" }
             milliseconds = $watch.ElapsedMilliseconds
-            state = if ($fields) { $fields.state } else { $null }
+            # An unreadable file gets a report without a signature state; StrictMode would throw on it.
+            state = if ($fields -and $fields.PSObject.Properties.Name -contains 'state') { $fields.state } else { $null }
             sha256Matches = [bool]($fields -and ($fields.PSObject.Properties.Name -contains "sha256") -and $fields.sha256 -eq $expected)
             fetchRequestsDuringRead = [CloudFilesProbe]::FetchRequests - $fetchBefore
             output = $stdout.Result
