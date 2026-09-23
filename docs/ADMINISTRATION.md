@@ -106,8 +106,13 @@ sc query WinSightFirewall
 
 The elevated uninstall verb stops the service, removes current dynamic objects and any legacy static
 WinSight namespace, and only then deletes registration. `sc query` must end with error **1060**
-(service does not exist). Uninstalling the *application*
-does not remove the service - the service is a separate, deliberate registration.
+(service does not exist).
+
+Uninstalling a machine-wide installation runs this verb first when the registered service runs that
+installation's own `winsight-firewall-service.exe`, so no LocalSystem service is left pointing at a
+deleted file and no block outlives the product. A service registered from any other location is not
+that installation's and is left alone. If the verb fails, the uninstaller says so and names the
+command to run; the details go to the uninstall log when it runs with `/LOG`.
 
 ## Where state lives
 

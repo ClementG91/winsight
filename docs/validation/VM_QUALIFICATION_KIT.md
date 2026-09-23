@@ -439,6 +439,7 @@ Create protected manifests for the three EXEs and every script/module that will 
 $ValidationFiles = @(
     $PeScript,
     (Join-Path $ProtectedSourceRoot 'scripts\Test-Installer.ps1'),
+    (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerServiceUninstall.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\Test-McpServer.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\WinSightEtwValidation.psm1'),
     (Join-Path $PackageRoot 'Test-WfpValidation.ps1'),
@@ -561,6 +562,23 @@ if ($RequireSigned) {
 }
 & $NativePowerShellExe @installerArguments
 if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle failed.' }
+```
+
+Then prove the all-users uninstall and the firewall service it may leave behind (WS-63). The script
+installs for all users under `Program Files`, registers the service from that installation, and
+requires the uninstall to remove it with no file left; with `-ForeignServicePath`, it also requires a
+service registered from another protected location to survive the application's uninstall. Both
+cases must print `PASS`, and `sc query WinSightFirewall` must end with **1060**:
+
+```powershell
+Assert-CandidateFiles
+& $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerServiceUninstall.ps1') `
+    -InstallerPath $ProtectedInstaller -Version $ProductVersion `
+    -ForeignServicePath $Service
+if ($LASTEXITCODE -ne 0) { throw 'All-users uninstall and service removal failed.' }
+& $ScExe query WinSightFirewall *> $null
+if ($LASTEXITCODE -ne 1060) { throw 'A firewall service is left after the all-users uninstall.' }
 ```
 
 ### Signature evidence and operator-confirmed responses
