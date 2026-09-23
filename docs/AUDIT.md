@@ -661,8 +661,13 @@ installeur v0.13.0 publié `c3bf248` pour la mise à niveau), preuves sous
 | 25 écriture par handle pré-ouvert | WS-60 : l'attribution d'une écriture dont le handle précède la session ETW | témoin attribué ; l'écriture pré-ouverte attribuée, sinon WS-60 confirmé |
 
 Au moment de cette mise à jour, la passe n'a pas encore eu lieu. La porte 36 (IPC par ouverture de
-session réseau) exige toujours une seconde machine, un compte jetable et son mot de passe, saisis
-par l'opérateur : elle reste `NOT_RUN` dans une passe automatique.
+session réseau) reste `NOT_RUN` dans une passe automatique ; une passe dédiée est prête
+(`hyperv/Invoke-HyperVNetworkLogon.ps1`) : une seconde VM sur un disque différentiel du même
+disque de base, un commutateur Hyper-V privé que ni l'hôte ni Internet ne voient, WinRM HTTPS avec
+`Basic` sur TLS seulement, comme au §7 du kit. Le certificat public et le résultat passent par un
+rendez-vous HTTP sur ce commutateur privé plutôt que par un stockage partagé. Le mot de passe jetable
+est choisi et tapé par l'opérateur dans la boîte d'identification Windows de chaque VM, et les deux
+VM sont restaurées ensuite.
 
 ---
 
