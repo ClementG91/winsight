@@ -26,11 +26,17 @@ public sealed class WfpInteropDuplicationTests
     private static readonly string RepositoryRoot = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
-    /// <summary>Every <c>LibraryImport</c> declaration in a file, keyed by native function name.</summary>
+    /// <summary>
+    /// Every <c>LibraryImport</c> declaration in a class, keyed by native function name. A partial
+    /// class is read whole: <c>Name.cs</c> and every <c>Name.*.cs</c> beside it.
+    /// </summary>
     private static Dictionary<string, string> Declarations(string fileName)
     {
-        var source = File.ReadAllText(
-            Path.Combine(RepositoryRoot, "src", "WinSight.FirewallService", fileName));
+        var directory = Path.Combine(RepositoryRoot, "src", "WinSight.FirewallService");
+        var source = string.Join("\n", Directory
+            .GetFiles(directory, Path.GetFileNameWithoutExtension(fileName) + ".*.cs")
+            .Prepend(Path.Combine(directory, fileName))
+            .Select(File.ReadAllText));
 
         var matches = Regex.Matches(
             source,

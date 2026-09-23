@@ -127,7 +127,9 @@ $engineExcludedFiles = @{
     "WinSight.Core" = @("RegistryKeyWatcher.cs", "PackageContentSignatureVerifier.cs")
     "WinSight.InputHooks" = @("InputFilterWatcher.cs")
     "WinSight.Application" = @("RunningImageSource.cs")
-    "winsight-dashboard" = @("MainWindow.xaml.cs", "App.xaml.cs", "VirusTotalSettingsWindow.xaml.cs")
+    "winsight-dashboard" = @(
+        "MainWindow.xaml.cs", "MainWindow.Monitors.cs", "MainWindow.Scan.cs", "MainWindow.Firewall.cs",
+        "App.xaml.cs", "VirusTotalSettingsWindow.xaml.cs")
 }
 
 # The component that runs as SYSTEM and drives WFP. It had no floor at all while the pure detection
@@ -156,6 +158,9 @@ $privilegedAssemblies = @(
 $privilegedNativeFiles = @(
     "Program.cs"
     "WfpProvisioning.cs"
+    "WfpProvisioning.Engine.cs"
+    "WfpProvisioning.Native.cs"
+    "WfpProvisioning.OwnedObjects.cs"
     "WfpSelfTest.cs"
     "WfpOutboundFirewallEngine.cs"
     "FirewallServiceInstaller.cs"
