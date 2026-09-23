@@ -9,8 +9,21 @@ namespace WinSight.Persistence;
 /// A per-user COM registration that points a class the machine also registers at a different
 /// server: the per-user value wins, so this is the class being redirected (WS-54).
 /// </param>
+/// <param name="Loader">
+/// How the process that loads the command sees the machine, when that is not the scanner's own
+/// view: a 32-bit process, or another account (WS-45, WS-46). Null for the scanner's view.
+/// </param>
 public readonly record struct RawAutostart(
-    AutostartVector Vector, string Name, string Location, string Command, bool OverridesMachineClass = false);
+    AutostartVector Vector, string Name, string Location, string Command, bool OverridesMachineClass = false,
+    LoaderContext? Loader = null)
+{
+    /// <summary>
+    /// The loader for something read from <paramref name="view"/> and loaded in-process: a 32-bit
+    /// process for the WOW6432Node half, the scanner's own view otherwise.
+    /// </summary>
+    internal static LoaderContext? LoaderFor(RegistryView view) =>
+        view == RegistryView.Registry32 ? LoaderContext.Wow64Process : null;
+}
 
 /// <summary>An autostart surface WinSight knows how to enumerate.</summary>
 public interface IAutostartEnumerator
@@ -400,6 +413,8 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
             : _source.UnreadableFolders is { } folders
                 ? [.. folders.Select(folder => Path.Combine(TasksRoot, folder.Trim('\\')))]
                 : null;
+        var scannerSid = UserHiveEnumerator.CurrentSid();
+        var loaders = new Dictionary<string, LoaderContext>(StringComparer.OrdinalIgnoreCase);
         foreach (var task in tasks)
         {
             var location = Path.Combine(TasksRoot, task.Path.TrimStart('\\'));
@@ -416,13 +431,16 @@ public sealed class ScheduledTaskEnumerator(IScheduledTaskSource? source = null)
             {
                 _unreadableScopes?.Add(location);
             }
+            // The action's variables expand in the environment of the account the task runs as.
+            var loader = ScheduledTaskPrincipal.Loader(ScheduledTaskPrincipal.Sid(task.Xml), scannerSid, loaders);
             foreach (var command in commands)
             {
                 yield return new RawAutostart(
                     AutostartVector.ScheduledTask,
                     task.Path.TrimStart('\\'),
                     Path.Combine(TasksRoot, task.Path.TrimStart('\\')),
-                    command);
+                    command,
+                    Loader: loader);
             }
         }
     }
@@ -584,8 +602,10 @@ public sealed class AppInitDllsEnumerator : IAutostartEnumerator
                          Separators,
                          StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
+                // The 32-bit list is loaded into every 32-bit process, where System32 is SysWOW64.
                 yield return new RawAutostart(
-                    AutostartVector.AppInitDll, "AppInit_DLLs", $"HKLM\\{Path} [{view}]", dll);
+                    AutostartVector.AppInitDll, "AppInit_DLLs", $"HKLM\\{Path} [{view}]", dll,
+                    Loader: RawAutostart.LoaderFor(view));
             }
         }
     }
@@ -954,7 +974,9 @@ public sealed class ComHijackEnumerator : IAutostartEnumerator
                     entries.Add(new RawAutostart(
                         AutostartVector.ComHijack, $"{clsid} [{key}]",
                         $"HKCU\\{RegistryViews.Describe(Path, view)}\\{clsid}\\{key}", command,
-                        relation == ComMachineRelation.DifferentServer));
+                        relation == ComMachineRelation.DifferentServer,
+                        // An in-process server in the 32-bit view is loaded by 32-bit hosts.
+                        key is "InprocServer32" or "TreatAs" ? RawAutostart.LoaderFor(view) : null));
                 }
             }
             catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
@@ -1035,8 +1057,10 @@ public sealed class NetshHelperEnumerator : IAutostartEnumerator
             {
                 if (key.GetValue(name) is string dll && dll.Trim().Length > 0)
                 {
+                    // A 32-bit helper is loaded by the 32-bit netsh in SysWOW64.
                     yield return new RawAutostart(
-                        AutostartVector.NetshHelper, name, $"HKLM\\{Path} [{view}]", dll);
+                        AutostartVector.NetshHelper, name, $"HKLM\\{Path} [{view}]", dll,
+                        Loader: RawAutostart.LoaderFor(view));
                 }
             }
         }

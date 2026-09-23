@@ -156,18 +156,22 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
             return entries;
         }
 
+        // WS-46: the account's own variables, never the scanner's. An account whose profile is unknown
+        // gets none, so its per-account variables stay unexpanded rather than pointing into this one.
+        var loader = LoaderContext.ForAccount(
+            AccountEnvironment.For(sid) ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
         using (hive)
         {
             foreach (var sub in SubKeys)
             {
-                entries.AddRange(ReadValues(hive, sid, view, sub));
+                entries.AddRange(ReadValues(hive, sid, view, sub, loader));
             }
         }
         return entries;
     }
 
     private List<RawAutostart> ReadValues(
-        RegistryKey hive, string sid, RegistryView view, string sub)
+        RegistryKey hive, string sid, RegistryView view, string sub, LoaderContext loader)
     {
         var entries = new List<RawAutostart>();
         RegistryKey? key;
@@ -192,9 +196,11 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
             var location = $"HKU\\{sid}\\{RegistryViews.Describe(sub, view)} [{view}]";
             foreach (var name in key.GetValueNames())
             {
-                if (key.GetValue(name) is string command && command.Length > 0)
+                // Read unexpanded: .NET would expand a REG_EXPAND_SZ with the scanner's own profile.
+                if (key.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames) is string command
+                    && command.Length > 0)
                 {
-                    entries.Add(new RawAutostart(AutostartVector.RunKey, name, location, command));
+                    entries.Add(new RawAutostart(AutostartVector.RunKey, name, location, command, Loader: loader));
                 }
             }
         }
@@ -273,7 +279,7 @@ public sealed class UserHiveEnumerator : IAutostartEnumerator
         }
     }
 
-    private static string? CurrentSid()
+    internal static string? CurrentSid()
     {
         try
         {

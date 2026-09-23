@@ -129,7 +129,7 @@ public sealed class PersistenceScanner
         //    in-process WinTrust/catalog verifier. No PowerShell child process or online
         //    revocation lookup is involved.
         var resolved = raws
-            .Select(r => (Raw: r.Entry, r.Source, Resolution: CommandLine.ResolveExecutable(r.Entry.Command)))
+            .Select(r => (Raw: r.Entry, r.Source, Resolution: CommandLine.ResolveExecutable(r.Entry.Command, r.Entry.Loader)))
             .ToList();
         var verdicts = _verifier.VerifyMany(
             resolved.Where(x => x.Resolution.ImagePath is not null)
