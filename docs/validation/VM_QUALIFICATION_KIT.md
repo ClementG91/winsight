@@ -440,6 +440,8 @@ $ValidationFiles = @(
     $PeScript,
     (Join-Path $ProtectedSourceRoot 'scripts\Test-Installer.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerServiceUninstall.ps1'),
+    (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerUpgrade.ps1'),
+    (Join-Path $ProtectedSourceRoot 'scripts\Measure-CloudFilesAccess.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\Test-McpServer.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\WinSightEtwValidation.psm1'),
     (Join-Path $PackageRoot 'Test-WfpValidation.ps1'),
@@ -579,6 +581,41 @@ Assert-CandidateFiles
 if ($LASTEXITCODE -ne 0) { throw 'All-users uninstall and service removal failed.' }
 & $ScExe query WinSightFirewall *> $null
 if ($LASTEXITCODE -ne 1060) { throw 'A firewall service is left after the all-users uninstall.' }
+```
+
+Upgrade in place from the previous published release, per user. Download its installer the same way
+as the candidate's (§3) and pin its hash in the evidence. The script requires the new version to
+replace the old one under a single uninstall entry, with no file of the old version that a fresh
+install of the new one would not have, and a clean uninstall afterwards:
+
+```powershell
+Assert-CandidateFiles
+& $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerUpgrade.ps1') `
+    -PreviousInstallerPath $ProtectedPreviousInstaller -PreviousVersion $PreviousProductVersion `
+    -InstallerPath $ProtectedInstaller -Version $ProductVersion
+if ($LASTEXITCODE -ne 0) { throw 'Upgrade from the previous release failed.' }
+```
+
+Finally, measure the automatic file access against Cloud Files placeholders, the shape of every
+file in a folder OneDrive backs up (WS-40). The script registers a disposable sync root through the
+documented Cloud Files API, with no OneDrive and no account, and records for each placeholder shape
+whether `winsight sign` could hash it and how many download requests the read caused. A hydrated
+placeholder must be readable, and no read may request a download:
+
+```powershell
+Assert-CandidateFiles
+$CloudEvidence = Join-Path $EvidenceRoot 'cloud-files.json'
+& $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File (Join-Path $ProtectedSourceRoot 'scripts\Measure-CloudFilesAccess.ps1') `
+    -CliPath $Cli -EvidencePath $CloudEvidence
+$cloud = (Get-Content -LiteralPath $CloudEvidence -Raw | ConvertFrom-Json).cases
+foreach ($case in 'control', 'plain-in-sync-root', 'hydrated-placeholder', 'hydrated-in-directory-placeholder') {
+    if (-not $cloud.$case.sha256Matches) { throw "Cloud Files: $case was not readable." }
+}
+if (@($cloud.PSObject.Properties.Value | Where-Object fetchRequestsDuringRead -gt 0).Count -gt 0) {
+    throw 'Cloud Files: a WinSight read requested a download.'
+}
 ```
 
 ### Signature evidence and operator-confirmed responses
