@@ -134,20 +134,75 @@ public static partial class AutomaticFileAccess
                 }
                 return new FileStream(duplicate, managedAccess);
             }
-            var reopened = ReOpenFile(
-                original,
-                desiredAccess,
-                _shareAccess,
-                (uint)options);
-            if (reopened.IsInvalid)
+            var reopened = ReopenRelative(original, desiredAccess | Synchronize, _shareAccess, options, out var status);
+            if (reopened is null)
             {
-                var error = Marshal.GetLastPInvokeError();
-                reopened.Dispose();
                 throw new IOException(
                     "The acquired local file could not be reopened for reading.",
-                    new Win32Exception(error));
+                    new Win32Exception(unchecked((int)RtlNtStatusToDosError(status))));
             }
             return new FileStream(reopened, managedAccess);
+        }
+
+        /// <summary>
+        /// A new open of the very object <paramref name="original"/> refers to (an empty name relative
+        /// to its handle, which is what <c>ReOpenFile</c> does inside), with recall forbidden.
+        /// </summary>
+        /// <remarks>
+        /// The acquiring open forbade recall, but a reopen is a new open with only its own options.
+        /// <c>ReOpenFile</c> without <c>FILE_FLAG_OPEN_NO_RECALL</c> let a read of a cloud-only
+        /// OneDrive file ask its provider to download it - measured in the VM (gate 17): two download
+        /// requests, and the read blocked for two minutes - and <c>ReOpenFile</c> rejects that flag
+        /// with ERROR_INVALID_PARAMETER. An automatic read never downloads: a file whose data is not
+        /// on this machine is unreadable, not fetched (WS-40).
+        /// </remarks>
+        private static SafeFileHandle? ReopenRelative(
+            SafeFileHandle original, uint desiredAccess, uint shareAccess, FileOptions options, out int status)
+        {
+            var createOptions = FileSynchronousIoNonAlert | FileNonDirectoryFile | FileOpenReparsePoint | FileOpenNoRecall;
+            if ((options & FileOptions.SequentialScan) != 0)
+            {
+                createOptions |= FileSequentialOnly;
+            }
+            if ((options & FileOptions.RandomAccess) != 0)
+            {
+                createOptions |= FileRandomAccess;
+            }
+            var addedReference = false;
+            var namePointer = IntPtr.Zero;
+            try
+            {
+                original.DangerousAddRef(ref addedReference);
+                namePointer = Marshal.AllocHGlobal(Marshal.SizeOf<UnicodeString>());
+                Marshal.StructureToPtr(new UnicodeString { Length = 0, MaximumLength = 0, Buffer = IntPtr.Zero }, namePointer, false);
+                var attributes = new ObjectAttributes
+                {
+                    Length = Marshal.SizeOf<ObjectAttributes>(),
+                    RootDirectory = original.DangerousGetHandle(),
+                    ObjectName = namePointer,
+                    Attributes = ObjCaseInsensitive,
+                };
+                status = NtCreateFile(
+                    out var handle, desiredAccess, ref attributes, out _, IntPtr.Zero, 0, shareAccess,
+                    FileOpen, createOptions, IntPtr.Zero, 0);
+                if (status < 0 || handle.IsInvalid)
+                {
+                    handle.Dispose();
+                    return null;
+                }
+                return handle;
+            }
+            finally
+            {
+                if (namePointer != IntPtr.Zero)
+                {
+                    Marshal.FreeHGlobal(namePointer);
+                }
+                if (addedReference)
+                {
+                    original.DangerousRelease();
+                }
+            }
         }
 
         /// <summary>Whether the path still names this exact volume/file identity.</summary>
@@ -519,6 +574,8 @@ public static partial class AutomaticFileAccess
     private const uint FileSynchronousIoNonAlert = 0x00000020;
     private const uint FileOpenReparsePoint = 0x00200000;
     private const uint FileOpenNoRecall = 0x00400000;
+    private const uint FileSequentialOnly = 0x00000004;
+    private const uint FileRandomAccess = 0x00000800;
     private const int ErrorFileNotFound = 2;
     private const int ErrorPathNotFound = 3;
     private const int FileDispositionInfoEx = 21;
@@ -601,13 +658,6 @@ public static partial class AutomaticFileAccess
 
     [DllImport("ntdll.dll", ExactSpelling = true)]
     private static extern uint RtlNtStatusToDosError(int status);
-
-    [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
-    private static extern SafeFileHandle ReOpenFile(
-        SafeFileHandle originalFile,
-        uint desiredAccess,
-        uint shareMode,
-        uint flagsAndAttributes);
 
     [DllImport("kernel32.dll", SetLastError = true, ExactSpelling = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
