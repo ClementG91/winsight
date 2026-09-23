@@ -31,6 +31,7 @@ public static partial class AutomaticFileAccess
         private readonly FileIdentity _identity;
         private readonly uint _desiredAccess;
         private readonly uint _shareAccess;
+        private readonly uint _attributes;
 
         internal LocalPathLease(
             string fullPath,
@@ -41,8 +42,10 @@ public static partial class AutomaticFileAccess
             FileIdentity identity,
             SafeFileHandle handle,
             uint desiredAccess,
-            uint shareAccess)
+            uint shareAccess,
+            uint attributes = 0)
         {
+            _attributes = attributes;
             FullPath = fullPath;
             IsDirectory = isDirectory;
             Length = length;
@@ -102,6 +105,17 @@ public static partial class AutomaticFileAccess
             return true;
         }
 
+        /// <summary>
+        /// False for a file whose data lives elsewhere: a cloud-only OneDrive file, or an offline one.
+        /// </summary>
+        /// <remarks>
+        /// Reading such a file asks its provider to fetch it. Measured in the VM (gate 17), a read of a
+        /// cloud-only Cloud Files placeholder sent two download requests and blocked for two minutes,
+        /// even through an open that forbade recall. An automatic read never downloads (WS-40), so
+        /// <see cref="OpenRead"/> refuses such a file before any open is attempted.
+        /// </remarks>
+        public bool DataIsLocal => (_attributes & (FileAttributeOffline | FileAttributeRecallOnOpen | FileAttributeRecallOnDataAccess)) == 0;
+
         /// <summary>Opens this acquired object for data reads without resolving its path again.</summary>
         public FileStream OpenRead(FileOptions options = FileOptions.SequentialScan)
             => Reopen(GenericRead, FileAccess.Read, options);
@@ -113,6 +127,11 @@ public static partial class AutomaticFileAccess
             if (IsDirectory)
             {
                 throw new IOException("The acquired local path is a directory, not a file.");
+            }
+            if (!DataIsLocal)
+            {
+                throw new IOException(
+                    "The file's data is not on this machine (a cloud-only or offline file); an automatic read does not download it.");
             }
             if ((_desiredAccess & GenericRead) != 0)
             {
@@ -499,7 +518,8 @@ public static partial class AutomaticFileAccess
                 identity,
                 handle,
                 desiredAccess,
-                shareAccess);
+                shareAccess,
+                information.FileAttributes);
         }
         catch (Exception ex) when (ex is ArgumentException
                                      or OverflowException
@@ -575,6 +595,9 @@ public static partial class AutomaticFileAccess
     private const uint FileOpenReparsePoint = 0x00200000;
     private const uint FileOpenNoRecall = 0x00400000;
     private const uint FileSequentialOnly = 0x00000004;
+    private const uint FileAttributeOffline = 0x00001000;
+    private const uint FileAttributeRecallOnOpen = 0x00040000;
+    private const uint FileAttributeRecallOnDataAccess = 0x00400000;
     private const uint FileRandomAccess = 0x00000800;
     private const int ErrorFileNotFound = 2;
     private const int ErrorPathNotFound = 3;

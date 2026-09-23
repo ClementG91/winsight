@@ -344,7 +344,8 @@ public static partial class AutomaticFileAccess
                     ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow),
                 handle,
                 desiredAccess,
-                shareAccess);
+                shareAccess,
+                information.FileAttributes);
         }
         catch (Exception ex) when (ex is ArgumentException
                                      or OverflowException

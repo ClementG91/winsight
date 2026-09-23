@@ -253,6 +253,73 @@ try
             $name, $c.sha256Matches, $c.state, $c.fetchRequestsDuringRead, $c.milliseconds, `
             $c.attributesBefore, $c.reparseTag, $c.placeholderStateBefore, $c.placeholderStateAfter
     }
+
+    # The primitives underneath, each in its own default-mode process, against the cloud-only file:
+    # what attributes an ordinary process is shown, and whether an open that forbids recall is honoured
+    # by the Cloud Files filter when the data is read.
+    $primitive = @'
+using System; using System.Runtime.InteropServices; using Microsoft.Win32.SafeHandles;
+public static class Primitive {
+    [StructLayout(LayoutKind.Sequential)] struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
+    [StructLayout(LayoutKind.Sequential)] struct ObjectAttributes { public int Length; public IntPtr Root; public IntPtr Name; public uint Attributes; public IntPtr Sd; public IntPtr Qos; }
+    [StructLayout(LayoutKind.Sequential)] struct IoStatus { public IntPtr Status; public UIntPtr Information; }
+    [StructLayout(LayoutKind.Sequential)] struct Info { public uint Attributes; public long C, A, W; public uint Volume, SizeHigh, SizeLow, Links, IndexHigh, IndexLow; }
+    [DllImport("ntdll.dll")] static extern int NtCreateFile(out SafeFileHandle h, uint access, ref ObjectAttributes oa, out IoStatus io, IntPtr alloc, uint attrs, uint share, uint disposition, uint options, IntPtr ea, uint eaLength);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)] static extern SafeFileHandle CreateFileW(string n, uint a, uint s, IntPtr sa, uint d, uint f, IntPtr t);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadFile(SafeFileHandle h, byte[] b, int n, out int r, IntPtr o);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetFileInformationByHandle(SafeFileHandle h, out Info i);
+    static string Read(SafeFileHandle h) {
+        var buffer = new byte[4096]; int read;
+        return ReadFile(h, buffer, buffer.Length, out read, IntPtr.Zero) ? "read " + read + " bytes" : "read failed " + Marshal.GetLastWin32Error();
+    }
+    public static string Attributes(string path) {
+        using (var h = CreateFileW(path, 0x80, 7, IntPtr.Zero, 3, 0x02000000 | 0x00200000 | 0x00100000, IntPtr.Zero)) {
+            if (h.IsInvalid) return "open failed " + Marshal.GetLastWin32Error();
+            Info i; return GetFileInformationByHandle(h, out i) ? "attributes 0x" + i.Attributes.ToString("X8") : "query failed " + Marshal.GetLastWin32Error();
+        }
+    }
+    public static string Win32NoRecallRead(string path) {
+        using (var h = CreateFileW(path, 0x80000000, 7, IntPtr.Zero, 3, 0x00100000 | 0x00200000, IntPtr.Zero)) {
+            return h.IsInvalid ? "open failed " + Marshal.GetLastWin32Error() : Read(h);
+        }
+    }
+    public static string NtNoRecallRead(string path) {
+        var name = @"\??\" + path; var buffer = Marshal.StringToHGlobalUni(name); var us = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
+        try {
+            Marshal.StructureToPtr(new UnicodeString { Length = (ushort)(name.Length * 2), MaximumLength = (ushort)(name.Length * 2 + 2), Buffer = buffer }, us, false);
+            var oa = new ObjectAttributes { Length = Marshal.SizeOf(typeof(ObjectAttributes)), Name = us, Attributes = 0x40 };
+            SafeFileHandle h; IoStatus io;
+            var status = NtCreateFile(out h, 0x80100000, ref oa, out io, IntPtr.Zero, 0, 7, 1, 0x20 | 0x40 | 0x00200000 | 0x00400000, IntPtr.Zero, 0);
+            using (h) { return status < 0 ? "open failed 0x" + status.ToString("X8") : Read(h); }
+        } finally { Marshal.FreeHGlobal(us); Marshal.FreeHGlobal(buffer); }
+    }
+}
+'@
+    $evidence.primitives = [ordered]@{}
+    $target = $cases['dehydrated-placeholder'].Path
+    foreach ($method in 'Attributes', 'NtNoRecallRead', 'Win32NoRecallRead') {
+        $child = "Add-Type -TypeDefinition @'`n$primitive`n'@`n[Primitive]::$method('$target')"
+        $start = New-Object Diagnostics.ProcessStartInfo (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+        $start.Arguments = '-NoProfile -EncodedCommand ' + [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($child))
+        $start.UseShellExecute = $false
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $fetchBefore = [CloudFilesProbe]::FetchRequests
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $process = [Diagnostics.Process]::Start($start)
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $null = $process.StandardError.ReadToEndAsync()
+        $finished = $process.WaitForExit(90000)
+        if (-not $finished) { $process.Kill() }
+        $watch.Stop()
+        $evidence.primitives[$method] = [ordered]@{
+            result = if ($finished) { $stdout.Result.Trim() } else { 'timeout' }
+            milliseconds = $watch.ElapsedMilliseconds
+            fetchRequests = [CloudFilesProbe]::FetchRequests - $fetchBefore
+        }
+        $p = $evidence.primitives[$method]
+        "primitive {0}: {1} fetch={2} ms={3}" -f $method, $p.result, $p.fetchRequests, $p.milliseconds
+    }
 }
 finally
 {
