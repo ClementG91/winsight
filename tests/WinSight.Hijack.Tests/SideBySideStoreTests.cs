@@ -148,8 +148,7 @@ public sealed class SideBySideStoreTests : IDisposable
     /// The recursive enumerator opened every subdirectory as it met it and kept the handle queued, so
     /// indexing the real WinSxS - tens of thousands of component directories - held about 46 000
     /// directory handles at once. Three thousand directories here would have meant three thousand
-    /// open handles; nested ones (the <c>f</c>/<c>r</c> delta folders real components carry) must
-    /// still be indexed.
+    /// open handles; nested ones must still be walked.
     /// </remarks>
     [Fact]
     public void AStoreOfManyDirectoriesIsIndexedWithoutHoldingTheirHandles()
@@ -157,9 +156,9 @@ public sealed class SideBySideStoreTests : IDisposable
         const int Components = 3000;
         for (var i = 0; i < Components; i++)
         {
-            var component = Path.Combine(_root, "WinSxS", $"amd64_component_{i}");
-            Directory.CreateDirectory(Path.Combine(component, "f"));
-            File.WriteAllBytes(Path.Combine(component, "f", $"lib{i}.dll"), []);
+            var nested = Path.Combine(_root, "WinSxS", $"amd64_component_{i}", "amd64");
+            Directory.CreateDirectory(nested);
+            File.WriteAllBytes(Path.Combine(nested, $"lib{i}.dll"), []);
         }
         var store = new SideBySideStore(_root, TimeSpan.FromMinutes(2), int.MaxValue);
         using var process = System.Diagnostics.Process.GetCurrentProcess();
@@ -178,5 +177,45 @@ public sealed class SideBySideStoreTests : IDisposable
 
         Assert.True(Volatile.Read(ref peak) - before < Components / 4,
             $"the walk held {Volatile.Read(ref peak) - before} extra handles at its peak");
+    }
+
+    /// <summary>
+    /// WS-51. The store's bookkeeping and the differentials inside a component are not load sources
+    /// and are not walked; <c>Fusion</c> and any folder a later Windows adds are.
+    /// </summary>
+    /// <remarks>
+    /// Walking them was most of the time the index spent - 124 584 directories where 27 039 hold
+    /// what the loader can use - so the real index rarely finished within its budget and every
+    /// phantom-import question came back "unknown". A DLL name that only a delta or a pending
+    /// deletion carries does not make an import resolvable.
+    /// </remarks>
+    [Fact]
+    public void OnlyFoldersTheLoaderCanUseAreIndexed()
+    {
+        void File(string relative)
+        {
+            var path = Path.Combine(_root, "WinSxS", relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            System.IO.File.WriteAllBytes(path, []);
+        }
+        File(@"amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.9635_none_08e2c157a83ed5da\msvcr90.dll");
+        File(@"amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.9635_none_08e2c157a83ed5da\r\delta-only.dll");
+        File(@"amd64_microsoft.vc90.crt_1fc8b3b9a1e18e3b_9.0.30729.9635_none_08e2c157a83ed5da\f\forward-only.dll");
+        File(@"Temp\PendingDeletes\0123abcd.pending.dll");
+        File(@"Backup\backup-only.dll");
+        File(@"Manifests\manifest-folder.dll");
+        File(@"Fusion\amd64_microsoft.vc80.mfc_1fc8b3b9a1e18e3b_none_758c8a477f89a995\8.0\8.0.50727.6195\mfc80.dll");
+        File(@"FutureLayout\component\future.dll");
+        var store = new SideBySideStore(_root);
+
+        Assert.True(store.Contains("msvcr90.dll"));
+        Assert.True(store.Contains("mfc80.dll"));
+        Assert.True(store.Contains("future.dll"));
+        Assert.False(store.Contains("delta-only.dll"));
+        Assert.False(store.Contains("forward-only.dll"));
+        Assert.False(store.Contains("0123abcd.pending.dll"));
+        Assert.False(store.Contains("backup-only.dll"));
+        Assert.False(store.Contains("manifest-folder.dll"));
+        Assert.Equal(0, store.UnansweredLookups);
     }
 }

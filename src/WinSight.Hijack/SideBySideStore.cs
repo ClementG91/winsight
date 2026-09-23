@@ -42,6 +42,18 @@ public interface ISideBySideStore
 /// did not finish, the index cannot prove a name is absent, so every lookup answers null and the
 /// caller reports coverage instead of a finding - the same rule the rest of this codebase follows.
 ///
+/// <b>Only what the loader can load from is walked (WS-51).</b> Walking every folder of WinSxS did
+/// not fit the budget: on the audit machine it took 9.75 s warm and longer cold, across 124 584
+/// directories, so the index was usually partial and every phantom-import question came back
+/// "unknown". Most of those directories are the store's bookkeeping - pending deletions and
+/// in-flight installs, backups, manifests, catalogs - and the forward/reverse/null differentials
+/// inside each component, which are deltas against another version of a file the component already
+/// names. None of them is a load source. Skipping them walks 27 039 directories in 2.1 s and finds
+/// the same 5 828 names, less five <c>hermes.dll</c> files waiting in <c>Temp\PendingDeletes</c>.
+/// The rule is a denylist on purpose: <c>Fusion</c>, where Windows 11 keeps MSI-installed Win32
+/// assemblies such as the VC80 MFC and OpenMP ones, is walked, and so is any folder a later Windows
+/// adds.
+///
 /// <b>One instance per scan, on one thread.</b> The index is built lazily on first use and the
 /// unanswered-lookup count is a plain increment, neither of which is synchronised: this is a
 /// per-scan object, created inside <c>HijackScanner.ScanWithCoverage</c> and used by the single
@@ -57,6 +69,14 @@ public sealed class SideBySideStore : ISideBySideStore
 
     /// <summary>Entries indexed before the walk is abandoned.</summary>
     public const int MaxEntries = 400_000;
+
+    // Top-level folders that are the store's bookkeeping, never a load source.
+    private static readonly string[] BookkeepingFolders = ["Temp", "InstallTemp", "Backup", "Manifests", "Catalogs", "FileMaps"];
+
+    // Differentials inside a component directory: deltas against another version of the same file.
+    private static readonly string[] DeltaFolders = ["f", "r", "n"];
+
+    private static readonly string[] NoFolders = [];
 
     private readonly string _root;
     private readonly TimeSpan _budget;
@@ -162,27 +182,37 @@ public sealed class SideBySideStore : ISideBySideStore
                 AttributesToSkip = FileAttributes.ReparsePoint,
                 IgnoreInaccessible = true,
             };
-            var pending = new Stack<string>();
-            pending.Push(_root);
+            var pending = new Stack<(string Path, int Depth)>();
+            pending.Push((_root, 0));
             while (pending.Count > 0)
             {
-                var directory = pending.Pop();
-                var entries = new System.IO.Enumeration.FileSystemEnumerable<(string Path, bool IsDirectory)>(
+                if (spent.Elapsed > _budget)
+                {
+                    _names = names;
+                    _complete = false;
+                    return;
+                }
+                var (directory, depth) = pending.Pop();
+                // Only a DLL's name is materialised; every other file is filtered before a string exists.
+                var entries = new System.IO.Enumeration.FileSystemEnumerable<(string Value, bool IsDirectory)>(
                     directory,
-                    (ref System.IO.Enumeration.FileSystemEntry entry) => (entry.ToFullPath(), entry.IsDirectory),
-                    options);
-                foreach (var (path, isDirectory) in entries)
+                    (ref System.IO.Enumeration.FileSystemEntry entry) => entry.IsDirectory
+                        ? (entry.ToFullPath(), true)
+                        : (entry.FileName.ToString(), false),
+                    options)
+                {
+                    ShouldIncludePredicate = (ref System.IO.Enumeration.FileSystemEntry entry) => entry.IsDirectory
+                        ? !IsNamed(entry.FileName, depth switch { 0 => BookkeepingFolders, 1 => DeltaFolders, _ => NoFolders })
+                        : entry.FileName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase),
+                };
+                foreach (var (value, isDirectory) in entries)
                 {
                     if (isDirectory)
                     {
-                        pending.Push(path);
+                        pending.Push((value, depth + 1));
                         continue;
                     }
-                    if (!path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-                    names.Add(Path.GetFileName(path));
+                    names.Add(value);
                     if (names.Count >= _maxEntries || spent.Elapsed > _budget)
                     {
                         _names = names;
@@ -202,5 +232,17 @@ public sealed class SideBySideStore : ISideBySideStore
             _names = names;
             _complete = false;
         }
+    }
+
+    private static bool IsNamed(ReadOnlySpan<char> name, string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (name.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 }
