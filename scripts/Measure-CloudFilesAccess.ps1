@@ -227,6 +227,7 @@ try
         $watch = [Diagnostics.Stopwatch]::StartNew()
         $process = [Diagnostics.Process]::Start($start)
         $stdout = $process.StandardOutput.ReadToEndAsync()
+        $null = $process.StandardError.ReadToEndAsync()   # drained, so a full pipe can never stall the read
         $finished = $process.WaitForExit(120000)
         if (-not $finished) { $process.Kill() }
         $watch.Stop()
