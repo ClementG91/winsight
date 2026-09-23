@@ -11,6 +11,38 @@ namespace WinSight.Mcp.Tests;
 /// </summary>
 public sealed class ResponseIsNotReachableFromMcpTests
 {
+    private const BindingFlags Declared = BindingFlags.Public | BindingFlags.NonPublic
+        | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
+
+    /// <summary>
+    /// The methods that change the machine or the operator's decisions. MCP may read the action
+    /// journal and the rule list (the <c>actions</c> and <c>rules</c> categories); it must never
+    /// reach one of these.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> Mutators = new(StringComparer.Ordinal)
+    {
+        ["WinSight.Response.ProcessResponder"] = ["Suspend", "Resume", "Terminate"],
+        ["WinSight.Response.Win32ProcessController"] = ["SuspendThreads", "ResumeThreads", "TerminateProcess"],
+        ["WinSight.Response.RuleStore"] = ["Add", "Remove"],
+        ["WinSight.Response.ActionJournal"] = ["TryAppend", "MarkUndone"],
+        ["WinSight.Response.Quarantine"] = ["Store", "Remove"],
+        ["WinSight.Application.PersistenceResponder"] = ["Block", "Restore"],
+        ["WinSight.Application.RegistryAndFilePersistenceMutator"] = ["RemoveIfUnchanged", "RestoreIfFree"],
+        ["WinSight.Application.GuardianAlertPresenter"] = ["Allow", "Revoke", "Block", "Restore"],
+        ["WinSight.Application.FirewallServiceGateway"] = ["MutateAsync"],
+        ["WinSight.Application.Adapters"] = ["RespondToProcess", "RestoreBlocked", "RevokeRule"],
+        ["WinSight.Firewall.FirewallPolicyStore"] = ["SaveAsync"],
+        ["WinSight.Firewall.FirewallRequestDispatcher"] = ["DispatchAsync"],
+    };
+
+    private static readonly Lazy<Assembly[]> WinSightAssemblies = new(() => Directory
+        .GetFiles(AppContext.BaseDirectory, "*.dll")
+        .Where(path => !Path.GetFileName(path).Contains(".Tests", StringComparison.Ordinal))
+        .Select(AssemblyName.GetAssemblyName)
+        .Where(IlCallGraph.IsWinSight)
+        .Select(Assembly.Load)
+        .ToArray());
+
     [Fact]
     public void TheMcpAssemblyDoesNotDependOnTheResponseLayer()
     {
@@ -42,4 +74,60 @@ public sealed class ResponseIsNotReachableFromMcpTests
 
         Assert.Empty(offenders);
     }
+
+    /// <summary>
+    /// WS-61. MCP depends on the application layer, which depends on the response layer, so the two
+    /// checks above cannot see a path such as a scan category that happens to call a responder. This
+    /// walks the IL from every method of the MCP assembly (the SDK activates its types by reflection,
+    /// so all of them are roots) and proves no mutator is reachable.
+    /// </summary>
+    [Fact]
+    public void NoMutatorIsReachableFromAnyMcpMethod()
+    {
+        var graph = new IlCallGraph(WinSightAssemblies.Value).Walk(AllMethodsOf(typeof(McpScanService).Assembly));
+
+        Assert.Empty(graph.Unresolved);
+        var reached = graph.Reached.Where(IsMutator).Select(graph.PathTo).ToArray();
+        Assert.True(reached.Length == 0, "MCP reaches a mutator:\n" + string.Join("\n", reached));
+    }
+
+    [Fact]
+    public void TheWalkReachesWhatMcpReallyReads()
+    {
+        var graph = new IlCallGraph(WinSightAssemblies.Value).Walk(AllMethodsOf(typeof(McpScanService).Assembly));
+        var reached = graph.Reached.Select(IlCallGraph.Describe).ToHashSet(StringComparer.Ordinal);
+
+        // Through an async state machine, a lambda and a category table: the paths a naive walk misses.
+        Assert.Contains("WinSight.Application.Adapters.Run", reached);
+        Assert.Contains("WinSight.Response.ActionJournal.Read", reached);
+        Assert.Contains("WinSight.Response.RuleStore.ActiveRules", reached);
+        Assert.Contains("WinSight.Application.FirewallServiceGateway.GetViewAsync", reached);
+    }
+
+    /// <summary>
+    /// The positive control: the same walk from the CLI, which does offer the response verbs, finds
+    /// them. Without it a walk that silently stopped early would pass the test above.
+    /// </summary>
+    [Fact]
+    public void TheSameWalkFindsTheMutatorsTheCliOffers()
+    {
+        var cli = WinSightAssemblies.Value.Single(a => a.GetName().Name == "winsight");
+        var graph = new IlCallGraph(WinSightAssemblies.Value).Walk([cli.EntryPoint!]);
+        var reached = graph.Reached.Where(IsMutator).Select(IlCallGraph.Describe).ToHashSet(StringComparer.Ordinal);
+
+        Assert.Empty(graph.Unresolved);
+        Assert.Contains("WinSight.Response.Win32ProcessController.TerminateProcess", reached);
+        Assert.Contains("WinSight.Response.RuleStore.Remove", reached);
+        Assert.Contains("WinSight.Application.RegistryAndFilePersistenceMutator.RestoreIfFree", reached);
+    }
+
+    private static bool IsMutator(MethodBase method) =>
+        method.Module.Assembly.GetName().Name == "WinSight.FirewallService"
+        || (method.DeclaringType?.FullName is { } type
+            && Mutators.TryGetValue(type, out var names)
+            && names.Contains(method.Name, StringComparer.Ordinal));
+
+    private static IEnumerable<MethodBase> AllMethodsOf(Assembly assembly) =>
+        assembly.GetTypes().SelectMany(type => type.GetMethods(Declared).Cast<MethodBase>()
+            .Concat(type.GetConstructors(Declared)));
 }
