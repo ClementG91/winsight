@@ -22,12 +22,13 @@ IPC locale, absence de résidu.
 **Qualifié en VM le 23 septembre** (§17.2, candidats `bd4242f` puis `259056b`, Hyper-V, passes
 autonomes) : toutes les portes du 22, plus l'installation « tous les utilisateurs » avec retrait du
 service à la désinstallation (WS-63), la mise à niveau depuis la v0.13.0 publiée, les substituts
-Cloud Files de OneDrive (WS-40) et l'attribution des écritures dans le dossier Démarrage (WS-73, WS-60).
+Cloud Files de OneDrive (WS-40), l'attribution des écritures dans le dossier Démarrage (WS-73, WS-60)
+et l'IPC par ouverture de session réseau depuis une seconde VM (porte 36, 10/10). La qualification x64
+est complète : les 31 portes passent sur le candidat `259056b`.
 
-**Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : IPC par ouverture de session
-réseau (la passe à deux VM est prête ; elle attend la saisie du mot de passe jetable par l'opérateur),
-ARM64 natif, signature Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque
-section précise ce qui a été mesuré et ce qui ne l'a pas été.
+**Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
+Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
+été mesuré et ce qui ne l'a pas été.
 
 ---
 
@@ -63,9 +64,8 @@ section précise ce qui a été mesuré et ce qui ne l'a pas été.
 - **Différenciation réelle.** Un triage unifié, local et compréhensible pour un non-spécialiste, avec
   des verdicts gradués (exploitabilité réelle, ancre de confiance, abus d'interpréteur signé) et une
   interface MCP sûre — aucune alternative ne réunit tout cela.
-- **Priorités.** (1) IPC par ouverture de session réseau : passe à deux VM prête (§17.2), il ne
-  manque que la saisie du mot de passe jetable ; (2) qualification ARM64 ; (3) réduire le paquet
-  installé (431 Mo, WS-53) ; (4) mode pare-feu « demander après la première connexion ».
+- **Priorités.** (1) qualification ARM64 ; (2) réduire le paquet installé (431 Mo, WS-53) ;
+  (3) mode pare-feu « demander après la première connexion » ; (4) signature Authenticode.
 
 ---
 
@@ -498,8 +498,8 @@ Présence en direct, blocage DNS, flux de fichiers générique.
 
 ## 13. Security hardening roadmap
 
-1. **Maintenant** : IPC par ouverture de session réseau (passe à deux VM prête) ; ARM64. Les passes
-   VM du 23 septembre ont validé WS-63, WS-40, WS-73 et la mise à niveau ; IPC par
+1. **Maintenant** : ARM64. Les passes VM du 23 septembre ont validé WS-63, WS-40, WS-73, la mise à
+   niveau et l'IPC par ouverture de session réseau (porte 36) ; IPC par
    ouverture de session réseau. L'étanchéité MCP est prouvée au niveau IL (WS-61) et la release
    restaure ses paquets sans cache (WS-62).
 2. **Ensuite** : recommander l'installation tous utilisateurs quand l'utilisateur fait partie du modèle
@@ -674,22 +674,28 @@ Le harnais reprend les portes du §17.1 et en ajoute quatre :
 | `hv-run2-all-2c3085a` | `2c3085a` | 29 PASS, 1 FAIL, 36 NOT_RUN | 16 PASS ; 25 : seul l'auteur réel est attribué (WS-73 corrigé), l'écriture pré-ouverte ne l'est pas (WS-60) ; 17 : la réouverture avec `FILE_OPEN_NO_RECALL` ne suffit pas |
 | `hv-run3c-gate17-259056b` | `259056b` | 2 PASS | 17 : lecture refusée en 138 ms sans téléchargement ; les primitives montrent que le filtre Cloud Files ignore `FILE_OPEN_NO_RECALL` en lecture (NT comme Win32 : 2 demandes, 90 s) et qu'un processus ordinaire voit l'attribut « rappel à l'accès » (`0x00401620`) |
 | `hv-run4-all-259056b` | `259056b` (final) | **30 PASS, 0 FAIL**, 36 NOT_RUN | la qualification complète du candidat final |
+| `hv-network1` | `259056b` (final) | **36 PASS (10/10)**, 99 PASS | ouverture de session réseau depuis la VM de contrôle : 7/7 (jeton `S-1-5-2` sans `S-1-5-4`, tube authentifié inaccessible, aucune mutation), observateur 3/3 (même instance du service avant et après) |
 
-La porte 36 (IPC par ouverture de session réseau) reste `NOT_RUN` dans une passe automatique. Une
-passe dédiée est prête et sa VM de contrôle existe (`WinSight-Control-HV`, point de contrôle
-`C0-control`) : disque différentiel du même disque de base, commutateur Hyper-V privé que ni l'hôte
-ni Internet ne voient, WinRM HTTPS avec `Basic` sur TLS seulement comme au §7 du kit, et un
-rendez-vous HTTP sur ce commutateur pour le certificat public et le résultat. Le compte jetable est
-créé, et son mot de passe tapé, par l'opérateur lui-même dans la boîte d'identification Windows de
-chaque VM ; les deux VM sont restaurées ensuite.
+La porte 36 (IPC par ouverture de session réseau) est passée à part, avec deux VM : la cible et
+`WinSight-Control-HV`, sur un disque différentiel du même disque de base, reliées par un commutateur
+Hyper-V privé que ni l'hôte ni Internet ne voient ; WinRM HTTPS avec `Basic` sur TLS seulement,
+comme au §7 du kit, et un rendez-vous HTTP sur ce commutateur pour le certificat public et le
+résultat. L'opérateur a créé le compte jetable, et tapé son mot de passe, dans la boîte
+d'identification Windows de chaque VM. Deux écarts de harnais, consignés dans
+`host-operations.txt` : le pilote hôte s'est fermé en cours de passe (preuves collectées ensuite
+avec `-Resume`, VM restaurées), et le script de contrôle lisait la réponse du rendez-vous comme du
+texte alors que Windows PowerShell la rend en octets. L'opérateur l'a corrigé dans la VM (décodage
+des octets) avant de le relancer ; les scripts sont corrigés pour les passes suivantes. Ni l'un ni
+l'autre ne touche le produit ni ce que la porte vérifie.
+
 ---
 
 ## 18. Recommended roadmap
 
 ### Maintenant — bugs, sécurité, fiabilité
 
-- Relire et fusionner la branche d'audit par thème ; qualification x64 faite (§17.1, sauf IPC réseau
-  qui exige une seconde machine, passe prête) ; passes VM du 23 septembre : `259056b` qualifié, 30 portes sur 30 hors IPC réseau (§17.2) ; ARM64.
+- Relire et fusionner la branche d'audit par thème ; qualification x64 faite (§17.1 et §17.2, IPC réseau
+  comprise, porte 36 à deux VM) : `259056b` qualifié, 31 portes sur 31 (§17.2) ; ARM64.
 - Mettre à jour `PRODUCTION_READINESS.md` avec le nouveau candidat qualifié.
 
 ### Ensuite — fonctionnalités différenciantes
@@ -731,7 +737,7 @@ chaque VM ; les deux VM sont restaurées ensuite.
 
 | # | Fonctionnalité | Pourquoi | Valeur utilisateur | Difficulté (1-5) | Risque (1-5) | Coût performance | Fichiers / composants |
 |---|---|---|---|---|---|---|---|
-| 1 | IPC par ouverture de session réseau (porte 36) | seule frontière IPC non qualifiée ; passe à deux VM prête | confiance dans le modèle d'autorisation | 1 | 1 | nul | `hyperv/Invoke-HyperVNetworkLogon.ps1` |
+| 1 | Mettre à jour `PRODUCTION_READINESS.md` et publier le candidat qualifié | la qualification x64 est complète (31/31) | une version publiable | 1 | 1 | nul | `docs/PRODUCTION_READINESS.md`, release |
 | 2 | Qualification ARM64 native | seconde architecture publiée, jamais qualifiée | publication ARM64 | 3 | 2 | nul | runner ARM64, kit de qualification |
 | 3 | Pare-feu « décider après la première connexion » | l'attente n°1 d'un utilisateur de LuLu | contrôle réseau compréhensible | 3 | 3 | faible (événements WFP) | `FirewallService/OutboundObserverService.cs`, `Dashboard` |
 | 4 | Leurres rançongiciel dans les dossiers OneDrive | la plantation et le nettoyage des leurres sous une racine Cloud Files ne sont pas mesurés | détection rançongiciel fiable sur un PC grand public | 2 | 2 | nul | `Ransomware/CanaryManager.cs`, `scripts/Measure-CloudFilesAccess.ps1` |
