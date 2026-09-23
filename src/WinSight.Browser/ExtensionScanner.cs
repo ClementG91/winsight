@@ -13,10 +13,24 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
 {
     private const long MaximumJsonBytes = 1024 * 1024;
 
-    /// <summary>A browser's on-disk "Extensions" directory to scan.</summary>
+    // A profile's preferences grow with its history of settings; a few megabytes is common.
+    private const long MaximumPreferencesBytes = 64L * 1024 * 1024;
+
+    // Chromium's ManifestLocation values (extensions/common/mojom/manifest.mojom) for an extension
+    // read from a folder instead of the profile's Extensions directory.
+    private const int UnpackedLocation = 4;
+    private const int CommandLineLocation = 8;
+
+    // Chrome and Edge keep extensions.settings in Secure Preferences; other builds in Preferences.
+    private static readonly string[] PreferenceFiles = ["Secure Preferences", "Preferences"];
+
+    /// <summary>A browser profile to scan.</summary>
     /// <param name="Browser">Friendly browser name for reporting.</param>
     /// <param name="ExtensionsDir">Path containing per-extension-id subdirectories.</param>
-    public readonly record struct Root(string Browser, string ExtensionsDir);
+    /// <param name="ProfileDir">
+    /// The profile whose preferences list the extensions loaded from a folder; null to skip them.
+    /// </param>
+    public readonly record struct Root(string Browser, string ExtensionsDir, string? ProfileDir = null);
 
     private readonly IReadOnlyList<Root>? _roots = roots;
 
@@ -75,13 +89,17 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
             foreach (var profile in profiles.Append(userData))
             {
                 var ext = System.IO.Path.Combine(profile, "Extensions");
-                if (DirectoryPresent(ext, out var extensionsUnreadable))
-                {
-                    roots.Add(new Root(name, ext));
-                }
-                else if (extensionsUnreadable)
+                var hasExtensions = DirectoryPresent(ext, out var extensionsUnreadable);
+                if (extensionsUnreadable)
                 {
                     unreadableSources++;
+                }
+                // A profile whose only extension was loaded unpacked has no Extensions folder at all.
+                var hasPreferences = PreferenceFiles.Any(file =>
+                    AutomaticFileAccess.FileExists(System.IO.Path.Combine(profile, file)));
+                if (hasExtensions || hasPreferences)
+                {
+                    roots.Add(new Root(name, ext, profile));
                 }
             }
         }
@@ -100,45 +118,138 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         var unreadableItems = 0;
         foreach (var root in rootAcquisition.Items)
         {
-            if (!DirectoryPresent(root.ExtensionsDir, out var rootPresenceUnreadable))
+            ScanExtensionsFolder(root, results, ref unreadableSources, ref unreadableItems);
+            if (root.ProfileDir is not null)
             {
-                if (rootPresenceUnreadable)
-                {
-                    unreadableSources++;
-                }
-                continue;
-            }
-            var extensionDirectories = SafeEnumerate(root.ExtensionsDir, out var rootUnreadable);
-            if (rootUnreadable)
-            {
-                unreadableSources++;
-                continue;
-            }
-            foreach (var extDir in extensionDirectories)
-            {
-                var versionDir = LatestVersionDir(extDir, out var extensionUnreadable);
-                if (extensionUnreadable)
-                {
-                    unreadableItems++;
-                    continue;
-                }
-                if (versionDir is null)
-                {
-                    continue;
-                }
-                var parsed = TryParse(root.Browser, System.IO.Path.GetFileName(extDir), versionDir);
-                if (parsed is not null)
-                {
-                    results.Add(parsed);
-                }
-                else
-                {
-                    unreadableItems++;
-                }
+                ScanFolderLoaded(root.Browser, root.ProfileDir, results, ref unreadableSources);
             }
         }
         return new AcquisitionSnapshot<BrowserExtension>(
             results, unreadableSources, unreadableItems);
+    }
+
+    private static void ScanExtensionsFolder(
+        Root root, List<BrowserExtension> results, ref int unreadableSources, ref int unreadableItems)
+    {
+        if (!DirectoryPresent(root.ExtensionsDir, out var rootPresenceUnreadable))
+        {
+            if (rootPresenceUnreadable)
+            {
+                unreadableSources++;
+            }
+            return;
+        }
+        var extensionDirectories = SafeEnumerate(root.ExtensionsDir, out var rootUnreadable);
+        if (rootUnreadable)
+        {
+            unreadableSources++;
+            return;
+        }
+        foreach (var extDir in extensionDirectories)
+        {
+            var versionDir = LatestVersionDir(extDir, out var extensionUnreadable);
+            if (extensionUnreadable)
+            {
+                unreadableItems++;
+                continue;
+            }
+            if (versionDir is null)
+            {
+                continue;
+            }
+            var parsed = TryParse(root.Browser, System.IO.Path.GetFileName(extDir), versionDir);
+            if (parsed is not null)
+            {
+                results.Add(parsed);
+            }
+            else
+            {
+                unreadableItems++;
+            }
+        }
+    }
+
+    /// <summary>
+    /// WS-48. The extensions a profile loads from a folder outside its Extensions directory: "Load
+    /// unpacked" in developer mode, <c>--load-extension</c>, or an entry a sideloader wrote into the
+    /// preferences. Their folders are listed only in <c>extensions.settings</c>, so a scan of the
+    /// Extensions directory never saw them. One whose manifest cannot be read is still reported: the
+    /// entry is the evidence, and a folder on a network share is named without being opened.
+    /// </summary>
+    private static void ScanFolderLoaded(
+        string browser, string profileDir, List<BrowserExtension> results, ref int unreadableSources)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var file in PreferenceFiles)
+        {
+            var path = System.IO.Path.Combine(profileDir, file);
+            if (!AutomaticFileAccess.FileExists(path))
+            {
+                continue;
+            }
+            List<(string Id, ExtensionLocation Location, string Folder)>? entries;
+            try
+            {
+                entries = ReadFolderLoaded(path);
+            }
+            catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+            {
+                entries = null;
+            }
+            if (entries is null)
+            {
+                unreadableSources++;
+                continue;
+            }
+            foreach (var (id, location, folder) in entries.Where(entry => seen.Add(entry.Id)))
+            {
+                var parsed = TryParse(browser, id, folder)
+                    ?? new BrowserExtension(browser, id, id, null, [], [], folder);
+                results.Add(parsed with { Location = location });
+            }
+        }
+    }
+
+    private static List<(string Id, ExtensionLocation Location, string Folder)>? ReadFolderLoaded(string preferencesPath)
+    {
+        using var doc = ParseJson(preferencesPath, MaximumPreferencesBytes);
+        if (doc is null || doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+        var entries = new List<(string, ExtensionLocation, string)>();
+        if (!doc.RootElement.TryGetProperty("extensions", out var extensions)
+            || extensions.ValueKind != JsonValueKind.Object
+            || !extensions.TryGetProperty("settings", out var settings)
+            || settings.ValueKind != JsonValueKind.Object)
+        {
+            return entries;
+        }
+        foreach (var setting in settings.EnumerateObject())
+        {
+            if (setting.Value.ValueKind != JsonValueKind.Object
+                || !setting.Value.TryGetProperty("location", out var code)
+                || code.ValueKind != JsonValueKind.Number
+                || !code.TryGetInt32(out var value))
+            {
+                continue;
+            }
+            var location = value switch
+            {
+                UnpackedLocation => ExtensionLocation.Unpacked,
+                CommandLineLocation => ExtensionLocation.CommandLine,
+                _ => ExtensionLocation.Profile,
+            };
+            var folder = DisplayString(setting.Value, "path");
+            // A store install's path is relative to the Extensions directory, already scanned.
+            if (location == ExtensionLocation.Profile || string.IsNullOrEmpty(folder)
+                || folder.Contains('\0', StringComparison.Ordinal) || !System.IO.Path.IsPathFullyQualified(folder))
+            {
+                continue;
+            }
+            entries.Add((setting.Name, location, folder));
+        }
+        return entries;
     }
 
     // Newest version subdirectory (extensions keep old versions around until GC'd).
@@ -381,10 +492,10 @@ public sealed class ExtensionScanner(IReadOnlyList<ExtensionScanner.Root>? roots
         }
     }
 
-    private static JsonDocument? ParseJson(string path)
+    private static JsonDocument? ParseJson(string path, long maximumBytes = MaximumJsonBytes)
     {
         using var lease = AutomaticFileAccess.TryAcquire(path);
-        if (lease is null || lease.IsDirectory || lease.Length > MaximumJsonBytes)
+        if (lease is null || lease.IsDirectory || lease.Length > maximumBytes)
         {
             return null;
         }

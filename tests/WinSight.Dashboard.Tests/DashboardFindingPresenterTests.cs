@@ -776,6 +776,31 @@ public sealed class DashboardFindingPresenterTests
         });
     }
 
+    [Theory]
+    [InlineData("en", "loaded from a folder")]
+    [InlineData("fr", "chargée depuis un dossier")]
+    [InlineData("es", "cargada desde una carpeta")]
+    public void AnExtensionLoadedFromAFolderSaysSoInTheOperatorsLanguage(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var unpacked = DashboardFindingPresenter.Present("extensions", Item(Severity.Notable, new()
+            {
+                ["permissions"] = "storage",
+                ["location"] = "Unpacked",
+            }), text);
+            var installed = DashboardFindingPresenter.Present("extensions", Item(Severity.Info, new()
+            {
+                ["permissions"] = "storage",
+                ["location"] = "Profile",
+            }), text);
+
+            Assert.StartsWith(expected, unpacked.Detail, StringComparison.Ordinal);
+            Assert.EndsWith("storage", unpacked.Detail, StringComparison.Ordinal);
+            Assert.Equal("storage", installed.Detail);
+        });
+    }
+
     private static ReportItem Item(Severity severity, Dictionary<string, string?> fields) =>
         new(severity, "raw-title", "raw-detail", fields);
 

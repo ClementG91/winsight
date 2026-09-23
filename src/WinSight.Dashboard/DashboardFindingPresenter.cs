@@ -350,7 +350,15 @@ public static class DashboardFindingPresenter
         var permissions = new[] { Field(item, "permissions"), Field(item, "hostPermissions") }
             .Where(value => !string.IsNullOrWhiteSpace(value));
         var detail = string.Join(" ", permissions);
-        return new FindingPresentation(item.Title, detail.Length == 0 ? text["NoDeclaredPermissions"] : detail);
+        if (detail.Length == 0)
+        {
+            detail = text["NoDeclaredPermissions"];
+        }
+        if (Field(item, "location") is "Unpacked" or "CommandLine")
+        {
+            detail = text["ExtensionLoadedFromFolderRisk"] + "; " + detail;
+        }
+        return new FindingPresentation(item.Title, detail);
     }
 
     private static FindingPresentation Firewall(ReportItem item, LocalizationManager text)

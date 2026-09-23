@@ -53,16 +53,17 @@ public static partial class Adapters
         var acquisition = new ExtensionScanner().SnapshotWithCoverage();
         var extensions = acquisition.Items;
         var b = new ToolReport.Builder("extensions");
-        foreach (var e in extensions.Where(e => !flaggedOnly || e.HighRisk)
-                     .OrderByDescending(e => e.HighRisk)
+        foreach (var e in extensions.Where(e => !flaggedOnly || e.Notable)
+                     .OrderByDescending(e => e.Notable)
                      .ThenBy(e => e.Browser, StringComparer.OrdinalIgnoreCase)
                      .ThenBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
         {
             var perms = string.Join(", ", e.Permissions.Concat(e.HostPermissions));
             b.Add(
-                e.HighRisk ? Severity.Notable : Severity.Info,
+                e.Notable ? Severity.Notable : Severity.Info,
                 $"{e.Browser}/{e.Name}",
-                perms.Length > 0 ? perms : "(no declared permissions)",
+                (e.LoadedFromFolder ? $"loaded from a folder ({e.Location}), not installed; " : "")
+                    + (perms.Length > 0 ? perms : "(no declared permissions)"),
                 new Dictionary<string, string?>
                 {
                     ["browser"] = e.Browser,
@@ -72,10 +73,12 @@ public static partial class Adapters
                     ["permissions"] = string.Join(" ", e.Permissions),
                     ["hostPermissions"] = string.Join(" ", e.HostPermissions),
                     ["highRisk"] = e.HighRisk.ToString(),
+                    ["location"] = e.Location.ToString(),
                     ["path"] = e.Path,
                 });
         }
         AddCoverageFinding(b, acquisition);
-        return b.Build($"{extensions.Count} extension(s), {extensions.Count(e => e.HighRisk)} high-risk{CoverageSuffix(acquisition)}");
+        return b.Build($"{extensions.Count} extension(s), {extensions.Count(e => e.HighRisk)} high-risk, "
+            + $"{extensions.Count(e => e.LoadedFromFolder)} loaded from a folder{CoverageSuffix(acquisition)}");
     }
 }

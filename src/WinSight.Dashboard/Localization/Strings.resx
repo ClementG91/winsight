@@ -240,6 +240,7 @@
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Undersized RSA key ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, {1}-bit key</value></data>
   <data name="NoDeclaredPermissions" xml:space="preserve"><value>No declared permissions</value></data>
+  <data name="ExtensionLoadedFromFolderRisk" xml:space="preserve"><value>loaded from a folder, not installed from a store: developer mode or a sideloader</value></data>
   <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="FirewallDirectionInbound" xml:space="preserve"><value>Inbound</value></data>
   <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Outbound</value></data>

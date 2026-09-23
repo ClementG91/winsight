@@ -237,6 +237,7 @@
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clave RSA demasiado corta ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, clave de {1} bits</value></data>
   <data name="NoDeclaredPermissions" xml:space="preserve"><value>Sin permisos declarados</value></data>
+  <data name="ExtensionLoadedFromFolderRisk" xml:space="preserve"><value>cargada desde una carpeta, no instalada desde una tienda: modo de desarrollador o carga forzada</value></data>
   <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="FirewallDirectionInbound" xml:space="preserve"><value>Entrante</value></data>
   <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Saliente</value></data>
