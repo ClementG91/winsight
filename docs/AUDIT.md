@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Date | 2026-09-21 |
+| Date | 2026-09-21, mis à jour le 2026-09-23 |
 | Base | `main` @ `4a361a6` (v0.13.0) |
 | Périmètre | dépôt complet : code, tests, docs, CI/CD, scripts de build/release, installeur |
-| Auteurs de l'audit | Claude Code (sessions du 18-19 et du 21 septembre) et Codex (20-21 septembre), travaillant sur le même arbre et se relisant mutuellement |
+| Auteurs de l'audit | Claude Code (sessions du 18-19, du 21 et du 22-23 septembre) et Codex (20-21 septembre), travaillant sur le même arbre et se relisant mutuellement |
 | Environnement de validation | Windows 11 Pro 10.0.26200 x64, compte administrateur à jeton scindé (UAC), processus non élevé, SDK .NET 10.0.303 |
 | État livré | branche d'audit, commits thématiques, non poussée |
 
@@ -19,10 +19,14 @@ Révoquer), attribution du tableau de bord et récupération ETW (DNS, service),
 WFP, armement WFP complet et désarmement d'urgence (Hyper-V, 35 vérifications), frontière de confiance,
 IPC locale, absence de résidu.
 
+**Outillé, en attente de la passe VM du candidat `d8e6a38`** (§17.2) : installation « tous les
+utilisateurs » avec retrait du service à la désinstallation, mise à niveau depuis la v0.13.0 publiée,
+substituts Cloud Files (OneDrive), écriture attribuée par un handle ouvert avant la session ETW.
+
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : IPC par ouverture de session
-réseau, installation « tous les utilisateurs », mise à niveau, ARM64 natif,
-signature Authenticode, essai d'endurance (soak), dossiers redirigés par OneDrive (Known Folder
-Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesuré et ce qui ne l'a pas été.
+réseau, ARM64 natif, signature Authenticode, essai d'endurance (soak), machines multi-utilisateurs,
+et tant que la passe ci-dessus n'a pas eu lieu, les quatre points qu'elle couvre. Chaque section
+précise ce qui a été mesuré et ce qui ne l'a pas été.
 
 ---
 
@@ -35,9 +39,10 @@ Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesur
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **54 défauts** (50 corrigés et testés, dont deux dans le kit
-  de qualification VM, 3 corrigés en partie, 1 rendu explicite dans la documentation), dont 9 de
-  sévérité *High* :
+- **Problèmes trouvés.** L'audit a traité **66 défauts** : 59 corrigés et testés (dont deux dans le
+  kit de qualification VM, et un, WS-63, dont la qualification VM reste à faire), 3 rendus explicites
+  dans la documentation, 3 ouverts et 1 à vérifier — pour ces deux derniers, la mesure en VM est
+  prête (§4.2). Les 9 de sévérité *High* sont tous corrigés :
   faux positif et faux négatif du scanner hijack, Guardian aveugle aux clés Run absentes ou
   recréées, fuites de lignes de commande vers le modèle via MCP, courses TOCTOU dans les actions de
   réponse (réutilisation de PID, suppression/restauration de persistance, liste de processus protégés
@@ -56,10 +61,10 @@ Move), machines multi-utilisateurs. Chaque section précise ce qui a été mesur
 - **Différenciation réelle.** Un triage unifié, local et compréhensible pour un non-spécialiste, avec
   des verdicts gradués (exploitabilité réelle, ancre de confiance, abus d'interpréteur signé) et une
   interface MCP sûre — aucune alternative ne réunit tout cela.
-- **Priorités.** (1) WS-70, fausses alertes
-  Guardian au premier lancement élevé ; (2) qualification ARM64 et installeur « tous les
-  utilisateurs » ; (3) vérifier le comportement sur dossiers OneDrive ; (4) réduire le paquet
-  installé (431 Mo, WS-53) ; (5) mode pare-feu « demander après la première
+- **Priorités.** (1) passe VM du candidat `d8e6a38` : installeur « tous les utilisateurs » et
+  service (WS-63), mise à niveau, OneDrive (WS-40), attribution après ouverture précoce (WS-60) ;
+  (2) IPC par ouverture de session réseau, avec une seconde VM ; (3) qualification ARM64 ;
+  (4) réduire le paquet installé (431 Mo, WS-53) ; (5) mode pare-feu « demander après la première
   connexion ».
 
 ---
@@ -232,21 +237,27 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-42 | Medium | Signatures | L'ancre « racine installée par l'utilisateur » n'était prise en compte que par la persistance et le verbe signature | processus, module ou propriétaire de connexion signé via une racine importée sans privilège présenté comme sain ; un certificat « Microsoft Windows » forgé faisait passer un pilote de System32 pour fourni par Windows | `ProcessInfo.cs`, `LoadedModule.cs`, `Connection.cs`, `WindowsImage.cs` | signalé partout (champ `userInstalledTrust`, texte explicite) ; jamais « fourni par Windows » ; pilotes et filtres `Untrusted` (l'intégrité du code noyau ignore le magasin de l'utilisateur) | Corrigé |
 | WS-43 | Medium | Filtres d'entrée | `kbdclass` / `mouclass` jugés attendus sur leur seul nom | `ImagePath` repointé vers un autre pilote : la ligne reste « pilote de classe Windows » et sort de la vue signalée | `InputFilterTriage.cs` | attendu = nom **et** image `<nom>.sys` signée par l'identité exacte Windows dans System32 (règle partagée `WindowsImage`) ; sinon `Impersonating` ; vérification impossible = `Unverified` | Corrigé |
 | WS-44 | Medium | WMI | `ReturnImmediately = false` (processus, cache DNS, Controlled Folder Access), aucune option pour les règles pare-feu : le délai ne bornait pas la requête elle-même | fournisseur bloqué → scan et annulation figés (mesuré : `Get()` bloqué 27 s sous un délai d'1 s) | `ProcessLister.cs`, `DnsCacheReader.cs`, `ControlledFolderAccessReader.cs`, `FirewallRuleReader.cs` | mode semi-synchrone, délai par résultat ; options épinglées par des tests (dont un qui figeait le mode synchrone) | Corrigé |
+| WS-45 | Medium | Persistance | Contexte 32 bits : une DLL inscrite sous `WOW6432Node` (AppInit_DLLs, assistants netsh, serveurs COM in-process, BHO) était résolue comme par un processus 64 bits | le jumeau 64 bits vérifié à la place du fichier que chargent les processus 32 bits, ou « introuvable » pour une DLL réelle | `CommandLine.cs`, `LoaderContext.cs` | contexte de chargement porté par l'entrée : `System32` → `SysWOW64` (hors exemptions du redirecteur), `Sysnative` → `System32`, `%ProgramFiles%` → `Program Files (x86)` ; mesuré ici : 22 entrées vérifient désormais le fichier 32 bits (19 assistants netsh, 2 `shell32`, `mscoree`), aucun verdict changé | Corrigé |
+| WS-46 | Medium | Persistance | Variables d'environnement des autres comptes (clés Run des autres ruches, tâches planifiées exécutées sous un autre compte) résolues avec celles du compte qui scanne ; une valeur `REG_EXPAND_SZ` était même développée par .NET avec le profil du scanner | mauvais fichier vérifié ou faux « introuvable » | `UserHiveEnumerator.cs`, `ScheduledTaskPrincipal.cs`, `AccountEnvironment.cs` | valeurs lues brutes, résolues avec le profil du compte (ProfileList, puis dossiers redirigés et variables de sa ruche si elle est chargée) ; principal des actions de la tâche (SID, nom connu, compte local — jamais de requête à un annuaire) ; variable propre au compte qu'il ne définit pas laissée non développée plutôt que pointant vers le profil du scanner | Corrigé |
 | WS-66 | Medium | Persistance | Chemins relatifs et noms nus cherchés d'abord dans le répertoire de travail de WinSight | verdict dépendant du dossier de lancement : le pilote 3ware lu « signature valide » depuis `C:\Windows`, « non signé » depuis un dossier contenant un leurre `System32\drivers\3ware.sys` ; un fichier signé déposé là pouvait répondre pour un enregistrement | `CommandLine.cs` | candidats pleinement qualifiés uniquement, sonde qui refuse le reste, entrées `%PATH%` relatives ignorées ; 1 entrée sur 4 540 change (un `StubPath` réduit à « U », désormais non résoluble) | Corrigé |
 | WS-47 | Medium | Hosts | `Tcpip\Parameters\DataBasePath` ignoré : le fichier hosts réellement utilisé par Windows pouvait être déplacé hors de vue | toutes les redirections déplacées, fichier standard propre présenté | `HostsReader.cs` | emplacement lu dans le registre (`%SystemRoot%`/`%windir%` résolus depuis le répertoire Windows du système, jamais depuis l'environnement), déplacement signalé, fichier déplacé lu ; partage, chemin relatif ou autre variable : signalé, non lu | Corrigé |
-| WS-48 | Medium | Extensions | `content_scripts` ignoré ; canaux Beta/Dev/Canary, Chromium et Opera GX absents | un script injecté sur tous les sites jugé sans accès ; navigateurs non lus | `ExtensionScanner.cs` | motifs `matches` comptés comme accès hôte ; 10 racines de navigateurs ajoutées | Corrigé en partie (reste en 4.2) |
+| WS-48 | Medium | Extensions | `content_scripts` ignoré ; canaux Beta/Dev/Canary, Chromium et Opera GX absents ; extensions chargées depuis un dossier (mode développeur, `--load-extension`, entrée forgée de `Secure Preferences`) jamais lues | script injecté sur tous les sites jugé sans accès ; navigateurs non lus ; extension hors boutique invisible, alors que c'est le mode de persistance des chargeurs forcés | `ExtensionScanner.cs` | motifs `matches` comptés comme accès hôte ; 10 racines ajoutées ; `extensions.settings` lu dans `Secure Preferences` et `Preferences` (emplacements 4 et 8), manifeste lu dans le dossier, extension toujours signalée ; dossier disparu ou sur un partage nommé sans être ouvert ; mesuré ici : 24 → 26 extensions (deux dossiers de build de l'opérateur) | Corrigé |
 | WS-49 | Medium | Tableau de bord | La raison d'un signalement (racine installée par l'utilisateur, code tiers dans un processus privilégié) disparaissait ; lignes processus/modules sans état de signature ; tout le cache DNS « résolu par le réseau » | [!] à côté de « Signature valide », ou d'un chemin nu | `DashboardFindingPresenter.cs` | champs `privilegedHost`/`userInstalledTrust`, raison localisée ajoutée, état de signature affiché ; DNS « dans le cache du résolveur » | Corrigé |
 | WS-50 | Medium | Tableau de bord | Une exception imprévue dans un gestionnaire d'interface terminait l'application, donc toute la protection temps réel | Guardian, rançongiciel et caméra arrêtés sans avertissement | `CrashReporter.cs`, `DispatcherRecoveryPolicy.cs` | une fois démarré : exception absorbée, rapport écrit, avis dans la zone de notification ; jamais au démarrage, ni pour une exception qui compromet le processus (mémoire, pile, état corrompu, déploiement cassé), ni au-delà de 3 par minute | Corrigé |
 | WS-52 | Medium | Perf | Surveillance caméra/micro au repos : ~1,7 % d'un cœur (relecture complète du ConsentStore chaque seconde malgré la notification registre) | batterie pour un moniteur permanent | `CameraMicMonitor.cs`, `RegistryKeyWatcher.cs` | interrogation à 30 s tant que la notification des deux ruches est confirmée armée, sinon 1 s ; mesuré 0,09 % et 27 Mo (contre 1,7 % et 47 Mo) | Corrigé |
-| WS-55 | Low | Certificats | Racines machine comptées deux fois (la vue utilisateur de `Root` inclut celles de la machine) | liste et compteurs doublés | `CertStoreAuditor.cs` | chaque racine machine rapportée une seule fois ; test sur les magasins réels | Corrigé en partie (reste en 4.2) |
+| WS-54 | Low | Persistance | Chaque CLSID HKCU rapporté comme « ComHijack » (3 941 lignes, JSON de 5,3 Mo), copies de la classe machine comprises, sans distinguer le détournement d'un CLSID HKLM | bruit, rapport lourd, le vrai détournement noyé | `ComHijackEnumerator.cs` | copie identique à la classe machine ignorée ; classe utilisateur qui remplace le serveur de la machine signalée (T1546.015), sauf signée Microsoft ; mesuré ici : 4 541 → 698 entrées, JSON 5,3 → 0,9 Mo, même entrée signalée | Corrigé |
+| WS-55 | Low | Certificats | Racines machine comptées deux fois ; `TrustedPublisher` et `Disallowed` non audités | liste doublée ; un éditeur approuvé ajouté sans élévation (vue utilisateur) invisible | `CertStoreAuditor.cs`, `TrustedCertificate.cs` | dédoublonnage par magasin ; rôle Root / TrustedPublisher / Disallowed : éditeur propre à l'utilisateur ou dont la clé privée est présente signalé, `Disallowed` jamais une alerte ; `CA` volontairement non lu (un intermédiaire n'accorde aucune confiance sans racine) ; mesuré ici : 67 racines, 2 éditeurs machine, les mêmes 6 racines signalées | Corrigé |
 | WS-56 | Low | Intégrité | WDAC en audit présenté comme appliqué ; chemins d'exclusion ignorés ; bit d'audit HVCI lu à l'envers (activé + audit = « n'applique rien », audit seul = « désactivé ») ; signature « flight » non signalée | fausse assurance et fausse alarme | `CodeIntegrityTriage.cs` | lecture conforme à la documentation de `SYSTEM_CODEINTEGRITY_INFORMATION` ; test de localisation générant toutes les combinaisons d'options | Corrigé |
 | WS-57 | Low | Filtres CLI | `--nonmicrosoft` masquait tout signataire dont le texte contenait « Microsoft » | un faux « CN=Microsoft » auto-signé ou sous racine utilisateur disparaissait du filtre | `ReportItemFilter.cs` | champ `microsoftSigned` établi depuis le verdict entier (identité exacte, chaîne de confiance machine) | Corrigé |
 | WS-58 | Low | Présence | Durées au-delà de 24 h tronquées (30 h lues « 06:00 ») ; un `Data` dupliqué levait une exception qui interrompait le scan | affichage faux, scan interrompu | `PresenceScanner.cs` | jours conservés ; première occurrence retenue | Corrigé |
 | WS-59 | Low | Hosts | Puits détectés par comparaison de chaînes | `127.1`, `0`, `::ffff:127.0.0.1` signalés comme redirections externes | `HostEntry.cs` | adresse analysée : bouclage, non spécifiée, 0.0.0.0/8 | Corrigé |
-| WS-61 | Low | MCP | Rédaction des chemins sans frontière (`C:\Users\nom2` → `%USERPROFILE%2`) ; alertes bloquées derrière le verrou de scan | fragment d'un autre nom de compte divulgué ; « un autre scan est en cours » | `McpModels.cs`, `McpScanService.cs` | rédaction par chemin entier ; journal lu hors verrou avec sa propre borne | Corrigé en partie (reste en 4.2) |
+| WS-61 | Low | MCP | Rédaction des chemins sans frontière (`C:\Users\nom2` → `%USERPROFILE%2`) ; alertes bloquées derrière le verrou de scan ; étanchéité à la couche de réponse testée par références directes seulement (MCP → application → réponse) | fragment d'un autre nom de compte divulgué ; « un autre scan est en cours » ; régression possible non détectée | `McpModels.cs`, `McpScanService.cs`, `IlCallGraph.cs` | rédaction par chemin entier ; journal lu hors verrou ; graphe d'appels IL conservateur (machines à états, lambdas, dispatch virtuel, rappels du framework) depuis chaque méthode MCP : aucun mutateur atteignable, zéro jeton non résolu, témoin positif depuis la CLI ; vérifié en injectant un appel caché dans une lambda | Corrigé |
 | WS-62 | Low | Supply chain | Le workflow de release restaurait le cache `setup-dotnet` dans un build de tag | empoisonnement de cache théorique | `release.yml` | cache désactivé pour les releases, test de contrat | Corrigé |
+| WS-63 | Low | Installeur | La désinstallation « tous les utilisateurs » laissait le service pare-feu enregistré depuis cette installation | service LocalSystem pointant vers un binaire supprimé, blocages conservés | `installer/WinSight.iss` | en mode administrateur, si `ImagePath` désigne l'exécutable de cette installation, son verbe `uninstall` (arrêt, objets WFP, enregistrement) avant toute suppression ; service d'un autre emplacement laissé en place ; échec signalé avec la commande exacte ; porte VM 15 (`Test-InstallerServiceUninstall.ps1`, cas négatif compris) | Corrigé (qualification VM en attente) |
 | WS-67 | Low | Maintenabilité | `Adapters.cs` : 1 958 lignes pour tous les scans | revue et diff difficiles | `Application/Adapters*.cs` | 11 fichiers partiels par domaine (85 à 411 lignes), déplacement pur | Corrigé |
 | WS-68 | Low | Tableau de bord | Les lignes hosts « fichier illisible » et « enregistrements mal formés » présentées comme « redirection externe » | message contraire aux faits | `DashboardFindingPresenter.cs` | présentation propre et localisée | Corrigé |
+| WS-69 | Low | Maintenabilité | Fichiers au-delà de 800 lignes : `MainWindow.xaml.cs` (1 449), `WfpProvisioning.cs` (1 300), `Enumerators.cs` (1 257), `EnforcementCoordinator.cs` (808) | revue et diff difficiles | ces fichiers | déplacement pur vérifié ligne à ligne : un énumérateur par fichier, partiels par thème pour la fenêtre, WFP et les transitions ; plus aucun fichier de production au-delà de 800 lignes ; exclusions de couverture reportées sur les partiels | Corrigé |
+| WS-70 | Medium | Guardian | La ligne de base persistée ne mémorisait pas quelles sources étaient lisibles : tout élément d'une source devenue lisible était annoncé comme nouveau (en VM, ~60 tâches planifiées et services Windows au premier tableau de bord élevé) | rafale de fausses alertes au moment où l'utilisateur suit le conseil d'élever ; fatigue d'alerte | `PersistenceCoverageMap.cs`, `PersistenceMonitorCore.cs`, `FilePersistenceBaselineStore.cs` | portées couvertes (source × portée) persistées avec la ligne de base, union conservée d'un scan à l'autre ; éléments d'une portée qui n'était pas couverte absorbés sans annonce ; format lisible par la v0.13 (lignes ignorées), ligne de base sans couverture : règle précédente ; 4 tests échouent sans le correctif | Corrigé |
 | WS-71 | Low | Validation | Kit VM, §6 : « no single-instance mutex » et deux tableaux de bord lancés côte à côte, alors que le tableau de bord est à instance unique depuis WS-31 ; la porte échouait sur le comportement voulu (« Dashboard … stopped ») | requalification bloquée à tort | `docs/validation/VM_QUALIFICATION_KIT.md` | la porte prouve la passation (second lancement : sortie 0, aucune session) et la préservation d'une session vivante face à `attribution --watch` ; test de contrat | Corrigé |
 | WS-72 | Low | Validation | Kit VM, §6 : `sc start` explicite après l'arrêt brutal du service, en course avec l'action de récupération du SCM (redémarrage à 5 s) ; dès que le re-hachage intermédiaire dépassait 5 s, l'échec 1056 faisait passer un service rétabli pour un service qui ne redémarre pas | faux échec ; récupération SCM jamais qualifiée | `docs/validation/VM_QUALIFICATION_KIT.md` | attendre, et donc prouver, le redémarrage par le SCM sous un nouveau PID, puis vérifier que c'est le candidat ; test de contrat | Corrigé |
 
@@ -254,21 +265,12 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 
 | ID | Sév. | Composant | Description | Impact | Preuve | Correction proposée | Statut |
 |---|---|---|---|---|---|---|---|
-| WS-40 | Medium | Accès fichiers | Toute lecture refuse un fichier portant `ReparsePoint`. Les fichiers compressés WOF passent (vérifié) ; les fichiers cloud OneDrive **n'ont pas pu être testés** | si les fichiers cloud exposent l'attribut : entropie aveugle et leurres ni vérifiables ni nettoyables dans les dossiers sauvegardés par OneDrive | `AutomaticFileAccess.cs` | tester sur une machine avec Known Folder Move ; si confirmé, accepter les balises non « name surrogate » | À vérifier |
-| WS-45 | Medium | Persistance | Contexte 32 bits : un nom nu inscrit sous `WOW6432Node` n'est pas cherché dans `SysWOW64` | verdict « introuvable » pour une DLL réelle | `CommandLine.cs` | propager la vue registre jusqu'à la résolution | Documenté |
-| WS-46 | Medium | Persistance | Variables d'environnement des autres profils résolues avec celles du compte qui scanne | mauvais fichier vérifié ou faux « introuvable » | `CommandLine.cs` | résolution avec le profil propriétaire | Documenté |
-| WS-48 | Medium | Extensions | Extensions non empaquetées (mode développeur) chargées depuis d'autres dossiers non lues | extension locale invisible | `ExtensionScanner.cs` | lire `Preferences` (`extensions.settings`, emplacement « unpacked ») | Ouvert (reste) |
+| WS-40 | Medium | Accès fichiers | Toute lecture refuse un fichier portant `ReparsePoint`. Les fichiers compressés WOF passent (vérifié) ; les substituts Cloud Files (OneDrive) **n'ont pas encore été mesurés** | si les substituts exposent l'attribut : entropie aveugle et leurres ni vérifiables ni nettoyables dans les dossiers sauvegardés par OneDrive | `AutomaticFileAccess.cs` | mesure prête : porte VM 17 (`Measure-CloudFilesAccess.ps1`, racine de synchronisation Cloud Files jetable, sans OneDrive ni compte) ; si confirmé, accepter les balises cloud non « name surrogate » | À vérifier (mesure prête) |
 | WS-51 | Medium | Hijack | Index WinSxS non terminé dans le budget de 8 s (3 164 noms sur 5 833 ici) | imports « fantômes » dégradés en « non déterminé » | `SideBySideStore.cs` | index persistant invalidé par la maintenance Windows | Ouvert |
 | WS-53 | Medium | Package | Trois exécutables autonomes « single-file » : 431 Mo installés (installeur 116 Mo) | téléchargement, disque, mises à jour | `Build-Release.ps1` | runtime partagé dans un répertoire commun | Ouvert |
-| WS-54 | Low | Persistance | Chaque CLSID HKCU rapporté comme « ComHijack » (3 941 lignes, JSON de 5,3 Mo) sans distinguer le masquage d'un CLSID HKLM | bruit, rapport lourd | `Enumerators.cs` | signaler en priorité les CLSID qui en masquent un de la machine | Ouvert |
-| WS-55 | Low | Certificats | `TrustedPublisher`, `CA`, `Disallowed` non audités | couverture partielle | `CertStoreAuditor.cs` | ajouter ces magasins avec un modèle adapté | Ouvert (reste) |
-| WS-60 | Medium | Attribution | Fichiers ouverts avant la session ETW sans nom résoluble (`DiskFileIO` non activé) | auteur inconnu pour ces écritures | `WriteAttributionWatcher.cs` | mesurer, puis activer ou documenter | Ouvert (plausible) |
-| WS-61 | Low | MCP | L'étanchéité à la couche de réponse n'est testée que par références directes | régression possible non détectée | `ResponseIsNotReachableFromMcpTests.cs` | test au niveau IL | Ouvert (reste) |
-| WS-63 | Low | Installeur | La désinstallation ne retire pas le service pare-feu (choix documenté) | service orphelin pointant vers un binaire supprimé | `ADMINISTRATION.md` | proposer la désinstallation du service en mode tous utilisateurs | Documenté |
+| WS-60 | Medium | Attribution | Seul `FileIOInit` est activé : une écriture par un handle ouvert avant la session ETW peut arriver sans nom de fichier, et le filtre l'écarte alors sans rien compter | auteur inconnu pour ces écritures, sans que la veille le signale | `WriteAttributionWatcher.cs` | mesure prête : porte VM 25 (écriture dans le dossier Démarrage par un handle ouvert avant la session, témoin ouvert pendant) ; selon le résultat, activer le rundown des noms (`DiskFileIO`, coût à mesurer) ou compter ces écritures comme non attribuées | Ouvert (mesure prête) |
 | WS-64 | Info | Réponse | Fenêtre résiduelle de quelques microsecondes entre comparaison et changement pour une valeur de registre sans TxR | valeur concurrente supprimée sans quarantaine | `THREAT_MODEL.md` | aucune primitive Windows ne ferme cette fenêtre | Documenté |
 | WS-65 | Info | Pare-feu | Aucune invite avant la première connexion | pas d'équivalent LuLu | `WFP_DESIGN.md` | décision « après coup » via les événements WFP (§11) | Documenté |
-| WS-69 | Low | Maintenabilité | Fichiers au-delà de 800 lignes : `MainWindow.xaml.cs` (1 449), `WfpProvisioning.cs` (1 300), `Enumerators.cs` (1 154), `EnforcementCoordinator.cs` (808) | revue et diff difficiles | ces fichiers | découper comme `Adapters.cs` ; le code WFP après requalification VM | Ouvert |
-| WS-70 | Medium | Guardian | La ligne de base persistée ne mémorise pas quelles sources étaient lisibles. Les éléments disparus d'une source devenue illisible sont bien conservés, mais tout élément d'une source devenue lisible est annoncé comme nouveau : en VM, le premier tableau de bord élevé a annoncé ~60 tâches planifiées et services Windows déjà présents | rafale de fausses alertes au moment précis où l'utilisateur suit le conseil d'élever pour l'attribution ; fatigue d'alerte | `Persistence/PersistenceMonitorCore.cs`, `FilePersistenceBaselineStore.cs` | persister avec la ligne de base les portées lues (source × emplacement) et absorber sans annonce les éléments d'une portée qui n'était pas couverte ; format de fichier rétrocompatible | Ouvert |
 
 ---
 
@@ -288,7 +290,7 @@ même utilisateur), service non protégé contre un administrateur.
 
 **Accès fichiers (corrigé).** Les lectures automatiques ne suivent plus aucun reparse point ; les
 mutations (journaux, baseline, quarantaine, politique, leurres) passent par des opérations relatives à
-un handle. Le point à vérifier est WS-40 (fichiers cloud).
+un handle. Le point à vérifier est WS-40 (substituts Cloud Files) : la mesure est prête (porte VM 17).
 
 **Surface de réponse (corrigée).** Identité de processus liée au handle, liste protégée par identité,
 journal en deux phases, comparaison-et-mutation par objet (WS-17/18), refus explicite des cibles machine.
@@ -334,9 +336,9 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `modules` | 57-87 s | PSAPI appel par module, un processus à la fois |
 | `av --watch` au repos | 0,09 % d'un cœur, 27 Mo (1,7 % et 47 Mo avant WS-52) | notification registre vérifiée |
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
-| Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) | WS-54 |
+| Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 370 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 452 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -440,7 +442,7 @@ de référence reste Sysmon/Velociraptor.
 
 - Requalifier en VM le candidat actuel : arrêt d'urgence, nouvelle couche d'accès fichiers, réponse,
   instance unique, installeur (portée utilisateur et tous utilisateurs), x64 puis ARM64.
-- Vérifier le comportement sur dossiers redirigés par OneDrive (WS-40) avant publication.
+- Exécuter la mesure Cloud Files (WS-40, porte VM 17) avant publication, et corriger si elle confirme le refus.
 
 ### P1 — forte valeur
 
@@ -454,7 +456,7 @@ de référence reste Sysmon/Velociraptor.
 - **Surveillance des tâches planifiées et abonnements WMI pour un utilisateur standard** via les
   journaux `TaskScheduler/Operational` et `WMI-Activity/Operational` (lisibles par les interactifs).
 - **Intégration Sysmon** (lecture de `Microsoft-Windows-Sysmon/Operational` quand il est activé).
-- Détection du masquage COM (WS-54), index WinSxS persistant (WS-51), attribution des arrivées
+- Index WinSxS persistant (WS-51), attribution des arrivées
   Guardian sans élévation lorsqu'une source documentée le permet.
 
 ### P2 — amélioration intéressante
@@ -495,8 +497,9 @@ Présence en direct, blocage DNS, flux de fichiers générique.
 
 ## 13. Security hardening roadmap
 
-1. **Maintenant** : requalification VM ; WS-40 ; test d'étanchéité MCP au niveau IL (reste de
-   WS-61). La release restaure désormais ses paquets sans cache (WS-62).
+1. **Maintenant** : passe VM du candidat `d8e6a38` (WS-63, WS-40, WS-60, mise à niveau) ; IPC par
+   ouverture de session réseau. L'étanchéité MCP est prouvée au niveau IL (WS-61) et la release
+   restaure ses paquets sans cache (WS-62).
 2. **Ensuite** : recommander l'installation tous utilisateurs quand l'utilisateur fait partie du modèle
    de menace ; journal d'actions chaîné par hachage (preuve d'altération) ; chien de garde signalant
    l'arrêt du tableau de bord ; niveau de réponse machine dans le service avec son autorité propre.
@@ -540,11 +543,12 @@ mesure.
 
 ## 16. Tests missing
 
-- Environnement OneDrive (Known Folder Move) pour la couche d'accès fichiers et les leurres.
+- Environnement OneDrive (Known Folder Move) pour la couche d'accès fichiers et les leurres : la
+  mesure des substituts Cloud Files est prête (porte VM 17), les leurres restent à couvrir.
 - Parcours « Bloquer » avec un programme qui réinscrit sa valeur.
-- Guardian : lancement élevé après une ligne de base construite sans élévation (WS-70).
 - Débit ETW soutenu et pertes sous charge ; endurance de sept jours du tableau de bord.
-- Installation tous utilisateurs, mise à niveau depuis v0.12/v0.13, désinstallation avec service.
+- Installation tous utilisateurs, mise à niveau depuis la v0.13 publiée, désinstallation avec service :
+  outillés (portes VM 15 et 16), à exécuter.
 - Qualification ARM64 native des chemins privilégiés.
 
 ---
@@ -552,7 +556,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 370 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 452 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -579,16 +583,18 @@ ci-dessous, par thème, avec la justification.
 | Présence | `Presence/PresenceScanner.cs`, `Application/Adapters.Presence.cs` | WS-58 |
 | Stabilité du tableau de bord | `Dashboard/DispatcherRecoveryPolicy.cs`, `CrashReporter.cs` | WS-50 |
 | Caméra/micro au repos | `AvMonitor/CameraMicMonitor.cs`, `ConsentStoreChangeSignal.cs`, `Core/RegistryKeyWatcher.cs` | WS-52 |
-| Certificats, extensions | `Certificates/CertStoreAuditor.cs`, `Browser/ExtensionScanner.cs` | WS-55, WS-48 |
-| MCP (suite) | `Mcp/McpModels.cs`, `McpScanService.cs` | WS-61 |
+| Certificats, extensions | `Certificates/CertStoreAuditor.cs`, `CertificateTrustRole.cs`, `TrustedCertificate.cs`, `Browser/ExtensionScanner.cs`, `ExtensionLocation.cs` | WS-55, WS-48 |
+| MCP (suite) | `Mcp/McpModels.cs`, `McpScanService.cs`, `tests/WinSight.Mcp.Tests/IlCallGraph.cs` | WS-61 |
+| Guardian (couverture de la ligne de base) | `Persistence/PersistenceCoverageMap.cs`, `PersistenceMonitorCore.cs`, `FilePersistenceBaselineStore.cs` | WS-70 |
+| COM et contexte de chargement | `Persistence/ComHijackEnumerator.cs`, `CommandLine.cs`, `LoaderContext.cs`, `AccountEnvironment.cs`, `ScheduledTaskPrincipal.cs`, `UserHiveEnumerator.cs` | WS-54, WS-45, WS-46 |
 | Release | `.github/workflows/release.yml` | WS-62 |
-| Maintenabilité | `Application/Adapters*.cs` (11 fichiers) | WS-67 |
+| Maintenabilité | `Application/Adapters*.cs` (11 fichiers), `Persistence/*Enumerator.cs`, `Dashboard/MainWindow.*.cs`, `FirewallService/WfpProvisioning.*.cs`, `EnforcementCoordinator.*.cs` | WS-67, WS-69 |
 | Tableau de bord | `Dashboard/DashboardSingleInstance.cs`, `App.xaml.cs`, `AlertWindow.xaml.cs`, `MainWindow.xaml.cs`, ressources EN/FR/ES | WS-31, WS-18 |
 | CLI | `Application/CliHelp.cs`, `CliContract.cs`, `Cli/Program.cs` | WS-14, code de sortie de couverture incomplète |
-| Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1` | WS-13 |
+| Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1`, `Test-InstallerServiceUninstall.ps1`, `Test-InstallerUpgrade.ps1` | WS-13, WS-63 |
 | Mesure | `scripts/Measure-Performance.ps1` | outil de mesure reproductible (D3) |
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
-| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs` | WS-71, WS-72 |
+| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1` | WS-71, WS-72, WS-40 (mesure) |
 
 ### 17.1 Qualification VM du 22 septembre 2026
 
@@ -613,7 +619,7 @@ restauration de `S0-clean-before-winsight`. Aucune authentification dans l'invit
 | 36 IPC par ouverture de session réseau | NOT_RUN | exige une seconde machine et un compte à mot de passe |
 
 Aucun défaut du produit n'a fait échouer une porte. La campagne a produit un constat produit
-(WS-70 : fausses arrivées Guardian au premier lancement élevé, relevées dans le journal d'alertes de
+(WS-70, corrigé depuis : fausses arrivées Guardian au premier lancement élevé, relevées dans le journal d'alertes de
 l'invité) et deux corrections du kit (WS-71, WS-72). Les autres échecs venaient du harnais ou de
 l'environnement :
 
@@ -638,6 +644,26 @@ l'environnement :
   `WINSIGHTQ` en guise de dossier partagé, sans compte ni mot de passe invité). Aucun gel : c'est
   désormais l'environnement recommandé ; les étapes administrateur restent celles de l'opérateur.
 
+### 17.2 Candidat `d8e6a38` (23 septembre 2026)
+
+Construit localement comme le précédent (`Build-Release.ps1 -DisableSignature -Architectures x64`),
+après WS-70, WS-54, WS-55, WS-61, WS-48, WS-45/46, WS-69 et WS-63. Il est préparé dans
+`<share>\winsight-v0.13.0-audit-d8e6a38` (artefacts et scripts hachés dans `candidate.json`,
+installeur v0.13.0 publié `c3bf248` pour la mise à niveau), preuves sous
+`<vol>\WinSight-Host-Evidence\v0.13.0-audit-d8e6a38`. Le harnais reprend toutes les portes du
+§17.1 et en ajoute quatre :
+
+| Porte | Ce qu'elle prouve | Critère |
+|---|---|---|
+| 15 installeur tous utilisateurs et service | WS-63 : la désinstallation retire le service de cette installation, et seulement celui-là | `PASS own-service` et `PASS foreign-service`, `sc query` 1060, aucun fichier restant |
+| 16 mise à niveau | remplacement en place de la v0.13.0 publiée | une entrée de désinstallation, aucun fichier obsolète, désinstallation propre |
+| 17 Cloud Files | WS-40 : substituts hydratés lisibles, aucune demande de téléchargement | les quatre cas lisibles, zéro `FETCH_DATA` |
+| 25 écriture par handle pré-ouvert | WS-60 : l'attribution d'une écriture dont le handle précède la session ETW | témoin attribué ; l'écriture pré-ouverte attribuée, sinon WS-60 confirmé |
+
+Au moment de cette mise à jour, la passe n'a pas encore eu lieu. La porte 36 (IPC par ouverture de
+session réseau) exige toujours une seconde machine, un compte jetable et son mot de passe, saisis
+par l'opérateur : elle reste `NOT_RUN` dans une passe automatique.
+
 ---
 
 ## 18. Recommended roadmap
@@ -645,9 +671,9 @@ l'environnement :
 ### Maintenant — bugs, sécurité, fiabilité
 
 - Relire et fusionner la branche d'audit par thème ; qualification x64 faite (§17.1, sauf IPC réseau
-  qui exige une seconde machine) ; ARM64, installeur « tous les utilisateurs » et mise à niveau.
-- WS-70 (couverture de la ligne de base Guardian) ; WS-40 (OneDrive) ; restes de WS-48, WS-55 et
-  WS-61 ; WS-69.
+  qui exige une seconde machine) ; passe VM du candidat `d8e6a38` (§17.2) ; ARM64.
+- Selon cette passe : corriger WS-40 si le refus des substituts Cloud Files se confirme, et trancher
+  WS-60 (rundown des noms ou comptage des écritures non attribuées).
 - Mettre à jour `PRODUCTION_READINESS.md` avec le nouveau candidat qualifié.
 
 ### Ensuite — fonctionnalités différenciantes
@@ -656,7 +682,7 @@ l'environnement :
 - Caméra/micro via `MFCreateSensorActivityMonitor`, règles et actions.
 - Protection ClickFix ; tâches et WMI surveillées pour un utilisateur standard ; lecture de Sysmon.
 - Corrélation par identité de processus entre Guardian, pare-feu et rançongiciel.
-- Package à runtime partagé ; masquage COM ; index WinSxS persistant.
+- Package à runtime partagé ; index WinSxS persistant.
 
 ### Plus tard — changements importants
 
@@ -672,7 +698,7 @@ l'environnement :
 
 | Domaine | WinSight aujourd'hui | Meilleur outil de référence | Gap | WinSight après optimisations |
 |---|---|---|---|---|
-| Inventaire de persistance | ●●●○ 27 familles, verdicts gradués | Autoruns (●●●●) | catégories manquantes (Winsock, shell, Office, GPO) | ●●●● avec ces catégories et le masquage COM |
+| Inventaire de persistance | ●●●○ 27 familles, verdicts gradués, masquage COM, contexte 32 bits et par compte | Autoruns (●●●●) | catégories manquantes (Winsock, shell, Office, GPO) | ●●●● avec ces catégories |
 | Persistance en temps réel | ●●●○ clés et dossiers, décision, réversible | BlockBlock (macOS) / Sysmon 12-14 (Windows, sans décision) | blocage machine, attribution sans élévation | ●●●● avec le niveau machine du service |
 | Processus | ●●○○ scans | System Informer / Process Explorer (●●●●) | vue live, handles, threads | ●●●○ avec une vue interactive |
 | Réseau / pare-feu | ●●○○ règles WFP, état prouvé | Portmaster (●●●●, pilote) / simplewall (●●●○) | invite, destinations, historique | ●●●○ avec décision après coup et règles par destination |
@@ -689,16 +715,16 @@ l'environnement :
 
 | # | Fonctionnalité | Pourquoi | Valeur utilisateur | Difficulté (1-5) | Risque (1-5) | Coût performance | Fichiers / composants |
 |---|---|---|---|---|---|---|---|
-| 1 | Requalification VM du candidat | changements privilégiés et couche fichiers non qualifiés | condition de toute publication | 2 | 1 | nul | `docs/validation`, scripts de qualification |
-| 2 | Vérification et correctif OneDrive (WS-40) | cas par défaut de nombreux PC grand public | détection rançongiciel fiable | 2 | 2 | nul | `Core/AutomaticFileAccess.cs`, `Ransomware/*` |
+| 1 | Passe VM du candidat `d8e6a38` | installeur tous utilisateurs, mise à niveau, OneDrive et WS-60 outillés mais non exécutés | condition de toute publication | 2 | 1 | nul | `docs/validation`, scripts de qualification |
+| 2 | Correctif OneDrive si la mesure le confirme (WS-40) | cas par défaut de nombreux PC grand public | détection rançongiciel fiable | 2 | 2 | nul | `Core/AutomaticFileAccess.cs`, `Ransomware/*` |
 | 3 | Pare-feu « décider après la première connexion » | l'attente n°1 d'un utilisateur de LuLu | contrôle réseau compréhensible | 3 | 3 | faible (événements WFP) | `FirewallService/OutboundObserverService.cs`, `Dashboard` |
-| 4 | Couverture complète : extensions non empaquetées, magasins TrustedPublisher/CA/Disallowed (restes WS-48, WS-55) | angles morts connus | inventaire sans trou | 2 | 1 | faible | `Browser/ExtensionScanner.cs`, `Certificates/*` |
+| 4 | IPC par ouverture de session réseau (porte 36) | seule frontière IPC non qualifiée | confiance dans le modèle d'autorisation | 2 | 1 | nul | seconde VM, `Test-IpcBoundary.ps1` |
 | 5 | Caméra/micro par capteurs Media Foundation | source documentée au lieu du ConsentStore non documenté (le coût au repos est déjà réglé, WS-52) | confiance dans l'alerte | 3 | 2 | nul | `AvMonitor/*`, `Application/AvWatchHost.cs` |
-| 6 | Masquage COM et réduction du bruit | 3 941 lignes non pertinentes | rapport lisible | 2 | 1 | gain | `Persistence/Enumerators.cs` |
+| 6 | Catégories Autoruns manquantes (Winsock, extensions du shell, Office, GPO) | angles morts de l'inventaire | parité avec Autoruns | 3 | 1 | faible | `Persistence` |
 | 7 | Protection « ClickFix » | vecteur d'infection majeur en 2025-2026 | prévention concrète | 3 | 2 | faible | `Persistence`, `Application`, `Dashboard` |
 | 8 | Runtime partagé | 431 Mo installés | téléchargement et mises à jour | 3 | 3 | nul | `scripts/Build-Release.ps1`, `installer` |
 | 9 | Index WinSxS persistant (WS-51) | imports « fantômes » non déterminés faute de temps | verdicts hijack complets | 3 | 2 | gain | `Hijack/SideBySideStore.cs` |
 | 10 | Lecture de Sysmon intégré | ascendance, DNS et réseau sans pilote quand il est activé | corrélation | 3 | 2 | faible | nouveau lecteur dans `NetMonitor`/`Application` |
 
-WS-41 à WS-44, WS-50 et WS-52, qui figuraient dans des versions précédentes de ce classement, ont été
-corrigés pendant l'audit (§4.1).
+WS-41 à WS-44, WS-48, WS-50, WS-52, WS-54 et WS-55, qui figuraient dans des versions précédentes de ce
+classement, ont été corrigés pendant l'audit (§4.1).
