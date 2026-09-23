@@ -113,7 +113,8 @@ try
     "upgraded in place to ${Version}: one uninstall entry, $($upgradedFiles.Count) files, none stale"
 
     Uninstall-WinSight $upgraded
-    $left = if (Test-Path -LiteralPath $upgraded) { @(Get-ChildItem -LiteralPath $upgraded -Recurse -File) } else { @() }
+    # @() around the whole statement: an empty result of an if statement is $null, not an empty array.
+    $left = @(if (Test-Path -LiteralPath $upgraded) { Get-ChildItem -LiteralPath $upgraded -Recurse -File })
     if ($left.Count -gt 0) { throw "The uninstall after the upgrade left files: $($left.FullName -join ', ')" }
     "uninstalled: registration and files removed"
 }
