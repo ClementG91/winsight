@@ -244,7 +244,7 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
 
         session.Source.Kernel.FileIOCreate += e =>
         {
-            if (_fileFilter(e.FileName))
+            if (CreateCanWrite(e.CreateDisposition) && _fileFilter(e.FileName))
             {
                 Record(e.ProcessID, e.TimeStamp, normalizer.NormalizeFilePath(e.FileName));
             }
@@ -266,6 +266,22 @@ public sealed class WriteAttributionWatcher(Func<string, bool>? fileFilter = nul
 
         session.Source.Process(); // blocks until the session is stopped
     }
+
+    /// <summary>
+    /// Whether a file create can itself change the file: every disposition except opening one that
+    /// already exists.
+    /// </summary>
+    /// <remarks>
+    /// Recording every create recorded every open. Measured in the VM (gate 25): right after a
+    /// program drops a shortcut into the Startup folder, the shell (<c>sihost.exe</c>) and Defender
+    /// (<c>MsMpEng.exe</c>) open it to look at it, and those opens were logged as writes. The index
+    /// answers with the newest write before a detection, so Guardian would have named the shell or
+    /// the antivirus as the author of the persistence it was reporting - a wrong name, which is worse
+    /// than none. A program that opens an existing file and then writes to it is still seen: its
+    /// write events carry the name the kernel resolved on that open.
+    /// </remarks>
+    internal static bool CreateCanWrite(Microsoft.Diagnostics.Tracing.Parsers.Kernel.CreateDisposition disposition) =>
+        disposition != Microsoft.Diagnostics.Tracing.Parsers.Kernel.CreateDisposition.OPEN_EXISTING;
 
     /// <summary>
     /// The SID whose hive should read as <c>HKCU</c>. Null when it cannot be determined, which
