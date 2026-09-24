@@ -31,9 +31,10 @@ user without elevation could create a file - or, for an absent machine `PATH` en
 its nearest existing parent - and never creates one to find out. A user who could first give
 themselves that right counts too: one who owns the directory, may change its permissions
 (`WRITE_DAC`) or may take ownership (`WRITE_OWNER`), unless an `OWNER RIGHTS` entry limits what the
-owner holds. Where no non-elevated token exists (SYSTEM, a service account, UAC disabled) it reads
-the ACL and owner for the well-known unprivileged groups instead, which does not see a grant to one
-named user, and the report says so.
+owner holds. A directory whose mandatory label is above Medium refuses a standard user's writes
+whatever its ACL says, and counts as not writable. Where no non-elevated token exists (SYSTEM, a
+service account, UAC disabled) it reads the ACL, owner and label for the well-known unprivileged
+groups instead, which does not see a grant to one named user, and the report says so.
 
 ## Verdict model
 

@@ -64,6 +64,10 @@ public enum WriteAccessEvaluation
 /// then locked down by an administrator who kept the owner - as not plantable by the very user who
 /// can reopen it. Both methods now count all three, and honour OWNER RIGHTS.
 ///
+/// <b>The mandatory label is part of the answer.</b> A directory labelled above Medium refuses a
+/// standard user's token every write, whatever its DACL grants. The descriptor is read with its
+/// label: <c>AccessCheck</c> applies it, and the well-known-group model refuses such a directory.
+///
 /// <b>Conservative either way.</b> Anything that cannot be read or evaluated is
 /// <see langword="false"/> and counted as unreadable, because an unproven "yes" is a false
 /// accusation against installed software.
@@ -210,10 +214,54 @@ public static class UnprivilegedWriteAccess
     internal static bool IsGrantedByDescriptor(byte[] descriptor, PlantedObject planted)
     {
         ArgumentNullException.ThrowIfNull(descriptor);
+        if (LabelAboveMedium(descriptor))
+        {
+            return false;
+        }
         var security = new DirectorySecurity();
         security.SetSecurityDescriptorBinaryForm(
             descriptor, AccessControlSections.Access | AccessControlSections.Owner);
         return IsGrantedBy(security, planted);
+    }
+
+    /// <summary>
+    /// Whether the directory itself carries a mandatory label above Medium, the integrity level of a
+    /// standard user's token.
+    /// </summary>
+    /// <remarks>
+    /// Such a label refuses that token every write - the create rights, WRITE_DAC and WRITE_OWNER,
+    /// owner or not - whatever the DACL grants and whatever flags the label carries, because every
+    /// standard token has its own no-write-up policy (measured with <c>AccessCheck</c>, which applies
+    /// the label by itself; the well-known-group model has to be told). A label that only describes
+    /// children does not apply to the directory.
+    /// </remarks>
+    private static bool LabelAboveMedium(byte[] descriptor)
+    {
+        var sacl = new RawSecurityDescriptor(descriptor, 0).SystemAcl;
+        if (sacl is null)
+        {
+            return false;
+        }
+        foreach (var ace in sacl)
+        {
+            // .NET has no type for SYSTEM_MANDATORY_LABEL_ACE and hands it back as a custom entry
+            // whose data is the policy mask followed by the label SID, S-1-16-<level>.
+            if ((int)ace.AceType != SystemMandatoryLabelAceType
+                || (ace.AceFlags & AceFlags.InheritOnly) != 0
+                || ace is not CustomAce label
+                || label.GetOpaque() is not { Length: >= sizeof(uint) + LabelSidBytes } data)
+            {
+                continue;
+            }
+            var parts = new SecurityIdentifier(data, sizeof(uint)).Value.Split('-');
+            if (parts is [_, _, "16", var level]
+                && uint.TryParse(level, out var integrity)
+                && integrity > MediumIntegrityLevel)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
@@ -239,10 +287,12 @@ public static class UnprivilegedWriteAccess
         }
 
         AuthorizationRuleCollection rules;
+        SecurityIdentifier? owner;
         try
         {
             rules = security.GetAccessRules(
                 includeExplicit: true, includeInherited: true, typeof(SecurityIdentifier));
+            owner = security.GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
         }
         catch (Exception ex) when (ex is InvalidOperationException or IdentityNotMappedException)
         {
@@ -314,8 +364,7 @@ public static class UnprivilegedWriteAccess
             return false;
         }
         return (held & FileSystemRights.TakeOwnership) != 0
-            || (security.GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier owner
-                && principals.Contains(owner));
+            || (owner is not null && principals.Contains(owner));
     }
 
     private static HashSet<SecurityIdentifier> ResolvePrincipals()
@@ -500,6 +549,8 @@ public static class UnprivilegedWriteAccess
                     return false;
                 }
                 Marshal.FreeHGlobal(privileges);
+                // Cleared first: if the new allocation throws, the finally must not free this again.
+                privileges = IntPtr.Zero;
                 privileges = Marshal.AllocHGlobal(checked((int)privilegeBytes));
                 if (!AccessCheck(
                         descriptorHandle.AddrOfPinnedObject(),
@@ -553,6 +604,9 @@ public static class UnprivilegedWriteAccess
     private const int TokenElevationTypeFull = 2;
     private const int SecurityImpersonation = 2;
     private const uint MaximumAllowed = 0x02000000;
+    private const int SystemMandatoryLabelAceType = 0x11;
+    private const int LabelSidBytes = 12;              // S-1-16-<level>: one sub-authority
+    private const uint MediumIntegrityLevel = 0x2000;  // a standard user's token
     private const uint WriteDac = 0x00040000;
     private const uint WriteOwner = 0x00080000;
     private const uint FileAddFile = 0x00000002;

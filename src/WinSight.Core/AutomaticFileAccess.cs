@@ -411,9 +411,13 @@ public static partial class AutomaticFileAccess
     }
 
     /// <summary>
-    /// Reads the DACL-bearing self-relative security descriptor from an exact local directory
-    /// handle. A path replacement during the read is rejected.
+    /// Reads the self-relative security descriptor of an exact local directory handle: owner,
+    /// group, DACL and mandatory label. A path replacement during the read is rejected.
     /// </summary>
+    /// <remarks>
+    /// The label is part of who may write: a directory labelled above Medium refuses a standard
+    /// user's writes whatever its DACL grants. Reading it needs no more than READ_CONTROL.
+    /// </remarks>
     public static byte[]? TryReadDirectorySecurityDescriptor(string? path)
     {
         if (!TryNormalize(path, out var fullPath))
@@ -431,7 +435,7 @@ public static partial class AutomaticFileAccess
         }
         _ = GetKernelObjectSecurity(
             handle,
-            OwnerSecurityInformation | GroupSecurityInformation | DaclSecurityInformation,
+            DirectorySecurityInformation,
             null,
             0,
             out var required);
@@ -442,7 +446,7 @@ public static partial class AutomaticFileAccess
         var descriptor = new byte[required];
         return GetKernelObjectSecurity(
                    handle,
-                   OwnerSecurityInformation | GroupSecurityInformation | DaclSecurityInformation,
+                   DirectorySecurityInformation,
                    descriptor,
                    descriptor.Length,
                    out _)
@@ -619,6 +623,11 @@ public static partial class AutomaticFileAccess
     private const int MaximumSecurityDescriptorBytes = 1024 * 1024;
     private const uint OwnerSecurityInformation = 0x00000001;
     private const uint GroupSecurityInformation = 0x00000002;
+    private const uint LabelSecurityInformation = 0x00000010;
+
+    // What a directory's descriptor is read with: owner, group, DACL and mandatory label.
+    private const uint DirectorySecurityInformation =
+        OwnerSecurityInformation | GroupSecurityInformation | DaclSecurityInformation | LabelSecurityInformation;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct UnicodeString

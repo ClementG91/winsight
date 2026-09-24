@@ -1,6 +1,7 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 
+using WinSight.Core;
 using WinSight.Hijack;
 using Xunit;
 
@@ -276,6 +277,75 @@ public sealed class UnprivilegedWriteAccessTests
         Assert.Equal(plantable, UnprivilegedWriteAccess.IsGrantedBy(Sddl(sddl)));
 
     /// <summary>
+    /// The mandatory label is read with the rest of the descriptor.
+    /// </summary>
+    /// <remarks>
+    /// Every profile's LocalLow carries a Low label, which is what lets Low-integrity processes
+    /// write there. The descriptor used to be read without it, so a label that forbids a standard
+    /// user's writes could never be seen.
+    /// </remarks>
+    [Fact]
+    public void TheMandatoryLabelIsReadWithTheDescriptor()
+    {
+        var localLow = Path.Combine(
+            Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))!,
+            "LocalLow");
+        if (!Directory.Exists(localLow))
+        {
+            // An account without an interactive profile has no LocalLow to read.
+            return;
+        }
+
+        var descriptor = AutomaticFileAccess.TryReadDirectorySecurityDescriptor(localLow);
+
+        Assert.NotNull(descriptor);
+        var sacl = new RawSecurityDescriptor(descriptor, 0).SystemAcl;
+        Assert.NotNull(sacl);
+        Assert.Contains(sacl.Cast<GenericAce>(), ace => (int)ace.AceType == SystemMandatoryLabelAceType);
+    }
+
+    /// <summary>
+    /// A label above Medium refuses a standard user's writes whatever the DACL grants; one at or
+    /// below Medium, or one that only describes children, changes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <b>The false accusation.</b> Both methods judged the DACL alone: a directory granting Users
+    /// Full Control but labelled High was reported plantable, though Windows refuses every write to
+    /// it from the Medium-integrity token of a standard user. The label's own flags do not matter
+    /// here: a label that only forbids reading up blocks the write too (measured with
+    /// <c>AccessCheck</c>), because every standard token carries its own no-write-up policy.
+    /// </remarks>
+    [Theory]
+    [InlineData("S:(ML;;NW;;;HI)", false)]
+    [InlineData("S:(ML;;NW;;;SI)", false)]
+    [InlineData("S:(ML;;NR;;;HI)", false)]
+    [InlineData("S:(ML;;NX;;;HI)", false)]
+    [InlineData("S:(ML;;NW;;;ME)", true)]
+    [InlineData("S:(ML;;NW;;;LW)", true)]
+    [InlineData("S:(ML;OICIIO;NW;;;HI)", true)]
+    public void TheMandatoryLabelDecidesWhetherAStandardUserMayWrite(string label, bool plantable)
+    {
+        var descriptor = Binary("O:SYG:SYD:(A;;FA;;;BU)" + label);
+
+        Assert.True(UnprivilegedWriteAccess.TryIsGrantedByDescriptor(
+            descriptor, PlantedObject.File, out var granted, out _));
+        Assert.Equal(plantable, granted);
+        Assert.Equal(plantable, UnprivilegedWriteAccess.IsGrantedByDescriptor(descriptor, PlantedObject.File));
+    }
+
+    /// <summary>Owning a directory labelled above the user gives no way to write in it either.</summary>
+    [Fact]
+    public void OwnershipDoesNotOutrankALabelAboveTheUser()
+    {
+        var descriptor = Binary("O:BUG:SYD:(A;;0x1200a9;;;BU)S:(ML;;NW;;;HI)");
+
+        Assert.True(UnprivilegedWriteAccess.TryIsGrantedByDescriptor(
+            descriptor, PlantedObject.File, out var granted, out _));
+        Assert.False(granted);
+        Assert.False(UnprivilegedWriteAccess.IsGrantedByDescriptor(descriptor, PlantedObject.File));
+    }
+
+    /// <summary>
     /// The probe answers without creating anything, and its answer is the evaluator's.
     /// </summary>
     /// <remarks>
@@ -374,6 +444,9 @@ public sealed class UnprivilegedWriteAccessTests
         security.SetSecurityDescriptorSddlForm(sddl);
         return security;
     }
+
+    /// <summary>SYSTEM_MANDATORY_LABEL_ACE_TYPE, which .NET reads back as a custom entry.</summary>
+    private const int SystemMandatoryLabelAceType = 0x11;
 
     /// <summary>The self-relative form Windows returns for a directory handle.</summary>
     private static byte[] Binary(string sddl)
