@@ -31,7 +31,7 @@ scripts, le candidat, les disques des VM et les preuves dans des dossiers que to
 authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
 fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
 `Verify-QualificationProvenance.ps1`) mais n'a pas encore tourné, et le code produit a changé depuis
-`259056b` (RA-02 à RA-05, WS-74) : **la tête de la branche n'est pas qualifiée**.
+`259056b` (RA-02 à RA-05, WS-74, WS-75) : **la tête de la branche n'est pas qualifiée**.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -48,7 +48,7 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **68 défauts** : 63 corrigés et testés (dont deux dans le
+- **Problèmes trouvés.** L'audit a traité **69 défauts** : 64 corrigés et testés (dont deux dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
   1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
@@ -60,7 +60,9 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   sur Windows 11 faute de transactions registre (corrigé par un repli vérifié), et l'attribution d'une
   persistance à l'Explorateur ou à Defender qui l'avaient seulement ouverte (WS-73, trouvé en VM), et
   la règle d'abus d'interpréteur aveugle aux interpréteurs Windows authentiques depuis la v0.12.0
-  (WS-74, trouvé en corrigeant RA-02).
+  (WS-74, trouvé en corrigeant RA-02). Le dernier corrigé, WS-75 (*Medium*), a été trouvé en
+  déplaçant les tests sur le disque de données : le contrôle d'écriture du scanner hijack ignorait
+  qu'un utilisateur peut s'accorder le droit de créer un fichier dans un dossier qu'il possède.
 - **Contre-audit.** Codex a relu la branche le 24 septembre : sept constats (RA-01 à RA-07), aucun
   n'étant une faille du produit démontrée ; tous repris et corrigés le jour même (§4.3). Restent à
   exécuter par l'opérateur le harnais refait et la requalification de la tête (RA-01, RA-02, RA-05).
@@ -276,6 +278,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-72 | Low | Validation | Kit VM, §6 : `sc start` explicite après l'arrêt brutal du service, en course avec l'action de récupération du SCM (redémarrage à 5 s) ; dès que le re-hachage intermédiaire dépassait 5 s, l'échec 1056 faisait passer un service rétabli pour un service qui ne redémarre pas | faux échec ; récupération SCM jamais qualifiée | `docs/validation/VM_QUALIFICATION_KIT.md` | attendre, et donc prouver, le redémarrage par le SCM sous un nouveau PID, puis vérifier que c'est le candidat ; test de contrat | Corrigé |
 | WS-73 | High | Attribution | Chaque `FileIOCreate` était enregistré comme écriture, simple ouverture comprise. Mesuré en VM (porte 25) : juste après le dépôt d'un raccourci dans le dossier Démarrage, l'Explorateur (`sihost.exe`) et Defender (`MsMpEng.exe`) l'ouvrent, et l'index, qui retient l'écriture la plus récente, les aurait désignés comme auteurs | Guardian nomme l'Explorateur ou l'antivirus comme auteur d'une persistance malveillante : un faux nom à côté d'une alerte, qui invite à la tolérer | `WriteAttributionWatcher.cs` | création comptée seulement si sa disposition peut créer ou remplacer (tout sauf `OPEN_EXISTING`) ; une écriture après une ouverture reste vue par son événement d'écriture ; porte 25 : seul l'auteur réel est attribué | Corrigé, qualifié en VM (porte 25) |
 | WS-74 | High | Persistance | Le nom compilé dans l'image était lu par `FileVersionInfo`, qui prend la ressource localisée du fichier de langue : `powershell.exe`, `cmd.exe`, `mshta.exe`, `rundll32.exe` et `regsvr32.exe` se nommaient `*.MUI` (mesuré sur Windows 11 26200), un nom absent de la table des interpréteurs, et ce nom prime sur le chemin | `powershell -enc <charge>` dans une clé Run restait une entrée ordinaire signée Microsoft, jamais signalée ; livré dans la v0.12.0 et la v0.13.0 | `PersistenceScanner.cs`, `InterpreterAbuseTriage.cs` | ressource de version de l'image elle-même, lue par le handle acquis (`PeResources`, `VersionResource`) ; suffixe `.mui` retiré des entrées déjà enregistrées ; test de bout en bout sur le vrai `powershell.exe`, en échec sur l'ancien code | Corrigé |
+| WS-75 | Medium | Hijack | Le contrôle d'écriture ne demandait à Windows que le droit de créer (`FILE_ADD_FILE`), jamais ceux qui permettent de se l'accorder : `WRITE_DAC`, que le propriétaire détient sans aucune entrée, et `WRITE_OWNER`, qui permet de le devenir. Trouvé en corrigeant un test qui ne passait qu'avec TEMP sous le profil (C:) : il changeait le propriétaire, ce qui exige `WRITE_OWNER` | un dossier qu'un utilisateur standard possède (créé par lui, puis verrouillé par un administrateur qui a gardé le propriétaire) : entrée du PATH, dossier de service ou chemin non cité, jugé non plantable par l'utilisateur même qui peut le rouvrir | `UnprivilegedWriteAccess.cs` | `AccessCheck` en `MAXIMUM_ALLOWED` (droits implicites du propriétaire compris) ; si seul `WRITE_OWNER` revient, question reposée sur le descripteur tel qu'il serait après la prise de possession ; modèle des groupes connus : `WRITE_DAC`, `WRITE_OWNER` et propriétaire comptés, entrée `OWNER RIGHTS` respectée ; sémantique mesurée sur Windows 11 26200 (un refus explicite n'ôte pas le `WRITE_DAC` du propriétaire, une entrée `OWNER RIGHTS` si) ; 8 tests en échec sur l'ancien code ; pas de porte VM dédiée (la porte 06 ne vérifie que le contrat du rapport) | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -380,7 +383,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 551 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 562 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -601,7 +604,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 551 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 562 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -613,7 +616,7 @@ ci-dessous, par thème, avec la justification.
 | Santé des capteurs | `Core/SensorHealth.cs`, `NetMonitor/EtwSensorHealthTracker.cs`, `DnsEventDelivery.cs`, watchers Persistence/Attribution/NetMonitor, `PersistenceMonitor.cs` | WS-25, WS-27 |
 | Guardian | `Persistence/RegistryChangeWatcher.cs`, `FileSystemPersistenceWatcher.cs`, `FilePersistenceBaselineStore.cs`, `UserHiveEnumerator.cs` | WS-03, WS-07, WS-12 |
 | Réponse | `Response/*` (contrôleur, inspecteur, processus protégés, journal, quarantaine, règles), `Application/PersistenceResponder.cs`, `RegistryAndFilePersistenceMutator.cs` | WS-04, WS-05, WS-17 à WS-20, WS-23, WS-33 |
-| Hijack | `Hijack/UnprivilegedWriteAccess.cs`, `WritabilityProbe.cs`, `HijackTriage.cs`, `HijackScanner.cs`, `UnquotedPath.cs`, `SideBySideStore.cs` | WS-01, WS-02, WS-29, WS-30, WS-32 |
+| Hijack | `Hijack/UnprivilegedWriteAccess.cs`, `WritabilityProbe.cs`, `HijackTriage.cs`, `HijackScanner.cs`, `UnquotedPath.cs`, `SideBySideStore.cs` | WS-01, WS-02, WS-29, WS-30, WS-32, WS-75 |
 | MCP | `Mcp/McpScanService.cs`, `UntrustedText.cs`, `Application/Adapters.cs`, `PersistenceMonitorPresenter.cs` | WS-08 à WS-10 |
 | Rançongiciel | `Ransomware/RansomwareFileWatcher.cs`, `RansomwareBurstDetector.cs`, `RansomwareEntropySampler.cs`, `CanaryManager.cs`, `CanaryFile.cs` | WS-11, WS-23, WS-24 |
 | Pare-feu | `FirewallService/EnforcementCoordinator.cs`, `OutboundObserverService.cs`, `Firewall/PendingOutboundLog.cs`, `FirewallRequestDispatcher.cs`, `FirewallPolicyStore.cs` | WS-15, WS-26 |

@@ -26,9 +26,9 @@ public enum WriteAccessEvaluation
     EffectiveAccess,
 
     /// <summary>
-    /// The DACL read for the well-known unprivileged groups (Users, Authenticated Users, Everyone,
-    /// Interactive), because the process has no non-elevated token to ask Windows about: SYSTEM, a
-    /// service account, or an administrator with UAC disabled.
+    /// The DACL and owner read for the well-known unprivileged groups (Users, Authenticated Users,
+    /// Everyone, Interactive), because the process has no non-elevated token to ask Windows about:
+    /// SYSTEM, a service account, or an administrator with UAC disabled.
     /// </summary>
     WellKnownPrincipals,
 }
@@ -53,7 +53,16 @@ public enum WriteAccessEvaluation
 /// <b>Without such a token</b> - SYSTEM, a service account, an administrator with UAC disabled - the
 /// DACL is read for the well-known unprivileged groups instead (<see cref="IsGrantedBy(FileSystemSecurity, PlantedObject)"/>).
 /// That model claims a grant only when an explicit Allow gives the right to one of those groups on
-/// the directory itself and no Deny takes it back, and the answer says which method produced it.
+/// the directory itself and no Deny takes it back, or when one of them owns the directory or may
+/// take it, and the answer says which method produced it.
+///
+/// <b>A right to plant includes the rights that grant it.</b> WRITE_DAC lets its holder add the
+/// create right to the DACL, and WRITE_OWNER lets them become the owner, who holds WRITE_DAC without
+/// any entry granting it. An explicit Deny does not take the owner's WRITE_DAC away; an OWNER RIGHTS
+/// entry does, by stating what the owner holds instead (both measured on Windows 11 26200). Asking
+/// Windows about the create right alone read a directory a standard user owns - created by them,
+/// then locked down by an administrator who kept the owner - as not plantable by the very user who
+/// can reopen it. Both methods now count all three, and honour OWNER RIGHTS.
 ///
 /// <b>Conservative either way.</b> Anything that cannot be read or evaluated is
 /// <see langword="false"/> and counted as unreadable, because an unproven "yes" is a false
@@ -92,6 +101,9 @@ public static class UnprivilegedWriteAccess
     private static FileSystemRights PlantingRights(PlantedObject planted) => planted == PlantedObject.Directory
         ? FileSystemRights.CreateDirectories
         : FileSystemRights.CreateFiles;
+
+    /// <summary>OWNER RIGHTS (S-1-3-4): entries for it replace the owner's implicit rights.</summary>
+    private static readonly SecurityIdentifier OwnerRights = new("S-1-3-4");
 
     /// <summary>
     /// Whether an unprivileged principal is granted a file-creating right on
@@ -145,25 +157,8 @@ public static class UnprivilegedWriteAccess
         try
         {
             var descriptor = AutomaticFileAccess.TryReadDirectorySecurityDescriptor(directory);
-            if (descriptor is null)
-            {
-                return false;
-            }
-            var state = TryOpenUnprivilegedImpersonationToken(out var token);
-            using (token)
-            {
-                switch (state)
-                {
-                    case TokenState.Available when token is { IsInvalid: false }:
-                        return TryAccessCheck(descriptor, token, planted, out granted);
-                    case TokenState.PrivilegedUnsplit:
-                        evaluation = WriteAccessEvaluation.WellKnownPrincipals;
-                        granted = IsGrantedByDescriptor(descriptor, planted);
-                        return true;
-                    default:
-                        return false;
-                }
-            }
+            return descriptor is not null
+                && TryIsGrantedByDescriptor(descriptor, planted, out granted, out evaluation);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException
                                      or IOException
@@ -173,7 +168,38 @@ public static class UnprivilegedWriteAccess
                                      or System.Security.SecurityException)
         {
             // A descriptor WinSight cannot read is not evidence of anything.
+            granted = false;
             return false;
+        }
+    }
+
+    /// <summary>
+    /// The decision over a self-relative security descriptor as read from a directory handle
+    /// (owner, group and DACL), by whichever method the current token allows.
+    /// </summary>
+    internal static bool TryIsGrantedByDescriptor(
+        byte[] descriptor,
+        PlantedObject planted,
+        out bool granted,
+        out WriteAccessEvaluation evaluation)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        granted = false;
+        evaluation = WriteAccessEvaluation.EffectiveAccess;
+        var state = TryOpenUnprivilegedImpersonationToken(out var token);
+        using (token)
+        {
+            switch (state)
+            {
+                case TokenState.Available when token is { IsInvalid: false }:
+                    return TryAccessCheck(descriptor, token, planted, out granted);
+                case TokenState.PrivilegedUnsplit:
+                    evaluation = WriteAccessEvaluation.WellKnownPrincipals;
+                    granted = IsGrantedByDescriptor(descriptor, planted);
+                    return true;
+                default:
+                    return false;
+            }
         }
     }
 
@@ -185,7 +211,8 @@ public static class UnprivilegedWriteAccess
     {
         ArgumentNullException.ThrowIfNull(descriptor);
         var security = new DirectorySecurity();
-        security.SetSecurityDescriptorBinaryForm(descriptor, AccessControlSections.Access);
+        security.SetSecurityDescriptorBinaryForm(
+            descriptor, AccessControlSections.Access | AccessControlSections.Owner);
         return IsGrantedBy(security, planted);
     }
 
@@ -201,7 +228,9 @@ public static class UnprivilegedWriteAccess
     public static bool IsGrantedBy(FileSystemSecurity security, PlantedObject planted)
     {
         ArgumentNullException.ThrowIfNull(security);
-        var plantingRights = PlantingRights(planted);
+        // What plants directly, or lets its holder grant itself what plants.
+        var enabling = PlantingRights(planted) | FileSystemRights.ChangePermissions;
+        var relevant = enabling | FileSystemRights.TakeOwnership;
 
         var principals = ResolvePrincipals();
         if (principals.Count == 0)
@@ -220,18 +249,26 @@ public static class UnprivilegedWriteAccess
             return false;
         }
 
-        var allowed = false;
+        FileSystemRights allowed = 0, denied = 0, ownerAllowed = 0, ownerDenied = 0;
+        var ownerRightsNamed = false;
         foreach (var rule in rules)
         {
+            if (rule is not FileSystemAccessRule access
+                || access.IdentityReference is not SecurityIdentifier sid)
+            {
+                continue;
+            }
+            var forOwner = sid.Equals(OwnerRights);
+            // Any OWNER RIGHTS entry, even one that only describes children, is taken to replace the
+            // owner's implicit rights: that reading can only understate what ownership gives.
+            ownerRightsNamed |= forOwner;
+
             // An inherit-only entry describes what children of this directory will receive; it
             // grants nothing on the directory itself. The system drive root carries exactly such an
             // entry - Authenticated Users, Modify, inherit only - and reading it as a grant on C:\
             // is the other half of the false "C:\Program.exe is plantable" verdict above.
-            if (rule is not FileSystemAccessRule access
-                || (access.PropagationFlags & PropagationFlags.InheritOnly) != 0
-                || access.IdentityReference is not SecurityIdentifier sid
-                || !principals.Contains(sid)
-                || (GenericFileRights.Expand(access.FileSystemRights) & plantingRights) == 0)
+            if ((access.PropagationFlags & PropagationFlags.InheritOnly) != 0
+                || !(forOwner || principals.Contains(sid)))
             {
                 continue;
             }
@@ -239,13 +276,46 @@ public static class UnprivilegedWriteAccess
             // Deny is evaluated after every Allow rather than in ACE order. Canonical ACLs put deny
             // first anyway, and a non-canonical one is exactly where an order-sensitive reading
             // would produce the confident wrong answer this check must not make.
-            if (access.AccessControlType == AccessControlType.Deny)
+            var rights = GenericFileRights.Expand(access.FileSystemRights) & relevant;
+            var deny = access.AccessControlType == AccessControlType.Deny;
+            if (forOwner && deny)
             {
-                return false;
+                ownerDenied |= rights;
             }
-            allowed = true;
+            else if (forOwner)
+            {
+                ownerAllowed |= rights;
+            }
+            else if (deny)
+            {
+                denied |= rights;
+            }
+            else
+            {
+                allowed |= rights;
+            }
         }
-        return allowed;
+
+        var held = allowed & ~denied;
+        if ((held & enabling) != 0)
+        {
+            return true;
+        }
+
+        // Ownership - held by one of these groups, or taken by one allowed WRITE_OWNER - gives
+        // WRITE_DAC without any entry granting it, and a Deny does not take that back. An OWNER
+        // RIGHTS entry does: the owner then holds what those entries grant, less anything a Deny to
+        // these groups removes.
+        var ownership = ownerRightsNamed
+            ? ownerAllowed & ~ownerDenied & ~denied
+            : FileSystemRights.ChangePermissions;
+        if ((ownership & enabling) == 0)
+        {
+            return false;
+        }
+        return (held & FileSystemRights.TakeOwnership) != 0
+            || (security.GetOwner(typeof(SecurityIdentifier)) is SecurityIdentifier owner
+                && principals.Contains(owner));
     }
 
     private static HashSet<SecurityIdentifier> ResolvePrincipals()
@@ -356,6 +426,51 @@ public static class UnprivilegedWriteAccess
         out bool granted)
     {
         granted = false;
+        // What plants directly, or lets the user grant themselves what plants.
+        var enabling = DesiredAccess(planted) | WriteDac;
+        if (!TryMaximumAllowed(descriptor, token, out var access))
+        {
+            return false;
+        }
+        if ((access & enabling) == 0 && (access & WriteOwner) != 0)
+        {
+            // WRITE_OWNER lets the user make themselves the owner, who holds WRITE_DAC unless an
+            // OWNER RIGHTS entry says otherwise. Windows is asked again about the descriptor as it
+            // would read after that step, rather than this code guessing what ownership gives.
+            var owned = AsOwnedBy(descriptor, token);
+            if (owned is null || !TryMaximumAllowed(owned, token, out access))
+            {
+                return false;
+            }
+        }
+        granted = (access & enabling) != 0;
+        return true;
+    }
+
+    /// <summary>
+    /// The descriptor as it would read after the token's user made itself the owner, which
+    /// WRITE_OWNER allows without any privilege.
+    /// </summary>
+    private static byte[]? AsOwnedBy(byte[] descriptor, SafeAccessTokenHandle token)
+    {
+        using var identity = new WindowsIdentity(token.DangerousGetHandle());
+        if (identity.User is not { } user)
+        {
+            return null;
+        }
+        var owned = new RawSecurityDescriptor(descriptor, 0) { Owner = user };
+        var bytes = new byte[owned.BinaryLength];
+        owned.GetBinaryForm(bytes, 0);
+        return bytes;
+    }
+
+    /// <summary>
+    /// Every right the token holds on the descriptor (<c>MAXIMUM_ALLOWED</c>), including the owner's
+    /// implicit WRITE_DAC, which a question about the create right alone never reports.
+    /// </summary>
+    private static bool TryMaximumAllowed(byte[] descriptor, SafeAccessTokenHandle token, out uint access)
+    {
+        access = 0;
         var mapping = new GenericMapping
         {
             GenericRead = FileGenericRead,
@@ -372,7 +487,7 @@ public static class UnprivilegedWriteAccess
             if (!AccessCheck(
                     descriptorHandle.AddrOfPinnedObject(),
                     token,
-                    DesiredAccess(planted),
+                    MaximumAllowed,
                     ref mapping,
                     privileges,
                     ref privilegeBytes,
@@ -389,7 +504,7 @@ public static class UnprivilegedWriteAccess
                 if (!AccessCheck(
                         descriptorHandle.AddrOfPinnedObject(),
                         token,
-                        DesiredAccess(planted),
+                        MaximumAllowed,
                         ref mapping,
                         privileges,
                         ref privilegeBytes,
@@ -399,7 +514,7 @@ public static class UnprivilegedWriteAccess
                     return false;
                 }
             }
-            granted = accessStatus && (grantedAccess & DesiredAccess(planted)) != 0;
+            access = accessStatus ? grantedAccess : 0;
             return true;
         }
         finally
@@ -437,6 +552,9 @@ public static class UnprivilegedWriteAccess
     private const int TokenElevationTypeDefault = 1;
     private const int TokenElevationTypeFull = 2;
     private const int SecurityImpersonation = 2;
+    private const uint MaximumAllowed = 0x02000000;
+    private const uint WriteDac = 0x00040000;
+    private const uint WriteOwner = 0x00080000;
     private const uint FileAddFile = 0x00000002;
     private const uint FileAddSubdirectory = 0x00000004;
     private const uint FileGenericRead = 0x00120089;

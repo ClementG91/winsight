@@ -7,7 +7,7 @@ release.
 | Target | Verdict |
 |---|---|
 | **x64, published v0.13.0** | **Not re-qualified since the September audit.** The audit branch corrects defects present in it (`docs/AUDIT.md`), among them WS-74: since v0.12.0 the interpreter triage never classified the genuine Windows interpreters. |
-| **x64, audit branch** | **Current head not qualified.** A local, unsigned candidate of the branch, `259056b`, passed every x64 functional VM gate on 2026-09-23 (below), with a provenance caveat. The branch has changed product code since (RA-02 to RA-05 and WS-74, `bb608ff`..`861a9c9`), so the affected gates must run again on a new candidate once the qualification harness is hardened (RA-01). Not CI-attested, not signed. |
+| **x64, audit branch** | **Current head not qualified.** A local, unsigned candidate of the branch, `259056b`, passed every x64 functional VM gate on 2026-09-23 (below), with a provenance caveat. The branch has changed product code since (RA-02 to RA-05, WS-74 and WS-75, from `bb608ff`), so the affected gates must run again on a new candidate once the qualification harness is hardened (RA-01). Not CI-attested, not signed. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
@@ -37,7 +37,8 @@ not:
   build and is not qualified by it.
 - **The current branch.** RA-02 (compiled-in name read through the acquired handle), RA-03
   (coverage-gain notices), RA-04 (side-by-side resolution bound to the manifest), RA-05 (uninstall
-  stops when the firewall service cannot be removed) and WS-74 changed product code after it.
+  stops when the firewall service cannot be removed), WS-74 and WS-75 (a directory a standard user
+  owns, or may re-permission, now counts as writable by them) changed product code after it.
 - **Arm64, soak, multi-user.** Separate gates, not run (see the table above).
 
 Authenticode is an accepted distribution limitation and is not counted as a blocker here. Public
