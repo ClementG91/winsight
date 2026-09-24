@@ -750,6 +750,28 @@ texte alors que Windows PowerShell la rend en octets. L'opérateur l'a corrigé 
 des octets) avant de le relancer ; les scripts sont corrigés pour les passes suivantes. Ni l'un ni
 l'autre ne touche le produit ni ce que la porte vérifie.
 
+### 17.3 Historique réécrit avant publication
+
+Avant sa première publication, la branche a été réécrite le 24 septembre pour retirer de ses
+80 commits un nom de compte local et des chemins propres au poste de qualification (lecteur de
+données, dossiers de preuves, partage VirtualBox), dans les fichiers comme dans les messages. Le
+code n'a pas changé : l'arbre du dernier commit est identique avant et après, et chaque commit
+garde son auteur, ses dates et son message à ces chaînes près, signé par la même clé. Les SHA
+cités dans ce rapport sont ceux d'origine, auxquels les preuves VM sont liées (`candidate.json` de
+chaque passe) ; leur équivalent dans l'historique publié :
+
+| Cité | Publié | Cité | Publié |
+|---|---|---|---|
+| `5347a1b` | `aec330d` | `861a9c9` | `4ae37ec` |
+| `bd4242f` | `2ed85a6` | `76826b2` | `a72a130` |
+| `2c3085a` | `cf9cfbb` | `f18ec16` | `73eaab8` |
+| `259056b` | `13066b1` | `2cc522c` | `8e912cc` |
+| `631c4dc` | `f8bbc58` | `1cc1cf6` | `f5b7fbc` |
+| `9fbe1b3` | `04e0386` | `dc9f080` | `13717ed` |
+| `bb608ff` | `8e4a108` | `df92198` | `781895e` |
+| `9f7af15` | `cc4a6c1` | `066b3e1` | `ce2edbb` |
+| `66d4f61` | `02b17de` |  |  |
+
 ---
 
 ## 18. Recommended roadmap
