@@ -77,9 +77,9 @@ spanish.SignatureVerb=Añadir "Comprobar la firma con WinSight" al Explorador de
 english.SignatureVerbMenu=Check signature with WinSight
 french.SignatureVerbMenu=Vérifier la signature avec WinSight
 spanish.SignatureVerbMenu=Comprobar la firma con WinSight
-english.FirewallServiceNotRemoved=The WinSight firewall service could not be removed. Remove it from an elevated console with:%n%n"%1" uninstall%n%nbefore deleting that file, or remove the service with: sc delete WinSightFirewall
-french.FirewallServiceNotRemoved=Le service pare-feu WinSight n'a pas pu être retiré. Retirez-le depuis une console élevée avec :%n%n"%1" uninstall%n%navant de supprimer ce fichier, ou supprimez le service avec : sc delete WinSightFirewall
-spanish.FirewallServiceNotRemoved=No se pudo quitar el servicio de firewall de WinSight. Quítelo desde una consola elevada con:%n%n"%1" uninstall%n%nantes de eliminar ese archivo, o elimine el servicio con: sc delete WinSightFirewall
+english.FirewallServiceNotRemoved=The WinSight firewall service of this installation could not be removed, so the uninstall stopped before removing anything: deleting its program would leave a service pointing at a file that no longer exists. From an elevated console, run:%n%n"%1" uninstall%n%nor, if that fails: sc stop WinSightFirewall, then sc delete WinSightFirewall (its filters are dynamic and end with the service). Then run the uninstall again.
+french.FirewallServiceNotRemoved=Le service pare-feu WinSight de cette installation n'a pas pu être retiré ; la désinstallation s'est donc arrêtée avant de supprimer quoi que ce soit : supprimer son programme laisserait un service pointant vers un fichier inexistant. Depuis une console élevée, exécutez :%n%n"%1" uninstall%n%nou, en cas d'échec : sc stop WinSightFirewall, puis sc delete WinSightFirewall (ses filtres sont dynamiques et disparaissent avec le service). Relancez ensuite la désinstallation.
+spanish.FirewallServiceNotRemoved=No se pudo quitar el servicio de firewall de WinSight de esta instalación, así que la desinstalación se detuvo antes de quitar nada: borrar su programa dejaría un servicio que apunta a un archivo inexistente. Desde una consola con privilegios elevados, ejecute:%n%n"%1" uninstall%n%no, si falla: sc stop WinSightFirewall y luego sc delete WinSightFirewall (sus filtros son dinámicos y terminan con el servicio). Después vuelva a ejecutar la desinstalación.
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:DesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -137,6 +137,14 @@ begin
     Quote := Pos('"', ImagePath);
     if Quote > 1 then
       Result := Copy(ImagePath, 1, Quote - 1);
+  end
+  else
+  begin
+    // Re-registered by hand without quotes: the executable still ends at its extension, and
+    // missing it here would delete the program under a service still pointing at it.
+    Quote := Pos('.EXE', Uppercase(ImagePath));
+    if Quote > 0 then
+      Result := Copy(ImagePath, 1, Quote + 3);
   end;
 end;
 
@@ -145,11 +153,18 @@ end;
 // left a LocalSystem service pointing at a file that no longer exists. When the service runs this
 // installation's executable, its own verb removes it first - stop, remove its WFP objects, then the
 // registration - while the file is still there. A service registered from any other location is
-// not this installation's to remove and is left alone. A failure is reported and does not block the
-// uninstall: the operator gets the exact command instead of a half-removed product.
+// not this installation's to remove and is left alone.
+//
+// RA-05. A failure stops the uninstall instead of carrying on: continuing deleted the program and
+// left exactly the dangling LocalSystem service this exists to prevent, while the message told the
+// operator to act "before deleting that file". Raised from usUninstall, the exception is fatal to
+// Inno: nothing has been removed yet ([UninstallRun] and file deletion come after), the uninstaller
+// exits with code 1, and the message is shown - or, with /SUPPRESSMSGBOXES, only logged, so an
+// unattended uninstall fails instead of hanging. The installation stays whole and the service keeps
+// its program; the message gives the commands that remove it, then the uninstall is run again.
 procedure RemoveFirewallServiceOfThisInstallation();
 var
-  Image, Expected, Message: String;
+  Image, Expected: String;
   ResultCode: Integer;
 begin
   if not IsAdminInstallMode then
@@ -167,10 +182,8 @@ begin
     Log('Removed the WinSight firewall service of this installation.')
   else
   begin
-    Message := FmtMessage(CustomMessage('FirewallServiceNotRemoved'), [Expected]);
-    Log(Message);
-    if not UninstallSilent then
-      MsgBox(Message, mbError, MB_OK);
+    Log('The firewall service of this installation was not removed (exit ' + IntToStr(ResultCode) + '); uninstall stopped.');
+    RaiseException(FmtMessage(CustomMessage('FirewallServiceNotRemoved'), [Expected]));
   end;
 end;
 

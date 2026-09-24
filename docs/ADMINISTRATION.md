@@ -111,8 +111,13 @@ WinSight namespace, and only then deletes registration. `sc query` must end with
 Uninstalling a machine-wide installation runs this verb first when the registered service runs that
 installation's own `winsight-firewall-service.exe`, so no LocalSystem service is left pointing at a
 deleted file and no block outlives the product. A service registered from any other location is not
-that installation's and is left alone. If the verb fails, the uninstaller says so and names the
-command to run; the details go to the uninstall log when it runs with `/LOG`.
+that installation's and is left alone. If the verb fails, the uninstall stops before removing
+anything - the installation stays whole and the service keeps its program - and says which commands
+remove the service (the verb from an elevated console, or `sc stop` then `sc delete WinSightFirewall`:
+its filters are dynamic and end with the service); then run the uninstall again. A silent uninstall
+(`/VERYSILENT /SUPPRESSMSGBOXES`) stops the same way without a dialog and records it in the log given
+with `/LOG`. The uninstaller's first phase does not relay the exit code, so check the log or the
+`Uninstall` registration rather than the exit code.
 
 ## Where state lives
 

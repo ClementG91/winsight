@@ -568,9 +568,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle failed.' }
 
 Then prove the all-users uninstall and the firewall service it may leave behind (WS-63). The script
 installs for all users under `Program Files`, registers the service from that installation, and
-requires the uninstall to remove it with no file left; with `-ForeignServicePath`, it also requires a
-service registered from another protected location to survive the application's uninstall. Both
-cases must print `PASS`, and `sc query WinSightFirewall` must end with **1060**:
+requires the uninstall to remove it with no file or WinSight WFP object left. It then injects a
+failure of that removal (RA-05) by denying `DELETE` on the service object to Administrators and
+SYSTEM, and requires the uninstall to stop with nothing removed - registration, program and service
+intact, a fatal stop in the log - and to complete once the descriptor is restored. With
+`-ForeignServicePath`, it also requires a service registered from another protected location to
+survive the application's uninstall. Every case must print `PASS`, and `sc query WinSightFirewall`
+must end with **1060**:
 
 ```powershell
 Assert-CandidateFiles

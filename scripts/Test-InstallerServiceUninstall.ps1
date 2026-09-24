@@ -14,8 +14,9 @@ param(
 )
 
 # WS-63. Uninstalling an all-users installation must remove the firewall service registered from it,
-# and only that one. This installs a LocalSystem service and changes WFP state: run it in a disposable
-# VM (docs/validation/VM_QUALIFICATION_KIT.md), never on a workstation.
+# and only that one; RA-05: when it cannot, the uninstall must stop before removing anything. This
+# installs a LocalSystem service, changes its security descriptor and reads WFP state: run it in a
+# disposable VM (docs/validation/VM_QUALIFICATION_KIT.md), never on a workstation.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
@@ -84,6 +85,30 @@ function Uninstall-Application([string]$LogName)
     if (Test-Path -LiteralPath $serviceExe) { throw "The uninstall left $serviceExe behind (still locked by the service?)." }
 }
 
+function Get-ServiceSddl
+{
+    $sddl = @(& $ScExe sdshow $ServiceName | Where-Object { $_ -match '^\s*D:' })
+    if ($LASTEXITCODE -ne 0 -or $sddl.Count -ne 1) { throw "Could not read the security descriptor of $ServiceName." }
+    return $sddl[0].Trim()
+}
+
+function Set-ServiceSddl([string]$Sddl)
+{
+    & $ScExe sdset $ServiceName $Sddl *> $null
+    if ($LASTEXITCODE -ne 0) { throw "Could not set the security descriptor of $ServiceName (sc exit $LASTEXITCODE)." }
+}
+
+# Every WFP object WinSight creates carries a key ending in this suffix (WfpProvisioning.cs).
+function Assert-NoWinSightWfpObject([string]$Because)
+{
+    $state = Join-Path $log "wfp-state-$([Guid]::NewGuid().ToString('N')).xml"
+    & (Join-Path $env:SystemRoot "System32\netsh.exe") wfp show state file="$state" *> $null
+    if (-not (Test-Path -LiteralPath $state)) { throw "netsh wfp show state produced no file." }
+    if ((Get-Content -LiteralPath $state -Raw) -match '5c3a-4b8e-9f21-6c0a7e2d1f34') {
+        throw "A WinSight WFP object is still present ($Because); see $state."
+    }
+}
+
 function Register-Service([string]$Executable)
 {
     & $Executable install *> (Join-Path $log "service-install-$([IO.Path]::GetFileName([IO.Path]::GetDirectoryName($Executable))).txt")
@@ -107,7 +132,45 @@ try
         $left = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File | ForEach-Object FullName)
         if ($left.Count -gt 0) { throw "The uninstall left files: $($left -join ', ')" }
     }
-    "PASS own-service: registered from the installation, removed by its uninstall, no file left"
+    Assert-NoWinSightWfpObject "after the uninstall removed the service"
+    "PASS own-service: registered from the installation, removed by its uninstall, no file or WFP object left"
+
+    # 3. RA-05. When the service of this installation cannot be removed, the uninstall stops before
+    #    removing anything - the program stays under the service that runs it - and completes once
+    #    the cause is gone. The failure is injected by denying DELETE on the service object to
+    #    Administrators and SYSTEM, who run the uninstaller and its verb: deterministic, and undone.
+    Install-Application
+    Register-Service $serviceExe
+    $filesBefore = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File).Count
+    $original = Get-ServiceSddl
+    if ($original -notmatch '^D:([A-Z]*)\(') { throw "Unexpected service DACL: $original" }
+    Set-ServiceSddl ($original -replace '^D:([A-Z]*)\(', 'D:$1(D;;SD;;;BA)(D;;SD;;;SY)(')
+    try
+    {
+        # The first phase waits for the second but does not relay its exit code: the evidence is the
+        # log, the registration, and the files.
+        Start-Process -FilePath $uninstaller -ArgumentList @(
+            "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOG=`"$(Join-Path $log 'uninstall-blocked.log')`""
+        ) -Wait | Out-Null
+        $blockedLog = Get-Content -LiteralPath (Join-Path $log "uninstall-blocked.log") -Raw
+        if ($blockedLog -notmatch [regex]::Escape("uninstall stopped") -or $blockedLog -notmatch [regex]::Escape("(fatal)")) {
+            throw "The blocked uninstall does not record a fatal stop."
+        }
+        if (-not (Test-Path -LiteralPath $UninstallKey)) { throw "The installation was unregistered although its service could not be removed." }
+        if (-not (Test-Path -LiteralPath $serviceExe)) { throw "The service program was deleted under a registered service." }
+        $image = Get-ServiceImage
+        if ($null -eq $image -or $image -notlike "*$serviceExe*") { throw "The service registration changed: '$image'." }
+        $filesAfter = @(Get-ChildItem -LiteralPath $installDirectory -Recurse -File).Count
+        if ($filesAfter -ne $filesBefore) { throw "The blocked uninstall removed files ($filesBefore before, $filesAfter after)." }
+    }
+    finally
+    {
+        Set-ServiceSddl $original
+    }
+    Uninstall-Application "uninstall-after-block.log"
+    Assert-ServiceAbsent "the uninstall run again once the service could be removed"
+    Assert-NoWinSightWfpObject "after the second uninstall"
+    "PASS blocked-service: uninstall stopped with nothing removed, then completed once the service could go"
 
     # 2. A service registered from anywhere else is not the installation's to remove.
     if ($ForeignServicePath)
