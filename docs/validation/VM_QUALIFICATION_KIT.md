@@ -8,6 +8,14 @@ inventory, or unexported evidence means **STOP / RED**.
 > Run privileged phases only in an isolated, disposable VM. Never install the service, modify WFP,
 > or stop an ETW session on the development workstation.
 
+The host side can be driven unattended on Hyper-V by the harness in
+[`scripts/validation/hyperv`](../../scripts/validation/hyperv/README.md). Its elevated runner reads
+requests from a user-writable folder but writes only into administrators-only copies of the harness,
+the candidate and the evidence, refuses VM storage anyone else could modify, and seals, with each
+run, the git blob ids of what ran; `Verify-QualificationProvenance.ps1`, run unelevated, checks them
+against the reviewed commit and proves every write is refused (RA-01). A run that has not passed it
+is functional evidence only.
+
 ## 0. Do not confuse version, tag, and candidate
 
 The VM report from 29 July 2026 tested `main` commit
