@@ -49,9 +49,12 @@ rehearsal is still not a CI-attested release.
 1. Commit the harness and note the commit (`git rev-parse HEAD`). Start the runner from that clean
    tree, elevated (the operator accepts the UAC prompt):
    `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<repo>\scripts\validation\hyperv\WinSightQualRunner.ps1'`
-2. Build the candidate unelevated and place it, with `candidate.json`, `source\scripts` (the
-   repository's `scripts` at the candidate commit) and `previous\` (the published installer the
-   upgrade gate starts from), in `<vol>\WinSight-Qualification-Requests\candidates\<name>`.
+2. Build the candidate unelevated from a clean checkout of the commit (a worktree on a drive with
+   room: `Build-Release.ps1 -Version <v> -Architectures x64 -DisableSignature`), then assemble it with
+   `New-QualificationCandidate.ps1 -BuildTree <checkout> -Name <name> -PreviousInstaller <published setup>
+   -PreviousSha256 <its published hash> -PreviousCommit <its commit>`: the artifacts, the repository's
+   `scripts` at that commit, the published installer the upgrade gate starts from, and
+   `candidate.json` binding them by SHA-256, in `<vol>\WinSight-Qualification-Requests\candidates\<name>`.
 3. Queue requests as JSON files with unique names in `<vol>\WinSight-Qualification-Requests`:
    `{"action":"stage","candidate":"<name>"}`, then `{"action":"qualify","runName":"...","gates":[...],"memoryGB":4}`,
    `{"action":"network","runName":"..."}` for gate 36 (the operator types the disposable password in
@@ -73,6 +76,7 @@ rehearsal is still not a CI-attested release.
 | `New-WinSightControlVm.ps1` | host, elevated, once | the control VM and private switch |
 | `New-WinSightHyperVVm.ps1` | host, elevated, once | the qualification VM (from an exported disk) |
 | `Protect-WinSightVmStorage.ps1` | host, elevated, once | VM storage ACL, sealed disk hashes |
+| `New-QualificationCandidate.ps1` | host, unelevated | assembles a candidate for a `stage` request |
 | `Verify-QualificationProvenance.ps1` | host, **unelevated** | provenance and access checks of a sealed run |
 | `Test-HarnessHelpers.ps1` | host, unelevated | self-checks of the helpers that need no elevation |
 | `WinSightHyperV.psm1` | host | the helpers above |
