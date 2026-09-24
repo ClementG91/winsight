@@ -46,8 +46,15 @@ try {
     Report (Throws { Copy-ListedFile -SourceRoot $source -Relative '..\outside\host-secret.txt' -DestinationRoot $staging } 'Invalid relative path') 'Copy-ListedFile refuses a path that climbs out'
     Copy-ListedFile -SourceRoot $source -Relative 'sub\result.txt' -DestinationRoot $staging
     Report (Test-Path -LiteralPath (Join-Path $staging 'sub\result.txt')) 'Copy-ListedFile copies a listed ordinary file'
-    Report (Throws { Assert-ProtectedPath -Path $source } 'Not owned by Administrators|Writable by') 'Assert-ProtectedPath refuses a folder an ordinary user owns'
-    Report (Throws { Assert-ProtectedPath -Path $source -Recurse } 'Reparse point|Not owned|Writable by') 'Assert-ProtectedPath -Recurse refuses a tree holding a junction'
+    Report (Throws { Assert-ProtectedPath -Path $source } 'Not owned by Administrators|Writable by|renamed|Children of') 'Assert-ProtectedPath refuses a folder an ordinary user owns'
+    # The folders above a protected one count: here the user's own profile, which the user can rename.
+    Report (Throws { Assert-ProtectedAncestors -Path $source } 'Not owned by Administrators|renamed|Children of') 'Assert-ProtectedAncestors refuses a path under folders an ordinary user controls'
+    Report (-not (Throws { Assert-ProtectedAncestors -Path (Join-Path $env:SystemRoot 'System32') } '.')) 'Assert-ProtectedAncestors accepts a path whose parents only administrators can replace'
+    # An inheritable entry can hold only the generic bit (GENERIC_ALL), which no specific right matches.
+    $generic = [pscustomobject]@{ FileSystemRights = [Enum]::ToObject([System.Security.AccessControl.FileSystemRights], 0x10000000) }
+    $module = Get-Module WinSightHyperV
+    Report (& $module { param($Rule) Test-Grants $Rule $script:WriteRights } $generic) 'a GENERIC_ALL inheritable entry counts as a write grant'
+    Report (Throws { Assert-ProtectedPath -Path $source -Recurse } 'Reparse point|Not owned|Writable by|renamed|Children of') 'Assert-ProtectedPath -Recurse refuses a tree holding a junction'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

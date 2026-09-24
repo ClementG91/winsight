@@ -32,6 +32,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
+Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $controlData = Join-Path $Root 'control-data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'

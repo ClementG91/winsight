@@ -10,9 +10,49 @@
 
 $script:Administrators = 'S-1-5-32-544'
 $script:LocalSystem = 'S-1-5-18'
+# The Windows servicing identity that owns the system folders, more privileged than Administrators.
+$script:TrustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
 $script:AuthenticatedUsers = 'S-1-5-11'
 $script:VirtualMachines = 'S-1-5-83-0'
 $script:WriteRights = [System.Security.AccessControl.FileSystemRights]'WriteData, AppendData, WriteExtendedAttributes, WriteAttributes, Delete, DeleteSubdirectoriesAndFiles, ChangePermissions, TakeOwnership'
+# What lets someone rename or re-permission a directory, and what lets them delete its children.
+$script:ReplaceRights = [System.Security.AccessControl.FileSystemRights]'Delete, ChangePermissions, TakeOwnership'
+$script:DeleteChildRights = [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles
+# GENERIC_ALL and GENERIC_WRITE, as inheritable entries carry them before they are mapped.
+$script:GenericWrite = 0x50000000L
+
+# Whether an access rule grants any of $Rights, counting the generic bits an inheritable entry holds.
+function Test-Grants($Rule, [System.Security.AccessControl.FileSystemRights]$Rights) {
+    $raw = [int64]$Rule.FileSystemRights -band 0xFFFFFFFFL
+    return (($raw -band [int64]$Rights) -ne 0) -or (($raw -band $script:GenericWrite) -ne 0)
+}
+
+# Throws unless nobody but an administrator can rename, replace or re-permission a directory between
+# the drive root and $Path. Otherwise a protected tree can be swapped for another under the same
+# path between two checks - a whole VM storage folder, for instance. A directory can be renamed by
+# whoever has DELETE on it or FILE_DELETE_CHILD on its parent, and re-permissioned by its owner or
+# whoever has WRITE_DAC or WRITE_OWNER; only entries that apply to the directory itself count.
+function Assert-ProtectedAncestors([Parameter(Mandatory)][string]$Path) {
+    $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
+    $driveRoot = [IO.Path]::GetPathRoot($full).TrimEnd('\')
+    $allowed = @($script:LocalSystem, $script:Administrators, $script:TrustedInstaller)
+    $parent = [IO.Path]::GetDirectoryName($full)
+    while ($parent) {
+        $acl = Get-Acl -LiteralPath $parent
+        foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+            if ($rule.AccessControlType -ne 'Allow' -or ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly)) { continue }
+            $sid = $rule.IdentityReference.Value
+            if ($sid -in $allowed) { continue }
+            if (Test-Grants $rule $script:DeleteChildRights) { throw "Children of $parent can be deleted or renamed by $sid." }
+            if ($parent.TrimEnd('\') -ne $driveRoot -and (Test-Grants $rule $script:ReplaceRights)) { throw "$parent can be renamed or re-permissioned by $sid." }
+        }
+        if ($parent.TrimEnd('\') -eq $driveRoot) { break }
+        if ([IO.File]::GetAttributes($parent) -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse point: $parent" }
+        $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if ($owner -notin $allowed) { throw "Not owned by Administrators, SYSTEM or TrustedInstaller ($owner): $parent" }
+        $parent = [IO.Path]::GetDirectoryName($parent)
+    }
+}
 
 function New-DirectorySecurity([bool]$UsersRead, [bool]$VirtualMachinesFull = $false) {
     $security = New-Object System.Security.AccessControl.DirectorySecurity
@@ -36,6 +76,9 @@ function New-DirectorySecurity([bool]$UsersRead, [bool]$VirtualMachinesFull = $f
 # planted anywhere in the tree.
 function Assert-ProtectedPath {
     param([Parameter(Mandatory)][string]$Path, [switch]$Recurse, [switch]$AllowVirtualMachines)
+    # A protected folder under a parent anyone can rename is not protected: the parent goes, and
+    # another folder takes its path.
+    Assert-ProtectedAncestors -Path $Path
     $items = New-Object System.Collections.Generic.List[string]
     $items.Add([IO.Path]::GetFullPath($Path))
     if ($Recurse -and ([IO.File]::GetAttributes($Path) -band [IO.FileAttributes]::Directory)) {
@@ -61,8 +104,9 @@ function Assert-ProtectedPath {
         if ($owner -notin $script:LocalSystem, $script:Administrators) { throw "Not owned by Administrators or SYSTEM ($owner): $item" }
         foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
             $sid = $rule.IdentityReference.Value
-            # S-1-5-83-1-*: the per-VM identity Hyper-V grants on the disks of the VM it runs.
-            if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $script:WriteRights) -and
+            # S-1-5-83-1-*: the per-VM identity Hyper-V grants on the disks of the VM it runs. Entries
+            # that only children inherit count too: they would make the next file written here writable.
+            if ($rule.AccessControlType -eq 'Allow' -and (Test-Grants $rule $script:WriteRights) -and
                 $sid -notin $allowed -and $sid -notlike 'S-1-5-83-1-*') {
                 throw "Writable by $sid ($($rule.FileSystemRights)): $item"
             }
@@ -220,6 +264,6 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
     (Get-VM -Name $Name -ErrorAction Stop).State.ToString()
 }
 
-Export-ModuleMember -Function Assert-ProtectedPath, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
+Export-ModuleMember -Function Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
     Copy-GuestResults, Get-WinSightVmState

@@ -12,7 +12,9 @@
 param(
     [string]$VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
     [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification'),
-    [string[]]$VmNames = @('WinSight-Qualification-HV', 'WinSight-Control-HV')
+    [string[]]$VmNames = @('WinSight-Qualification-HV', 'WinSight-Control-HV'),
+    # Also protect a parent folder of the VM storage that holds other things.
+    [switch]$AllowAncestorChange
 )
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
@@ -51,7 +53,38 @@ foreach ($item in $items) {
 # Then the DACL of the root, which every item inherits from once the inheritance from <vol>\ is cut.
 & $icacls $VmRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-83-0:(OI)(CI)F' /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not set the DACL of $VmRoot (icacls exit $LASTEXITCODE)." }
-# An explicit grant on an item survives that; it must be gone too, or the storage is still writable.
+
+# The folders above it, below the drive root. Whoever can rename one can put another folder, with other
+# disks, at the path the VMs are registered with - between two checks, or for good. Each gets
+# Administrators as owner and an administrators-only DACL (everyone keeps read). A folder that also
+# holds something else is not changed without -AllowAncestorChange: its other content would inherit the
+# new DACL.
+$vmRootFull = [IO.Path]::GetFullPath($VmRoot).TrimEnd('\')
+$driveRoot = [IO.Path]::GetPathRoot($vmRootFull).TrimEnd('\')
+$below = $vmRootFull
+$ancestor = [IO.Path]::GetDirectoryName($vmRootFull)
+while ($ancestor -and $ancestor.TrimEnd('\') -ne $driveRoot) {
+    if ([IO.File]::GetAttributes($ancestor) -band [IO.FileAttributes]::ReparsePoint) { throw "$ancestor is a reparse point." }
+    $others = @([IO.Directory]::EnumerateFileSystemEntries($ancestor) | Where-Object { $_ -ne $below })
+    try { Assert-ProtectedAncestors -Path $below }
+    catch {
+        if ($others.Count -gt 0 -and -not $AllowAncestorChange) {
+            throw "$ancestor must be protected ($($_.Exception.Message)) but also holds $($others.Count) other item(s); rerun with -AllowAncestorChange to apply its new DACL to them too."
+        }
+        $owner = (Get-Acl -LiteralPath $ancestor).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+        if ($owner -notin 'S-1-5-18', 'S-1-5-32-544') {
+            & $icacls $ancestor /setowner '*S-1-5-32-544' /Q | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Could not take ownership of $ancestor (icacls exit $LASTEXITCODE)." }
+        }
+        & $icacls $ancestor /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-11:(OI)(CI)RX' /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not set the DACL of $ancestor (icacls exit $LASTEXITCODE)." }
+        Write-Host "protected against renaming: $ancestor"
+    }
+    $below = $ancestor
+    $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+}
+
+# An explicit grant on an item survives all that; it must be gone too, or the storage is still writable.
 Assert-ProtectedPath -Path $VmRoot -Recurse -AllowVirtualMachines
 Write-Host "$VmRoot is administrators-only."
 

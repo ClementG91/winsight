@@ -32,6 +32,7 @@ $Gates = @($Gates | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim(
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
+Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
 function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [hyper-v] $Message"; Add-Content -LiteralPath $hostLog -Value $line; Write-Host $line }

@@ -215,6 +215,8 @@ while ((Get-Date) -lt $deadline) {
         if ($entry.action -eq 'ping') { Say "ping $id"; continue }
         Assert-Harness
         if ($entry.action -eq 'stage') { Say "staged candidate $(Invoke-Stage $request)"; continue }
+        # Checked again before every run, not only at start: the disks are what the evidence comes from.
+        Assert-ProtectedPath -Path $VmRoot -Recurse -AllowVirtualMachines
         if ($entry.action -ne 'control') { $arguments += @('-CandidateDir', (Assert-Candidate)) }
         $arguments += @('-HarnessDir', $harness, '-EvidenceRoot', $sealed, '-Root', $VmRoot)
         $log = Join-Path $runnerDir "logs\$id-$stamp.log"
