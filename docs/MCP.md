@@ -12,10 +12,20 @@ remote clients or install a background MCP service.
 
 The MCP server never exposes a response action. Suspending a process, removing or disabling
 persistence, quarantining a file, or adding a firewall or trust rule are reachable only from the
-dashboard and CLI, never from a model: the MCP assembly does not even reference the response layer,
-and a contract test (`ResponseIsNotReachableFromMcpTests`) fails the build if that changes. All
-exposed tools are declared read-only, idempotent, non-destructive and
-closed-world. MCP never exposes process termination, file deletion, quarantine,
+dashboard and CLI, never from a model: the MCP assembly does not even reference the response layer.
+Two contract tests guard the rest. `ResponseIsNotReachableFromMcpTests` walks the IL of WinSight's
+own assemblies from every MCP method and fails if a known response mutator, or anything in the
+firewall service, is reachable. `McpSideEffectBoundaryTests` covers what a list of known mutators
+cannot - one added later, or a write made straight through the framework or a P/Invoke: it fails if
+MCP reaches a mutating framework API, one of WinSight's own file-writing primitives, or a native
+function nobody has reviewed, and a canary proves each of those detectors fires. Three reviewed
+exceptions remain. The `process` tool may start `netstat.exe`, which only reads, when the native
+connection tables fail, and kills only that child on timeout. The VirusTotal lookup and its quota
+file are present in the code MCP reaches but switched off at runtime by `allowNetworkLookups: false`,
+which the test pins at every MCP call site. These are targeted guards, not a proof: reflection with
+a computed name, native callbacks and the framework's own internals are outside what the walk sees.
+All exposed tools are declared read-only, idempotent, non-destructive and
+closed-world, and the test pins that list of six. MCP never exposes process termination, file deletion, quarantine,
 registry editing, firewall mutation or WFP policy changes. VirusTotal and every
 other network lookup are disabled inside MCP scans even when `WINSIGHT_VT_KEY` is
 present in the parent environment.

@@ -14,6 +14,14 @@ namespace WinSight.Mcp.Tests;
 /// framework code may call them. Framework methods are not walked: a WinSight method reachable only
 /// through a framework callback therefore has to enter through one of those rules.
 /// </summary>
+/// <remarks>
+/// <b>What it is not (RA-06).</b> A finite walk of WinSight's IL, not a proof about every future side
+/// effect. It does not enter the framework, so what a framework method does is judged at the call
+/// site: every call leaving WinSight is recorded in <see cref="ExternalCalls"/> and every WinSight
+/// P/Invoke reached in <see cref="NativeCalls"/>, for the tests to hold against a denylist of mutating
+/// framework APIs and a reviewed list of native functions. Reflection with a computed name, a
+/// delegate built outside the walk, or native code calling back are outside it.
+/// </remarks>
 internal sealed class IlCallGraph
 {
     private const BindingFlags Declared = BindingFlags.Public | BindingFlags.NonPublic
@@ -25,19 +33,36 @@ internal sealed class IlCallGraph
         .ToDictionary(code => code.Value);
 
     private readonly Type[] _winSightTypes;
+    private readonly Func<MethodBase, bool> _stopAt;
     private readonly Queue<MethodBase> _pending = new();
     private readonly Dictionary<MethodBase, MethodBase?> _parents = [];
     private readonly HashSet<Type> _instantiated = [];
 
-    public IlCallGraph(IEnumerable<Assembly> winSightAssemblies)
+    /// <param name="winSightAssemblies">The assemblies whose types the class-hierarchy analysis considers.</param>
+    /// <param name="stopAt">
+    /// Methods reached but not entered: reviewed owners of a known side effect, so a walk can hold
+    /// everything else to a stricter rule.
+    /// </param>
+    public IlCallGraph(IEnumerable<Assembly> winSightAssemblies, Func<MethodBase, bool>? stopAt = null)
     {
         _winSightTypes = winSightAssemblies.SelectMany(LoadableTypes).ToArray();
+        _stopAt = stopAt ?? (_ => false);
     }
 
     /// <summary>Tokens that could not be resolved. Each one is a hole in the proof, so callers assert it empty.</summary>
     public List<string> Unresolved { get; } = [];
 
     public IReadOnlyCollection<MethodBase> Reached => _parents.Keys;
+
+    /// <summary>
+    /// Every call from a reached WinSight method to a method outside WinSight, with its caller: the
+    /// point where the walk stops and a side effect has to be recognised by name.
+    /// </summary>
+    public HashSet<(MethodBase Caller, MethodBase Target)> ExternalCalls { get; } = [];
+
+    /// <summary>The WinSight-declared native functions (<c>DllImport</c>, and <c>LibraryImport</c>'s inner stub) reached.</summary>
+    public IEnumerable<MethodBase> NativeCalls =>
+        _parents.Keys.Where(method => (method.Attributes & MethodAttributes.PinvokeImpl) != 0);
 
     /// <summary>WinSight's own code: the <c>WinSight.*</c> libraries and the <c>winsight</c> CLI.</summary>
     public static bool IsWinSight(Assembly assembly) => IsWinSight(assembly.GetName());
@@ -105,6 +130,10 @@ internal sealed class IlCallGraph
 
     private void Visit(MethodBase method)
     {
+        if (_stopAt(method))
+        {
+            return;
+        }
         var type = method.DeclaringType!;
         if (type.TypeInitializer is { } initializer)
         {
@@ -195,6 +224,10 @@ internal sealed class IlCallGraph
 
     private void FollowMethod(MethodBase caller, OpCode code, MethodBase target)
     {
+        if (code != OpCodes.Ldtoken && !IsWinSight(target.Module.Assembly))
+        {
+            ExternalCalls.Add((caller, target));
+        }
         Enqueue(target, caller);
         if (target.IsGenericMethod)
         {
