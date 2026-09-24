@@ -172,6 +172,15 @@ try
     Assert-NoWinSightWfpObject "after the second uninstall"
     "PASS blocked-service: uninstall stopped with nothing removed, then completed once the service could go"
 
+    # 4. The same service re-registered by hand without quotes, under a path with spaces: still this
+    #    installation's, still removed before its program is deleted.
+    Install-Application
+    Register-Service $serviceExe
+    Set-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$ServiceName" -Name ImagePath -Value "$serviceExe run"
+    Uninstall-Application "uninstall-unquoted.log"
+    Assert-ServiceAbsent "the uninstall of an installation whose service was registered without quotes"
+    "PASS unquoted-service: an unquoted registration of this installation is recognised and removed"
+
     # 2. A service registered from anywhere else is not the installation's to remove.
     if ($ForeignServicePath)
     {

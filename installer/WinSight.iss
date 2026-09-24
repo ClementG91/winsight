@@ -120,32 +120,46 @@ Filename: "{app}\winsight.exe"; Parameters: "remove-decoys"; Flags: runhidden sk
 const
   FirewallServiceKey = 'SYSTEM\CurrentControlSet\Services\WinSightFirewall';
 
-// The executable the WinSightFirewall service is registered to run, from its ImagePath
-// ("<path>" run, as FirewallServiceInstaller.BuildBinaryPath writes it); empty when there is none.
-function FirewallServiceImage(): String;
+// Whether CommandLine starts with the executable Path: all of it, or followed by its arguments.
+function StartsTheCommand(CommandLine, Path: String): Boolean;
+begin
+  // One test at a time: the character after the path is read only once it is known to exist.
+  Result := False;
+  if Length(CommandLine) < Length(Path) then
+    exit;
+  if CompareText(Copy(CommandLine, 1, Length(Path)), Path) <> 0 then
+    exit;
+  if Length(CommandLine) = Length(Path) then
+    Result := True
+  else
+    Result := CommandLine[Length(Path) + 1] = ' ';
+end;
+
+// Whether the WinSightFirewall service is registered to run Expected, this installation's executable.
+// ImagePath receives the registration as found, empty when there is no service or no ImagePath.
+function ServiceRunsThisInstallation(Expected: String; var ImagePath: String): Boolean;
 var
-  ImagePath: String;
   Quote: Integer;
 begin
-  Result := '';
+  Result := False;
+  ImagePath := '';
   if not RegQueryStringValue(HKLM, FirewallServiceKey, 'ImagePath', ImagePath) then
     exit;
   ImagePath := Trim(ImagePath);
   if (Length(ImagePath) > 1) and (ImagePath[1] = '"') then
   begin
-    Delete(ImagePath, 1, 1);
-    Quote := Pos('"', ImagePath);
-    if Quote > 1 then
-      Result := Copy(ImagePath, 1, Quote - 1);
+    // "<path>" run, as FirewallServiceInstaller.BuildBinaryPath writes it.
+    Quote := Pos('"', Copy(ImagePath, 2, Length(ImagePath) - 1));
+    Result := (Quote > 1) and (CompareText(Copy(ImagePath, 2, Quote - 1), Expected) = 0);
   end
   else
-  begin
-    // Re-registered by hand without quotes: the executable still ends at its extension, and
-    // missing it here would delete the program under a service still pointing at it.
-    Quote := Pos('.EXE', Uppercase(ImagePath));
-    if Quote > 0 then
-      Result := Copy(ImagePath, 1, Quote + 3);
-  end;
+    // Re-registered by hand without quotes. Windows runs the leading path, adding ".exe" when it has
+    // none, so this installation's executable is recognised as the start of the command, with or
+    // without its extension. Searching for ".exe" instead stopped at the first one in the path - a
+    // folder named "tools.exe" - and read this installation's service as someone else's, which let
+    // the uninstall delete the program under it.
+    Result := StartsTheCommand(ImagePath, Expected)
+      or StartsTheCommand(ImagePath, Copy(Expected, 1, Length(Expected) - Length('.exe')));
 end;
 
 // WS-63. The firewall service is registered separately and deliberately, from an all-users
@@ -164,18 +178,16 @@ end;
 // its program; the message gives the commands that remove it, then the uninstall is run again.
 procedure RemoveFirewallServiceOfThisInstallation();
 var
-  Image, Expected: String;
+  ImagePath, Expected: String;
   ResultCode: Integer;
 begin
   if not IsAdminInstallMode then
     exit;
-  Image := FirewallServiceImage();
-  if Image = '' then
-    exit;
   Expected := ExpandConstant('{app}\winsight-firewall-service.exe');
-  if CompareText(Image, Expected) <> 0 then
+  if not ServiceRunsThisInstallation(Expected, ImagePath) then
   begin
-    Log('WinSightFirewall runs ' + Image + ', not this installation; left in place.');
+    if ImagePath <> '' then
+      Log('WinSightFirewall runs ' + ImagePath + ', not this installation; left in place.');
     exit;
   end;
   if Exec(Expected, 'uninstall', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then

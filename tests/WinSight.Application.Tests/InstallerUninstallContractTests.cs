@@ -45,6 +45,23 @@ public sealed class InstallerUninstallContractTests
         Assert.Contains("RemoveFirewallServiceOfThisInstallation();", step, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// An ImagePath re-registered without quotes is recognised by its start, with or without the
+    /// extension Windows would add; searching for ".exe" stopped at the first one in the path and read
+    /// this installation's service as someone else's, which let the uninstall carry on.
+    /// </summary>
+    [Fact]
+    public void AnUnquotedRegistrationOfThisInstallationIsStillRecognised()
+    {
+        var script = Read("installer", "WinSight.iss");
+
+        Assert.DoesNotContain("Pos('.EXE'", script, StringComparison.OrdinalIgnoreCase);
+        var recognition = Between(script, "function ServiceRunsThisInstallation(", "// WS-63.");
+        Assert.Contains("StartsTheCommand(ImagePath, Expected)", recognition, StringComparison.Ordinal);
+        Assert.Contains("StartsTheCommand(ImagePath, Copy(Expected, 1, Length(Expected) - Length('.exe')))", recognition, StringComparison.Ordinal);
+        Assert.Contains("PASS unquoted-service", Read("scripts", "Test-InstallerServiceUninstall.ps1"), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TheMessageGivesTheRecoveryAndNeverAsksForActionBeforeADeletion()
     {
