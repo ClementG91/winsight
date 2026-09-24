@@ -79,8 +79,25 @@ New-ProtectedDirectory -Path $harness
 foreach ($file in $HarnessFiles) { Copy-ListedFile -SourceRoot $HarnessSource -Relative $file -DestinationRoot $harness -MaximumBytes 1MB }
 Assert-ProtectedPath -Path $harness -Recurse
 $harnessManifest = @(Get-FileManifest $harness)
-$headFile = Join-Path $Repository '.git\HEAD'
-$claimedHead = if (Test-Path -LiteralPath $headFile -PathType Leaf) { (Get-Content -LiteralPath $headFile -TotalCount 1) } else { 'unknown' }
+# The commit the harness claims to come from, for the record only: the verifier checks the files
+# themselves against the reviewed commit. In a worktree .git is a file naming the real git directory.
+# Only a value shaped like a commit or a ref is written down, so a crafted .git cannot make this
+# elevated process copy another file's first line into a readable manifest.
+function Get-ClaimedHead([string]$RepositoryRoot) {
+    $dotGit = Join-Path $RepositoryRoot '.git'
+    $gitDir = $dotGit
+    if (Test-Path -LiteralPath $dotGit -PathType Leaf) {
+        $pointer = [string](Get-Content -LiteralPath $dotGit -TotalCount 1)
+        if ($pointer -notmatch '^gitdir: (?<dir>.+)$') { return 'unrecognised' }
+        $gitDir = $Matches['dir'].Trim()
+    }
+    $head = Join-Path $gitDir 'HEAD'
+    if (-not (Test-Path -LiteralPath $head -PathType Leaf)) { return 'unknown' }
+    $value = [string](Get-Content -LiteralPath $head -TotalCount 1)
+    if ($value -match '^([0-9a-f]{40}|ref: refs/[A-Za-z0-9._/-]{1,200})$') { return $value }
+    return 'unrecognised'
+}
+$claimedHead = Get-ClaimedHead $Repository
 $manifestPath = Join-Path $sealed "harness-$stamp.txt"
 @("# harness copied $stamp from $HarnessSource", "# repository HEAD as found (unverified): $claimedHead",
   "# runner: $(Get-GitBlobId $PSCommandPath)  $PSCommandPath") + $harnessManifest | Set-Content -LiteralPath $manifestPath

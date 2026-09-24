@@ -46,9 +46,11 @@ rehearsal is still not a CI-attested release.
 
 ## Each campaign
 
-1. Commit the harness and note the commit (`git rev-parse HEAD`). Start the runner from that clean
-   tree, elevated (the operator accepts the UAC prompt):
-   `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<repo>\scripts\validation\hyperv\WinSightQualRunner.ps1'`
+1. Commit the harness and note the commit (`git rev-parse HEAD`). Check it out as a worktree on the
+   data drive (`git worktree add <vol>\WinSight-Build\wt-<sha> <sha>`) - builds, tests and runs stay off
+   the system drive - and start the runner from that clean tree, elevated (the operator accepts the
+   UAC prompt):
+   `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<vol>\WinSight-Build\wt-<sha>\scripts\validation\hyperv\WinSightQualRunner.ps1'`
 2. Build the candidate unelevated from a clean checkout of the commit (a worktree on a drive with
    room: `Build-Release.ps1 -Version <v> -Architectures x64 -DisableSignature`), then assemble it with
    `New-QualificationCandidate.ps1 -BuildTree <checkout> -Name <name> -PreviousInstaller <published setup>
