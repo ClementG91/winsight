@@ -729,14 +729,15 @@ $EtwGateStart = Get-Date
 
 Invoke-Gate '15-installer-all-users-service' {
     # WS-63: the all-users uninstall removes the service registered from it, and only that one.
+    # RA-05: when it cannot, the uninstall stops with nothing removed, then completes.
     Remove-ServiceIfPresent
     $code = Invoke-Script 'installer-all-users-service.txt' (Join-Path $Source 'scripts\Test-InstallerServiceUninstall.ps1') @('-InstallerPath', $script:Installer, '-Version', $Version, '-ForeignServicePath', $script:Service)
     if ($code -ne 0) { throw "All-users uninstall with service failed (exit $code): $(Tail 'installer-all-users-service.txt' 15)" }
     & $ScExe query WinSightFirewall *> $null
     if ($LASTEXITCODE -ne 1060) { throw 'A firewall service is left after the all-users uninstall.' }
     $text = Get-Content (Join-Path $Evidence 'installer-all-users-service.txt') -Raw
-    if ($text -notmatch 'PASS own-service' -or $text -notmatch 'PASS foreign-service') { throw "Both cases did not pass: $(Tail 'installer-all-users-service.txt' 10)" }
-    Tail 'installer-all-users-service.txt' 4
+    if ($text -notmatch 'PASS own-service' -or $text -notmatch 'PASS blocked-service' -or $text -notmatch 'PASS foreign-service') { throw "Not every case passed: $(Tail 'installer-all-users-service.txt' 10)" }
+    Tail 'installer-all-users-service.txt' 5
 }
 
 Invoke-Gate '16-installer-upgrade' {
@@ -765,7 +766,33 @@ Invoke-Gate '17-cloud-files' {
     if ($unreadable.Count -gt 0 -or $fetching.Count -gt 0 -or $slow.Count -gt 0) {
         throw "WS-40: unreadable [$($unreadable -join ', ')], download requested by [$($fetching -join ', ')], over 30 s [$($slow -join ', ')]`n$($lines -join "`n")"
     }
-    $lines
+    # RA-02: the persistence scan (the scanner Guardian re-runs) over a Run value naming the cloud-only
+    # file: it must list the entry and finish without asking the provider for the data.
+    $scan = (Get-Content -LiteralPath $evidenceFile -Raw | ConvertFrom-Json).persistence
+    $scanLine = @(Get-Content (Join-Path $Evidence 'cloud-files.txt') | Where-Object { $_ -match '^persistence scan:' })
+    if ($null -eq $scan -or -not $scan.entryFound -or [int]$scan.fetchRequestsDuringScan -ne 0 -or "$($scan.exit)" -eq 'timeout') {
+        throw "RA-02: the persistence scan of a cloud-only image failed its bound: $($scanLine -join ' ')"
+    }
+    $lines + $scanLine
+}
+
+Invoke-Gate '18-interpreter-triage' {
+    # WS-74: the genuine powershell.exe handed an encoded command from a Run value is flagged. Before the
+    # fix the compiled-in name read "PowerShell.EXE.MUI" - the name of its language file, in no rule's
+    # table - and the entry passed as an ordinary Microsoft-signed one.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $name = 'WinSightInterpreterProbe'
+    $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    Set-ItemProperty -LiteralPath $runKey -Name $name -Value "`"$powershell`" -NoProfile -enc SQBFAFgA"
+    try {
+        $json = & $script:Cli persistence --flagged --json 2>$null | Out-String
+        $json | Set-Content (Join-Path $Evidence 'interpreter-triage.json')
+        $item = @(($json | ConvertFrom-Json).reports[0].items | Where-Object { $_.fields.name -eq $name })
+        if ($item.Count -ne 1) { throw 'WS-74: the encoded PowerShell Run value is not among the flagged entries.' }
+        if ("$($item[0].fields.commandLineConcern)" -ne 'EncodedCommand') { throw "WS-74: flagged for '$($item[0].fields.commandLineConcern)', not EncodedCommand." }
+        "flagged: $($item[0].title), concern $($item[0].fields.commandLineConcern), signature $($item[0].fields.signature)"
+    }
+    finally { Remove-ItemProperty -LiteralPath $runKey -Name $name -ErrorAction SilentlyContinue }
 }
 
 Invoke-Gate '20-etw-clean-before' {

@@ -255,6 +255,53 @@ try
             $c.attributesBefore, $c.reparseTag, $c.placeholderStateBefore, $c.placeholderStateAfter
     }
 
+    # RA-02: the persistence scan reads more than a signature - the compiled-in name of each image,
+    # which it used to read by path outside the automatic-read guard. A Run value pointing at the
+    # cloud-only file puts it on that path; the scan must finish without one download request. The
+    # value is this user's, in this disposable VM, and is removed below whatever happens.
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $runValue = 'WinSightCloudFilesProbe'
+    $cloudOnly = $cases['dehydrated-placeholder'].Path
+    Set-ItemProperty -LiteralPath $runKey -Name $runValue -Value "`"$cloudOnly`" --probe"
+    try
+    {
+        $fetchBefore = [CloudFilesProbe]::FetchRequests
+        $start = New-Object Diagnostics.ProcessStartInfo $cli
+        $start.Arguments = 'persistence --json'
+        $start.UseShellExecute = $false
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $process = [Diagnostics.Process]::Start($start)
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $null = $process.StandardError.ReadToEndAsync()
+        $finished = $process.WaitForExit(300000)
+        if (-not $finished) { $process.Kill() }
+        $watch.Stop()
+        $entry = $null
+        try {
+            $entry = @(($stdout.Result | ConvertFrom-Json).reports[0].items |
+                Where-Object { $_.fields.name -eq $runValue } | Select-Object -First 1)[0]
+        } catch { }
+        $evidence.persistence = [ordered]@{
+            exit = if ($finished) { $process.ExitCode } else { 'timeout' }
+            milliseconds = $watch.ElapsedMilliseconds
+            fetchRequestsDuringScan = [CloudFilesProbe]::FetchRequests - $fetchBefore
+            entryFound = $null -ne $entry
+            image = if ($entry) { $entry.fields.image } else { $null }
+            fileStatus = if ($entry) { $entry.fields.fileStatus } else { $null }
+            status = if ($entry) { $entry.fields.status } else { $null }
+            placeholderStateAfter = ('0x{0:X8}' -f ([CloudFilesProbe]::Describe($cloudOnly))[2])
+        }
+        $s = $evidence.persistence
+        "persistence scan: found={0} fileStatus={1} status={2} fetch={3} ms={4} exit={5}" -f `
+            $s.entryFound, $s.fileStatus, $s.status, $s.fetchRequestsDuringScan, $s.milliseconds, $s.exit
+    }
+    finally
+    {
+        Remove-ItemProperty -LiteralPath $runKey -Name $runValue -ErrorAction SilentlyContinue
+    }
+
     # The primitives underneath, each in its own default-mode process, against the cloud-only file:
     # what attributes an ordinary process is shown, and whether an open that forbids recall is honoured
     # by the Cloud Files filter when the data is read.
