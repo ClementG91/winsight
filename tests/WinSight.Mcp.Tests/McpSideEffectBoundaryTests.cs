@@ -36,6 +36,8 @@ public sealed class McpSideEffectBoundaryTests
             "HTTPS GET of a hash to VirusTotal; statically reachable, never run from MCP (allowNetworkLookups: false)",
         ["WinSight.Core.VirusTotalQuotaLimiter.Save"] =
             "WinSight's own VirusTotal quota file; same gate as the lookup it meters",
+        ["WinSight.Firewall.FirewallServiceClient.SendAsync"] =
+            "connects to the local firewall service's pipe and writes one request; MCP holds only the posture reader, whose requests are status and list commands, and the service refuses any mutation to an unelevated caller",
     };
 
     /// <summary>Framework APIs that change the machine, its configuration or the network, by name.</summary>
@@ -86,6 +88,28 @@ public sealed class McpSideEffectBoundaryTests
         ["System.Net.Sockets.Socket"] = ["Connect", "ConnectAsync", "SendTo", "SendToAsync"],
         ["System.Net.Sockets.TcpClient"] = ["Connect", "ConnectAsync"],
         ["System.Net.Sockets.UdpClient"] = ["Send", "SendAsync", "Connect"],
+        // A pipe is a channel to another process - the privileged firewall service among them - and a
+        // server end is a new listener.
+        ["System.IO.Pipes.NamedPipeClientStream"] = [".ctor", "Connect", "ConnectAsync"],
+        ["System.IO.Pipes.NamedPipeServerStream"] = [".ctor", "WaitForConnection", "WaitForConnectionAsync"],
+        ["System.IO.Pipes.AnonymousPipeServerStream"] = [".ctor"],
+        ["System.IO.Pipes.PipeStream"] = ["Write", "WriteAsync", "WriteByte"],
+        ["System.IO.RandomAccess"] = ["Write", "WriteAsync", "SetLength"],
+        ["System.IO.MemoryMappedFiles.MemoryMappedFile"] = ["CreateFromFile", "CreateNew", "CreateOrOpen", "OpenExisting"],
+        ["System.IO.Compression.ZipFile"] = ["CreateFromDirectory", "ExtractToDirectory", "Open"],
+        ["System.IO.Compression.ZipFileExtensions"] = ["ExtractToDirectory", "ExtractToFile", "CreateEntryFromFile"],
+        ["System.Xml.XmlWriter"] = ["Create"],
+        ["System.Xml.Linq.XDocument"] = ["Save", "SaveAsync"],
+        ["System.Xml.Linq.XElement"] = ["Save", "SaveAsync"],
+    };
+
+    /// <summary>
+    /// Types whose constructor opens a file by path when its first parameter is a string: the path
+    /// form can create or truncate, where the handle form WinSight's reads use cannot.
+    /// </summary>
+    private static readonly HashSet<string> PathOpeningConstructors = new(StringComparer.Ordinal)
+    {
+        "System.IO.FileStream", "System.IO.StreamWriter",
     };
 
     /// <summary>WinSight's own primitives that create, write, rename or delete files and ACLs.</summary>
@@ -157,6 +181,14 @@ public sealed class McpSideEffectBoundaryTests
             {
                 violations.Add($"framework write: {IlCallGraph.Describe(target)} <= {graph.PathTo(caller)}");
             }
+            else if (target is ConstructorInfo constructor
+                && constructor.DeclaringType?.FullName is { } opened
+                && PathOpeningConstructors.Contains(opened)
+                && constructor.GetParameters() is [{ ParameterType: var first }, ..]
+                && first == typeof(string))
+            {
+                violations.Add($"framework write: {opened} opened by path <= {graph.PathTo(caller)}");
+            }
         }
         foreach (var method in graph.Reached)
         {
@@ -217,6 +249,8 @@ public sealed class McpSideEffectBoundaryTests
         Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Net.Http.HttpMessageInvoker.Send", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
             && violation.Contains("VirusTotalQuotaLimiter.Save", StringComparison.Ordinal));
+        Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.IO.Pipes.NamedPipeClientStream", StringComparison.Ordinal)
+            && violation.Contains("FirewallServiceClient", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -286,6 +320,9 @@ public sealed class McpSideEffectBoundaryTests
     [InlineData(nameof(Canaries.StartsAProcess), "framework write: System.Diagnostics.Process.Start")]
     [InlineData(nameof(Canaries.CallsAnUnreviewedNativeFunction), "unreviewed native: kernel32.dll!DeleteFileW")]
     [InlineData(nameof(Canaries.ReachesAWriteGatewayThroughANewPath), "write gateway: ")]
+    [InlineData(nameof(Canaries.OpensAPipeServer), "framework write: System.IO.Pipes.NamedPipeServerStream..ctor")]
+    [InlineData(nameof(Canaries.OpensAPipeToAnotherProcess), "framework write: System.IO.Pipes.NamedPipeClientStream..ctor")]
+    [InlineData(nameof(Canaries.WritesThroughAFileStreamOpenedByPath), "framework write: System.IO.FileStream opened by path")]
     public void EachDetectorCatchesItsCanary(string canary, string expected)
     {
         var root = typeof(Canaries).GetMethod(canary, BindingFlags.Public | BindingFlags.Static)!;
@@ -327,6 +364,16 @@ public sealed class McpSideEffectBoundaryTests
         public static bool ReachesAWriteGatewayThroughANewPath(string path) => Relay(path);
 
         private static bool Relay(string path) => AutomaticFileAccess.TryDeleteFile(path);
+
+        public static void OpensAPipeServer() => new System.IO.Pipes.NamedPipeServerStream("winsight-canary").Dispose();
+
+        public static void OpensAPipeToAnotherProcess() => new System.IO.Pipes.NamedPipeClientStream("winsight-canary").Dispose();
+
+        public static void WritesThroughAFileStreamOpenedByPath(string path)
+        {
+            using var stream = new FileStream(path, FileMode.Create, FileAccess.Write);
+            stream.WriteByte(1);
+        }
 
         [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true, ExactSpelling = true)]
         [return: MarshalAs(UnmanagedType.Bool)]

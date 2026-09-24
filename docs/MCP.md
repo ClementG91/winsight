@@ -18,11 +18,14 @@ own assemblies from every MCP method and fails if a known response mutator, or a
 firewall service, is reachable. `McpSideEffectBoundaryTests` covers what a list of known mutators
 cannot - one added later, or a write made straight through the framework or a P/Invoke: it fails if
 MCP reaches a mutating framework API, one of WinSight's own file-writing primitives, or a native
-function nobody has reviewed, and a canary proves each of those detectors fires. Three reviewed
-exceptions remain. The `process` tool may start `netstat.exe`, which only reads, when the native
-connection tables fail, and kills only that child on timeout. The VirusTotal lookup and its quota
-file are present in the code MCP reaches but switched off at runtime by `allowNetworkLookups: false`,
-which the test pins at every MCP call site. These are targeted guards, not a proof: reflection with
+function nobody has reviewed; the framework writes it knows include file and directory changes,
+files and pipes opened by path, registry, services, processes, event logs, HTTP and sockets, and a
+canary proves each of those detectors fires. Four reviewed exceptions remain. The `process` tool may
+start `netstat.exe`, which only reads, when the native connection tables fail, and kills only that
+child on timeout. `winsight_outbound_firewall` writes its status and list requests to the firewall
+service's pipe, described below. The VirusTotal lookup and its quota file are present in the code
+MCP reaches but switched off at runtime by `allowNetworkLookups: false`, which the test pins at
+every MCP call site. These are targeted guards, not a proof: reflection with
 a computed name, native callbacks and the framework's own internals are outside what the walk sees.
 All exposed tools are declared read-only, idempotent, non-destructive and
 closed-world, and the test pins that list of six. MCP never exposes process termination, file deletion, quarantine,
