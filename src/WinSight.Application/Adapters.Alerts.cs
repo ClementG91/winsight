@@ -45,7 +45,7 @@ public static partial class Adapters
         foreach (var alert in alerts)
         {
             b.Add(
-                Severity.Notable,
+                SeverityOf(alert),
                 $"{alert.Source}/{alert.Kind}",
                 $"{alert.TimeUtc.ToLocalTime():yyyy-MM-dd HH:mm:ss} — {alert.Detail}",
                 new Dictionary<string, string?>
@@ -56,10 +56,23 @@ public static partial class Adapters
                     ["detail"] = alert.Detail,
                 });
         }
+        var uncertain = alerts.Count(alert => SeverityOf(alert) == Severity.Unverified);
         return b.Build(journal.Unreadable || journal.MalformedEntries > 0
             ? "alert journal incomplete; some detection history may be unavailable"
             : alerts.Count == 0
             ? "no real-time detections recorded yet"
-            : $"{alerts.Count} recorded detection(s), newest first");
+            : uncertain == 0
+            ? $"{alerts.Count} recorded detection(s), newest first"
+            : $"{alerts.Count - uncertain} recorded detection(s) and {uncertain} coverage notice(s), newest first");
     }
+
+    /// <summary>
+    /// A coverage-gain notice is <see cref="Severity.Unverified"/>, not <see cref="Severity.Notable"/>:
+    /// it records entries whose arrival time WinSight cannot establish, not a detection (RA-03). It
+    /// therefore stays visible without driving the exit code or reading as an attack.
+    /// </summary>
+    private static Severity SeverityOf(SecurityAlert alert) =>
+        alert.Source == "Guardian" && alert.Kind == GuardianHost.CoverageGainKind
+            ? Severity.Unverified
+            : Severity.Notable;
 }

@@ -16,6 +16,11 @@ public sealed class PersistenceMonitorCore
     // restored from a baseline saved without coverage - which keeps the pre-coverage rule.
     private PersistenceCoverageMap? _coverage;
     private int _absorbed;
+    // Absorbed since the last TakeCoverageGain (RA-03): what the widened view found, kept until the
+    // monitor hands it on, because absorbing without a word hid entries planted while unreadable.
+    private readonly List<AutostartEntry> _uncertain = [];
+    private int _uncertainUnlisted;
+    private DateTimeOffset _uncertainObservedUtc;
 
     public PersistenceMonitorCore(PersistenceChangeLog? log = null)
     {
@@ -53,6 +58,25 @@ public sealed class PersistenceMonitorCore
     public int AbsorbedOnCoverageGain
     {
         get { lock (_gate) { return _absorbed; } }
+    }
+
+    /// <summary>
+    /// The entries absorbed since the last call, as one batch to be reported as uncertain rather than
+    /// as arrivals, or null when none were. Each absorbed entry is returned once.
+    /// </summary>
+    public PersistenceCoverageGain? TakeCoverageGain()
+    {
+        lock (_gate)
+        {
+            if (_uncertain.Count == 0 && _uncertainUnlisted == 0)
+            {
+                return null;
+            }
+            var gain = new PersistenceCoverageGain(_uncertainObservedUtc, _uncertain.ToArray(), _uncertainUnlisted);
+            _uncertain.Clear();
+            _uncertainUnlisted = 0;
+            return gain;
+        }
     }
 
     /// <summary>
@@ -239,6 +263,15 @@ public sealed class PersistenceMonitorCore
             if (newlyVisible?.Invoke(identity) == true)
             {
                 _absorbed++;
+                if (_uncertain.Count < PersistenceCoverageGain.MaxListed)
+                {
+                    _uncertain.Add(entry);
+                }
+                else
+                {
+                    _uncertainUnlisted++;
+                }
+                _uncertainObservedUtc = nowUtc;
                 continue;
             }
             // The log is a bounded display list that nothing acknowledges. Reporting only what it had

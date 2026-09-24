@@ -2,66 +2,6 @@ using WinSight.Core;
 
 namespace WinSight.Persistence;
 
-/// <summary>Raised when a genuinely new persistence entry has been surfaced.</summary>
-public sealed class PersistenceDetectedEventArgs(PersistenceEvent detected) : EventArgs
-{
-    public PersistenceEvent Detected { get; } = detected;
-}
-
-/// <summary>The monitor operation that failed.</summary>
-public enum PersistenceMonitorOperation
-{
-    Scan,
-    Notification,
-    BaselineSave,
-    SourceShutdown,
-
-    /// <summary>The change source could not be armed, so live monitoring never started.</summary>
-    WatcherArming,
-}
-
-/// <summary>One contained failure, kept whole so it can be diagnosed.</summary>
-public sealed record PersistenceMonitorFault(
-    PersistenceMonitorOperation Operation,
-    Exception Exception,
-    DateTimeOffset AtUtc);
-
-/// <summary>
-/// What the monitor could not do. Nothing here is silent: a failed scan, save or notification is
-/// counted, the last one is kept whole, and undelivered arrivals stay visible until delivered.
-/// </summary>
-public sealed record PersistenceMonitorDiagnostics(
-    int PendingNotifications,
-    int ScanFailures,
-    int NotificationFailures,
-    int SaveFailures,
-    bool RetryScheduled,
-    bool AutomaticRetriesExhausted,
-    bool ShutdownDeferred,
-    PersistenceMonitorFault? LastFault)
-{
-    /// <summary>True when an arrival is undelivered or the last scan or save has not recovered.</summary>
-    public bool IsDegraded { get; init; }
-
-    /// <summary>
-    /// Arrivals reported but not kept in the bounded display list because it was full. They were
-    /// notified; only the in-app list is incomplete.
-    /// </summary>
-    public int UnlistedArrivals { get; init; }
-
-    /// <summary>OS watcher loss/error signals observed since this monitor started.</summary>
-    public int SourceLostObservations { get; init; }
-
-    /// <summary>Change-source notifications a subscriber failed to handle.</summary>
-    public int SourceNotificationFailures { get; init; }
-
-    /// <summary>Whether an operator-triggered retry can still make progress.</summary>
-    public bool RetryableFailurePending { get; init; }
-
-    /// <summary>Provider-neutral source lifecycle, loss and recovery counters when available.</summary>
-    public SensorHealthSnapshot? SourceHealth { get; init; }
-}
-
 /// <summary>
 /// Wires a real-time <see cref="IPersistenceChangeSource"/> to the pure
 /// <see cref="PersistenceMonitorCore"/>: on a change signal it debounces a burst, re-scans, and
@@ -83,7 +23,7 @@ public sealed record PersistenceMonitorDiagnostics(
 /// does not leave in time the remaining shutdown work (source disposal, final save) is completed by
 /// that scan's thread as it exits, instead of blocking the caller — typically the UI thread.</para>
 /// </remarks>
-public sealed class PersistenceMonitor : IDisposable
+public sealed partial class PersistenceMonitor : IDisposable
 {
     /// <summary>Delivery attempts per arrival before automatic retries stop for this session.</summary>
     internal const int MaxDeliveryAttempts = 4;
@@ -107,6 +47,9 @@ public sealed class PersistenceMonitor : IDisposable
     private readonly CancellationTokenSource _lifetime = new();
     // Arrivals reconciled into the in-memory baseline whose delivery has not completed, in order.
     private readonly List<PendingNotification> _undelivered = [];
+    // Coverage-gain notices not yet accepted by every subscriber; their entries stay out of the saved
+    // baseline meanwhile, exactly like undelivered arrivals.
+    private readonly List<PendingCoverageGain> _undeliveredGains = [];
     private readonly HashSet<PersistenceWatchTarget> _pendingTargets = [];
     private Timer? _debounceTimer;
     private Timer? _retryTimer;
@@ -129,6 +72,18 @@ public sealed class PersistenceMonitor : IDisposable
     /// that throws does not stop the monitor: the arrival stays pending for that handler and is retried.
     /// </remarks>
     public event EventHandler<PersistenceDetectedEventArgs>? Detected;
+
+    /// <summary>
+    /// Raised when a scan baselined entries at locations it could read in full for the first time.
+    /// Not an alert: when those entries appeared is unknown, and saying so is the point (RA-03).
+    /// </summary>
+    /// <remarks>
+    /// Delivered like <see cref="Detected"/>: on a background thread, retried when a handler throws,
+    /// and the entries are left out of the saved baseline until every handler has accepted the
+    /// notice. A notice still undelivered at shutdown therefore becomes arrivals on the next launch
+    /// (its locations are covered by then): louder than needed, never silent.
+    /// </remarks>
+    public event EventHandler<PersistenceCoverageGainEventArgs>? CoverageGained;
 
     /// <param name="enumerators">The full surface set; the seed scans all of them, a change scans the affected subset.</param>
     /// <param name="source">The real-time change source (registry, filesystem, composite).</param>
@@ -197,7 +152,8 @@ public sealed class PersistenceMonitor : IDisposable
             var sourceNotificationFailures = sourceDiagnostics?.NotificationFailures ?? 0;
             lock (_gate)
             {
-                var retryable = _undelivered.Count > 0 || _scanRetryNeeded || _saveRetryNeeded;
+                var retryable = _undelivered.Count > 0 || _undeliveredGains.Count > 0
+                    || _scanRetryNeeded || _saveRetryNeeded;
                 return new PersistenceMonitorDiagnostics(
                     _undelivered.Count,
                     _scanFailures,
@@ -217,6 +173,8 @@ public sealed class PersistenceMonitor : IDisposable
                     SourceNotificationFailures = sourceNotificationFailures,
                     RetryableFailurePending = retryable,
                     SourceHealth = sourceHealth,
+                    CoverageGainEntries = _core.AbsorbedOnCoverageGain,
+                    PendingCoverageGains = _undeliveredGains.Count,
                 };
             }
         }
@@ -272,6 +230,7 @@ public sealed class PersistenceMonitor : IDisposable
                     {
                         EnqueueLocked(_core.ReconcileFromPersistedBaseline(
                             persisted.Identities, persisted.Coverage, scan, _clock()));
+                        EnqueueGainLocked(_core.TakeCoverageGain());
                     }
                     else
                     {
@@ -323,6 +282,10 @@ public sealed class PersistenceMonitor : IDisposable
                 return;
             }
             foreach (var pending in _undelivered)
+            {
+                pending.Attempts = 0;
+            }
+            foreach (var pending in _undeliveredGains)
             {
                 pending.Attempts = 0;
             }
@@ -445,6 +408,7 @@ public sealed class PersistenceMonitor : IDisposable
                     return;
                 }
                 EnqueueLocked(_core.Reconcile(scan, _clock()));
+                EnqueueGainLocked(_core.TakeCoverageGain());
                 _scanRetryNeeded = false;
             }
         }
@@ -482,130 +446,6 @@ public sealed class PersistenceMonitor : IDisposable
         TrySaveBaseline();
     }
 
-    private void EnqueueLocked(IReadOnlyList<PersistenceEvent> detected)
-    {
-        foreach (var ev in detected)
-        {
-            _undelivered.RemoveAll(pending => pending.Event.Identity == ev.Identity);
-            _undelivered.Add(new PendingNotification(ev));
-        }
-    }
-
-    /// <summary>
-    /// Persists the baseline minus arrivals whose delivery has not completed. Delivery is
-    /// at-least-once: a crash after delivery can repeat an alert, but a shutdown, subscriber failure
-    /// or crash before delivery never turns an arrival into a silently known entry.
-    /// </summary>
-    private void TrySaveBaseline()
-    {
-        if (_baselineStore is null)
-        {
-            return;
-        }
-        lock (_saveGate)
-        {
-            IReadOnlyCollection<PersistenceIdentity> snapshot;
-            PersistenceCoverageMap? coverage;
-            lock (_gate)
-            {
-                var undelivered = _undelivered.Select(pending => pending.Event.Identity).ToHashSet();
-                snapshot = undelivered.Count == 0
-                    ? _core.CurrentBaseline
-                    : _core.CurrentBaseline.Where(id => !undelivered.Contains(id)).ToArray();
-                coverage = _core.CurrentCoverage;
-            }
-            try
-            {
-                _baselineStore.Save(snapshot, coverage);
-                lock (_gate)
-                {
-                    _saveRetryNeeded = false;
-                }
-            }
-            catch (Exception ex) when (!IsCatastrophic(ex))
-            {
-                lock (_gate)
-                {
-                    _saveRetryNeeded = true;
-                }
-                RecordFault(PersistenceMonitorOperation.BaselineSave, ex);
-            }
-        }
-    }
-
-    private void PublishPending()
-    {
-        // UI handlers may synchronously dispatch. Never hold a lock Dispose waits for here; this gate
-        // only keeps two publishers from delivering the same arrival concurrently.
-        var delivered = false;
-        lock (_publishGate)
-        {
-            List<PendingNotification> batch;
-            lock (_gate)
-            {
-                if (_disposed)
-                {
-                    return;
-                }
-                batch = [.. _undelivered.Where(pending => pending.Attempts < MaxDeliveryAttempts)];
-            }
-            var handlers = Detected?.GetInvocationList() ?? [];
-            foreach (var pending in batch)
-            {
-                lock (_gate)
-                {
-                    if (_disposed)
-                    {
-                        return;
-                    }
-                    if (!_undelivered.Contains(pending))
-                    {
-                        continue;
-                    }
-                    pending.Attempts++;
-                }
-                var complete = true;
-                foreach (var handler in handlers)
-                {
-                    if (pending.DeliveredTo.Contains(handler))
-                    {
-                        continue;
-                    }
-                    try
-                    {
-                        ((EventHandler<PersistenceDetectedEventArgs>)handler)(
-                            this, new PersistenceDetectedEventArgs(pending.Event));
-                        pending.DeliveredTo.Add(handler);
-                    }
-                    catch (Exception ex) when (!IsCatastrophic(ex))
-                    {
-                        complete = false;
-                        RecordFault(PersistenceMonitorOperation.Notification, ex);
-                    }
-                }
-                if (complete)
-                {
-                    lock (_gate)
-                    {
-                        _undelivered.Remove(pending);
-                    }
-                    delivered = true;
-                }
-            }
-        }
-        bool disposed;
-        lock (_gate)
-        {
-            disposed = _disposed;
-        }
-        if (delivered && !disposed)
-        {
-            // Delivered arrivals may now be acknowledged durably. Saves are serialized and each
-            // snapshots the latest state, so this cannot overwrite a newer baseline with an older one.
-            TrySaveBaseline();
-        }
-    }
-
     private void RecordFault(PersistenceMonitorOperation operation, Exception exception)
     {
         lock (_gate)
@@ -635,12 +475,13 @@ public sealed class PersistenceMonitor : IDisposable
                 return;
             }
             var retryable = _undelivered.Any(pending => pending.Attempts < MaxDeliveryAttempts)
+                || _undeliveredGains.Any(pending => pending.Attempts < MaxDeliveryAttempts)
                 || _scanRetryNeeded
                 || _saveRetryNeeded;
             if (!retryable)
             {
-                // Recovered, or only arrivals whose delivery budget is spent remain.
-                _retriesExhausted = _undelivered.Count > 0;
+                // Recovered, or only notices whose delivery budget is spent remain.
+                _retriesExhausted = _undelivered.Count > 0 || _undeliveredGains.Count > 0;
                 _retryAttempt = 0;
                 return;
             }
@@ -744,12 +585,5 @@ public sealed class PersistenceMonitor : IDisposable
         {
             TrySaveBaseline();
         }
-    }
-
-    private sealed class PendingNotification(PersistenceEvent ev)
-    {
-        public PersistenceEvent Event { get; } = ev;
-        public int Attempts { get; set; }
-        public HashSet<Delegate> DeliveredTo { get; } = [];
     }
 }

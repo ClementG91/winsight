@@ -96,7 +96,49 @@ public static class GuardianHost
         {
             parts.Add($"{diagnostics.SourceNotificationFailures} source notification failure(s)");
         }
+        if (diagnostics.CoverageGainEntries > 0)
+        {
+            parts.Add($"{diagnostics.CoverageGainEntries} entr(ies) first readable this session, "
+                + "baselined without an alert, arrival time unknown (see winsight alerts)");
+        }
         return parts.Count == 0 ? null : "Guardian: " + string.Join("; ", parts);
+    }
+
+    /// <summary>The journal kind of a coverage-gain notice, told apart from every arrival kind.</summary>
+    public const string CoverageGainKind = "CoverageGain";
+
+    /// <summary>Entries named in one coverage-gain journal line; the rest are counted.</summary>
+    internal const int CoverageGainListed = 20;
+
+    /// <summary>
+    /// The journal line for entries Guardian baselined because it could read their location for the
+    /// first time (RA-03).
+    /// </summary>
+    /// <remarks>
+    /// Worded as what it is. These are not arrivals, and nothing says they are hostile: most are items
+    /// that were always there and that an unelevated launch was not allowed to read. But one written
+    /// while its location was unreadable looks exactly the same, so the line says that WinSight
+    /// cannot date them and names them, for the operator to look at once. It is journalled, and
+    /// therefore shown by <c>winsight alerts</c> and to MCP clients, with no balloon.
+    ///
+    /// Like an arrival, it names the executable and never the raw command line, which may carry a
+    /// payload and is withheld from MCP clients elsewhere.
+    /// </remarks>
+    public static SecurityAlert CoverageGainAlert(PersistenceCoverageGain gain)
+    {
+        ArgumentNullException.ThrowIfNull(gain);
+        var listed = gain.Entries.Take(CoverageGainListed)
+            .Select(entry => $"{entry.Vector} {entry.Name} — {entry.ImagePath ?? entry.ExpectedImagePath ?? Adapters.CommandHead(entry.Command)}");
+        var more = gain.Count - Math.Min(gain.Entries.Count, CoverageGainListed);
+        var sources = gain.Sources.Count == 0 ? "unknown surfaces" : string.Join(", ", gain.Sources);
+        // Count and explanation first: the journal truncates a long field from the end.
+        var detail = $"{gain.Count} existing startup entr(ies) became readable for the first time ({sources}) "
+            + "and were added to the baseline without an alert: WinSight cannot tell whether they were "
+            + "there all along or appeared while it could not read that location. Review them once "
+            + "(winsight persistence): "
+            + string.Join("; ", listed)
+            + (more > 0 ? $"; and {more} more" : string.Empty);
+        return new SecurityAlert(gain.ObservedUtc.ToLocalTime(), "Guardian", CoverageGainKind, detail);
     }
 
     /// <summary>Whether the operator can usefully ask Guardian to retry now.</summary>

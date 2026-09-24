@@ -296,7 +296,18 @@ The vectors Block covers:
    v0.13 dashboard still reads the file after a downgrade; a v0.13 baseline has no coverage and
    keeps the previous rule for its first read. Accepted limit: whoever can make a source
    unreadable while the baseline is taken, and readable again later, gets that source's content
-   baselined; that requires changing the ACL of an autostart location, which is already game over.
+   baselined without an alert; that requires changing the ACL of an autostart location, which is
+   already game over.
+
+   **Uncertain, not silent (RA-03).** An entry planted while its location was unreadable looks
+   exactly like one that was always there, so what a widened view baselines is handed on as one
+   `PersistenceCoverageGain` (count, surfaces, entries) through `PersistenceMonitor.CoverageGained`.
+   The dashboard journals it as `Guardian/CoverageGain`, with no balloon; `winsight alerts` and the
+   MCP `alerts` tool show it as *Unverified*, worded as entries WinSight cannot date, never as a
+   detection; the protection tooltip counts it. It is delivered at least once, like an arrival:
+   until every subscriber has accepted it, its entries stay out of the saved baseline, so a notice
+   lost to a crash or an unwritable journal becomes arrivals on the next launch - louder than
+   needed, never silent.
 6. **Scoped re-scan.** ✅ Done. A change re-scans only the surface that fired - the change source
    carries the fired `PersistenceWatchTarget`, and the monitor maps it to the owning enumerator(s)
    via `WatchTargets` and scans just those (full scan when the origin is unknown). Real-machine

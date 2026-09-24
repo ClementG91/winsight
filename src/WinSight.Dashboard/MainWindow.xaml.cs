@@ -312,6 +312,7 @@ public partial class MainWindow : Window, IDisposable
         _protectionHealthTimer.Tick -= RefreshProtectionHealthOnTick;
         StopRansomwareProtection(); // removes any planted decoys before we go
         _guardian.Detected -= OnGuardianDetected;
+        _guardian.CoverageGained -= OnGuardianCoverageGained;
         _guardian.Dispose();
         _avWatch.Detected -= OnCameraMicDetected;
         _avWatch.Dispose();

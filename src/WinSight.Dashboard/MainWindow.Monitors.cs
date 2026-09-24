@@ -25,6 +25,7 @@ public partial class MainWindow
         StartAttribution();
         SweepOrphanedDecoys();
         _guardian.Detected += OnGuardianDetected;
+        _guardian.CoverageGained += OnGuardianCoverageGained;
         Task.Run(() =>
         {
             try
@@ -422,6 +423,25 @@ public partial class MainWindow
             // unacknowledged: Guardian retries it and, if the journal stays unwritable, reports it
             // again on the next launch.
             throw new IOException("The alert journal could not be written; the arrival stays unacknowledged.",
+                AlertJournal.LastWriteFailure);
+        }
+    }
+
+    /// <summary>
+    /// Records entries Guardian baselined because it could read their location for the first time.
+    /// </summary>
+    /// <remarks>
+    /// Journalled, never a balloon (RA-03): these are not arrivals, and interrupting the operator for
+    /// the sixty scheduled tasks Windows ships is the alert fatigue WS-70 removed. They are still not
+    /// clean - one planted while its location was unreadable looks the same - so the record names
+    /// them. A failed write fails the notice: Guardian retries it and keeps the entries out of the
+    /// saved baseline, so the next launch reports them rather than knowing them silently.
+    /// </remarks>
+    private void OnGuardianCoverageGained(object? sender, PersistenceCoverageGainEventArgs e)
+    {
+        if (!AlertJournal.TryAppend(GuardianHost.CoverageGainAlert(e.Gain)))
+        {
+            throw new IOException("The alert journal could not be written; the coverage notice stays pending.",
                 AlertJournal.LastWriteFailure);
         }
     }
