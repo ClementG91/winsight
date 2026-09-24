@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Date | 2026-09-21, mis à jour le 2026-09-23 |
+| Date | 2026-09-21, mis à jour les 23 et 24 septembre |
 | Base | `main` @ `4a361a6` (v0.13.0) |
 | Périmètre | dépôt complet : code, tests, docs, CI/CD, scripts de build/release, installeur |
-| Auteurs de l'audit | Claude Code (sessions du 18-19, du 21 et du 22-23 septembre) et Codex (20-21 septembre), travaillant sur le même arbre et se relisant mutuellement |
+| Auteurs de l'audit | Claude Code (sessions du 18-19, du 21, du 22-23 et du 24 septembre) et Codex (20-21 septembre, contre-audit indépendant le 24, §4.3), travaillant sur le même arbre et se relisant mutuellement |
 | Environnement de validation | Windows 11 Pro 10.0.26200 x64, compte administrateur à jeton scindé (UAC), processus non élevé, SDK .NET 10.0.303 |
 | État livré | branche d'audit, commits thématiques, non poussée |
 
@@ -23,8 +23,15 @@ IPC locale, absence de résidu.
 autonomes) : toutes les portes du 22, plus l'installation « tous les utilisateurs » avec retrait du
 service à la désinstallation (WS-63), la mise à niveau depuis la v0.13.0 publiée, les substituts
 Cloud Files de OneDrive (WS-40), l'attribution des écritures dans le dossier Démarrage (WS-73, WS-60)
-et l'IPC par ouverture de session réseau depuis une seconde VM (porte 36, 10/10). La qualification x64
-est complète : les 31 portes passent sur le candidat `259056b`.
+et l'IPC par ouverture de session réseau depuis une seconde VM (porte 36, 10/10). Les 31 portes x64
+passent sur le candidat `259056b`.
+
+**Réserve du 24 septembre** (contre-audit Codex, §4.3). Le harnais hôte de ces passes gardait ses
+scripts, le candidat, les disques des VM et les preuves dans des dossiers que tout utilisateur
+authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
+fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
+`Verify-QualificationProvenance.ps1`) mais n'a pas encore tourné, et le code produit a changé depuis
+`259056b` (RA-02 à RA-05, WS-74) : **la tête de la branche n'est pas qualifiée**.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -41,9 +48,9 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **67 défauts** : 62 corrigés et testés (dont deux dans le
+- **Problèmes trouvés.** L'audit a traité **68 défauts** : 63 corrigés et testés (dont deux dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
-  1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 10 de sévérité *High* sont
+  1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
   faux positif et faux négatif du scanner hijack, Guardian aveugle aux clés Run absentes ou
   recréées, fuites de lignes de commande vers le modèle via MCP, courses TOCTOU dans les actions de
@@ -51,7 +58,12 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   par simple nom de fichier), actions destructrices réussies sans journal, accès fichiers suivant les
   points d'analyse (reparse points) vers d'autres emplacements, « Bloquer » devenu inutilisable
   sur Windows 11 faute de transactions registre (corrigé par un repli vérifié), et l'attribution d'une
-  persistance à l'Explorateur ou à Defender qui l'avaient seulement ouverte (WS-73, trouvé en VM).
+  persistance à l'Explorateur ou à Defender qui l'avaient seulement ouverte (WS-73, trouvé en VM), et
+  la règle d'abus d'interpréteur aveugle aux interpréteurs Windows authentiques depuis la v0.12.0
+  (WS-74, trouvé en corrigeant RA-02).
+- **Contre-audit.** Codex a relu la branche le 24 septembre : sept constats (RA-01 à RA-07), aucun
+  n'étant une faille du produit démontrée ; tous repris et corrigés le jour même (§4.3). Restent à
+  exécuter par l'opérateur le harnais refait et la requalification de la tête (RA-01, RA-02, RA-05).
 - **Performance.** Scan de persistance 2,7× plus rapide (25,2 s → 9,3 s, A/B même machine) ;
   indexation WinSxS passée de ~46 000 handles de répertoire ouverts simultanément à quelques-uns
   (pic du processus 45 910 → 553) ; surveillance caméra/micro au repos ramenée de 1,7 % à 0,09 %
@@ -233,7 +245,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-31 | Medium | Tableau de bord | Plusieurs instances interactives possibles | moniteurs, alertes et journaux en double | `App.xaml.cs` | instance unique par utilisateur et session ; la seconde réactive la première | Corrigé |
 | WS-32 | Medium | Hijack (perf) | Indexation WinSxS récursive : ~46 000 handles de répertoire ouverts simultanément | pression noyau et filtres antivirus | `SideBySideStore.cs` | parcours en profondeur, un handle à la fois (pic 45 910 → 553) | Corrigé |
 | WS-33 | Low | Réponse | Chemin transactionnel sans garde de ruche (ouvrait HKCU avec la sous-clé d'une cible HKLM) | action sur la mauvaise clé si une cible machine arrivait jusque-là | `RegistryAndFilePersistenceMutator.cs` | garde HKCU explicite | Corrigé |
-| WS-40 | Medium | Accès fichiers | Crainte initiale : toute lecture refuse un fichier portant `ReparsePoint`, donc les fichiers OneDrive. Mesuré en VM avec une racine Cloud Files jetable (porte 17) : les substituts hydratés se lisent (l'attribut est masqué aux applications), mais lire un fichier « en ligne uniquement » demandait deux téléchargements au fournisseur et bloquait 120 s, même par une réouverture interdisant le rappel | sous OneDrive, un scan aurait téléchargé les fichiers de l'utilisateur, et chaque lecture pouvait bloquer une minute | `AutomaticFileAccess.cs` | réouverture relative au handle avec `FILE_OPEN_NO_RECALL` (`ReOpenFile` refuse ce drapeau), et refus de toute lecture d'un fichier marqué hors ligne, rappel à l'ouverture ou rappel à l'accès : métadonnées visibles, données jamais rapatriées ; porte 17 : aucun téléchargement, réponse immédiate | Corrigé, qualifié en VM (porte 17) |
+| WS-40 | Medium | Accès fichiers | Crainte initiale : toute lecture refuse un fichier portant `ReparsePoint`, donc les fichiers OneDrive. Mesuré en VM avec une racine Cloud Files jetable (porte 17) : les substituts hydratés se lisent (l'attribut est masqué aux applications), mais lire un fichier « en ligne uniquement » demandait deux téléchargements au fournisseur et bloquait 120 s, même par une réouverture interdisant le rappel | sous OneDrive, un scan aurait téléchargé les fichiers de l'utilisateur, et chaque lecture pouvait bloquer une minute | `AutomaticFileAccess.cs` | réouverture relative au handle avec `FILE_OPEN_NO_RECALL` (`ReOpenFile` refuse ce drapeau), et refus de toute lecture d'un fichier marqué hors ligne, rappel à l'ouverture ou rappel à l'accès : métadonnées visibles, données jamais rapatriées ; porte 17 : aucun téléchargement, réponse immédiate ; résidu RA-02 (nom d'origine lu par chemin, hors de cette garde) corrigé le 24 septembre (§4.3) | Corrigé, qualifié en VM (porte 17) ; RA-02 à requalifier |
 | WS-41 | Medium | Pilotes | `ImagePath` non résolu ou fichier introuvable → repli sur `System32\drivers\<nom>.sys` même quand `ImagePath` était défini ; `\??\GLOBALROOT` et noms de volume lus comme chemins relatifs | un pilote enregistré ailleurs vérifié comme le fichier Microsoft du même nom, donc « fourni par Windows » et masqué | `KernelDriverScanner.cs`, `InputFilterScanner.cs` | `DriverImagePath` partagé : défaut seulement sans `ImagePath` ; nom d'objet NT ou partage = `Unresolvable`, signalé avec la valeur enregistrée ; verdicts inchangés pour les 456 pilotes de ce poste | Corrigé |
 | WS-42 | Medium | Signatures | L'ancre « racine installée par l'utilisateur » n'était prise en compte que par la persistance et le verbe signature | processus, module ou propriétaire de connexion signé via une racine importée sans privilège présenté comme sain ; un certificat « Microsoft Windows » forgé faisait passer un pilote de System32 pour fourni par Windows | `ProcessInfo.cs`, `LoadedModule.cs`, `Connection.cs`, `WindowsImage.cs` | signalé partout (champ `userInstalledTrust`, texte explicite) ; jamais « fourni par Windows » ; pilotes et filtres `Untrusted` (l'intégrité du code noyau ignore le magasin de l'utilisateur) | Corrigé |
 | WS-43 | Medium | Filtres d'entrée | `kbdclass` / `mouclass` jugés attendus sur leur seul nom | `ImagePath` repointé vers un autre pilote : la ligne reste « pilote de classe Windows » et sort de la vue signalée | `InputFilterTriage.cs` | attendu = nom **et** image `<nom>.sys` signée par l'identité exacte Windows dans System32 (règle partagée `WindowsImage`) ; sinon `Impersonating` ; vérification impossible = `Unverified` | Corrigé |
@@ -245,7 +257,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-48 | Medium | Extensions | `content_scripts` ignoré ; canaux Beta/Dev/Canary, Chromium et Opera GX absents ; extensions chargées depuis un dossier (mode développeur, `--load-extension`, entrée forgée de `Secure Preferences`) jamais lues | script injecté sur tous les sites jugé sans accès ; navigateurs non lus ; extension hors boutique invisible, alors que c'est le mode de persistance des chargeurs forcés | `ExtensionScanner.cs` | motifs `matches` comptés comme accès hôte ; 10 racines ajoutées ; `extensions.settings` lu dans `Secure Preferences` et `Preferences` (emplacements 4 et 8), manifeste lu dans le dossier, extension toujours signalée ; dossier disparu ou sur un partage nommé sans être ouvert ; mesuré ici : 24 → 26 extensions (deux dossiers de build de l'opérateur) | Corrigé |
 | WS-49 | Medium | Tableau de bord | La raison d'un signalement (racine installée par l'utilisateur, code tiers dans un processus privilégié) disparaissait ; lignes processus/modules sans état de signature ; tout le cache DNS « résolu par le réseau » | [!] à côté de « Signature valide », ou d'un chemin nu | `DashboardFindingPresenter.cs` | champs `privilegedHost`/`userInstalledTrust`, raison localisée ajoutée, état de signature affiché ; DNS « dans le cache du résolveur » | Corrigé |
 | WS-50 | Medium | Tableau de bord | Une exception imprévue dans un gestionnaire d'interface terminait l'application, donc toute la protection temps réel | Guardian, rançongiciel et caméra arrêtés sans avertissement | `CrashReporter.cs`, `DispatcherRecoveryPolicy.cs` | une fois démarré : exception absorbée, rapport écrit, avis dans la zone de notification ; jamais au démarrage, ni pour une exception qui compromet le processus (mémoire, pile, état corrompu, déploiement cassé), ni au-delà de 3 par minute | Corrigé |
-| WS-51 | Medium | Hijack | Index WinSxS non terminé dans son budget de 8 s : le parcours de tout WinSxS prenait 9,75 s à chaud (124 584 répertoires), davantage à froid | imports « fantômes » dégradés en « non déterminé », scan hijack déclaré incomplet | `SideBySideStore.cs` | parcours limité à ce que le chargeur utilise : dossiers techniques (`Temp`, `InstallTemp`, `Backup`, `Manifests`, `Catalogs`, `FileMaps`) et deltas `f`/`r`/`n` exclus, `Fusion` et tout dossier futur parcourus (liste d'exclusion) ; 27 039 répertoires en 2,1 s, mêmes 5 828 noms sauf 5 fichiers en attente de suppression ; `winsight hijack` 8,3-8,7 s incomplet → 2,4-3,4 s complet, les deux imports autrefois non déterminés répondus comme par un parcours complet | Corrigé |
+| WS-51 | Medium | Hijack | Index WinSxS non terminé dans son budget de 8 s : le parcours de tout WinSxS prenait 9,75 s à chaud (124 584 répertoires), davantage à froid | imports « fantômes » dégradés en « non déterminé », scan hijack déclaré incomplet | `SideBySideStore.cs` | parcours limité à ce que le chargeur utilise : dossiers techniques (`Temp`, `InstallTemp`, `Backup`, `Manifests`, `Catalogs`, `FileMaps`) et deltas `f`/`r`/`n` exclus, `Fusion` et tout dossier futur parcourus (liste d'exclusion) ; 27 039 répertoires en 2,1 s, mêmes 5 828 noms sauf 5 fichiers en attente de suppression ; `winsight hijack` 8,3-8,7 s incomplet → 2,4-3,4 s complet, les deux imports autrefois non déterminés répondus comme par un parcours complet ; un homonyme n'importe où dans WinSxS valait encore résolution : lié au manifeste de l'image le 24 septembre (RA-04) | Corrigé |
 | WS-52 | Medium | Perf | Surveillance caméra/micro au repos : ~1,7 % d'un cœur (relecture complète du ConsentStore chaque seconde malgré la notification registre) | batterie pour un moniteur permanent | `CameraMicMonitor.cs`, `RegistryKeyWatcher.cs` | interrogation à 30 s tant que la notification des deux ruches est confirmée armée, sinon 1 s ; mesuré 0,09 % et 27 Mo (contre 1,7 % et 47 Mo) | Corrigé |
 | WS-54 | Low | Persistance | Chaque CLSID HKCU rapporté comme « ComHijack » (3 941 lignes, JSON de 5,3 Mo), copies de la classe machine comprises, sans distinguer le détournement d'un CLSID HKLM | bruit, rapport lourd, le vrai détournement noyé | `ComHijackEnumerator.cs` | copie identique à la classe machine ignorée ; classe utilisateur qui remplace le serveur de la machine signalée (T1546.015), sauf signée Microsoft ; mesuré ici : 4 541 → 698 entrées, JSON 5,3 → 0,9 Mo, même entrée signalée | Corrigé |
 | WS-55 | Low | Certificats | Racines machine comptées deux fois ; `TrustedPublisher` et `Disallowed` non audités | liste doublée ; un éditeur approuvé ajouté sans élévation (vue utilisateur) invisible | `CertStoreAuditor.cs`, `TrustedCertificate.cs` | dédoublonnage par magasin ; rôle Root / TrustedPublisher / Disallowed : éditeur propre à l'utilisateur ou dont la clé privée est présente signalé, `Disallowed` jamais une alerte ; `CA` volontairement non lu (un intermédiaire n'accorde aucune confiance sans racine) ; mesuré ici : 67 racines, 2 éditeurs machine, les mêmes 6 racines signalées | Corrigé |
@@ -253,16 +265,17 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-57 | Low | Filtres CLI | `--nonmicrosoft` masquait tout signataire dont le texte contenait « Microsoft » | un faux « CN=Microsoft » auto-signé ou sous racine utilisateur disparaissait du filtre | `ReportItemFilter.cs` | champ `microsoftSigned` établi depuis le verdict entier (identité exacte, chaîne de confiance machine) | Corrigé |
 | WS-58 | Low | Présence | Durées au-delà de 24 h tronquées (30 h lues « 06:00 ») ; un `Data` dupliqué levait une exception qui interrompait le scan | affichage faux, scan interrompu | `PresenceScanner.cs` | jours conservés ; première occurrence retenue | Corrigé |
 | WS-59 | Low | Hosts | Puits détectés par comparaison de chaînes | `127.1`, `0`, `::ffff:127.0.0.1` signalés comme redirections externes | `HostEntry.cs` | adresse analysée : bouclage, non spécifiée, 0.0.0.0/8 | Corrigé |
-| WS-61 | Low | MCP | Rédaction des chemins sans frontière (`C:\Users\nom2` → `%USERPROFILE%2`) ; alertes bloquées derrière le verrou de scan ; étanchéité à la couche de réponse testée par références directes seulement (MCP → application → réponse) | fragment d'un autre nom de compte divulgué ; « un autre scan est en cours » ; régression possible non détectée | `McpModels.cs`, `McpScanService.cs`, `IlCallGraph.cs` | rédaction par chemin entier ; journal lu hors verrou ; graphe d'appels IL conservateur (machines à états, lambdas, dispatch virtuel, rappels du framework) depuis chaque méthode MCP : aucun mutateur atteignable, zéro jeton non résolu, témoin positif depuis la CLI ; vérifié en injectant un appel caché dans une lambda | Corrigé |
+| WS-61 | Low | MCP | Rédaction des chemins sans frontière (`C:\Users\nom2` → `%USERPROFILE%2`) ; alertes bloquées derrière le verrou de scan ; étanchéité à la couche de réponse testée par références directes seulement (MCP → application → réponse) | fragment d'un autre nom de compte divulgué ; « un autre scan est en cours » ; régression possible non détectée | `McpModels.cs`, `McpScanService.cs`, `IlCallGraph.cs` | rédaction par chemin entier ; journal lu hors verrou ; graphe d'appels IL conservateur (machines à états, lambdas, dispatch virtuel, rappels du framework) depuis chaque méthode MCP : aucun mutateur **listé** atteignable, zéro jeton non résolu, témoin positif depuis la CLI ; vérifié en injectant un appel caché dans une lambda. Une garde ciblée, pas une preuve : étendue le 24 septembre à la frontière du framework et des P/Invoke (RA-06) | Corrigé |
 | WS-62 | Low | Supply chain | Le workflow de release restaurait le cache `setup-dotnet` dans un build de tag | empoisonnement de cache théorique | `release.yml` | cache désactivé pour les releases, test de contrat | Corrigé |
-| WS-63 | Low | Installeur | La désinstallation « tous les utilisateurs » laissait le service pare-feu enregistré depuis cette installation | service LocalSystem pointant vers un binaire supprimé, blocages conservés | `installer/WinSight.iss` | en mode administrateur, si `ImagePath` désigne l'exécutable de cette installation, son verbe `uninstall` (arrêt, objets WFP, enregistrement) avant toute suppression ; service d'un autre emplacement laissé en place ; échec signalé avec la commande exacte ; porte VM 15 (`Test-InstallerServiceUninstall.ps1`, cas négatif compris) | Corrigé, qualifié en VM (porte 15, deux passes) |
+| WS-63 | Low | Installeur | La désinstallation « tous les utilisateurs » laissait le service pare-feu enregistré depuis cette installation | service LocalSystem pointant vers un binaire supprimé, blocages conservés | `installer/WinSight.iss` | en mode administrateur, si `ImagePath` désigne l'exécutable de cette installation, son verbe `uninstall` (arrêt, objets WFP, enregistrement) avant toute suppression ; service d'un autre emplacement laissé en place ; en cas d'échec, la désinstallation s'arrête avant de supprimer quoi que ce soit (RA-05 : elle se poursuivait jusqu'au 24 septembre) ; porte VM 15 (`Test-InstallerServiceUninstall.ps1`, cas négatif et échec injecté) | Corrigé, qualifié en VM (porte 15, deux passes) ; cas d'échec RA-05 à qualifier |
 | WS-67 | Low | Maintenabilité | `Adapters.cs` : 1 958 lignes pour tous les scans | revue et diff difficiles | `Application/Adapters*.cs` | 11 fichiers partiels par domaine (85 à 411 lignes), déplacement pur | Corrigé |
 | WS-68 | Low | Tableau de bord | Les lignes hosts « fichier illisible » et « enregistrements mal formés » présentées comme « redirection externe » | message contraire aux faits | `DashboardFindingPresenter.cs` | présentation propre et localisée | Corrigé |
 | WS-69 | Low | Maintenabilité | Fichiers au-delà de 800 lignes : `MainWindow.xaml.cs` (1 449), `WfpProvisioning.cs` (1 300), `Enumerators.cs` (1 257), `EnforcementCoordinator.cs` (808) | revue et diff difficiles | ces fichiers | déplacement pur vérifié ligne à ligne : un énumérateur par fichier, partiels par thème pour la fenêtre, WFP et les transitions ; plus aucun fichier de production au-delà de 800 lignes ; exclusions de couverture reportées sur les partiels | Corrigé |
-| WS-70 | Medium | Guardian | La ligne de base persistée ne mémorisait pas quelles sources étaient lisibles : tout élément d'une source devenue lisible était annoncé comme nouveau (en VM, ~60 tâches planifiées et services Windows au premier tableau de bord élevé) | rafale de fausses alertes au moment où l'utilisateur suit le conseil d'élever ; fatigue d'alerte | `PersistenceCoverageMap.cs`, `PersistenceMonitorCore.cs`, `FilePersistenceBaselineStore.cs` | portées couvertes (source × portée) persistées avec la ligne de base, union conservée d'un scan à l'autre ; éléments d'une portée qui n'était pas couverte absorbés sans annonce ; format lisible par la v0.13 (lignes ignorées), ligne de base sans couverture : règle précédente ; 4 tests échouent sans le correctif | Corrigé |
+| WS-70 | Medium | Guardian | La ligne de base persistée ne mémorisait pas quelles sources étaient lisibles : tout élément d'une source devenue lisible était annoncé comme nouveau (en VM, ~60 tâches planifiées et services Windows au premier tableau de bord élevé) | rafale de fausses alertes au moment où l'utilisateur suit le conseil d'élever ; fatigue d'alerte | `PersistenceCoverageMap.cs`, `PersistenceMonitorCore.cs`, `FilePersistenceBaselineStore.cs` | portées couvertes (source × portée) persistées avec la ligne de base, union conservée d'un scan à l'autre ; éléments d'une portée qui n'était pas couverte absorbés sans annonce ; format lisible par la v0.13 (lignes ignorées), ligne de base sans couverture : règle précédente ; 4 tests échouent sans le correctif ; l'absorption se faisait sans un mot : annoncée comme incertaine depuis le 24 septembre (RA-03) | Corrigé |
 | WS-71 | Low | Validation | Kit VM, §6 : « no single-instance mutex » et deux tableaux de bord lancés côte à côte, alors que le tableau de bord est à instance unique depuis WS-31 ; la porte échouait sur le comportement voulu (« Dashboard … stopped ») | requalification bloquée à tort | `docs/validation/VM_QUALIFICATION_KIT.md` | la porte prouve la passation (second lancement : sortie 0, aucune session) et la préservation d'une session vivante face à `attribution --watch` ; test de contrat | Corrigé |
 | WS-72 | Low | Validation | Kit VM, §6 : `sc start` explicite après l'arrêt brutal du service, en course avec l'action de récupération du SCM (redémarrage à 5 s) ; dès que le re-hachage intermédiaire dépassait 5 s, l'échec 1056 faisait passer un service rétabli pour un service qui ne redémarre pas | faux échec ; récupération SCM jamais qualifiée | `docs/validation/VM_QUALIFICATION_KIT.md` | attendre, et donc prouver, le redémarrage par le SCM sous un nouveau PID, puis vérifier que c'est le candidat ; test de contrat | Corrigé |
 | WS-73 | High | Attribution | Chaque `FileIOCreate` était enregistré comme écriture, simple ouverture comprise. Mesuré en VM (porte 25) : juste après le dépôt d'un raccourci dans le dossier Démarrage, l'Explorateur (`sihost.exe`) et Defender (`MsMpEng.exe`) l'ouvrent, et l'index, qui retient l'écriture la plus récente, les aurait désignés comme auteurs | Guardian nomme l'Explorateur ou l'antivirus comme auteur d'une persistance malveillante : un faux nom à côté d'une alerte, qui invite à la tolérer | `WriteAttributionWatcher.cs` | création comptée seulement si sa disposition peut créer ou remplacer (tout sauf `OPEN_EXISTING`) ; une écriture après une ouverture reste vue par son événement d'écriture ; porte 25 : seul l'auteur réel est attribué | Corrigé, qualifié en VM (porte 25) |
+| WS-74 | High | Persistance | Le nom compilé dans l'image était lu par `FileVersionInfo`, qui prend la ressource localisée du fichier de langue : `powershell.exe`, `cmd.exe`, `mshta.exe`, `rundll32.exe` et `regsvr32.exe` se nommaient `*.MUI` (mesuré sur Windows 11 26200), un nom absent de la table des interpréteurs, et ce nom prime sur le chemin | `powershell -enc <charge>` dans une clé Run restait une entrée ordinaire signée Microsoft, jamais signalée ; livré dans la v0.12.0 et la v0.13.0 | `PersistenceScanner.cs`, `InterpreterAbuseTriage.cs` | ressource de version de l'image elle-même, lue par le handle acquis (`PeResources`, `VersionResource`) ; suffixe `.mui` retiré des entrées déjà enregistrées ; test de bout en bout sur le vrai `powershell.exe`, en échec sur l'ancien code | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -272,6 +285,24 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-60 | Medium | Attribution | Une écriture par un handle ouvert avant la session ETW n'a pas de nom de fichier (seul `FileIOInit` est activé ; le noyau ne donne le rundown des noms qu'en fin de session). Mesuré en VM (porte 25) : l'auteur n'est pas attribué | auteur « inconnu » pour ces écritures : une réponse honnête, pas un faux nom (WS-73) | `WriteAttributionWatcher.cs` | résoudre ces écritures demanderait de relier chaque objet fichier à la table des handles des processus au démarrage de la session (privilège de débogage, pointeurs noyau) : disproportionné pour un fichier de démarrage gardé ouvert avant WinSight | Documenté |
 | WS-64 | Info | Réponse | Fenêtre résiduelle de quelques microsecondes entre comparaison et changement pour une valeur de registre sans TxR | valeur concurrente supprimée sans quarantaine | `THREAT_MODEL.md` | aucune primitive Windows ne ferme cette fenêtre | Documenté |
 | WS-65 | Info | Pare-feu | Aucune invite avant la première connexion | pas d'équivalent LuLu | `WFP_DESIGN.md` | décision « après coup » via les événements WFP (§11) | Documenté |
+
+### 4.3 Contre-audit Codex du 24 septembre
+
+Codex a relu la branche à `9fbe1b3`, sans modifier le code : sept constats, dont aucun n'est une faille
+du produit démontrée, et le verdict « pas prêt pour une publication de production ». Chacun a été
+repris depuis le code, prouvé par un test en échec sur l'ancien code quand c'était possible, puis
+corrigé. La suite complète passe ensuite : 3 540 tests, 0 échec.
+
+| ID | Gravité | Constat | Correction | Commit | Statut |
+|---|---|---|---|---|---|
+| RA-01 | Haute (harnais) | Scripts du harnais, candidat, disques des VM et preuves sous `<vol>\`, où les utilisateurs authentifiés ont « Modification » par héritage : les hachages prouvaient la cohérence, pas la provenance. La relecture ajoute que l'exécuteur élevé écrivait dans ce dossier et commençait par un `Remove-Item -Recurse` que Windows PowerShell 5.1 fait à travers une jonction, et que les pilotes supprimaient récursivement le dossier écrit par l'invité, qui exécute le candidat en administrateur. Rien n'a été exploité | harnais versé au dépôt (`scripts/validation/hyperv`) : requêtes lues sans jamais être écrites ni supprimées ; toute écriture élevée sous une racine créée avec une DACL réservée aux administrateurs ; copies d'une liste fermée sans point d'analyse, SHA-256 et blob git scellés et revérifiés avant chaque action ; stockage des VM verrouillé, sinon refus ; disque de transport formaté, résultats copiés sans suivre de lien ; `Verify-QualificationProvenance.ps1` non élevé. `Test-HarnessHelpers.ps1` 8/8 sous PowerShell 5.1, 6 contrats dont 3 échouent sur l'ancien exécuteur | `2cc522c` | Corrigé dans le code ; verrouillage du stockage, lancement et requalification par l'opérateur à faire |
+| RA-02 | Moyenne | Le nom d'origine (`OriginalFilename`) lu par `FileVersionInfo.GetVersionInfo(chemin)` : seconde ouverture par nom, hors de la garde WS-40 ; un fichier échangé prêtait son nom, un fichier hors ligne était lu | lecteur de ressources PE borné sur le handle acquis ; nom lu seulement dans le fichier que la résolution a trouvé (volume et index), jamais si ses données ne sont pas locales ; trois tests en échec sur l'ancien code (`Cmd.Exe` hors ligne, `whoami.exe` échangé, `PowerShell.EXE.MUI`) ; a révélé WS-74 | `bb608ff` | Corrigé ; porte VM 17 par la persistance à refaire |
+| RA-03 | Moyenne | WS-70 absorbait sans un mot ce qui devenait lisible : une entrée posée pendant l'intervalle illisible était indiscernable d'une ancienne | lot « incertain » (nombre, surfaces, entrées) remis par le moniteur, journalisé `Guardian/CoverageGain` sans bulle, montré *Unverified* par `winsight alerts` et le MCP, jamais comme une détection ; livré au moins une fois (tant qu'il ne l'est pas, ses entrées restent hors de la ligne de base sauvegardée, donc annoncées au lancement suivant) ; emplacement couvert toujours annoncé, ancienne ligne de base inchangée | `9f7af15` | Corrigé |
+| RA-04 | Moyenne | WS-51 : un homonyme n'importe où dans WinSxS (autre architecture, fonctionnalité en attente, composant sans rapport) valait résolution de l'import | index par composant (architecture, nom, clé) ; manifeste de l'image lu (XML sans DTD ni résolveur, borné) ; résolu seulement par un assemblage lié ou du même éditeur non Windows, sinon non résolu ou inconnu ; test de bout en bout en échec sur l'ancienne recherche ; même sortie sur ce poste | `66d4f61` | Corrigé |
+| RA-05 | Moyenne | Échec du verbe de retrait du service : message, puis désinstallation poursuivie, laissant le service pointer vers un fichier supprimé | exception à `usUninstall`, fatale pour Inno avant toute suppression (code 1 ; sans boîte avec `/SUPPRESSMSGBOXES`), vérifié dans les sources d'Inno ; messages EN/FR/ES ; porte VM avec échec injecté (DELETE refusé sur l'objet service) et contrôle WFP ; contrats en échec sur l'ancien script ; compilé par ISCC 6.7.3 | `861a9c9` | Corrigé ; porte VM à exécuter |
+| RA-06 | Basse (assurance) | WS-61 présenté comme une preuve ; seuls les mutateurs listés étaient cherchés | frontière : aucune API d'écriture du framework, aucune primitive d'écriture de WinSight, seules 22 fonctions natives relues, hors trois propriétaires relus (netstat en lecture seule ; VirusTotal et son fichier de quota, présents dans l'IL mais coupés par `allowNetworkLookups: false`, épinglé à chaque appel MCP) ; un canari par détecteur ; inventaire des 6 outils et de leurs annotations | `76826b2` | Corrigé |
+| RA-07 | Basse (docs) | `PRODUCTION_READINESS.md` « faisant autorité » au 14 septembre, contredit par le §17.2 | version publiée, candidat local qualifié (hachages exacts, réserve RA-01) et tête actuelle distingués | `f18ec16` | Corrigé |
+| RA-08 | — | ARM64 natif, x64 sur ARM64, multi-utilisateur, Authenticode, débit ETW et endurance, WS-53 | chacun reste une porte à part, non qualifiée | — | Ouvert, inchangé |
 
 ---
 
@@ -339,7 +370,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 463 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 540 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -498,10 +529,11 @@ Présence en direct, blocage DNS, flux de fichiers générique.
 
 ## 13. Security hardening roadmap
 
-1. **Maintenant** : ARM64. Les passes VM du 23 septembre ont validé WS-63, WS-40, WS-73, la mise à
-   niveau et l'IPC par ouverture de session réseau (porte 36) ; IPC par
-   ouverture de session réseau. L'étanchéité MCP est prouvée au niveau IL (WS-61) et la release
-   restaure ses paquets sans cache (WS-62).
+1. **Maintenant** : exécuter le harnais refait (RA-01) et requalifier la tête de la branche ; puis
+   ARM64. Les passes VM du 23 septembre ont validé WS-63, WS-40, WS-73, la mise à niveau et l'IPC par
+   ouverture de session réseau (porte 36), sous la réserve RA-01. L'étanchéité MCP est gardée au
+   niveau IL (WS-61, étendue par RA-06 : une garde ciblée, pas une preuve) et la release restaure ses
+   paquets sans cache (WS-62).
 2. **Ensuite** : recommander l'installation tous utilisateurs quand l'utilisateur fait partie du modèle
    de menace ; journal d'actions chaîné par hachage (preuve d'altération) ; chien de garde signalant
    l'arrêt du tableau de bord ; niveau de réponse machine dans le service avec son autorité propre.
@@ -537,7 +569,8 @@ profils et en contexte 32 bits ; fichier hosts déplacé ; limites des preuves c
 `regsvr32` cité deux fois ; affirmations sur l'architecture (aucun pilote WinSight, ETW réellement
 utilisés, négociation MCP) — ces dernières corrigées par Codex.
 
-Restantes : `PRODUCTION_READINESS.md` doit être mis à jour après la requalification ; les nombres
+Restantes : `PRODUCTION_READINESS.md` distingue désormais la version publiée, le candidat qualifié et
+la tête (RA-07) et sera à mettre à jour après la requalification ; les nombres
 « 27 surfaces » et « 57 s » pour les modules sont des mesures anciennes à revalider avec l'outil de
 mesure.
 
@@ -558,7 +591,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 463 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 540 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -598,6 +631,13 @@ ci-dessous, par thème, avec la justification.
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
 | Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1` | WS-71, WS-72, WS-40 (mesure) |
 | Lecture automatique et attribution | `Core/AutomaticFileAccess.cs`, `AutomaticFileMutation.cs`, `Attribution/WriteAttributionWatcher.cs` | WS-40, WS-73 |
+| Contre-audit : nom d'origine par le handle | `Core/PeResources.cs`, `VersionResource.cs`, `Persistence/PersistenceScanner.cs`, `CommandLine.cs`, `InterpreterAbuseTriage.cs` | RA-02, WS-74 |
+| Contre-audit : Guardian incertain | `Persistence/PersistenceCoverageGain.cs`, `PersistenceMonitorCore.cs`, `PersistenceMonitor*.cs`, `Application/GuardianHost.cs`, `Adapters.Alerts.cs`, `Dashboard/MainWindow.Monitors.cs` | RA-03 |
+| Contre-audit : WinSxS lié au manifeste | `Hijack/SideBySideStore.cs`, `SideBySideComponent.cs`, `SideBySideManifest.cs`, `PeImports.cs`, `HijackScanner.cs` | RA-04 |
+| Contre-audit : désinstallation | `installer/WinSight.iss`, `scripts/Test-InstallerServiceUninstall.ps1`, `InstallerUninstallContractTests.cs` | RA-05 |
+| Contre-audit : frontière MCP | `tests/WinSight.Mcp.Tests/McpSideEffectBoundaryTests.cs`, `IlCallGraph.cs`, `docs/MCP.md` | RA-06 |
+| Contre-audit : harnais de qualification | `scripts/validation/hyperv/*`, `QualificationHarnessContractTests.cs` | RA-01 |
+| Contre-audit : état de publication | `docs/PRODUCTION_READINESS.md` | RA-07 |
 
 ### 17.1 Qualification VM du 22 septembre 2026
 
@@ -659,6 +699,12 @@ restaure la VM. Candidats construits localement (`Build-Release.ps1 -DisableSign
 sous `<vol>\WinSight-Host-Evidence\v0.13.0-audit-bd4242f\` ; `candidate.json` de chaque passe
 porte le commit réellement qualifié.
 
+**Réserve (RA-01).** Cette copie des scripts était prise, au démarrage, dans un dossier que tout
+utilisateur authentifié pouvait modifier, comme le candidat, les disques des VM et les preuves ; et
+l'exécuteur élevé écrivait lui-même dans ce dossier. Ces passes prouvent ce que les octets hachés ont
+fait, pas qu'aucun script n'a été changé avant ni aucun résultat après. Le harnais refait
+(`scripts/validation/hyperv`) n'a pas encore tourné, et `259056b` n'est plus la tête de la branche.
+
 Le harnais reprend les portes du §17.1 et en ajoute quatre :
 
 | Porte | Ce qu'elle prouve | Critère |
@@ -694,9 +740,12 @@ l'autre ne touche le produit ni ce que la porte vérifie.
 
 ### Maintenant — bugs, sécurité, fiabilité
 
-- Relire et fusionner la branche d'audit par thème ; qualification x64 faite (§17.1 et §17.2, IPC réseau
-  comprise, porte 36 à deux VM) : `259056b` qualifié, 31 portes sur 31 (§17.2) ; ARM64.
-- Mettre à jour `PRODUCTION_READINESS.md` avec le nouveau candidat qualifié.
+- Relire et fusionner la branche d'audit par thème. Qualification x64 : `259056b` a passé 31 portes
+  sur 31 (§17.2), sous la réserve RA-01 ; la tête est à requalifier avec le harnais refait (porte 17
+  par la persistance, porte 15 avec l'échec injecté, balayage persistance et hijack, puis l'ensemble),
+  vérification de provenance comprise ; ARM64.
+- `PRODUCTION_READINESS.md` : distinction faite (RA-07) ; déclarer le candidat seulement après cette
+  requalification.
 
 ### Ensuite — fonctionnalités différenciantes
 
@@ -737,7 +786,7 @@ l'autre ne touche le produit ni ce que la porte vérifie.
 
 | # | Fonctionnalité | Pourquoi | Valeur utilisateur | Difficulté (1-5) | Risque (1-5) | Coût performance | Fichiers / composants |
 |---|---|---|---|---|---|---|---|
-| 1 | Mettre à jour `PRODUCTION_READINESS.md` et publier le candidat qualifié | la qualification x64 est complète (31/31) | une version publiable | 1 | 1 | nul | `docs/PRODUCTION_READINESS.md`, release |
+| 1 | Requalifier la tête avec le harnais refait, puis publier | `259056b` a passé 31/31, mais sous la réserve RA-01 et avant RA-02 à RA-05 | une version publiable dont la provenance tient | 2 | 1 | nul | `scripts/validation/hyperv`, `docs/PRODUCTION_READINESS.md`, release |
 | 2 | Qualification ARM64 native | seconde architecture publiée, jamais qualifiée | publication ARM64 | 3 | 2 | nul | runner ARM64, kit de qualification |
 | 3 | Pare-feu « décider après la première connexion » | l'attente n°1 d'un utilisateur de LuLu | contrôle réseau compréhensible | 3 | 3 | faible (événements WFP) | `FirewallService/OutboundObserverService.cs`, `Dashboard` |
 | 4 | Leurres rançongiciel dans les dossiers OneDrive | la plantation et le nettoyage des leurres sous une racine Cloud Files ne sont pas mesurés | détection rançongiciel fiable sur un PC grand public | 2 | 2 | nul | `Ransomware/CanaryManager.cs`, `scripts/Measure-CloudFilesAccess.ps1` |
