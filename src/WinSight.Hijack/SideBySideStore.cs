@@ -51,8 +51,8 @@ public interface ISideBySideStore
 /// the assemblies the image's manifest names, so a same-named file in another architecture's copy, in
 /// a feature staged but not installed, or in an unrelated component served nothing - and hid a
 /// genuine phantom import. The index now records which component each file belongs to, and
-/// <see cref="Resolves"/> answers true only when an assembly the image binds holds the file, or one
-/// from the same non-Windows publisher (MFC depends on the CRT beside it). Where it cannot tell - an
+/// <see cref="Resolves"/> answers true only when an assembly the image binds holds the file, or the
+/// CRT that a bound Visual C++ library of the same version brings with it. Where it cannot tell - an
 /// unread manifest, a bound assembly whose own dependencies are not modelled - it answers unknown and
 /// the scan reports coverage, never "resolved".
 ///

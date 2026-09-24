@@ -93,14 +93,30 @@ public sealed class SideBySideBindingTests : IDisposable
         Assert.Equal(2, store.UnansweredLookups);
     }
 
-    // MFC depends on the CRT beside it; a shared vendor key reaches it.
+    // MFC brings the CRT of its own Visual C++ version with it.
     [Fact]
-    public void AnAssemblyFromTheSamePublisherIsReachable()
+    public void AVisualCppLibraryReachesTheRuntimeOfItsOwnVersion()
     {
         Plant($@"{Crt90Amd64}\msvcr90.dll");
         var store = new SideBySideStore(_root);
 
         Assert.True(store.Resolves("msvcr90.dll", is64Bit: true, [new SideBySideAssembly("Microsoft.VC90.MFC", VcKey, "amd64")]));
+    }
+
+    // The manifest comes from the scanned image: a made-up name under the Visual C++ key used to reach
+    // every Visual C++ component, which the loader would never do.
+    [Fact]
+    public void ASharedPublisherKeyAloneReachesNothing()
+    {
+        Plant($@"{Crt90Amd64}\msvcr90.dll");
+        Plant($@"amd64_microsoft.vc80.atl_{VcKey}_8.0.50727.6195_none_0123456789abcdef\atl80.dll");
+        var store = new SideBySideStore(_root);
+
+        Assert.Null(store.Resolves("msvcr90.dll", is64Bit: true, [new SideBySideAssembly("Anything", VcKey, "amd64")]));
+        // MFC 9 does not bring ATL 8: not reached, and MFC's other dependencies are not modelled.
+        Assert.Null(store.Resolves("atl80.dll", is64Bit: true, [new SideBySideAssembly("Microsoft.VC90.MFC", VcKey, "amd64")]));
+        // The CRT alone declares no dependency, so the answer is final.
+        Assert.False(store.Resolves("atl80.dll", is64Bit: true, [Crt90]));
     }
 
     [Fact]

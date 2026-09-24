@@ -78,21 +78,37 @@ internal sealed partial record SideBySideComponent(string Architecture, string N
 
     /// <summary>
     /// Whether an image binding <paramref name="assembly"/> reaches this component: it is that
-    /// assembly (any version, since publisher policy may redirect), or it shares a non-Windows
-    /// publisher key with it and may be one of its dependencies.
+    /// assembly (any version, since publisher policy may redirect), or the C runtime of the same
+    /// Visual C++ version that a Visual C++ library (MFC, ATL, OpenMP) brings with it.
     /// </summary>
+    /// <remarks>
+    /// A shared publisher key alone is not enough. The manifest is read from the scanned image, so
+    /// its names are whatever the file says: an image declaring a made-up assembly under the Visual
+    /// C++ key reached every Visual C++ component on the machine, and an import answered by any of
+    /// them read as resolved. The one dependency modelled is the one every Visual C++ library
+    /// declares; anything else reached through a bound assembly stays unknown.
+    /// </remarks>
     public bool IsReachedThrough(SideBySideAssembly assembly)
     {
         if (ReferenceEquals(this, Unattributed) || assembly.PublicKeyToken is not { } key
-            || !key.Equals(PublicKeyToken, StringComparison.OrdinalIgnoreCase))
+            || !key.Equals(PublicKeyToken, StringComparison.OrdinalIgnoreCase)
+            || !ArchitectureMatches(assembly.ProcessorArchitecture))
         {
             return false;
         }
-        if (!WindowsKeys.Contains(key))
+        return NameMatches(assembly.Name) || (!WindowsKeys.Contains(key) && IsRuntimeOf(assembly.Name));
+    }
+
+    /// <summary>True when this component is the CRT of the Visual C++ version <paramref name="library"/> belongs to.</summary>
+    private bool IsRuntimeOf(string library)
+    {
+        var match = VisualCppLibraryPattern().Match(library);
+        if (!match.Success)
         {
-            return true;
+            return false;
         }
-        return NameMatches(assembly.Name) && ArchitectureMatches(assembly.ProcessorArchitecture);
+        var family = $"microsoft.{match.Groups["version"].Value.ToLowerInvariant()}.";
+        return Name == family + "crt" || Name == family + "debugcrt";
     }
 
     /// <summary>
@@ -128,4 +144,7 @@ internal sealed partial record SideBySideComponent(string Architecture, string N
 
     [GeneratedRegex(@"^Microsoft\.VC\d+\.(Debug)?CRT$", RegexOptions.IgnoreCase)]
     private static partial Regex CrtPattern();
+
+    [GeneratedRegex(@"^Microsoft\.(?<version>VC\d+)\.(Debug)?(MFC|MFCLOC|ATL|OpenMP)$", RegexOptions.IgnoreCase)]
+    private static partial Regex VisualCppLibraryPattern();
 }
