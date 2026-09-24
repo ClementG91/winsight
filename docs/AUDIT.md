@@ -291,7 +291,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 Codex a relu la branche à `9fbe1b3`, sans modifier le code : sept constats, dont aucun n'est une faille
 du produit démontrée, et le verdict « pas prêt pour une publication de production ». Chacun a été
 repris depuis le code, prouvé par un test en échec sur l'ancien code quand c'était possible, puis
-corrigé. La suite complète passe ensuite : 3 540 tests, 0 échec.
+corrigé. La suite complète passe ensuite : 3 551 tests, 0 échec.
 
 | ID | Gravité | Constat | Correction | Commit | Statut |
 |---|---|---|---|---|---|
@@ -303,6 +303,16 @@ corrigé. La suite complète passe ensuite : 3 540 tests, 0 échec.
 | RA-06 | Basse (assurance) | WS-61 présenté comme une preuve ; seuls les mutateurs listés étaient cherchés | frontière : aucune API d'écriture du framework, aucune primitive d'écriture de WinSight, seules 22 fonctions natives relues, hors trois propriétaires relus (netstat en lecture seule ; VirusTotal et son fichier de quota, présents dans l'IL mais coupés par `allowNetworkLookups: false`, épinglé à chaque appel MCP) ; un canari par détecteur ; inventaire des 6 outils et de leurs annotations | `76826b2` | Corrigé |
 | RA-07 | Basse (docs) | `PRODUCTION_READINESS.md` « faisant autorité » au 14 septembre, contredit par le §17.2 | version publiée, candidat local qualifié (hachages exacts, réserve RA-01) et tête actuelle distingués | `f18ec16` | Corrigé |
 | RA-08 | — | ARM64 natif, x64 sur ARM64, multi-utilisateur, Authenticode, débit ETW et endurance, WS-53 | chacun reste une porte à part, non qualifiée | — | Ouvert, inchangé |
+
+Une revue de sécurité indépendante de ces correctifs, le même jour, a relevé quatre défauts, tous
+corrigés avec un test en échec sur l'état précédent :
+
+| Correctif revu | Défaut | Correction | Commit |
+|---|---|---|---|
+| RA-06 | la frontière ne voyait ni les tubes nommés ni les fichiers ouverts par chemin : `winsight_outbound_firewall` écrit bien une requête sur le tube du service pare-feu, jamais jugée | tubes (client, serveur, écriture), `FileStream`/`StreamWriter` construits depuis un chemin, `RandomAccess`, fichiers mappés, ZIP et XML ajoutés ; `FirewallServiceClient.SendAsync` devient un quatrième propriétaire relu (lecteur de posture seul, service qui refuse toute mutation à un appelant non élevé) ; trois canaris de plus | `1cc1cf6` |
+| RA-04 | le manifeste vient de l'image scannée : un assemblage inventé sous la clé Visual C++ atteignait tout composant Visual C++ | un assemblage lié n'atteint que lui-même et, pour une bibliothèque Visual C++ (MFC, ATL, OpenMP), le CRT de la même version | `dc9f080` |
+| RA-05 | l'`ImagePath` non guillemeté était coupé au premier « .exe » : un dossier `tools.exe` sur le chemin faisait passer le service de cette installation pour étranger, et la désinstallation continuait | exécutable reconnu comme début de la commande, avec ou sans extension ; cas VM ajouté | `df92198` |
+| RA-01 | les vérifications s'arrêtaient au dossier protégé ; `<vol>\Hyper-V`, parent du stockage des VM, appartient au compte ordinaire et reste renommable par les utilisateurs authentifiés | chaîne des parents vérifiée jusqu'à la racine (propriétaire, suppression, DACL, suppression des enfants), droits génériques comptés ; parents verrouillés par `Protect-WinSightVmStorage.ps1`, stockage revérifié avant chaque passe | `066b3e1` |
 
 ---
 
@@ -370,7 +380,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 540 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 551 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -591,7 +601,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 540 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 551 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
