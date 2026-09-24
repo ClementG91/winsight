@@ -324,7 +324,7 @@ public sealed class HijackScanner(
                     // Null means the store could not be searched. That is a gap in the observation,
                     // and this codebase never turns one into an accusation: the import is skipped
                     // and counted, not reported.
-                    var inStore = sideBySide.Contains(dll);
+                    var inStore = sideBySide.Resolves(dll, imports.Is64Bit, imports.BoundAssemblies);
                     if (inStore is null)
                     {
                         unresolvable++;

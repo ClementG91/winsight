@@ -15,6 +15,24 @@ public interface ISideBySideStore
 
     /// <summary>Names no verdict was reached about, so the caller can report coverage.</summary>
     int UnansweredLookups { get; }
+
+    /// <summary>
+    /// Whether the loader can serve <paramref name="dll"/> out of the store to an image of the given
+    /// bitness whose manifest binds <paramref name="bound"/> (null when that manifest could not be
+    /// read): true when a bound assembly holds it, false when nothing the image can reach does, null
+    /// when that cannot be established.
+    /// </summary>
+    /// <remarks>
+    /// Presence alone answers null here, never true (RA-04): a file of the same name in some other
+    /// assembly is not the one the loader would load. An implementation that knows no more than
+    /// presence therefore reports the import as unknown, not as resolved.
+    /// </remarks>
+    bool? Resolves(string dll, bool? is64Bit, IReadOnlyList<SideBySideAssembly>? bound) =>
+        Contains(dll) switch
+        {
+            true => null,
+            var answer => answer,
+        };
 }
 
 /// <summary>
@@ -28,10 +46,15 @@ public interface ISideBySideStore
 /// binary. On a machine with the usual redistributables that is a confident, repeated accusation
 /// against ordinary software, including SYSTEM services.
 ///
-/// <b>Why a file lookup rather than manifest parsing.</b> Reading the RT_MANIFEST resource and
-/// resolving the declared assembly to its files is the complete model, and it is a great deal of
-/// parsing of attacker-reachable structures for the same answer. If the DLL is physically in the
-/// store, the loader can reach it and the import is not phantom - which is the question being asked.
+/// <b>Bound to the image's manifest (RA-04).</b> This used to stop at "is a file of that name
+/// anywhere in the store": the loader reaches WinSxS only through an activation context, built from
+/// the assemblies the image's manifest names, so a same-named file in another architecture's copy, in
+/// a feature staged but not installed, or in an unrelated component served nothing - and hid a
+/// genuine phantom import. The index now records which component each file belongs to, and
+/// <see cref="Resolves"/> answers true only when an assembly the image binds holds the file, or one
+/// from the same non-Windows publisher (MFC depends on the CRT beside it). Where it cannot tell - an
+/// unread manifest, a bound assembly whose own dependencies are not modelled - it answers unknown and
+/// the scan reports coverage, never "resolved".
 ///
 /// <b>One walk, not one per name.</b> The first version searched the tree per lookup, and the
 /// hijack test suite went from 70 ms to 75 seconds - the fix for a false positive turning into a
@@ -81,7 +104,8 @@ public sealed class SideBySideStore : ISideBySideStore
     private readonly string _root;
     private readonly TimeSpan _budget;
     private readonly int _maxEntries;
-    private HashSet<string>? _names;
+    // Each DLL name, with the components holding a file of that name.
+    private Dictionary<string, List<SideBySideComponent>>? _names;
     private bool _complete;
 
     public SideBySideStore(string? windowsDirectory = null)
@@ -123,12 +147,51 @@ public sealed class SideBySideStore : ISideBySideStore
             UnansweredLookups++;
             return null;
         }
-        if (_names.Contains(dll))
+        if (_names.ContainsKey(dll))
         {
             return true;
         }
         // Absent from a complete index is proof; absent from a partial one is not.
         if (_complete)
+        {
+            return false;
+        }
+        UnansweredLookups++;
+        return null;
+    }
+
+    /// <inheritdoc />
+    public bool? Resolves(string dll, bool? is64Bit, IReadOnlyList<SideBySideAssembly>? bound)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dll);
+
+        Index();
+        if (_names is null)
+        {
+            UnansweredLookups++;
+            return null;
+        }
+        var holders = _names.TryGetValue(dll, out var found)
+            ? found.Where(component => component.Fits(is64Bit)).ToList()
+            : [];
+        if (bound is not null && holders.Any(component => bound.Any(component.IsReachedThrough)))
+        {
+            return true;
+        }
+        // Everything below reasons from the whole store; a partial index proves nothing absent.
+        if (!_complete)
+        {
+            UnansweredLookups++;
+            return null;
+        }
+        // No copy of this architecture anywhere, or none an image binding nothing could reach.
+        if (holders.Count == 0 || bound is { Count: 0 })
+        {
+            return false;
+        }
+        // Copies exist only where the image's manifest does not lead. Final only when the manifest
+        // was read and everything it binds is an assembly with no dependencies of its own.
+        if (bound is not null && bound.All(SideBySideComponent.IsLeaf))
         {
             return false;
         }
@@ -149,7 +212,7 @@ public sealed class SideBySideStore : ISideBySideStore
             // missing local path from a refused one. Only the former proves the store is empty.
             if (AutomaticFileAccess.IsLocal(_root))
             {
-                _names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                _names = new Dictionary<string, List<SideBySideComponent>>(StringComparer.OrdinalIgnoreCase);
                 _complete = true;
             }
             else
@@ -166,7 +229,8 @@ public sealed class SideBySideStore : ISideBySideStore
             return;
         }
 
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var names = new Dictionary<string, List<SideBySideComponent>>(StringComparer.OrdinalIgnoreCase);
+        var indexed = 0;
         var spent = Stopwatch.StartNew();
         try
         {
@@ -182,8 +246,8 @@ public sealed class SideBySideStore : ISideBySideStore
                 AttributesToSkip = FileAttributes.ReparsePoint,
                 IgnoreInaccessible = true,
             };
-            var pending = new Stack<(string Path, int Depth)>();
-            pending.Push((_root, 0));
+            var pending = new Stack<(string Path, int Depth, SideBySideComponent Component)>();
+            pending.Push((_root, 0, SideBySideComponent.Unattributed));
             while (pending.Count > 0)
             {
                 if (spent.Elapsed > _budget)
@@ -192,7 +256,7 @@ public sealed class SideBySideStore : ISideBySideStore
                     _complete = false;
                     return;
                 }
-                var (directory, depth) = pending.Pop();
+                var (directory, depth, component) = pending.Pop();
                 // Only a DLL's name is materialised; every other file is filtered before a string exists.
                 var entries = new System.IO.Enumeration.FileSystemEnumerable<(string Value, bool IsDirectory)>(
                     directory,
@@ -209,11 +273,19 @@ public sealed class SideBySideStore : ISideBySideStore
                 {
                     if (isDirectory)
                     {
-                        pending.Push((value, depth + 1));
+                        pending.Push((value, depth + 1, SideBySideComponent.ForDirectory(value, depth + 1, directory, component)));
                         continue;
                     }
-                    names.Add(value);
-                    if (names.Count >= _maxEntries || spent.Elapsed > _budget)
+                    if (!names.TryGetValue(value, out var holders))
+                    {
+                        holders = [];
+                        names[value] = holders;
+                    }
+                    if (!holders.Contains(component))
+                    {
+                        holders.Add(component);
+                    }
+                    if (++indexed >= _maxEntries || spent.Elapsed > _budget)
                     {
                         _names = names;
                         _complete = false;

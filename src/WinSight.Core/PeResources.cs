@@ -2,6 +2,22 @@ using System.Buffers.Binary;
 
 namespace WinSight.Core;
 
+/// <summary>What a resource lookup established.</summary>
+public enum PeResourceStatus
+{
+    /// <summary>The resource was read.</summary>
+    Found,
+
+    /// <summary>A well-formed image that has no such resource.</summary>
+    Absent,
+
+    /// <summary>
+    /// Not a PE image, a malformed resource tree, or a resource over the cap: nothing is known,
+    /// which is not the same as "absent".
+    /// </summary>
+    Unreadable,
+}
+
 /// <summary>
 /// Reads one resource out of a PE image through a stream the caller already holds, without loading
 /// the image.
@@ -44,7 +60,15 @@ public static class PeResources
     /// <paramref name="maximumBytes"/>.
     /// </summary>
     /// <exception cref="IOException">The stream failed or shrank while it was read.</exception>
-    public static byte[]? Read(Stream image, ushort type, ushort name, int maximumBytes)
+    public static byte[]? Read(Stream image, ushort type, ushort name, int maximumBytes) =>
+        TryRead(image, type, name, maximumBytes, out var data) == PeResourceStatus.Found ? data : null;
+
+    /// <summary>
+    /// As <see cref="Read"/>, telling a well-formed image without the resource apart from one that
+    /// could not be read. A caller for whom "absent" is evidence needs the difference.
+    /// </summary>
+    /// <exception cref="IOException">The stream failed or shrank while it was read.</exception>
+    public static PeResourceStatus TryRead(Stream image, ushort type, ushort name, int maximumBytes, out byte[]? data)
     {
         ArgumentNullException.ThrowIfNull(image);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBytes);
@@ -52,46 +76,66 @@ public static class PeResources
         {
             throw new ArgumentException("The image stream must be readable and seekable.", nameof(image));
         }
+        data = null;
         var reader = new Reader(image);
-        if (!TryReadLayout(reader, out var sections, out var root)
-            || !TryFindEntry(reader, sections, root, 0, type, out var typeEntry)
-            || (typeEntry & SubdirectoryFlag) == 0
-            || !TryFindEntry(reader, sections, root, typeEntry & ~SubdirectoryFlag, name, out var nameEntry)
-            || (nameEntry & SubdirectoryFlag) == 0
-            // Any language: an image carries one version resource and one manifest per identifier.
-            || !TryFindEntry(reader, sections, root, nameEntry & ~SubdirectoryFlag, id: null, out var languageEntry)
-            || (languageEntry & SubdirectoryFlag) != 0)
+        var status = ReadLayout(reader, out var sections, out var root);
+        if (status != PeResourceStatus.Found)
         {
-            return null;
+            return status;
+        }
+        // Type, then name, then any language: an image carries one version resource and one
+        // manifest per identifier. A leaf where a directory belongs is a malformed tree.
+        status = FindEntry(reader, sections, root, 0, type, out var typeEntry);
+        if (status != PeResourceStatus.Found || (typeEntry & SubdirectoryFlag) == 0)
+        {
+            return status == PeResourceStatus.Found ? PeResourceStatus.Unreadable : status;
+        }
+        status = FindEntry(reader, sections, root, typeEntry & ~SubdirectoryFlag, name, out var nameEntry);
+        if (status != PeResourceStatus.Found || (nameEntry & SubdirectoryFlag) == 0)
+        {
+            return status == PeResourceStatus.Found ? PeResourceStatus.Unreadable : status;
+        }
+        status = FindEntry(reader, sections, root, nameEntry & ~SubdirectoryFlag, id: null, out var languageEntry);
+        if (status != PeResourceStatus.Found || (languageEntry & SubdirectoryFlag) != 0)
+        {
+            return status == PeResourceStatus.Found ? PeResourceStatus.Unreadable : status;
         }
 
         // IMAGE_RESOURCE_DATA_ENTRY: OffsetToData (an RVA, unlike every offset above), Size.
         Span<byte> dataEntry = stackalloc byte[8];
         if (!TryReadRva(reader, sections, (ulong)root + languageEntry, dataEntry))
         {
-            return null;
+            return PeResourceStatus.Unreadable;
         }
         var dataRva = BinaryPrimitives.ReadUInt32LittleEndian(dataEntry);
         var size = BinaryPrimitives.ReadUInt32LittleEndian(dataEntry[4..]);
-        if (size == 0 || size > (uint)maximumBytes)
+        if (size > (uint)maximumBytes)
         {
-            return null;
+            return PeResourceStatus.Unreadable;
         }
-        var data = new byte[size];
-        return TryReadRva(reader, sections, dataRva, data) ? data : null;
+        var bytes = new byte[size];
+        if (!TryReadRva(reader, sections, dataRva, bytes))
+        {
+            return PeResourceStatus.Unreadable;
+        }
+        data = bytes;
+        return PeResourceStatus.Found;
     }
 
     private readonly record struct Section(uint VirtualAddress, uint Span, uint RawAddress);
 
-    /// <summary>The section table and the resource directory's RVA, from the image headers.</summary>
-    private static bool TryReadLayout(Reader reader, out Section[] sections, out uint resourceRoot)
+    /// <summary>
+    /// The section table and the resource directory's RVA, from the image headers: Absent for a
+    /// well-formed image without a resource directory.
+    /// </summary>
+    private static PeResourceStatus ReadLayout(Reader reader, out Section[] sections, out uint resourceRoot)
     {
         sections = [];
         resourceRoot = 0;
         Span<byte> dos = stackalloc byte[64];
         if (!reader.TryRead(0, dos) || BinaryPrimitives.ReadUInt16LittleEndian(dos) != DosSignature)
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         long peOffset = BinaryPrimitives.ReadUInt32LittleEndian(dos[0x3C..]);
 
@@ -99,13 +143,13 @@ public static class PeResources
         Span<byte> header = stackalloc byte[24];
         if (!reader.TryRead(peOffset, header) || BinaryPrimitives.ReadUInt32LittleEndian(header) != PeSignature)
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         var sectionCount = BinaryPrimitives.ReadUInt16LittleEndian(header[6..]);
         var optionalSize = BinaryPrimitives.ReadUInt16LittleEndian(header[20..]);
         if (sectionCount is 0 or > MaxSections)
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
 
         // The data directories sit at a different offset in the two optional-header shapes.
@@ -113,7 +157,7 @@ public static class PeResources
         Span<byte> magic = stackalloc byte[2];
         if (!reader.TryRead(optional, magic))
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         var (countOffset, directoriesOffset) = BinaryPrimitives.ReadUInt16LittleEndian(magic) switch
         {
@@ -124,24 +168,28 @@ public static class PeResources
         var resourceOffset = directoriesOffset + (ResourceDirectoryIndex * 8);
         if (directoriesOffset == 0 || optionalSize < resourceOffset + 8)
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         Span<byte> directories = stackalloc byte[resourceOffset + 8];
-        if (!reader.TryRead(optional, directories)
-            || BinaryPrimitives.ReadUInt32LittleEndian(directories[countOffset..]) <= ResourceDirectoryIndex)
+        if (!reader.TryRead(optional, directories))
         {
-            return false;
+            return PeResourceStatus.Unreadable;
+        }
+        // An image may declare fewer data directories than the resource one: it has none.
+        if (BinaryPrimitives.ReadUInt32LittleEndian(directories[countOffset..]) <= ResourceDirectoryIndex)
+        {
+            return PeResourceStatus.Absent;
         }
         resourceRoot = BinaryPrimitives.ReadUInt32LittleEndian(directories[resourceOffset..]);
         if (resourceRoot == 0)
         {
-            return false;
+            return PeResourceStatus.Absent;
         }
 
         var table = new byte[sectionCount * SectionHeaderSize];
         if (!reader.TryRead(optional + optionalSize, table))
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         sections = new Section[sectionCount];
         for (var i = 0; i < sectionCount; i++)
@@ -155,14 +203,14 @@ public static class PeResources
             // disk, and clamping to the raw size keeps a crafted header from reaching past it.
             sections[i] = new Section(virtualAddress, Math.Min(virtualSize == 0 ? rawSize : virtualSize, rawSize), rawAddress);
         }
-        return true;
+        return PeResourceStatus.Found;
     }
 
     /// <summary>
     /// The OffsetToData field of the entry with numeric identifier <paramref name="id"/> (the first
     /// entry when null) in the directory at <paramref name="directory"/>, relative to the root.
     /// </summary>
-    private static bool TryFindEntry(
+    private static PeResourceStatus FindEntry(
         Reader reader, Section[] sections, uint root, uint directory, ushort? id, out uint offsetToData)
     {
         offsetToData = 0;
@@ -171,18 +219,22 @@ public static class PeResources
         Span<byte> header = stackalloc byte[16];
         if (!TryReadRva(reader, sections, (ulong)root + directory, header))
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         var named = BinaryPrimitives.ReadUInt16LittleEndian(header[12..]);
         var total = named + BinaryPrimitives.ReadUInt16LittleEndian(header[14..]);
-        if (total is 0 or > MaxEntriesPerDirectory)
+        if (total == 0)
         {
-            return false;
+            return PeResourceStatus.Absent;
+        }
+        if (total > MaxEntriesPerDirectory)
+        {
+            return PeResourceStatus.Unreadable;
         }
         var entries = new byte[total * 8];
         if (!TryReadRva(reader, sections, (ulong)root + directory + 16, entries))
         {
-            return false;
+            return PeResourceStatus.Unreadable;
         }
         for (var i = id is null ? 0 : named; i < total; i++)
         {
@@ -190,10 +242,10 @@ public static class PeResources
             if (id is null || nameField == id.Value)
             {
                 offsetToData = BinaryPrimitives.ReadUInt32LittleEndian(entries.AsSpan((i * 8) + 4));
-                return true;
+                return PeResourceStatus.Found;
             }
         }
-        return false;
+        return PeResourceStatus.Absent;
     }
 
     /// <summary>Reads <paramref name="destination"/> at an RVA, entirely inside one section.</summary>
