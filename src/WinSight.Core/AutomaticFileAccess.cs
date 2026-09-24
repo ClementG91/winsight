@@ -74,6 +74,12 @@ public static partial class AutomaticFileAccess
         internal SafeFileHandle? NativeHandle => _handle;
 
         /// <summary>
+        /// Which file this lease holds, so a later observation of the same path can prove it reached
+        /// the same object rather than whatever the path names by then.
+        /// </summary>
+        public FileIdentity Identity => _identity;
+
+        /// <summary>
         /// Reads the filesystem's full identifier from this exact handle. Returns false on a
         /// filesystem that does not expose <c>FILE_ID_INFO</c>; no truncated identity is invented.
         /// </summary>
@@ -581,7 +587,11 @@ public static partial class AutomaticFileAccess
         }
     }
 
-    internal readonly record struct FileIdentity(uint VolumeSerialNumber, ulong FileIndex);
+    /// <summary>
+    /// The volume and file index an acquired object had when it was opened. Two leases with equal
+    /// identities opened the same file, whatever the path looked like in between.
+    /// </summary>
+    public readonly record struct FileIdentity(uint VolumeSerialNumber, ulong FileIndex);
 
     private const uint FileReadAttributes = 0x00000080;
     private const uint Synchronize = 0x00100000;

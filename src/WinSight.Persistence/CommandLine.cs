@@ -23,7 +23,14 @@ public enum ImageResolutionStatus
 public readonly record struct ExecutableResolution(
     string? ImagePath,
     string? ExpectedPath,
-    ImageResolutionStatus Status);
+    ImageResolutionStatus Status)
+{
+    /// <summary>
+    /// The file the resolution found, for <see cref="ImageResolutionStatus.Present"/>. A later read
+    /// of the image is accepted only from this same file, not from whatever the path names by then.
+    /// </summary>
+    public AutomaticFileAccess.FileIdentity? Identity { get; init; }
+}
 
 /// <summary>
 /// Best-effort extraction of the executable path from an autostart command string.
@@ -321,7 +328,7 @@ public static partial class CommandLine
             if (lease is not null)
             {
                 return !lease.IsDirectory && lease.IsCurrent()
-                    ? new(full, full, ImageResolutionStatus.Present)
+                    ? new(full, full, ImageResolutionStatus.Present) { Identity = lease.Identity }
                     : new(null, full, ImageResolutionStatus.Unresolved);
             }
             return AutomaticFileAccess.IsLocal(full)

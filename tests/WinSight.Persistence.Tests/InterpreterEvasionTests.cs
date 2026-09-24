@@ -78,6 +78,30 @@ public sealed class InterpreterEvasionTests
     }
 
     /// <summary>
+    /// WS-74: the Windows version API names the language file, <c>PowerShell.EXE.MUI</c>, and scans
+    /// before the fix stored that. It still names the interpreter.
+    /// </summary>
+    [Fact]
+    public void ALanguageFileNameStillNamesTheInterpreter()
+    {
+        var entry = new AutostartEntry(
+            AutostartVector.RunKey,
+            "Updater",
+            @"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+            @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -enc SQBFAFgA",
+            ImagePath: @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            ExpectedImagePath: @"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            ImageResolutionStatus.Present,
+            new SignatureVerdict(SignatureState.SignedTrusted, "CN=Microsoft Windows"),
+            OriginalFileName: "PowerShell.EXE.MUI");
+
+        Assert.Equal(InterpreterAbuse.EncodedCommand, entry.Abuse);
+        Assert.Equal("PowerShell.EXE", InterpreterAbuseTriage.WithoutLanguageSuffix("PowerShell.EXE.MUI"));
+        Assert.Equal(".mui", InterpreterAbuseTriage.WithoutLanguageSuffix(".mui"));
+        Assert.Equal("agent.exe", InterpreterAbuseTriage.WithoutLanguageSuffix("agent.exe"));
+    }
+
+    /// <summary>
     /// And a file whose compiled-in name is ordinary is not promoted into the table by it, so the
     /// addition cannot manufacture findings.
     /// </summary>

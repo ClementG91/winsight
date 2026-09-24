@@ -287,7 +287,7 @@ public static class InterpreterAbuseTriage
         // updater.exe no longer takes the entry out of the interpreter table (MITRE T1036.003).
         if (!string.IsNullOrWhiteSpace(entry.OriginalFileName))
         {
-            return NormalizeExtension(SafeFileName(entry.OriginalFileName));
+            return NormalizeExtension(SafeFileName(WithoutLanguageSuffix(entry.OriginalFileName)));
         }
         var path = entry.ImagePath ?? entry.ExpectedImagePath;
         if (!string.IsNullOrWhiteSpace(path))
@@ -304,6 +304,18 @@ public static class InterpreterAbuseTriage
             : command.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? command;
         return NormalizeExtension(SafeFileName(token));
     }
+
+    /// <summary>
+    /// The program a language resource file describes: <c>PowerShell.EXE.MUI</c> names
+    /// <c>PowerShell.EXE</c>.
+    /// </summary>
+    /// <remarks>
+    /// The Windows version API answers with the language file's name, and scans before WS-74 stored
+    /// it. A <c>.mui</c> file is resources only and is never what an autostart entry runs, so the
+    /// suffix can only have come from that substitution.
+    /// </remarks>
+    internal static string WithoutLanguageSuffix(string name) =>
+        name.Length > 4 && name.EndsWith(".mui", StringComparison.OrdinalIgnoreCase) ? name[..^4] : name;
 
     /// <summary>
     /// Appends the extension <c>CreateProcess</c> would, so an extension-less token is matched

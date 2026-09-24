@@ -137,9 +137,10 @@ public sealed class PersistenceScanner
             cancellationToken);
 
         // 3. Assemble. Version resources are read once per distinct image: a report holds thousands
-        //    of entries and a few hundred distinct files, so caching turns a per-entry Win32 call
-        //    into a per-file one.
-        var originalNames = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        //    of entries and a few hundred distinct files, so caching turns a per-entry read into a
+        //    per-file one.
+        var originalNames = new Dictionary<string, (AutomaticFileAccess.FileIdentity Identity, string? Name)>(
+            StringComparer.OrdinalIgnoreCase);
         var results = new List<AutostartEntry>(resolved.Count);
         foreach (var (raw, source, resolution) in resolved)
         {
@@ -156,7 +157,7 @@ public sealed class PersistenceScanner
                 resolution.ExpectedPath,
                 resolution.Status,
                 verdict,
-                OriginalFileNameOf(image, originalNames))
+                OriginalFileNameOf(resolution, originalNames))
             { Source = source, OverridesMachineClass = raw.OverridesMachineClass });
         }
         return new PersistenceScanResult(
@@ -176,28 +177,39 @@ public sealed class PersistenceScanner
     /// every resolved file and the rule itself runs repeatedly while a report is assembled and must
     /// perform no I/O. Any failure yields null: an unreadable version resource is not evidence of
     /// anything, and the file-name path still applies.
+    ///
+    /// <b>Only from the file the resolution found, through a handle (RA-02).</b> This used
+    /// <c>FileVersionInfo.GetVersionInfo(path)</c>: a second open by name, after the resolution had
+    /// let go of the file, outside the automatic-read guard. It read whatever the path named by then,
+    /// so a file swapped in during the scan lent this entry its name, and on a cloud-only file it
+    /// asked the provider to download it. It also answered with the language file's name
+    /// (<c>PowerShell.EXE.MUI</c>), which hid every genuine interpreter from the triage (WS-74).
     /// </remarks>
-    private static string? OriginalFileNameOf(string? image, Dictionary<string, string?> cache)
+    private static string? OriginalFileNameOf(
+        ExecutableResolution resolution,
+        Dictionary<string, (AutomaticFileAccess.FileIdentity Identity, string? Name)> cache)
     {
-        if (string.IsNullOrWhiteSpace(image))
+        if (resolution.ImagePath is not { } image || resolution.Identity is not { } identity)
         {
             return null;
         }
-        if (cache.TryGetValue(image, out var cached))
+        if (cache.TryGetValue(image, out var cached) && cached.Identity == identity)
         {
-            return cached;
+            return cached.Name;
         }
-        var name = ReadOriginalFileName(image);
-        cache[image] = name;
+        var name = ReadOriginalFileName(image, identity);
+        cache[image] = (identity, name);
         return name;
     }
 
-    private static string? ReadOriginalFileName(string image)
+    private static string? ReadOriginalFileName(string image, AutomaticFileAccess.FileIdentity identity)
     {
         try
         {
-            var name = System.Diagnostics.FileVersionInfo.GetVersionInfo(image).OriginalFilename;
-            return string.IsNullOrWhiteSpace(name) ? null : name;
+            using var lease = AutomaticFileAccess.TryAcquire(image);
+            return lease is not null && lease.Identity == identity
+                ? VersionResource.ReadOriginalFileName(lease)
+                : null;
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
