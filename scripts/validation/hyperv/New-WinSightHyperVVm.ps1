@@ -19,6 +19,7 @@
 # folder was; rebuilding it into a protected folder is what removes the doubt.
 [CmdletBinding()]
 param(
+    # Default locations are at the root of the volume this script runs from; pass a path to use another.
     [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
     [string]$Name = 'WinSight-Qualification-HV',
     [string]$Checkpoint = 'S0-hyperv-autorun',

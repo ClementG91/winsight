@@ -13,6 +13,7 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$PreviousSha256,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$PreviousCommit,
     [string]$PreviousVersion = '0.13.0',
+    # Default locations are at the root of the volume this script runs from; pass a path to use another.
     [string]$Requests = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification-Requests'),
     [string]$Architecture = 'x64'
 )

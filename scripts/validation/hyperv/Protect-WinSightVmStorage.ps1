@@ -2,14 +2,15 @@
 # HOST, elevated, once (and again after any change to the VMs): makes the Hyper-V qualification VM
 # storage administrators-only, then seals the SHA-256 of every disk in it.
 #
-# RA-01. The VMs were built under <vol>\, where Authenticated Users have Modify by inheritance, so any
-# local user could have replaced the disks the evidence came from. This removes that inheritance and
-# leaves SYSTEM, Administrators and the Hyper-V worker identities (Virtual Machines, S-1-5-83-0, and
-# the per-VM S-1-5-83-1-* grants Hyper-V adds itself). It cannot tell whether a disk was altered
-# before today: the sealed hashes let later runs prove it has not changed since, and rebuilding the
-# VM into protected storage is what removes the earlier doubt.
+# RA-01. The VMs were built on a data volume, whose default root ACL gives Authenticated Users Modify
+# by inheritance, so any local user could have replaced the disks the evidence came from. This
+# removes that inheritance and leaves SYSTEM, Administrators and the Hyper-V worker identities
+# (Virtual Machines, S-1-5-83-0, and the per-VM S-1-5-83-1-* grants Hyper-V adds itself). It cannot
+# tell whether a disk was altered before today: the sealed hashes let later runs prove it has not
+# changed since, and rebuilding the VM into protected storage is what removes the earlier doubt.
 [CmdletBinding()]
 param(
+    # Default locations are at the root of the volume this script runs from; pass a path to use another.
     [string]$VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
     [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification'),
     [string[]]$VmNames = @('WinSight-Qualification-HV', 'WinSight-Control-HV'),
@@ -50,7 +51,7 @@ foreach ($item in $items) {
     }
 }
 
-# Then the DACL of the root, which every item inherits from once the inheritance from <vol>\ is cut.
+# Then the DACL of the root, which every item inherits from once the inheritance from the volume is cut.
 & $icacls $VmRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-83-0:(OI)(CI)F' /Q | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "Could not set the DACL of $VmRoot (icacls exit $LASTEXITCODE)." }
 

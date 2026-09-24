@@ -11,6 +11,7 @@ param(
     [Parameter(Mandatory)][string]$RunDir,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$HarnessCommit,
     [string]$Repository = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))),
+    # Default locations are at the root of the volume this script runs from; pass a path to use another.
     [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification'),
     [string]$VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification')
 )

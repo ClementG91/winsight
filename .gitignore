@@ -11,6 +11,15 @@ target/
 # Secrets / local
 *.local
 .env
+# Personal and machine-local files, wherever they sit: private notes and settings (*.local.md,
+# settings.local.json), AI-assistant instructions and state, editor settings, caches and logs.
+*.local.*
+/CLAUDE.md
+.claude/
+.vscode/
+.idea/
+.ruff_cache/
+*.log
 # Scan reports exported by the CLI/dashboard (winsight-<yyyyMMdd-HHmmss>.json)
 winsight-*.json
 # Local evaluation runs

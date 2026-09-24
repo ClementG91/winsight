@@ -1,8 +1,8 @@
 # Shared helpers for the Hyper-V qualification scripts (HOST, elevated), Windows PowerShell 5.1.
 #
-# RA-01. The first harness kept its scripts, the staged candidate, the VM disks and the evidence under
-# <vol>\, where Authenticated Users have Modify by inheritance, and its elevated runner wrote and deleted
-# there. Anything that runs elevated here therefore follows three rules:
+# RA-01. The first harness kept its scripts, the staged candidate, the VM disks and the evidence at the
+# root of a data volume, where Authenticated Users have Modify by inheritance, and its elevated runner
+# wrote and deleted there. Anything that runs elevated here therefore follows three rules:
 #   - it writes only inside a directory it created itself with an administrators-only DACL, or one
 #     that Assert-ProtectedPath has just verified;
 #   - it reads from user-writable places only an explicit list of files, refusing reparse points;

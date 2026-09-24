@@ -49,7 +49,7 @@ public interface IAutostartEnumerator
     ///
     /// <b>Why a scanner must count its own refusals.</b> Measured on a real machine, the same scan
     /// returned 8 546 entries unelevated and 8 756 elevated: 210 autostart items — scheduled tasks
-    /// belonging to Brave, Edge, NVIDIA, OneDrive and Google updaters, and <i>one already flagged as
+    /// belonging to browser, graphics-driver and cloud-sync updaters, and <i>one already flagged as
     /// suspicious</i> — were simply absent, with no indication anything had been skipped. An
     /// operator reading that scan sees a clean surface, and "clean" and "I was not allowed to look"
     /// are not the same statement. Counting turns the second into something the report can say.

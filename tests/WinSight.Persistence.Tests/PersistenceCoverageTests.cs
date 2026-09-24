@@ -11,7 +11,7 @@ namespace WinSight.Persistence.Tests;
 /// <remarks>
 /// Measured on a real desktop: the same scan returned 8 546 autostart items unelevated and 8 756
 /// elevated. The 210 missing ones were scheduled tasks under
-/// <c>C:\Windows\System32\Tasks</c> — Brave, Edge, NVIDIA, OneDrive and Google updaters — and one
+/// <c>C:\Windows\System32\Tasks</c> — browser, graphics-driver and cloud-sync updaters — and one
 /// of them was already flagged as suspicious. Nothing in the report said anything had been skipped,
 /// so an unelevated operator read a complete, clean scan of a surface nobody had actually looked at.
 /// "No findings" and "not allowed to look" must never render the same.

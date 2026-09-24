@@ -10,10 +10,10 @@ privileged step happens inside a VM that is restored to a clean checkpoint after
 
 ## Trust boundary (RA-01)
 
-The first version kept its scripts, the staged candidate, the VM disks and the evidence under `<vol>\`,
-where Authenticated Users have Modify by inheritance, and its elevated runner wrote, moved and deleted
-files there. Hashes of that evidence proved it was consistent, not that nobody had changed a script
-before a run or a result after it. Now:
+The first version kept its scripts, the staged candidate, the VM disks and the evidence at the root of
+a data volume, where Authenticated Users have Modify by inheritance, and its elevated runner wrote,
+moved and deleted files there. Hashes of that evidence proved it was consistent, not that nobody had
+changed a script before a run or a result after it. Now:
 
 | Location | Who can write | What the runner does there |
 |---|---|---|
@@ -23,6 +23,9 @@ before a run or a result after it. Now:
 | `<vol>\WinSight-Qualification\sealed` | administrators (users read) | manifests, host log, one new directory per run |
 | `<vol>\WinSight-Qualification\runner` | administrators (users read) | status, log, action logs, processed request names |
 | `<vol>\Hyper-V\WinSight-Qualification` | administrators, Hyper-V | refused unless already protected |
+
+`<vol>` is the root of the volume the scripts run from: every default location above derives from
+it, and each script takes the path as a parameter to use another.
 
 Rules every elevated script here follows: write only into a directory it created with an
 administrators-only DACL, or one it has just verified; read from user-writable places only an explicit
@@ -47,9 +50,8 @@ rehearsal is still not a CI-attested release.
 ## Each campaign
 
 1. Commit the harness and note the commit (`git rev-parse HEAD`). Check it out as a worktree on the
-   data drive (`git worktree add <vol>\WinSight-Build\wt-<sha> <sha>`) - builds, tests and runs stay off
-   the system drive - and start the runner from that clean tree, elevated (the operator accepts the
-   UAC prompt):
+   volume that will hold the qualification data (`git worktree add <vol>\WinSight-Build\wt-<sha> <sha>`)
+   and start the runner from that clean tree, elevated (the operator accepts the UAC prompt):
    `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<vol>\WinSight-Build\wt-<sha>\scripts\validation\hyperv\WinSightQualRunner.ps1'`
 2. Build the candidate unelevated from a clean checkout of the commit (a worktree on a drive with
    room: `Build-Release.ps1 -Version <v> -Architectures x64 -DisableSignature`), then assemble it with

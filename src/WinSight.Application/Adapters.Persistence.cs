@@ -179,8 +179,8 @@ public static partial class Adapters
     /// </summary>
     /// <remarks>
     /// Measured on a real desktop, the same scan returned 8 546 items unelevated and 8 756
-    /// elevated. The 210 missing ones were scheduled tasks — Brave, Edge, NVIDIA, OneDrive and
-    /// Google updaters — and one of them was already flagged as suspicious. Nothing said so: the
+    /// elevated. The 210 missing ones were scheduled tasks — browser, graphics-driver and
+    /// cloud-sync updaters — and one of them was already flagged as suspicious. Nothing said so: the
     /// unelevated report read as a complete, clean scan. Naming the gap costs one clause and is the
     /// difference between "there is nothing there" and "I could not look".
     /// </remarks>
