@@ -261,6 +261,37 @@ public sealed class QualificationHarnessContractTests
     }
 
     /// <summary>
+    /// After restoring the checkpoints, the network run retries its queries of the restored VMs, and
+    /// the provenance check finds the results of a network run where it keeps them.
+    /// </summary>
+    /// <remarks>
+    /// Found by the first network run of the rebuilt harness to pass (net-711ded0b: gate 36 10/10).
+    /// The evidence was sealed, then the adapter query that followed the checkpoint restore failed
+    /// ("the object was not found; it may have been deleted": Hyper-V rebuilds the VM's objects during
+    /// a restore), and the run ended in error. The provenance check then stopped at its fourth check:
+    /// it looked for results.json at the root of the run, where a network run keeps target\results.json.
+    /// </remarks>
+    [Fact]
+    public void TheNetworkRunRetriesRestoredVmQueriesAndItsResultsCanBeVerified()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("function Invoke-WinSightVmRetry([scriptblock]$Action, [int]$Seconds = 60)", module, StringComparison.Ordinal);
+
+        var driver = Code(Path.Combine(Harness, "Invoke-HyperVNetworkLogon.ps1"));
+        var restore = Block(driver, driver.IndexOf("function Restore-BothVms", StringComparison.Ordinal));
+        var queries = restore.Split('\n').Where(line => line.Contains("Get-VMNetworkAdapter", StringComparison.Ordinal)
+            || line.Contains("Get-VMMemory", StringComparison.Ordinal)).ToArray();
+        Assert.NotEmpty(queries);
+        Assert.All(queries, line => Assert.Contains("Invoke-WinSightVmRetry {", line, StringComparison.Ordinal));
+        var restored = driver.Split('\n').Single(line => line.Contains("both VMs restored", StringComparison.Ordinal));
+        Assert.Contains("Invoke-WinSightVmRetry {", restored, StringComparison.Ordinal);
+
+        var verifier = Code(Path.Combine(Harness, "Verify-QualificationProvenance.ps1"));
+        Assert.Contains("'target\\results.json'", verifier, StringComparison.Ordinal);
+        Assert.DoesNotContain("Get-Content -LiteralPath (Join-Path $RunDir 'results.json')", verifier, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The Cloud Files probe fails each download request at once, over the whole file, so no request
     /// stays pending and every read, by any process, arrives as a request of its own.
     /// </summary>

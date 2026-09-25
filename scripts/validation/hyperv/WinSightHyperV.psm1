@@ -370,20 +370,37 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
 function Remove-WinSightDataDisk([Parameter(Mandatory)][string]$VMName, [Parameter(Mandatory)][string]$Path, [int]$Attempts = 30) {
     $found = $null
     for ($attempt = 1; ; $attempt++) {
-        $state = Get-WinSightVmState $VMName
-        if ($state -ne 'Off') {
-            if (-not $found) { $found = $state }
-            Stop-VM -Name $VMName -TurnOff -Force
-        }
-        $drives = @(Get-VMHardDiskDrive -VMName $VMName | Where-Object Path -eq $Path)
-        if ($drives.Count -eq 0) { return $found }
+        # The queries are retried too: this runs right after a checkpoint restore, while Hyper-V can
+        # answer "object not found" for a moment (see Invoke-WinSightVmRetry).
         try {
+            $state = Get-WinSightVmState $VMName
+            if ($state -ne 'Off') {
+                if (-not $found) { $found = $state }
+                Stop-VM -Name $VMName -TurnOff -Force
+            }
+            $drives = @(Get-VMHardDiskDrive -VMName $VMName | Where-Object Path -eq $Path)
+            if ($drives.Count -eq 0) { return $found }
             $drives | Remove-VMHardDiskDrive -ErrorAction Stop
             return $found
         }
         catch {
             if ($attempt -ge $Attempts) { throw }
             Start-Sleep -Seconds 10
+        }
+    }
+}
+
+# Runs $Action until it succeeds, for up to $Seconds, then fails with its last error. Right after
+# Restore-VMCheckpoint, Hyper-V rebuilds the VM's objects and a query of the VM can fail for a moment
+# ("the object was not found; it may have been deleted"): seen after a network run whose evidence was
+# already sealed.
+function Invoke-WinSightVmRetry([scriptblock]$Action, [int]$Seconds = 60) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ($true) {
+        try { return & $Action }
+        catch {
+            if ((Get-Date) -ge $deadline) { throw }
+            Start-Sleep -Seconds 2
         }
     }
 }
@@ -425,4 +442,5 @@ function Assert-WinSightHostMemory([int64]$Bytes, [string]$Advice) {
 
 Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
-    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine
+    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine,
+    Invoke-WinSightVmRetry

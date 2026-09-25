@@ -72,13 +72,17 @@ $scriptDrift = @($scripts | Where-Object {
         (Get-BlobAt $claimed ('scripts/' + ($_.Relative.Substring('source\scripts\'.Length) -replace '\\', '/'))) -ne $_.Blob
     } | ForEach-Object Relative)
 Report ($claimed -match '^[0-9a-f]{40}$' -and $scripts.Count -gt 0 -and $scriptDrift.Count -eq 0) "candidate scripts are commit $($claimed.Substring(0, [Math]::Min(12, $claimed.Length)))" ($scriptDrift -join ', ')
-$results = Get-Content -LiteralPath (Join-Path $RunDir 'results.json') -Raw | ConvertFrom-Json
-$artifactDrift = @($results.candidate.artifacts.PSObject.Properties | Where-Object {
-        $name = $_.Name
-        $staged = $candidate | Where-Object Relative -eq $name
-        -not $staged -or $staged.Sha256 -ne $_.Value
-    } | ForEach-Object Name)
-Report ($results.candidate.commit -eq $claimed -and $artifactDrift.Count -eq 0) 'the guest checked the artifacts the runner staged' ($artifactDrift -join ', ')
+# A qualification run keeps the guest's results at its root, a network run keeps the target's under target\.
+$resultsFile = @('results.json', 'target\results.json' | ForEach-Object { Join-Path $RunDir $_ } | Where-Object { Test-Path -LiteralPath $_ })[0]
+$results = if ($resultsFile) { Get-Content -LiteralPath $resultsFile -Raw | ConvertFrom-Json } else { $null }
+$artifactDrift = @(if ($results) {
+        $results.candidate.artifacts.PSObject.Properties | Where-Object {
+            $name = $_.Name
+            $staged = $candidate | Where-Object Relative -eq $name
+            -not $staged -or $staged.Sha256 -ne $_.Value
+        } | ForEach-Object Name
+    })
+Report ($null -ne $results -and $results.candidate.commit -eq $claimed -and $artifactDrift.Count -eq 0) 'the guest checked the artifacts the runner staged' $(if ($results) { $artifactDrift -join ', ' } else { 'no results.json in the run' })
 
 # --- 4. Nobody else can write --------------------------------------------------------------------------
 function Test-WriteRefused([string]$Check, [scriptblock]$Attempt) {
@@ -94,7 +98,7 @@ $probe = 'winsight-provenance-probe-' + [Guid]::NewGuid().ToString('N')
 function Open-ForWrite([string]$Path) { [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite).Dispose() }
 Test-WriteRefused 'a new file in the run is refused' { [IO.File]::WriteAllText((Join-Path $RunDir $probe), 'x') }
 Test-WriteRefused 'the seal cannot be opened for writing' { Open-ForWrite $sums }
-Test-WriteRefused 'the results cannot be opened for writing' { Open-ForWrite (Join-Path $RunDir 'results.json') }
+Test-WriteRefused 'the results cannot be opened for writing' { Open-ForWrite $resultsFile }
 Test-WriteRefused 'the protected harness is refused' { [IO.File]::WriteAllText((Join-Path $Root "harness\$probe"), 'x') }
 Test-WriteRefused 'the staged candidates are refused' { [IO.File]::WriteAllText((Join-Path $Root "candidates\$probe"), 'x') }
 Test-WriteRefused 'the VM storage is refused' { [IO.File]::WriteAllText((Join-Path $VmRoot $probe), 'x') }

@@ -30,8 +30,11 @@ passent sur le candidat `259056b`.
 scripts, le candidat, les disques des VM et les preuves dans des dossiers que tout utilisateur
 authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
 fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
-`Verify-QualificationProvenance.ps1`) mais n'a pas encore tourné, et le code produit a changé depuis
-`259056b` (RA-02 à RA-05, WS-74 à WS-83) : **la tête de la branche n'est pas qualifiée**. La passe complète `head-fe953fe` (§17.4, provenance vérifiée) a passé ses 32 portes sans échec (la porte 36 se passe à part, avec la VM de contrôle) ; la porte 17 est à repasser avec la mesure corrigée (WS-82).
+`Verify-QualificationProvenance.ps1`), et le code produit a changé depuis `259056b` (RA-02 à RA-05, WS-74 à
+WS-76). **Requalifié les 25 et 26 septembre avec le harnais refait** (§17.4, provenance vérifiée pour chaque passe) :
+la passe complète `head-fe953fe` (32 portes, 0 échec), la porte 17 repassée avec la mesure corrigée
+(`gate17-711ded0`) et la porte 36 depuis la VM de contrôle (`net-711ded0b`, 10/10). Le code produit de la tête est
+celui de ces candidats. Ce sont des répétitions locales non signées, pas des preuves attestées par la CI.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -48,7 +51,7 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **77 défauts** : 72 corrigés et testés (dont neuf dans le
+- **Problèmes trouvés.** L'audit a traité **79 défauts** : 74 corrigés et testés (dont onze dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
   1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
@@ -288,6 +291,8 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-81 | Low | Validation | L'étape réseau (porte 36) démarre deux VM ensemble sans vérifier que l'hôte peut les contenir. À la première passe du harnais refait, la cible a démarré (4 Go), puis la VM de contrôle n'a pas obtenu ses 3 Go (Hyper-V `0x800705AA`, 2,3 Go libres sur 15,9 Go). Le pilote s'est arrêté là, sans rien remettre en place : la cible est restée allumée sur le commutateur privé, sa passe chargée, avec la configuration de la passe (carte réseau privée, mémoire) | une passe réseau perdue et une VM laissée allumée que l'opérateur a dû éteindre ; aucune preuve concernée | `Invoke-HyperVNetworkLogon.ps1`, `WinSightHyperV.psm1`, `WinSightQualRunner.ps1` | mémoire disponible vérifiée avant tout changement (cible + contrôle + 0,5 Go, `Assert-WinSightHostMemory`, message qui dit quoi faire) ; VM de contrôle à 2 Go pendant la passe (elle ne fait qu'ouvrir une session réseau) ; démarrages dans un `try` dont le `catch` éteint les deux VM, retire les disques, restaure les deux points de contrôle, le réseau de la cible et la mémoire de chacune, puis échoue avec la cause ; l'exécuteur transmet `memoryGB` (3 à 8) à l'étape réseau ; test de contrat et autocontrôle PowerShell 5.1, en échec sur le harnais précédent | Corrigé |
 | WS-82 | Low | Validation | La porte 17 comptait toute demande de téléchargement reçue par le fournisseur Cloud Files de la sonde, sans savoir quel processus l'avait faite. Elle lançait en outre le scan de persistance à l'instant même où la valeur Run était écrite, pendant que ce qui réagit à une nouvelle valeur Run réagit encore. À la première passe du harnais refait, le scan a vu une demande. Tout indique qu'elle ne venait pas de WinSight : le verbe `sign` sur le même fichier n'en fait aucune, les lectures de fichier du scan, relues dans le code, passent par la garde « données locales » (`LocalPathLease.OpenRead`), et le scan a fini en 38 s, alors qu'une demande de sa part l'aurait bloqué au moins une minute (le fournisseur de la sonde ne répond jamais). La mesure ne permettait pas de le prouver | porte 17 en échec sans coupable établi : RA-02 non démontré en VM pour la tête | `scripts/Measure-CloudFilesAccess.ps1`, `guest/qualify.ps1`, `VM_QUALIFICATION_KIT.md` | le fournisseur se connecte avec `CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO` et enregistre, pour chaque demande, le processus (PID, image, ligne de commande) et le fichier ; une demande est imputée à WinSight si elle vient du processus mesuré ou d'une image `winsight*`, ou si la plateforme ne sait pas la nommer ; 30 s d'attente après l'écriture de la valeur Run, dont les demandes sont consignées à part et bornées de la même façon (Guardian compris) ; les demandes d'autres programmes figurent dans la preuve et la sortie, sans faire échouer la porte ; test de contrat, et autocontrôle qui compile les types de la sonde et décode un rappel écrit aux décalages x64 de `cfapi.h`, en échec sur la sonde précédente. Première passe avec l'attribution (`head-fe953fe`, §17.4) : les seules demandes, pendant l'attente comme pendant le scan, venaient de `sihost.exe` (l'hôte d'infrastructure de l'interpréteur de commandes de Windows, qui réagit à la nouvelle valeur Run), aucune de WinSight. Mais elles arrivaient une à une, à 60 s d'écart : la plateforme ne garde qu'une demande par fichier et fait attendre derrière elle tout autre lecteur, sans rappel à son nom (la primitive Win32 a attendu 90 s derrière une demande de sihost). Une lecture de WinSight pendant le scan, qu'une demande de sihost couvrait de bout en bout, n'aurait donc été comptée nulle part. Le fournisseur fait désormais échouer chaque demande sur-le-champ (`CfExecute`, `TRANSFER_DATA` en échec sur tout le fichier) : plus aucune demande n'attend, et chaque lecture arrive en demande à son nom ; autocontrôle de la disposition de `CF_OPERATION_INFO` (48 octets) et de `CF_OPERATION_PARAMETERS.TransferData` (40 octets) aux décalages x64 de `cfapi.h`, en échec sur la sonde précédente | Corrigé dans la mesure ; porte 17 à repasser en VM |
 | WS-83 | Low | Validation | Sous Windows PowerShell 5.1, `Add-Content` et `Set-Content` échouent dès qu'un autre processus tient le fichier ouvert en lecture, même un lecteur qui partage l'écriture (mesuré). Or l'exécuteur et les pilotes écrivaient ainsi les fichiers qu'on lit pendant une campagne : journal, état, liste des requêtes traitées, journal des opérations hôte. Au redémarrage de l'exécuteur pour la troisième campagne, un `tail -F` sur le journal (la surveillance de l'agent) l'a arrêté entre deux requêtes, la qualification déjà marquée traitée et jamais lancée ; relancé, il s'est arrêté à sa première ligne | un opérateur qui suit le journal (`Get-Content -Wait`, un éditeur) arrête l'exécuteur, ou un pilote entre la fin de l'invité et la collecte ; aucune preuve concernée cette fois, aucune VM démarrée | `WinSightHyperV.psm1`, `WinSightQualRunner.ps1`, `Invoke-HyperVQualification.ps1`, `Invoke-HyperVNetworkLogon.ps1`, `New-WinSightControlVm.ps1` | ces quatre fichiers écrits par un flux ouvert avec partage lecture et écriture (`Write-SharedText`, `Add-SharedLine`), une violation de partage réessayée cinq secondes ; plus aucun `Add-Content` dans les scripts hôtes ; test de contrat, et autocontrôle PowerShell 5.1 qui garde le fichier ouvert en lecture (`Add-Content` y échoue, les deux fonctions y écrivent), en échec sur le harnais précédent | Corrigé |
+| WS-84 | Low | Validation | Après la restauration des points de contrôle, l'étape réseau interrogeait aussitôt les VM restaurées (carte réseau, mémoire), sans réessayer. Pendant une restauration, Hyper-V reconstruit les objets de la VM et peut répondre un instant « objet introuvable ». À la première passe réseau réussie du harnais refait (`net-711ded0b`, porte 36 10/10), la preuve était scellée, puis cette requête a échoué et le pilote a fini en erreur | une porte réussie rapportée en échec par l'exécuteur, sans la ligne de restauration au journal ; les points de contrôle étaient restaurés et la preuve intacte | `WinSightHyperV.psm1`, `Invoke-HyperVNetworkLogon.ps1` | chaque requête aux VM restaurées réessayée pendant une minute (`Invoke-WinSightVmRetry`, toutes les 2 s, puis l'erreur d'origine) ; le retrait du disque de données, appelé lui aussi juste après une restauration, réessaie ses requêtes ; test de contrat et autocontrôle PowerShell 5.1, en échec sur le harnais précédent | Corrigé |
+| WS-85 | Low | Validation | `Verify-QualificationProvenance.ps1` lisait `results.json` à la racine de la passe, alors qu'une passe réseau garde celui de la cible sous `target\results.json`. Le vérificateur n'avait jamais vérifié une passe réseau du harnais refait : sur `net-711ded0b`, il s'est arrêté à son quatrième contrôle (chemin introuvable) | une passe réseau ne pouvait pas être citée comme preuve liée à sa provenance | `Verify-QualificationProvenance.ps1` | résultats lus à la racine ou sous `target\` ; si aucun des deux n'existe, le contrôle échoue (« no results.json ») ; test de contrat en échec sur le vérificateur précédent ; `net-711ded0b` vérifiée ensuite : 11/11 | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -392,7 +397,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 615 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 616 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -613,7 +618,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 615 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 616 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -651,7 +656,7 @@ ci-dessous, par thème, avec la justification.
 | Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1`, `Test-InstallerServiceUninstall.ps1`, `Test-InstallerUpgrade.ps1` | WS-13, WS-63 |
 | Mesure | `scripts/Measure-Performance.ps1` | outil de mesure reproductible (D3) |
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
-| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77 à WS-83, WS-40 (mesure) |
+| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77 à WS-85, WS-40 (mesure) |
 | Lecture automatique et attribution | `Core/AutomaticFileAccess.cs`, `AutomaticFileMutation.cs`, `Attribution/WriteAttributionWatcher.cs` | WS-40, WS-73 |
 | Contre-audit : nom d'origine par le handle | `Core/PeResources.cs`, `VersionResource.cs`, `Persistence/PersistenceScanner.cs`, `CommandLine.cs`, `InterpreterAbuseTriage.cs` | RA-02, WS-74 |
 | Contre-audit : Guardian incertain | `Persistence/PersistenceCoverageGain.cs`, `PersistenceMonitorCore.cs`, `PersistenceMonitor*.cs`, `Application/GuardianHost.cs`, `Adapters.Alerts.cs`, `Dashboard/MainWindow.Monitors.cs` | RA-03 |
@@ -780,7 +785,7 @@ chaque passe) ; leur équivalent dans l'historique publié :
 | `66d4f61` | `02b17de` |  |  |
 
 
-### 17.4 Qualification VM du 25 septembre 2026 (harnais refait)
+### 17.4 Qualification VM des 25 et 26 septembre 2026 (harnais refait)
 
 Premières passes du harnais refait (`scripts/validation/hyperv`, RA-01) : exécuteur élevé lancé par
 l'opérateur depuis une extraction du commit sur le volume de données, copies protégées du harnais et
@@ -795,9 +800,15 @@ signés : des répétitions, pas des preuves attestées par la CI.
 | `net-771a67b` | `771a67b` | non démarrée | la VM de contrôle n'a pas obtenu sa mémoire après le démarrage de la cible (WS-81) |
 | `head-bf9aad9` | `bf9aad9` | non démarrée | candidat chargé, puis l'exécuteur s'est arrêté sur une écriture de son journal qu'un lecteur tenait ouvert (WS-83) |
 | `head-fe953fe` | `fe953fe` | **32 portes, 0 FAIL**, 36 NOT_RUN (passe à part) ; provenance : 11/11 PASS | qualification complète ; 17 : demandes de téléchargement de `sihost.exe` seulement, aucune de WinSight, mais une lecture attendant derrière une demande de sihost n'aurait pas été vue (WS-82, second temps) |
+| `net-fe953fe` | `fe953fe` | perdue | l'opérateur n'était pas devant la machine : la VM de contrôle attend 60 minutes le rendez-vous de la cible, puis s'arrête ; porte 36 non passée |
+| `net-711ded0b` | `711ded0` | **porte 36 : 10/10** (ouverture de session réseau 7/7, observateur 3/3), 99 PASS ; contrôle 7/7 ; provenance : 11/11 PASS | le pilote a fini en erreur après le scellement (WS-84) ; passe vérifiée avec le vérificateur corrigé (WS-85) |
+| `gate17-711ded0` | `711ded0` | **17 PASS**, 01 et 99 PASS ; provenance : 11/11 PASS | aucune demande de téléchargement ni pendant l'attente ni pendant le scan (22 s, entrée listée, image refusée) ; les primitives montrent que la mesure voit désormais chaque lecture : chacune arrive à son nom (`powershell.exe`) et échoue aussitôt (erreur 389) |
 
-Restent la porte 36 (`net-fe953fe`) et la porte 17 avec la sonde qui fait échouer chaque demande
-sur-le-champ. La tête n'est donc toujours pas qualifiée.
+**Le code produit de la tête est qualifié en x64** : `head-fe953fe` pour toutes les portes sauf la 36 (32 portes,
+0 échec), `gate17-711ded0` pour la porte 17 avec la mesure corrigée, `net-711ded0b` pour la porte 36. Le code
+produit (`src`, `installer`) est identique entre ces candidats et la tête ; les commits suivants n'ont touché que
+le harnais, les tests et la documentation. Ce sont des répétitions locales non signées, pas des preuves attestées
+par la CI. Restent hors de portée : ARM64 natif, signature Authenticode, endurance, postes multi-utilisateurs.
 
 ---
 
@@ -806,8 +817,9 @@ sur-le-champ. La tête n'est donc toujours pas qualifiée.
 ### Maintenant — bugs, sécurité, fiabilité
 
 - Relire et fusionner la branche d'audit par thème. Qualification x64 : `259056b` a passé 31 portes
-  sur 31 (§17.2), sous la réserve RA-01 ; la tête est à requalifier avec le harnais refait : 32 portes sur 32 passées à `fe953fe`
-  (§17.4), restent la porte 17 avec la mesure corrigée et la porte 36 ; ARM64.
+  sur 31 (§17.2), sous la réserve RA-01 ; la tête a été requalifiée avec le harnais refait (§17.4 : `head-fe953fe`,
+  `gate17-711ded0`, `net-711ded0b`, provenance vérifiée) ; restent ARM64, la signature Authenticode,
+  l'endurance et les postes multi-utilisateurs.
 - `PRODUCTION_READINESS.md` : distinction faite (RA-07) ; déclarer le candidat seulement après cette
   requalification.
 

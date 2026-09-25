@@ -59,13 +59,14 @@ function Restore-BothVms {
     Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
     Restore-VMCheckpoint -VMName $ControlName -Name $ControlCheckpoint -Confirm:$false
     # The checkpoint restores the configuration too. This only makes sure, since the full
-    # qualification needs the target's own network (gates 23 and 33).
-    Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter
+    # qualification needs the target's own network (gates 23 and 33). Each query is retried: right
+    # after a restore, Hyper-V can answer "object not found" for a moment.
+    Invoke-WinSightVmRetry { Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter }
     foreach ($adapter in $originalAdapters) {
-        if ($adapter.SwitchName -and -not (Get-VMNetworkAdapter -VMName $Name -Name $adapter.Name).SwitchName) { Connect-VMNetworkAdapter -VMName $Name -Name $adapter.Name -SwitchName $adapter.SwitchName }
+        Invoke-WinSightVmRetry { if ($adapter.SwitchName -and -not (Get-VMNetworkAdapter -VMName $Name -Name $adapter.Name).SwitchName) { Connect-VMNetworkAdapter -VMName $Name -Name $adapter.Name -SwitchName $adapter.SwitchName } }
     }
-    if ($originalMemory -gt 0 -and (Get-VMMemory -VMName $Name).Startup -ne $originalMemory) { Set-VMMemory -VMName $Name -StartupBytes $originalMemory }
-    if ($originalControlMemory -gt 0 -and (Get-VMMemory -VMName $ControlName).Startup -ne $originalControlMemory) { Set-VMMemory -VMName $ControlName -StartupBytes $originalControlMemory }
+    Invoke-WinSightVmRetry { if ($originalMemory -gt 0 -and (Get-VMMemory -VMName $Name).Startup -ne $originalMemory) { Set-VMMemory -VMName $Name -StartupBytes $originalMemory } }
+    Invoke-WinSightVmRetry { if ($originalControlMemory -gt 0 -and (Get-VMMemory -VMName $ControlName).Startup -ne $originalControlMemory) { Set-VMMemory -VMName $ControlName -StartupBytes $originalControlMemory } }
 }
 $network = [ordered]@{
     targetAddress = '192.168.250.10'; controlAddress = '192.168.250.20'; prefixLength = 24; httpPort = 8088
@@ -198,7 +199,7 @@ Get-ChildItem -LiteralPath $runDir -Recurse -File | Where-Object Name -ne 'SHA25
     Set-Content -LiteralPath (Join-Path $runDir 'SHA256SUMS.txt')
 Write-HostLog "evidence sealed in $runDir"
 Restore-BothVms
-Write-HostLog "both VMs restored ($Checkpoint, $ControlCheckpoint), target network: $((Get-VMNetworkAdapter -VMName $Name | ForEach-Object { "$($_.Name)=$($_.SwitchName)" }) -join ', ')"
+Write-HostLog "both VMs restored ($Checkpoint, $ControlCheckpoint), target network: $(Invoke-WinSightVmRetry { (Get-VMNetworkAdapter -VMName $Name | ForEach-Object { "$($_.Name)=$($_.SwitchName)" }) -join ', ' })"
 
 $resultsFile = Join-Path $runDir 'target\results.json'
 if (-not (Test-Path -LiteralPath $resultsFile)) { Write-Warning 'No target results.json.'; exit 2 }

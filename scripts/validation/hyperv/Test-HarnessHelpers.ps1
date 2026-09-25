@@ -205,6 +205,17 @@ try {
     }
     finally { $follower.Dispose() }
     Report ($blocked -and $shared) 'the harness appends to and rewrites a file another process is reading (Add-Content cannot)'
+
+    # Right after a checkpoint restore, Hyper-V can answer "object not found" for a moment: a query of
+    # the restored VM is retried, and gives up with the error once its time is out.
+    $counter = @{ tries = 0 }
+    $retried = try {
+        $value = Invoke-WinSightVmRetry { $counter.tries++; if ($counter.tries -lt 3) { throw 'object not found' }; 'restored' } -Seconds 30
+        $gaveUp = try { Invoke-WinSightVmRetry { throw 'still not found' } -Seconds 1; $false } catch { $_.Exception.Message -eq 'still not found' }
+        $value -eq 'restored' -and $counter.tries -eq 3 -and $gaveUp
+    }
+    catch { $false }
+    Report $retried 'a query of a restored VM is retried, then fails with its own error'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete
