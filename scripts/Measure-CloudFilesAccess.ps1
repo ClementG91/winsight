@@ -17,20 +17,65 @@ param(
 #
 # This registers a throw-away sync root with the documented Cloud Files API (no OneDrive, no account),
 # creates the placeholder shapes OneDrive does - hydrated and dehydrated files, a directory placeholder
-# - connects a provider that only counts download (FETCH_DATA) requests, and asks winsight.exe to
-# hash each file. It registers a sync root for the current user: run it in the disposable VM.
+# - connects a provider that records each download (FETCH_DATA) request with the process that made it
+# and serves none, and asks winsight.exe to hash each file. It registers a sync root for the current
+# user: run it in the disposable VM.
+#
+# Who asked matters. A download request is WinSight's when a WinSight process made it; another program
+# on the machine (Defender reacting to a new Run value, for instance) can ask for the same file during
+# a measurement. Each request is recorded with its process, and one the platform cannot attribute is
+# counted as WinSight's.
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
-using System.Threading;
 using Microsoft.Win32.SafeHandles;
 
 public static class CloudFilesProbe
 {
+    // CF_CALLBACK_INFO (cfapi.h), field for field.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CallbackInfo
+    {
+        public uint StructSize;
+        public long ConnectionKey;
+        public IntPtr CallbackContext;
+        public IntPtr VolumeGuidName;
+        public IntPtr VolumeDosName;
+        public uint VolumeSerialNumber;
+        public long SyncRootFileId;
+        public IntPtr SyncRootIdentity;
+        public uint SyncRootIdentityLength;
+        public long FileId;
+        public long FileSize;
+        public IntPtr FileIdentity;
+        public uint FileIdentityLength;
+        public IntPtr NormalizedPath;
+        public long TransferKey;
+        public byte PriorityHint;
+        public IntPtr CorrelationVector;
+        public IntPtr ProcessInfo;
+        public long RequestKey;
+    }
+
+    // CF_PROCESS_INFO. CommandLine and SessionId came with Windows 10 1803; StructSize says whether
+    // they are there.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ProcessInfo
+    {
+        public uint StructSize;
+        public uint ProcessId;
+        public IntPtr ImagePath;
+        public IntPtr PackageName;
+        public IntPtr ApplicationId;
+        public IntPtr CommandLine;
+        public uint SessionId;
+    }
+
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     public struct SyncRegistration
     {
@@ -105,11 +150,48 @@ public static class CloudFilesProbe
     [DllImport("kernel32.dll")]
     public static extern bool FindClose(IntPtr handle);
 
-    private static int fetchRequests;
-    private static readonly Callback Fetch = delegate { Interlocked.Increment(ref fetchRequests); };
+    // CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO: without it the platform leaves ProcessInfo empty.
+    private const uint RequireProcessInfo = 0x2;
+    // One entry per download request: when, the id, image and command line of the process that asked,
+    // and the file. No request is answered, so a read waiting on one stays blocked until it times out.
+    private static readonly ConcurrentQueue<string[]> requests = new ConcurrentQueue<string[]>();
+    private static readonly Callback Fetch = OnFetch;
     private static readonly IntPtr Identity = Marshal.StringToHGlobalUni("winsight-cloud-probe");
 
-    public static int FetchRequests { get { return Volatile.Read(ref fetchRequests); } }
+    public static int FetchRequests { get { return requests.Count; } }
+
+    public static string[][] Requests() { return requests.ToArray(); }
+
+    // Runs on a platform thread: nothing may escape from it. The structures are read only as far as
+    // their StructSize covers.
+    private static void OnFetch(IntPtr info, IntPtr parameters)
+    {
+        string processId = "0", image = "", commandLine = "", file = "";
+        try
+        {
+            if (Marshal.ReadInt32(info) >= Offset(typeof(CallbackInfo), "RequestKey"))
+            {
+                file = Text(Marshal.ReadIntPtr(info, Offset(typeof(CallbackInfo), "NormalizedPath")));
+                var process = Marshal.ReadIntPtr(info, Offset(typeof(CallbackInfo), "ProcessInfo"));
+                if (process != IntPtr.Zero)
+                {
+                    var size = Marshal.ReadInt32(process);
+                    processId = ((uint)Marshal.ReadInt32(process, Offset(typeof(ProcessInfo), "ProcessId"))).ToString();
+                    image = Text(Marshal.ReadIntPtr(process, Offset(typeof(ProcessInfo), "ImagePath")));
+                    if (size >= Offset(typeof(ProcessInfo), "SessionId"))
+                    {
+                        commandLine = Text(Marshal.ReadIntPtr(process, Offset(typeof(ProcessInfo), "CommandLine")));
+                    }
+                }
+            }
+        }
+        catch (Exception) { }
+        requests.Enqueue(new[] { DateTime.UtcNow.ToString("o"), processId, image, commandLine, file });
+    }
+
+    private static int Offset(Type type, string field) { return Marshal.OffsetOf(type, field).ToInt32(); }
+
+    private static string Text(IntPtr value) { return value == IntPtr.Zero ? "" : Marshal.PtrToStringUni(value); }
 
     public static void Check(int hr, string what)
     {
@@ -139,7 +221,7 @@ public static class CloudFilesProbe
             new CallbackRegistration { Type = unchecked((int)0xFFFFFFFF), Callback = IntPtr.Zero },
         };
         long key;
-        Check(CfConnectSyncRoot(root, table, IntPtr.Zero, 0, out key), "CfConnectSyncRoot");
+        Check(CfConnectSyncRoot(root, table, IntPtr.Zero, RequireProcessInfo, out key), "CfConnectSyncRoot");
         return key;
     }
 
@@ -169,6 +251,48 @@ public static class CloudFilesProbe
     }
 }
 '@
+
+# Who made a download request: 'winsight' for the process under test or any WinSight image, 'other' for
+# another program, 'unattributed' when the platform could not say - which counts as WinSight, so that
+# a bound on WinSight's requests fails closed.
+function Get-FetchOwner([int]$ProcessId, [string]$Image, [int[]]$WinSightProcessIds) {
+    if ($ProcessId -le 0 -or -not $Image -or $Image -eq 'UNKNOWN') { return 'unattributed' }
+    if ($WinSightProcessIds -contains $ProcessId -or ($Image -split '\\')[-1] -like 'winsight*') { return 'winsight' }
+    'other'
+}
+
+# The download requests received from index $From on, each with the process that asked. When the
+# platform could not name the image, the name of the process still running under that id stands in.
+function Get-Fetches([int]$From, [int[]]$WinSightProcessIds) {
+    $all = [CloudFilesProbe]::Requests()
+    @(for ($i = $From; $i -lt $all.Count; $i++) {
+        $utc, $processId, $image, $commandLine, $file = $all[$i]
+        $processId = [int]$processId
+        if ((-not $image -or $image -eq 'UNKNOWN') -and $processId -gt 0) {
+            $running = Get-Process -Id $processId -ErrorAction SilentlyContinue
+            if ($running) { $image = $running.ProcessName }
+        }
+        [ordered]@{
+            utc = $utc; processId = $processId; image = $image; commandLine = $commandLine; file = $file
+            owner = Get-FetchOwner -ProcessId $processId -Image $image -WinSightProcessIds $WinSightProcessIds
+        }
+    })
+}
+
+# Adds to $Record the counts a gate bounds, and the requests themselves.
+function Add-Fetches($Record, $Fetches) {
+    $all = @($Fetches)
+    $Record.fetchRequestsByWinSight = @($all | Where-Object { $_.owner -eq 'winsight' }).Count
+    $Record.fetchRequestsUnattributed = @($all | Where-Object { $_.owner -eq 'unattributed' }).Count
+    $Record.fetchRequesters = $all
+}
+
+# "none", or each request as <image>#<process id>/<owner>.
+function Format-Fetches($Fetches) {
+    $all = @($Fetches)
+    if ($all.Count -eq 0) { return 'none' }
+    ($all | ForEach-Object { '{0}#{1}/{2}' -f ($_.image -split '\\')[-1], $_.processId, $_.owner }) -join ', '
+}
 
 $cli = (Resolve-Path -LiteralPath $CliPath).Path
 $sample = Join-Path $env:SystemRoot "System32\cmd.exe"
@@ -234,6 +358,7 @@ try
         $fields = $null
         try { $fields = ($stdout.Result | ConvertFrom-Json).reports[0].items[0].fields } catch { }
         $after = [CloudFilesProbe]::Describe($path)
+        $fetches = @(Get-Fetches -From $fetchBefore -WinSightProcessIds @($process.Id))
         $evidence.cases[$name] = [ordered]@{
             path = $path
             attributesBefore = ('0x{0:X8}' -f $before[0])
@@ -246,25 +371,37 @@ try
             # An unreadable file gets a report without a signature state; StrictMode would throw on it.
             state = if ($fields -and $fields.PSObject.Properties.Name -contains 'state') { $fields.state } else { $null }
             sha256Matches = [bool]($fields -and ($fields.PSObject.Properties.Name -contains "sha256") -and $fields.sha256 -eq $expected)
-            fetchRequestsDuringRead = [CloudFilesProbe]::FetchRequests - $fetchBefore
+            fetchRequestsDuringRead = $fetches.Count
             output = $stdout.Result
         }
         $c = $evidence.cases[$name]
-        "{0}: readable={1} state={2} fetch={3} ms={4} attrs={5} tag={6} placeholder={7}->{8}" -f `
+        Add-Fetches $c $fetches
+        "{0}: readable={1} state={2} fetch={3} ms={4} attrs={5} tag={6} placeholder={7}->{8} by={9}" -f `
             $name, $c.sha256Matches, $c.state, $c.fetchRequestsDuringRead, $c.milliseconds, `
-            $c.attributesBefore, $c.reparseTag, $c.placeholderStateBefore, $c.placeholderStateAfter
+            $c.attributesBefore, $c.reparseTag, $c.placeholderStateBefore, $c.placeholderStateAfter, (Format-Fetches $fetches)
     }
 
     # RA-02: the persistence scan reads more than a signature - the compiled-in name of each image,
     # which it used to read by path outside the automatic-read guard. A Run value pointing at the
-    # cloud-only file puts it on that path; the scan must finish without one download request. The
-    # value is this user's, in this disposable VM, and is removed below whatever happens.
+    # cloud-only file puts it on that path; the scan must finish without one download request of its
+    # own. The value is this user's, in this disposable VM, and is removed below whatever happens.
     $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $runValue = 'WinSightCloudFilesProbe'
     $cloudOnly = $cases['dehydrated-placeholder'].Path
     Set-ItemProperty -LiteralPath $runKey -Name $runValue -Value "`"$cloudOnly`" --probe"
     try
     {
+        # Whatever reacts to a new Run value - Defender, the shell - does so now, before the scan
+        # starts. Its requests are recorded apart. A WinSight process among the requesters (Guardian
+        # re-scanning) still counts.
+        $settleSeconds = 30
+        $settleFrom = [CloudFilesProbe]::FetchRequests
+        Start-Sleep -Seconds $settleSeconds
+        $settle = @(Get-Fetches -From $settleFrom -WinSightProcessIds @())
+        $evidence.runValueSettle = [ordered]@{ seconds = $settleSeconds; fetchRequests = $settle.Count }
+        Add-Fetches $evidence.runValueSettle $settle
+        "after the Run value was written: fetch={0} in {1} s by={2}" -f $settle.Count, $settleSeconds, (Format-Fetches $settle)
+
         $fetchBefore = [CloudFilesProbe]::FetchRequests
         $start = New-Object Diagnostics.ProcessStartInfo $cli
         $start.Arguments = 'persistence --json'
@@ -283,10 +420,11 @@ try
             $entry = @(($stdout.Result | ConvertFrom-Json).reports[0].items |
                 Where-Object { $_.fields.name -eq $runValue } | Select-Object -First 1)[0]
         } catch { }
+        $fetches = @(Get-Fetches -From $fetchBefore -WinSightProcessIds @($process.Id))
         $evidence.persistence = [ordered]@{
             exit = if ($finished) { $process.ExitCode } else { 'timeout' }
             milliseconds = $watch.ElapsedMilliseconds
-            fetchRequestsDuringScan = [CloudFilesProbe]::FetchRequests - $fetchBefore
+            fetchRequestsDuringScan = $fetches.Count
             entryFound = $null -ne $entry
             image = if ($entry) { $entry.fields.image } else { $null }
             fileStatus = if ($entry) { $entry.fields.fileStatus } else { $null }
@@ -294,8 +432,9 @@ try
             placeholderStateAfter = ('0x{0:X8}' -f ([CloudFilesProbe]::Describe($cloudOnly))[2])
         }
         $s = $evidence.persistence
-        "persistence scan: found={0} fileStatus={1} status={2} fetch={3} ms={4} exit={5}" -f `
-            $s.entryFound, $s.fileStatus, $s.status, $s.fetchRequestsDuringScan, $s.milliseconds, $s.exit
+        Add-Fetches $s $fetches
+        "persistence scan: found={0} fileStatus={1} status={2} fetch={3} ms={4} exit={5} by={6}" -f `
+            $s.entryFound, $s.fileStatus, $s.status, $s.fetchRequestsDuringScan, $s.milliseconds, $s.exit, (Format-Fetches $fetches)
     }
     finally
     {
@@ -360,13 +499,15 @@ public static class Primitive {
         $finished = $process.WaitForExit(90000)
         if (-not $finished) { $process.Kill() }
         $watch.Stop()
+        $fetches = @(Get-Fetches -From $fetchBefore -WinSightProcessIds @())
         $evidence.primitives[$method] = [ordered]@{
             result = if ($finished) { $stdout.Result.Trim() } else { 'timeout' }
             milliseconds = $watch.ElapsedMilliseconds
-            fetchRequests = [CloudFilesProbe]::FetchRequests - $fetchBefore
+            fetchRequests = $fetches.Count
+            fetchRequesters = $fetches
         }
         $p = $evidence.primitives[$method]
-        "primitive {0}: {1} fetch={2} ms={3}" -f $method, $p.result, $p.fetchRequests, $p.milliseconds
+        "primitive {0}: {1} fetch={2} ms={3} by={4}" -f $method, $p.result, $p.fetchRequests, $p.milliseconds, (Format-Fetches $fetches)
     }
 }
 finally
@@ -377,5 +518,5 @@ finally
     {
         if (Test-Path -LiteralPath $directory) { Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction SilentlyContinue }
     }
-    $evidence | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $EvidencePath -Encoding UTF8
+    $evidence | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $EvidencePath -Encoding UTF8
 }

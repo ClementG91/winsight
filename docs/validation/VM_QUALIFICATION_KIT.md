@@ -611,9 +611,13 @@ if ($LASTEXITCODE -ne 0) { throw 'Upgrade from the previous release failed.' }
 
 Finally, measure the automatic file access against Cloud Files placeholders, the shape of every
 file in a folder OneDrive backs up (WS-40). The script registers a disposable sync root through the
-documented Cloud Files API, with no OneDrive and no account, and records for each placeholder shape
-whether `winsight sign` could hash it and how many download requests the read caused. A hydrated
-placeholder must be readable, and no read may request a download:
+documented Cloud Files API, with no OneDrive and no account. For each placeholder shape it records
+whether `winsight sign` could hash it, and which process made each download request during the read.
+It then writes a Run value naming the cloud-only file, lets the machine react for 30 seconds, and runs
+the persistence scan over it (RA-02). A hydrated placeholder must be readable, and neither a read nor
+the scan may request a download. A request counts against WinSight when a WinSight process made it,
+or when Windows cannot say which process did. Requests from other programs, such as an antivirus
+reacting to the new Run value, are recorded but do not fail the check:
 
 ```powershell
 Assert-CandidateFiles
@@ -621,12 +625,17 @@ $CloudEvidence = Join-Path $EvidenceRoot 'cloud-files.json'
 & $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
     -File (Join-Path $ProtectedSourceRoot 'scripts\Measure-CloudFilesAccess.ps1') `
     -CliPath $Cli -EvidencePath $CloudEvidence
-$cloud = (Get-Content -LiteralPath $CloudEvidence -Raw | ConvertFrom-Json).cases
+$measured = Get-Content -LiteralPath $CloudEvidence -Raw | ConvertFrom-Json
+$cloud = $measured.cases
 foreach ($case in 'control', 'plain-in-sync-root', 'hydrated-placeholder', 'hydrated-in-directory-placeholder') {
     if (-not $cloud.$case.sha256Matches) { throw "Cloud Files: $case was not readable." }
 }
-if (@($cloud.PSObject.Properties.Value | Where-Object fetchRequestsDuringRead -gt 0).Count -gt 0) {
+$charged = { $_.fetchRequestsByWinSight -gt 0 -or $_.fetchRequestsUnattributed -gt 0 }
+if (@($cloud.PSObject.Properties.Value | Where-Object $charged).Count -gt 0) {
     throw 'Cloud Files: a WinSight read requested a download.'
+}
+if (-not $measured.persistence.entryFound -or @($measured.persistence, $measured.runValueSettle | Where-Object $charged).Count -gt 0) {
+    throw 'Cloud Files: the persistence scan of a cloud-only Run image requested a download.'
 }
 ```
 

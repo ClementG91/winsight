@@ -388,6 +388,16 @@ function Remove-WinSightDataDisk([Parameter(Mandatory)][string]$VMName, [Paramet
     }
 }
 
+# Refuses a run whose VMs the host cannot hold: $Bytes is what they need, margin included, compared with
+# the memory Windows can hand out now (free and standby pages). Hyper-V gives a VM all its memory at
+# start and fails the start otherwise.
+function Assert-WinSightHostMemory([int64]$Bytes, [string]$Advice) {
+    $available = [int64](Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB
+    if ($available -lt $Bytes) {
+        throw ("This run needs {0:N1} GB of memory and the host has {1:N1} GB available: {2}" -f ($Bytes / 1GB), ($available / 1GB), $Advice)
+    }
+}
+
 Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
-    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk
+    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory

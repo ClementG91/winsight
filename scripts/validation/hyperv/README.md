@@ -61,8 +61,9 @@ rehearsal is still not a CI-attested release.
    `candidate.json` binding them by SHA-256, in `<vol>\WinSight-Qualification-Requests\candidates\<name>`.
 3. Queue requests as JSON files with unique names in `<vol>\WinSight-Qualification-Requests`:
    `{"action":"stage","candidate":"<name>"}`, then `{"action":"qualify","runName":"...","gates":[...],"memoryGB":4}`,
-   `{"action":"network","runName":"..."}` for gate 36 (the operator types the disposable password in
-   each VM), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json`.
+   `{"action":"network","runName":"...","memoryGB":3}` for gate 36 (the operator types the disposable
+   password in each VM; the control VM runs with 2 GB, and the run is refused up front if the host
+   cannot hold both VMs plus 0.5 GB), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json`.
 4. Verify each run as an ordinary user before citing it:
    `.\Verify-QualificationProvenance.ps1 -RunDir <vol>\WinSight-Qualification\sealed\<run> -HarnessCommit <sha>`
    Every check must print PASS: the seal, the harness blob ids against the reviewed commit, the

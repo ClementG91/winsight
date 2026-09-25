@@ -31,7 +31,7 @@ scripts, le candidat, les disques des VM et les preuves dans des dossiers que to
 authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
 fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
 `Verify-QualificationProvenance.ps1`) mais n'a pas encore tourné, et le code produit a changé depuis
-`259056b` (RA-02 à RA-05, WS-74 à WS-80) : **la tête de la branche n'est pas qualifiée**.
+`259056b` (RA-02 à RA-05, WS-74 à WS-82) : **la tête de la branche n'est pas qualifiée**. La première passe du harnais refait (§17.4, provenance vérifiée) a passé 30 portes sur 32 à `771a67b` ; les portes 17 et 36 sont à repasser.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -48,7 +48,7 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **74 défauts** : 69 corrigés et testés (dont six dans le
+- **Problèmes trouvés.** L'audit a traité **76 défauts** : 71 corrigés et testés (dont huit dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
   1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
@@ -285,6 +285,8 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-78 | Low | Validation | La vérification du stockage des VM ne connaissait pas les entrées qu'Hyper-V pose lui-même : elle ne connaissait que l'identité propre à chaque VM (`S-1-5-83-1-*`) et refusait l'écriture accordée à la capacité du processus de travail (`vmWorkerProcess`, `S-1-15-3-1024-…`) sur le disque de données de la VM de contrôle, puis l'entrée CREATOR OWNER (GENERIC_ALL, héritage seul) du dossier de chaque VM ; elle s'arrêtait au premier refus, une passe de protection par entrée ; le scellement des empreintes lisait ensuite avec `Get-FileHash`, qui échoue sur la configuration d'un point de contrôle que le service de gestion Hyper-V garde ouverte même VM éteinte | protection du stockage impossible, donc aucune passe VM ; rien de modifié au-delà du propriétaire des disques et du verrou du dossier parent | `WinSightHyperV.psm1` | la capacité, et elle seule, acceptée dans le stockage des VM seulement (une capacité ne compte que pour un jeton AppContainer, au second de ses deux contrôles d'accès, et ne donne jamais l'écriture à un utilisateur local ; SID recalculé comme Windows le fait, SHA-256 du nom en majuscules, et vérifié par `DeriveCapabilitySidsFromName`) ; CREATOR OWNER accepté (il désigne, sur chaque nouvel élément, son créateur, qui devait déjà détenir un droit de création réservé aux comptes de confiance), CREATOR GROUP toujours refusé (le groupe principal du créateur est un groupe ordinaire) ; tous les refus listés en une fois ; empreintes lues avec tous les modes de partage, et un fichier que son détenteur ne laisse pas lire nommé dans le scellement sans empreinte plutôt que de faire échouer une protection déjà en place ; tests de contrat et huit autocontrôles PowerShell 5.1, en échec sur les modules précédents | Corrigé |
 | WS-79 | Medium | Validation | Sur un Windows client, un processus élevé crée ses fichiers au nom du compte de l'opérateur (réglage par défaut « créateur de l'objet ») : les 400 fichiers écrits par le premier exécuteur appartiennent à ce compte. Le harnais refait fixait le propriétaire de ses dossiers protégés, pas celui des fichiers qu'il y copie ou y écrit | le propriétaire d'un fichier peut toujours en changer les droits : tout processus du compte de l'opérateur aurait pu modifier une copie protégée ou les preuves scellées, ce que la vérification de provenance, qui teste seulement le refus d'une écriture, n'aurait pas vu ; l'exécuteur, qui revérifie sa copie du harnais, aurait par ailleurs refusé de démarrer | `WinSightHyperV.psm1` et les six scripts élevés | chaque script élevé fait des Administrateurs le propriétaire par défaut de son jeton (`SetTokenInformation(TokenOwner)`, hérité par les processus qu'il lance) avant de créer quoi que ce soit, ce que Windows n'accorde qu'à un jeton élevé ; test de contrat sur les six scripts et autocontrôle PowerShell 5.1 (le propre SID accepté, Administrateurs refusé hors élévation, erreur 1307), en échec sur les scripts précédents | Corrigé |
 | WS-80 | Low | Validation | Première passe complète : l'invité s'est éteint seul après 121 minutes, puis le retrait du disque de transport a échoué une seconde plus tard (« l'opération ne peut pas être effectuée tant que l'objet se trouve dans son état actuel ») ; le pilote s'est arrêté sans rapatrier les résultats, et la VM, redémarrée avec un disque qui disait toujours « qualify », a rejoué toutes les portes par-dessus. La passe suivante a été refusée : restaurer le point de contrôle crée un disque différentiel dont le propriétaire est l'identité de la VM | deux heures de passe perdues, résultats écrasés ; aucune preuve scellée | `WinSightHyperV.psm1`, `Invoke-HyperVQualification.ps1`, `Invoke-HyperVNetworkLogon.ps1`, `guest/run-guest-checks.ps1` | retrait du disque réessayé jusqu'à ce que la VM soit vraiment éteinte, VM trouvée relancée éteinte et consignée ; l'invité écrit « done » avant de s'éteindre et s'éteint aussitôt s'il redémarre ; identité de la VM acceptée comme propriétaire dans le stockage des VM seulement ; test de contrat et autocontrôle PowerShell 5.1, en échec sur le harnais précédent | Corrigé |
+| WS-81 | Low | Validation | L'étape réseau (porte 36) démarre deux VM ensemble sans vérifier que l'hôte peut les contenir. À la première passe du harnais refait, la cible a démarré (4 Go), puis la VM de contrôle n'a pas obtenu ses 3 Go (Hyper-V `0x800705AA`, 2,3 Go libres sur 15,9 Go). Le pilote s'est arrêté là, sans rien remettre en place : la cible est restée allumée sur le commutateur privé, sa passe chargée, avec la configuration de la passe (carte réseau privée, mémoire) | une passe réseau perdue et une VM laissée allumée que l'opérateur a dû éteindre ; aucune preuve concernée | `Invoke-HyperVNetworkLogon.ps1`, `WinSightHyperV.psm1`, `WinSightQualRunner.ps1` | mémoire disponible vérifiée avant tout changement (cible + contrôle + 0,5 Go, `Assert-WinSightHostMemory`, message qui dit quoi faire) ; VM de contrôle à 2 Go pendant la passe (elle ne fait qu'ouvrir une session réseau) ; démarrages dans un `try` dont le `catch` éteint les deux VM, retire les disques, restaure les deux points de contrôle, le réseau de la cible et la mémoire de chacune, puis échoue avec la cause ; l'exécuteur transmet `memoryGB` (3 à 8) à l'étape réseau ; test de contrat et autocontrôle PowerShell 5.1, en échec sur le harnais précédent | Corrigé |
+| WS-82 | Low | Validation | La porte 17 comptait toute demande de téléchargement reçue par le fournisseur Cloud Files de la sonde, sans savoir quel processus l'avait faite. Elle lançait en outre le scan de persistance à l'instant même où la valeur Run était écrite, pendant que ce qui réagit à une nouvelle valeur Run réagit encore. À la première passe du harnais refait, le scan a vu une demande. Tout indique qu'elle ne venait pas de WinSight : le verbe `sign` sur le même fichier n'en fait aucune, les lectures de fichier du scan, relues dans le code, passent par la garde « données locales » (`LocalPathLease.OpenRead`), et le scan a fini en 38 s, alors qu'une demande de sa part l'aurait bloqué au moins une minute (le fournisseur de la sonde ne répond jamais). La mesure ne permettait pas de le prouver | porte 17 en échec sans coupable établi : RA-02 non démontré en VM pour la tête | `scripts/Measure-CloudFilesAccess.ps1`, `guest/qualify.ps1`, `VM_QUALIFICATION_KIT.md` | le fournisseur se connecte avec `CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO` et enregistre, pour chaque demande, le processus (PID, image, ligne de commande) et le fichier ; une demande est imputée à WinSight si elle vient du processus mesuré ou d'une image `winsight*`, ou si la plateforme ne sait pas la nommer ; 30 s d'attente après l'écriture de la valeur Run, dont les demandes sont consignées à part et bornées de la même façon (Guardian compris) ; les demandes d'autres programmes figurent dans la preuve et la sortie, sans faire échouer la porte ; test de contrat, et autocontrôle qui compile les types de la sonde et décode un rappel écrit aux décalages x64 de `cfapi.h`, en échec sur la sonde précédente | Corrigé dans la mesure ; porte 17 à repasser en VM |
 
 ### 4.2 Ouverts ou documentés
 
@@ -389,7 +391,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 611 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 613 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -610,7 +612,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 611 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 613 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -648,7 +650,7 @@ ci-dessous, par thème, avec la justification.
 | Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1`, `Test-InstallerServiceUninstall.ps1`, `Test-InstallerUpgrade.ps1` | WS-13, WS-63 |
 | Mesure | `scripts/Measure-Performance.ps1` | outil de mesure reproductible (D3) |
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
-| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77 à WS-80, WS-40 (mesure) |
+| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77 à WS-82, WS-40 (mesure) |
 | Lecture automatique et attribution | `Core/AutomaticFileAccess.cs`, `AutomaticFileMutation.cs`, `Attribution/WriteAttributionWatcher.cs` | WS-40, WS-73 |
 | Contre-audit : nom d'origine par le handle | `Core/PeResources.cs`, `VersionResource.cs`, `Persistence/PersistenceScanner.cs`, `CommandLine.cs`, `InterpreterAbuseTriage.cs` | RA-02, WS-74 |
 | Contre-audit : Guardian incertain | `Persistence/PersistenceCoverageGain.cs`, `PersistenceMonitorCore.cs`, `PersistenceMonitor*.cs`, `Application/GuardianHost.cs`, `Adapters.Alerts.cs`, `Dashboard/MainWindow.Monitors.cs` | RA-03 |
@@ -776,6 +778,24 @@ chaque passe) ; leur équivalent dans l'historique publié :
 | `9f7af15` | `cc4a6c1` | `066b3e1` | `ce2edbb` |
 | `66d4f61` | `02b17de` |  |  |
 
+
+### 17.4 Qualification VM du 25 septembre 2026 (harnais refait)
+
+Premières passes du harnais refait (`scripts/validation/hyperv`, RA-01) : exécuteur élevé lancé par
+l'opérateur depuis une extraction du commit sur le volume de données, copies protégées du harnais et
+du candidat, stockage des VM et preuves réservés aux administrateurs, provenance vérifiée par
+`Verify-QualificationProvenance.ps1` sous un compte ordinaire. Candidats construits localement, non
+signés : des répétitions, pas des preuves attestées par la CI.
+
+| Passe | Candidat | Résultat | Ce qu'elle a appris |
+|---|---|---|---|
+| `head-72c48a7` | `72c48a7` | perdue | l'invité s'est éteint après 121 minutes, le retrait du disque a échoué, la VM a rejoué les portes (WS-80) ; rien de scellé |
+| `head-771a67b` | `771a67b` | **30 PASS, 1 FAIL**, 36 NOT_RUN (passe à part) ; provenance : 11/11 PASS | première passe attestée de bout en bout ; 17 : le scan de persistance a vu une demande de téléchargement que la sonde ne savait pas attribuer (WS-82) |
+| `net-771a67b` | `771a67b` | non démarrée | la VM de contrôle n'a pas obtenu sa mémoire après le démarrage de la cible (WS-81) |
+
+Restent à passer sur le candidat suivant : la porte 17 avec l'attribution, et la porte 36. La tête
+n'est donc toujours pas qualifiée.
+
 ---
 
 ## 18. Recommended roadmap
@@ -783,9 +803,8 @@ chaque passe) ; leur équivalent dans l'historique publié :
 ### Maintenant — bugs, sécurité, fiabilité
 
 - Relire et fusionner la branche d'audit par thème. Qualification x64 : `259056b` a passé 31 portes
-  sur 31 (§17.2), sous la réserve RA-01 ; la tête est à requalifier avec le harnais refait (porte 17
-  par la persistance, porte 15 avec l'échec injecté, balayage persistance et hijack, puis l'ensemble),
-  vérification de provenance comprise ; ARM64.
+  sur 31 (§17.2), sous la réserve RA-01 ; la tête est à requalifier avec le harnais refait : 30 portes sur 32 passées à `771a67b`
+  (§17.4), restent la porte 17 avec l'attribution des téléchargements et la porte 36 ; ARM64.
 - `PRODUCTION_READINESS.md` : distinction faite (RA-07) ; déclarer le candidat seulement après cette
   requalification.
 

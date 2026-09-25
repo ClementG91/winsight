@@ -151,9 +151,13 @@ function Get-Arguments($Request) {
         if ($gates.Count -gt 40) { throw 'too many gates' }
         foreach ($gate in $gates) { if ([string]$gate -notmatch '^\d{2}-[a-z0-9-]{1,40}$') { throw 'invalid gate' } }
         if ($gates.Count -gt 0) { $arguments += @('-Gates', ($gates -join ',')) }
+    }
+    if ($action -in 'qualify', 'network') {
+        # The memory of the VM under test: the target, beside the control, in the network run.
         $gb = if (Get-Field $Request 'memoryGB') { [int](Get-Field $Request 'memoryGB') } else { 4 }
         if ($gb -lt 3 -or $gb -gt 8) { throw 'invalid memoryGB' }
-        $arguments += @('-MemoryBytes', ([int64]$gb * 1GB))
+        $parameter = if ($action -eq 'qualify') { '-MemoryBytes' } else { '-TargetMemoryBytes' }
+        $arguments += @($parameter, ([int64]$gb * 1GB))
     }
     if ($action -in 'collect', 'network-collect') { $arguments += '-Resume' }
     return , $arguments

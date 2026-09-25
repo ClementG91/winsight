@@ -106,6 +106,57 @@ try {
     $ownSid = try { & $module { param($s) Set-DefaultOwner -Sid $s } $me; 'set' } catch { $_.Exception.Message }
     $admins = try { & $module { Set-AdministratorsDefaultOwner }; 'set' } catch { $_.Exception.Message }
     Report ($ownSid -eq 'set' -and $admins -match 'Win32 error 1307') 'Set-AdministratorsDefaultOwner asks Windows for Administrators as default owner (refused unelevated)'
+
+    # The network run starts two VMs together: it refuses up front a run the host memory cannot hold.
+    Report ((-not (Throws { Assert-WinSightHostMemory -Bytes 1 -Advice 'none' } '.')) -and
+        (Throws { Assert-WinSightHostMemory -Bytes 1PB -Advice 'close applications' } 'GB of memory and the host has .* available: close applications')) 'Assert-WinSightHostMemory refuses a run the host memory cannot hold'
+
+    # The Cloud Files gate counts against WinSight the download requests its own processes make, and
+    # those the platform cannot attribute. Another program's requests are only recorded.
+    $errors = $null
+    $probe = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repository 'scripts\Measure-CloudFilesAccess.ps1'), [ref]$null, [ref]$errors)
+    $definition = $probe.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq 'Get-FetchOwner' }, $true)
+    if ($definition) { . ([scriptblock]::Create($definition.Extent.Text)) }
+    $owner = { param($ProcessId, $Image, $Ids) try { Get-FetchOwner -ProcessId $ProcessId -Image $Image -WinSightProcessIds $Ids } catch { 'missing' } }
+    $volume = '\Device\HarddiskVolume3'
+    Report ((& $owner 4242 "$volume\Program Files\WinSight-Qualification\payload\winsight.exe" @()) -eq 'winsight' -and
+        (& $owner 4242 "$volume\Program Files\WinSight\WinSight.Dashboard.exe" @()) -eq 'winsight' -and
+        (& $owner 4242 "$volume\ProgramData\Microsoft\Windows Defender\Platform\4.18\MsMpEng.exe" @(4242)) -eq 'winsight' -and
+        (& $owner 4242 "$volume\ProgramData\Microsoft\Windows Defender\Platform\4.18\MsMpEng.exe" @(7)) -eq 'other' -and
+        (& $owner 4242 'UNKNOWN' @()) -eq 'unattributed' -and (& $owner 4242 '' @()) -eq 'unattributed' -and
+        (& $owner 0 "$volume\Windows\explorer.exe" @()) -eq 'unattributed') 'the Cloud Files probe charges WinSight with its own and unattributed download requests only'
+
+    # The probe learns who asked from the CF_CALLBACK_INFO the platform hands its callback. A callback
+    # written here at the x64 offsets of cfapi.h must come back as one request from that process. Only
+    # the probe's types are compiled: no sync root is registered.
+    $decoded = 'not run'
+    if ([IntPtr]::Size -eq 8) {
+        $decoded = try {
+            $addType = $probe.Find({ param($Node) $Node -is [System.Management.Automation.Language.CommandAst] -and $Node.GetCommandName() -eq 'Add-Type' }, $true)
+            Add-Type -TypeDefinition $addType.CommandElements[2].Value
+            foreach ($name in 'Get-Fetches', 'Format-Fetches') {
+                $function = $probe.Find({ param($Node) $Node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $Node.Name -eq $name }, $true)
+                . ([scriptblock]::Create($function.Extent.Text))
+            }
+            $marshal = [System.Runtime.InteropServices.Marshal]
+            $strings = @($marshal::StringToHGlobalUni("$volume\Program Files\WinSight\winsight.exe"), $marshal::StringToHGlobalUni('winsight persistence --json'), $marshal::StringToHGlobalUni('\Users\probe\dehydrated.exe'))
+            $processInfo = $marshal::AllocHGlobal(48)
+            $callbackInfo = $marshal::AllocHGlobal(152)
+            try {
+                foreach ($offset in 0..18) { $marshal::WriteInt64($callbackInfo, $offset * 8, 0) }
+                foreach ($offset in 0..5) { $marshal::WriteInt64($processInfo, $offset * 8, 0) }
+                $marshal::WriteInt32($processInfo, 0, 48); $marshal::WriteInt32($processInfo, 4, 4242)
+                $marshal::WriteIntPtr($processInfo, 8, $strings[0]); $marshal::WriteIntPtr($processInfo, 32, $strings[1])
+                $marshal::WriteInt32($callbackInfo, 0, 152); $marshal::WriteIntPtr($callbackInfo, 104, $strings[2]); $marshal::WriteIntPtr($callbackInfo, 136, $processInfo)
+                [void][CloudFilesProbe].GetMethod('OnFetch', [Reflection.BindingFlags]'NonPublic, Static').Invoke($null, @($callbackInfo, [IntPtr]::Zero))
+            }
+            finally { foreach ($pointer in @($strings) + $processInfo + $callbackInfo) { $marshal::FreeHGlobal($pointer) } }
+            $request = @(Get-Fetches -From 0 -WinSightProcessIds @())
+            if ($request.Count -eq 1 -and $request[0].commandLine -eq 'winsight persistence --json' -and $request[0].file -eq '\Users\probe\dehydrated.exe') { Format-Fetches $request } else { 'wrong request' }
+        }
+        catch { $_.Exception.Message }
+    }
+    Report ($decoded -eq 'winsight.exe#4242/winsight') "the Cloud Files probe reads the process that asked from a callback laid out as cfapi.h ($decoded)"
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

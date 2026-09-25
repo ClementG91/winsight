@@ -24,6 +24,9 @@ param(
     [string]$Switch = 'WinSight-Qual-Private',
     [string]$RunName = ('hv-network-' + (Get-Date -Format 'yyyyMMdd-HHmm')),
     [int64]$TargetMemoryBytes = 4GB,
+    # The control only logs on over the network. It runs with less memory than it was built with
+    # (3 GB), so that both VMs fit in the host's memory together.
+    [int64]$ControlMemoryBytes = 2GB,
     [int]$TimeoutMinutes = 120,
     # Collect a run whose driver was closed while both VMs kept going: wait for both to power off,
     # then collect, seal and restore. Nothing is staged or started.
@@ -50,6 +53,20 @@ function Remove-DataDisks {
     $found = Remove-WinSightDataDisk -VMName $ControlName -Path $controlData
     if ($found) { Write-HostLog "$ControlName was $found, not off, when its data disk was detached: turned off" }
 }
+# Puts both VMs back as they were: their checkpoints, the target's own network instead of the private
+# switch, and the memory each had.
+function Restore-BothVms {
+    Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
+    Restore-VMCheckpoint -VMName $ControlName -Name $ControlCheckpoint -Confirm:$false
+    # The checkpoint restores the configuration too. This only makes sure, since the full
+    # qualification needs the target's own network (gates 23 and 33).
+    Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter
+    foreach ($adapter in $originalAdapters) {
+        if ($adapter.SwitchName -and -not (Get-VMNetworkAdapter -VMName $Name -Name $adapter.Name).SwitchName) { Connect-VMNetworkAdapter -VMName $Name -Name $adapter.Name -SwitchName $adapter.SwitchName }
+    }
+    if ($originalMemory -gt 0 -and (Get-VMMemory -VMName $Name).Startup -ne $originalMemory) { Set-VMMemory -VMName $Name -StartupBytes $originalMemory }
+    if ($originalControlMemory -gt 0 -and (Get-VMMemory -VMName $ControlName).Startup -ne $originalControlMemory) { Set-VMMemory -VMName $ControlName -StartupBytes $originalControlMemory }
+}
 $network = [ordered]@{
     targetAddress = '192.168.250.10'; controlAddress = '192.168.250.20'; prefixLength = 24; httpPort = 8088
     targetMac = '00155D5AFA10'; controlMac = '00155D5AFA20'
@@ -58,6 +75,9 @@ $network = [ordered]@{
 if (-not $Resume) {
 foreach ($vm in $Name, $ControlName) { if ((Get-WinSightVmState $vm) -ne 'Off') { throw "VM $vm is $(Get-WinSightVmState $vm); turn it off first." } }
 if (-not (Get-VMSwitch -Name $Switch -ErrorAction SilentlyContinue)) { throw "No switch ${Switch}: run New-WinSightControlVm.ps1 first." }
+# Both VMs start together. This is checked before anything changes: in the first network run the
+# target started, the control could not get its memory, and the target stayed on with its run staged.
+Assert-WinSightHostMemory -Bytes ($TargetMemoryBytes + $ControlMemoryBytes + 512MB) -Advice 'close applications on the host, or ask for less memory for the target ("memoryGB":3).'
 
 # --- Stage both data disks --------------------------------------------------------------------------
 Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
@@ -95,16 +115,29 @@ finally { Dismount-WinSightData $controlData }
 # --- Wire the target to the private switch only, for this run -------------------------------------
 $originalAdapters = @(Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Select-Object Name, SwitchName)
 $originalMemory = (Get-VMMemory -VMName $Name).Startup
-Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Disconnect-VMNetworkAdapter
-Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter
-Add-VMNetworkAdapter -VMName $Name -Name 'WinSightPrivate' -SwitchName $Switch -StaticMacAddress $network.targetMac
-Set-VMMemory -VMName $Name -StartupBytes $TargetMemoryBytes
-Add-VMHardDiskDrive -VMName $Name -Path $data
-Add-VMHardDiskDrive -VMName $ControlName -Path $controlData
-Write-HostLog "$RunName on $($candidate.commit.Substring(0, 7)): target $Name + control $ControlName on $Switch"
-
-Start-VM -Name $Name
-Start-VM -Name $ControlName
+$originalControlMemory = (Get-VMMemory -VMName $ControlName).Startup
+try {
+    Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Disconnect-VMNetworkAdapter
+    Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter
+    Add-VMNetworkAdapter -VMName $Name -Name 'WinSightPrivate' -SwitchName $Switch -StaticMacAddress $network.targetMac
+    Set-VMMemory -VMName $Name -StartupBytes $TargetMemoryBytes
+    Set-VMMemory -VMName $ControlName -StartupBytes $ControlMemoryBytes
+    Add-VMHardDiskDrive -VMName $Name -Path $data
+    Add-VMHardDiskDrive -VMName $ControlName -Path $controlData
+    Write-HostLog ("$RunName on $($candidate.commit.Substring(0, 7)): target $Name ({0:N1} GB) + control $ControlName ({1:N1} GB) on $Switch" -f ($TargetMemoryBytes / 1GB), ($ControlMemoryBytes / 1GB))
+    Start-VM -Name $Name
+    Start-VM -Name $ControlName
+}
+catch {
+    # Half a run - one VM on, or the target rewired - waits for nobody. Turn both off, put both back,
+    # then fail with the cause.
+    $failure = $_
+    Write-HostLog "$RunName did not start: $($failure.Exception.Message)"
+    Remove-DataDisks
+    Restore-BothVms
+    Write-HostLog "$RunName stopped before it began, both VMs off and restored ($Checkpoint, $ControlCheckpoint)"
+    throw $failure
+}
 Write-Host ''
 Write-Host '================================================================================' -ForegroundColor Yellow
 Write-Host ' Both VMs are starting. Open their screens:' -ForegroundColor Yellow
@@ -122,6 +155,7 @@ else {
     # The disconnected adapters are the VM's own, on the Default Switch it was built with.
     $originalAdapters = @(Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | ForEach-Object { [pscustomobject]@{ Name = $_.Name; SwitchName = 'Default Switch' } })
     $originalMemory = 0
+    $originalControlMemory = 0
     Write-HostLog "$RunName resumed: target $(Get-WinSightVmState $Name), control $(Get-WinSightVmState $ControlName)"
 }
 
@@ -163,15 +197,7 @@ Get-ChildItem -LiteralPath $runDir -Recurse -File | Where-Object Name -ne 'SHA25
     ForEach-Object { "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.FullName.Substring($runDir.Length + 1))" } |
     Set-Content -LiteralPath (Join-Path $runDir 'SHA256SUMS.txt')
 Write-HostLog "evidence sealed in $runDir"
-Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
-Restore-VMCheckpoint -VMName $ControlName -Name $ControlCheckpoint -Confirm:$false
-# The checkpoint restores the configuration too; this only makes sure, since the full qualification
-# needs the target's own network (gates 23 and 33).
-Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter
-foreach ($adapter in $originalAdapters) {
-    if ($adapter.SwitchName -and -not (Get-VMNetworkAdapter -VMName $Name -Name $adapter.Name).SwitchName) { Connect-VMNetworkAdapter -VMName $Name -Name $adapter.Name -SwitchName $adapter.SwitchName }
-}
-if ($originalMemory -gt 0 -and (Get-VMMemory -VMName $Name).Startup -ne $originalMemory) { Set-VMMemory -VMName $Name -StartupBytes $originalMemory }
+Restore-BothVms
 Write-HostLog "both VMs restored ($Checkpoint, $ControlCheckpoint), target network: $((Get-VMNetworkAdapter -VMName $Name | ForEach-Object { "$($_.Name)=$($_.SwitchName)" }) -join ', ')"
 
 $resultsFile = Join-Path $runDir 'target\results.json'

@@ -753,24 +753,31 @@ Invoke-Gate '16-installer-upgrade' {
 }
 
 Invoke-Gate '17-cloud-files' {
-    # WS-40: OneDrive's placeholders, through a disposable Cloud Files sync root.
+    # WS-40: OneDrive's placeholders, through a disposable Cloud Files sync root. A download request
+    # counts against WinSight when a WinSight process made it or when the platform could not say who
+    # did. A request from another program is recorded in the evidence and named in the output.
     $evidenceFile = Join-Path $Evidence 'cloud-files.json'
     $code = Invoke-Script 'cloud-files.txt' (Join-Path $Source 'scripts\Measure-CloudFilesAccess.ps1') @('-CliPath', $script:Cli, '-EvidencePath', $evidenceFile)
     if ($code -ne 0 -or -not (Test-Path -LiteralPath $evidenceFile)) { throw "Cloud Files probe failed (exit $code): $(Tail 'cloud-files.txt' 15)" }
-    $cases = (Get-Content -LiteralPath $evidenceFile -Raw | ConvertFrom-Json).cases
+    $measured = Get-Content -LiteralPath $evidenceFile -Raw | ConvertFrom-Json
+    $cases = $measured.cases
     $lines = @(Get-Content (Join-Path $Evidence 'cloud-files.txt') | Where-Object { $_ -match 'readable=' })
     $unreadable = @('control', 'plain-in-sync-root', 'hydrated-placeholder', 'hydrated-in-directory-placeholder' | Where-Object { -not $cases.$_.sha256Matches })
-    $fetching = @($cases.PSObject.Properties | Where-Object { $_.Value.fetchRequestsDuringRead -gt 0 } | ForEach-Object Name)
+    $fetching = @($cases.PSObject.Properties | Where-Object { [int]$_.Value.fetchRequestsByWinSight -gt 0 -or [int]$_.Value.fetchRequestsUnattributed -gt 0 } | ForEach-Object Name)
     # A cloud-only file is unreadable, and must be so at once rather than after a download times out.
     $slow = @($cases.PSObject.Properties | Where-Object { [int64]$_.Value.milliseconds -gt 30000 } | ForEach-Object Name)
     if ($unreadable.Count -gt 0 -or $fetching.Count -gt 0 -or $slow.Count -gt 0) {
         throw "WS-40: unreadable [$($unreadable -join ', ')], download requested by [$($fetching -join ', ')], over 30 s [$($slow -join ', ')]`n$($lines -join "`n")"
     }
     # RA-02: the persistence scan (the scanner Guardian re-runs) over a Run value naming the cloud-only
-    # file: it must list the entry and finish without asking the provider for the data.
-    $scan = (Get-Content -LiteralPath $evidenceFile -Raw | ConvertFrom-Json).persistence
-    $scanLine = @(Get-Content (Join-Path $Evidence 'cloud-files.txt') | Where-Object { $_ -match '^persistence scan:' })
-    if ($null -eq $scan -or -not $scan.entryFound -or [int]$scan.fetchRequestsDuringScan -ne 0 -or "$($scan.exit)" -eq 'timeout') {
+    # file must list the entry and finish without asking the provider for the data. No WinSight process
+    # may ask for it while the new Run value settles, before the scan, either.
+    $scan = $measured.persistence
+    $settle = $measured.runValueSettle
+    $scanLine = @(Get-Content (Join-Path $Evidence 'cloud-files.txt') | Where-Object { $_ -match '^(after the Run value was written|persistence scan):' })
+    if ($null -eq $scan -or $null -eq $settle -or -not $scan.entryFound -or "$($scan.exit)" -eq 'timeout' -or
+        [int]$scan.fetchRequestsByWinSight -ne 0 -or [int]$scan.fetchRequestsUnattributed -ne 0 -or
+        [int]$settle.fetchRequestsByWinSight -ne 0 -or [int]$settle.fetchRequestsUnattributed -ne 0) {
         throw "RA-02: the persistence scan of a cloud-only image failed its bound: $($scanLine -join ' ')"
     }
     $lines + $scanLine

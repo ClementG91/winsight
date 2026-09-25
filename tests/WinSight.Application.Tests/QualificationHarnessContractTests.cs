@@ -178,6 +178,104 @@ public sealed class QualificationHarnessContractTests
         Assert.Contains("-not (Test-TrustedOwner $owner -VirtualMachines:$AllowVirtualMachines)", module, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The network run starts both VMs or neither. Before it changes anything, it checks that the host
+    /// can hold both VMs, and it runs the control VM with less memory. If a start fails, it turns both
+    /// VMs off and restores them. The runner passes the requested memory to it.
+    /// </summary>
+    /// <remarks>
+    /// Found at the first network run: the target started, then the control could not get its 3 GB
+    /// (Hyper-V 0x800705AA). The driver stopped there, and the target stayed on, on the private
+    /// switch, with its run staged and nobody to collect it.
+    /// </remarks>
+    [Fact]
+    public void ANetworkRunStartsBothVirtualMachinesOrNeither()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("function Assert-WinSightHostMemory([int64]$Bytes, [string]$Advice)", module, StringComparison.Ordinal);
+        Assert.Contains("(Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory * 1KB", module, StringComparison.Ordinal);
+
+        var driver = Code(Path.Combine(Harness, "Invoke-HyperVNetworkLogon.ps1"));
+        var memory = driver.IndexOf("Assert-WinSightHostMemory -Bytes ($TargetMemoryBytes + $ControlMemoryBytes + 512MB)", StringComparison.Ordinal);
+        // The first restore the run itself makes, at staging: a top-level line, not the helper's body.
+        var staging = driver.IndexOf("\nRestore-VMCheckpoint", StringComparison.Ordinal);
+        Assert.True(memory >= 0 && staging > memory, "the host memory is not checked before the VMs are touched");
+        Assert.Contains("[int64]$ControlMemoryBytes = 2GB", driver, StringComparison.Ordinal);
+        Assert.Contains("Set-VMMemory -VMName $ControlName -StartupBytes $ControlMemoryBytes", driver, StringComparison.Ordinal);
+
+        // Both starts sit in one try, and its catch turns both VMs off and puts both back.
+        Assert.Equal(2, Regex.Count(driver, @"\bStart-VM\b"));
+        var guarded = Regex.Matches(driver, @"\ntry \{")
+            .Select(match => Block(driver, match.Index))
+            .Single(block => block.Contains("Start-VM -Name $Name\n", StringComparison.Ordinal)
+                && block.Contains("Start-VM -Name $ControlName\n", StringComparison.Ordinal));
+        var after = driver[(driver.IndexOf(guarded, StringComparison.Ordinal) + guarded.Length)..];
+        Assert.StartsWith("\ncatch {", after, StringComparison.Ordinal);
+        var recovery = Block(after, 0);
+        Assert.Contains("Remove-DataDisks", recovery, StringComparison.Ordinal);
+        Assert.Contains("Restore-BothVms", recovery, StringComparison.Ordinal);
+        Assert.Contains("throw $failure", recovery, StringComparison.Ordinal);
+        Assert.Contains("Set-VMMemory -VMName $ControlName -StartupBytes $originalControlMemory", driver, StringComparison.Ordinal);
+
+        var runner = Code(Path.Combine(Harness, "WinSightQualRunner.ps1"));
+        Assert.Contains("if ($action -in 'qualify', 'network') {", runner, StringComparison.Ordinal);
+        Assert.Contains("'-TargetMemoryBytes'", runner, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The Cloud Files gate counts against WinSight only the download requests that come from
+    /// WinSight. The probe records which process asked for each request. A request the platform
+    /// cannot attribute counts against WinSight.
+    /// </summary>
+    /// <remarks>
+    /// Found at the first full run of the rebuilt harness: the persistence scan over a Run value naming
+    /// a cloud-only file saw one download request. The signature verb reading the same file saw none,
+    /// and the scan finished in 38 s, less than the minute a download request of its own would have
+    /// blocked it for. The probe counted requests without saying who made them. It also started the
+    /// scan the moment the Run value was written, when whatever reacts to a new Run value is still
+    /// reacting.
+    /// </remarks>
+    [Fact]
+    public void TheCloudFilesGateChargesWinSightOnlyWithItsOwnDownloads()
+    {
+        var probe = Code(Path.Combine(Harness, "..", "..", "Measure-CloudFilesAccess.ps1"));
+        // CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO: without it the platform leaves ProcessInfo empty.
+        Assert.Contains("private const uint RequireProcessInfo = 0x2;", probe, StringComparison.Ordinal);
+        Assert.Contains("CfConnectSyncRoot(root, table, IntPtr.Zero, RequireProcessInfo, out key)", probe, StringComparison.Ordinal);
+        Assert.Contains("public IntPtr ProcessInfo;", probe, StringComparison.Ordinal);
+        Assert.Contains("function Get-FetchOwner", probe, StringComparison.Ordinal);
+        Assert.Contains("runValueSettle", probe, StringComparison.Ordinal);
+
+        var gate = Code(Path.Combine(Harness, "guest", "qualify.ps1"));
+        gate = gate[gate.IndexOf("Invoke-Gate '17-cloud-files'", StringComparison.Ordinal)..];
+        gate = gate[..gate.IndexOf("\nInvoke-Gate ", StringComparison.Ordinal)];
+        Assert.DoesNotContain("fetchRequestsDuringRead -gt 0", gate, StringComparison.Ordinal);
+        Assert.DoesNotContain("fetchRequestsDuringScan -ne 0", gate, StringComparison.Ordinal);
+        foreach (var measured in new[] { "$scan", "$settle" })
+        {
+            Assert.Contains(
+                $"[int]{measured}.fetchRequestsByWinSight -ne 0 -or [int]{measured}.fetchRequestsUnattributed -ne 0",
+                gate,
+                StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>The block whose braces balance, from the first brace at or after <paramref name="from"/>.</summary>
+    private static string Block(string code, int from)
+    {
+        var open = code.IndexOf('{', from);
+        var depth = 0;
+        for (var index = open; index < code.Length; index++)
+        {
+            depth += code[index] switch { '{' => 1, '}' => -1, _ => 0 };
+            if (depth == 0)
+            {
+                return code[open..(index + 1)];
+            }
+        }
+        throw new InvalidOperationException("The braces do not balance.");
+    }
+
     /// <summary>A capability SID: S-1-15-3-1024 and the SHA-256 of the upper-case name, as eight words.</summary>
     private static string CapabilitySid(string name)
     {
