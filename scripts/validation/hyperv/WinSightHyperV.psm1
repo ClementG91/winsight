@@ -207,6 +207,29 @@ function Copy-ListedFile {
 
 # The git blob id of a file's bytes: what `git rev-parse <commit>:<path>` prints for the same content,
 # so a copy can be bound to a reviewed commit without running git elevated.
+# SHA-256 of a file another process may hold open, as the Hyper-V management service holds the
+# configuration of its VMs even while they are off: read through every sharing mode, so an existing
+# writer does not make the open fail. $null when the holder allows no sharing or has locked what is
+# read, for the caller to name the file rather than guess; any other failure throws.
+function Get-SharedFileHash([Parameter(Mandatory)][string]$Path) {
+    $stream = $null
+    try {
+        $stream = New-Object System.IO.FileStream($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, ([System.IO.FileShare]'ReadWrite, Delete'))
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try { return ([BitConverter]::ToString($sha.ComputeHash($stream)) -replace '-', '') } finally { $sha.Dispose() }
+    }
+    catch {
+        $inner = $_.Exception
+        while ($inner.InnerException) { $inner = $inner.InnerException }
+        # ERROR_SHARING_VIOLATION (32) or ERROR_LOCK_VIOLATION (33).
+        if ($inner -is [System.IO.IOException] -and ($inner.HResult -band 0xFFFF) -in 32, 33) { return $null }
+        throw
+    }
+    finally {
+        if ($stream) { $stream.Dispose() }
+    }
+}
+
 function Get-GitBlobId([Parameter(Mandatory)][string]$Path) {
     $bytes = [IO.File]::ReadAllBytes($Path)
     $header = [Text.Encoding]::ASCII.GetBytes("blob $($bytes.Length)`0")
@@ -291,5 +314,5 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
 }
 
 Export-ModuleMember -Function Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
-    Get-GitBlobId, Get-FileManifest, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
+    Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
     Copy-GuestResults, Get-WinSightVmState

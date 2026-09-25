@@ -99,8 +99,14 @@ New-ProtectedDirectory -Path $Root -UsersRead
 New-ProtectedDirectory -Path (Join-Path $Root 'sealed') -UsersRead
 $record = Join-Path $Root ("sealed\vm-storage-{0}.txt" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $lines = @("# $VmRoot protected $([DateTime]::UtcNow.ToString('o'))")
+# The Hyper-V management service keeps the configuration of its VMs open even while they are off; a
+# file it lets nobody read is named in the seal rather than failing a protection already in place.
+$unread = 0
 foreach ($disk in $items | Where-Object { $_ -match '\.(a?vhdx?|vmgs|vmrs|vmcx)$' } | Sort-Object) {
-    $lines += '{0}  {1}' -f (Get-FileHash -LiteralPath $disk -Algorithm SHA256).Hash, $disk.Substring($VmRoot.TrimEnd('\').Length + 1)
+    $relative = $disk.Substring($VmRoot.TrimEnd('\').Length + 1)
+    $hash = Get-SharedFileHash -Path $disk
+    if ($hash) { $lines += '{0}  {1}' -f $hash, $relative }
+    else { $unread++; $lines += '(held open by another process, not hashed)  {0}' -f $relative }
 }
 $lines | Set-Content -LiteralPath $record
-Write-Host "Disk hashes sealed in $record"
+Write-Host "Disk hashes sealed in $record$(if ($unread) { " ($unread file(s) held open by another process named without a hash)" })"

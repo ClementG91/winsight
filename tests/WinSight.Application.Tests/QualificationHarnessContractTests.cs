@@ -88,6 +88,27 @@ public sealed class QualificationHarnessContractTests
         Assert.DoesNotContain("throw \"Writable by", module, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The VM storage seal hashes through every sharing mode and names a file it cannot open, instead
+    /// of failing a protection that is already complete.
+    /// </summary>
+    /// <remarks>
+    /// Found at the fourth storage protection: the storage was protected, then Get-FileHash met the
+    /// configuration file of a checkpoint that the Hyper-V management service keeps open while the VM is
+    /// off, and the seal was never written.
+    /// </remarks>
+    [Fact]
+    public void TheStorageSealReadsFilesHyperVKeepsOpen()
+    {
+        var protect = Code(Path.Combine(Harness, "Protect-WinSightVmStorage.ps1"));
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+
+        Assert.DoesNotContain("Get-FileHash", protect, StringComparison.Ordinal);
+        Assert.Contains("Get-SharedFileHash -Path $disk", protect, StringComparison.Ordinal);
+        Assert.Contains("held open by another process, not hashed", protect, StringComparison.Ordinal);
+        Assert.Contains("([System.IO.FileShare]'ReadWrite, Delete')", module, StringComparison.Ordinal);
+    }
+
     /// <summary>A capability SID: S-1-15-3-1024 and the SHA-256 of the upper-case name, as eight words.</summary>
     private static string CapabilitySid(string name)
     {

@@ -75,6 +75,20 @@ try {
     foreach ($file in $one, $two) { [IO.File]::WriteAllText($file, 'x') }
     $listed = try { @(& $module { param($i) Get-ProtectionRefusals -Items $i } ([string[]]@($one, $two))) } catch { @() }
     Report (@($listed | Where-Object { $_ -like '*refusal-one.bin' }).Count -gt 0 -and @($listed | Where-Object { $_ -like '*refusal-two.bin' }).Count -gt 0) 'Assert-ProtectedPath lists every refusal, not only the first'
+
+    # Hyper-V keeps the configuration of its VMs open even while they are off. The seal hashes such a
+    # file through every sharing mode, and names one it cannot open at all instead of failing.
+    $held = Join-Path $work 'held-open.vmcx'
+    [IO.File]::WriteAllText($held, 'configuration')
+    $expected = (Get-FileHash -LiteralPath $held -Algorithm SHA256).Hash
+    $writer = [IO.File]::Open($held, 'Open', 'ReadWrite', 'Read')
+    try { $shared = try { & $module { param($p) Get-SharedFileHash -Path $p } $held } catch { 'threw' } }
+    finally { $writer.Dispose() }
+    Report ($shared -eq $expected) 'Get-SharedFileHash hashes a file another process holds open for writing'
+    $exclusive = [IO.File]::Open($held, 'Open', 'ReadWrite', 'None')
+    try { $none = try { $result = & $module { param($p) Get-SharedFileHash -Path $p } $held; if ($null -eq $result) { 'none' } else { $result } } catch { 'threw' } }
+    finally { $exclusive.Dispose() }
+    Report ($none -eq 'none') 'Get-SharedFileHash answers nothing, without failing, for a file held with no sharing'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete
