@@ -18,7 +18,7 @@ param(
 # This registers a throw-away sync root with the documented Cloud Files API (no OneDrive, no account),
 # creates the placeholder shapes OneDrive does - hydrated and dehydrated files, a directory placeholder
 # - connects a provider that records each download (FETCH_DATA) request with the process that made it
-# and serves none, and asks winsight.exe to hash each file. It registers a sync root for the current
+# and fails it at once, and asks winsight.exe to hash each file. It registers a sync root for the current
 # user: run it in the disposable VM.
 #
 # Who asked matters. A download request is WinSight's when a WinSight process made it; another program
@@ -60,6 +60,32 @@ public static class CloudFilesProbe
         public IntPtr CorrelationVector;
         public IntPtr ProcessInfo;
         public long RequestKey;
+    }
+
+    // CF_OPERATION_INFO (cfapi.h), field for field.
+    [StructLayout(LayoutKind.Sequential)]
+    public struct OperationInfo
+    {
+        public uint StructSize;
+        public int Type;
+        public long ConnectionKey;
+        public long TransferKey;
+        public IntPtr CorrelationVector;
+        public IntPtr SyncStatus;
+        public long RequestKey;
+    }
+
+    // CF_OPERATION_PARAMETERS with the one member used here, TransferData: ParamSize, then the union
+    // at offset 8.
+    [StructLayout(LayoutKind.Explicit)]
+    public struct TransferData
+    {
+        [FieldOffset(0)] public uint ParamSize;
+        [FieldOffset(8)] public uint Flags;
+        [FieldOffset(12)] public int CompletionStatus;
+        [FieldOffset(16)] public IntPtr Buffer;
+        [FieldOffset(24)] public long Offset;
+        [FieldOffset(32)] public long Length;
     }
 
     // CF_PROCESS_INFO. CommandLine and SessionId came with Windows 10 1803; StructSize says whether
@@ -139,6 +165,8 @@ public static class CloudFilesProbe
     public static extern int CfConvertToPlaceholder(SafeFileHandle handle, IntPtr identity, uint identityLength, uint flags, out long usn, IntPtr overlapped);
     [DllImport("cldapi.dll")]
     public static extern uint CfGetPlaceholderStateFromAttributeTag(uint attributes, uint reparseTag);
+    [DllImport("cldapi.dll")]
+    public static extern int CfExecute(ref OperationInfo operation, ref TransferData transfer);
     [DllImport("ntdll.dll")]
     public static extern sbyte RtlQueryProcessPlaceholderCompatibilityMode();
     [DllImport("ntdll.dll")]
@@ -152,8 +180,12 @@ public static class CloudFilesProbe
 
     // CF_CONNECT_FLAG_REQUIRE_PROCESS_INFO: without it the platform leaves ProcessInfo empty.
     private const uint RequireProcessInfo = 0x2;
+    // CF_OPERATION_TYPE_TRANSFER_DATA, and a failure status: one outside the STATUS_CLOUD_FILE_* range
+    // reaches the reader as STATUS_CLOUD_FILE_UNSUCCESSFUL.
+    private const int TransferDataOperation = 0;
+    private const int StatusUnsuccessful = unchecked((int)0xC0000001);
     // One entry per download request: when, the id, image and command line of the process that asked,
-    // and the file. No request is answered, so a read waiting on one stays blocked until it times out.
+    // the file, and the HRESULT of failing it.
     private static readonly ConcurrentQueue<string[]> requests = new ConcurrentQueue<string[]>();
     private static readonly Callback Fetch = OnFetch;
     private static readonly IntPtr Identity = Marshal.StringToHGlobalUni("winsight-cloud-probe");
@@ -166,7 +198,7 @@ public static class CloudFilesProbe
     // their StructSize covers.
     private static void OnFetch(IntPtr info, IntPtr parameters)
     {
-        string processId = "0", image = "", commandLine = "", file = "";
+        string processId = "0", image = "", commandLine = "", file = "", completion = "";
         try
         {
             if (Marshal.ReadInt32(info) >= Offset(typeof(CallbackInfo), "RequestKey"))
@@ -186,7 +218,44 @@ public static class CloudFilesProbe
             }
         }
         catch (Exception) { }
-        requests.Enqueue(new[] { DateTime.UtcNow.ToString("o"), processId, image, commandLine, file });
+        try
+        {
+            // Failed at once. The platform keeps one request per file and makes every other reader
+            // wait behind it without a request of its own: a request left pending would hide a read by
+            // WinSight. A callback without a connection key, which the platform never sends, is not
+            // answered.
+            if (Marshal.ReadInt32(info) >= Offset(typeof(CallbackInfo), "RequestKey") + 8
+                && Marshal.ReadInt64(info, Offset(typeof(CallbackInfo), "ConnectionKey")) != 0)
+            {
+                OperationInfo operation;
+                TransferData transfer;
+                DescribeFailure(info, out operation, out transfer);
+                completion = "0x" + CfExecute(ref operation, ref transfer).ToString("X8");
+            }
+        }
+        catch (Exception exception) { completion = exception.GetType().Name; }
+        requests.Enqueue(new[] { DateTime.UtcNow.ToString("o"), processId, image, commandLine, file, completion });
+    }
+
+    // The failure of a download request: TRANSFER_DATA with an error status over the whole file, from
+    // offset 0 to the end of the file, which fails every read of the file waiting on it.
+    public static void DescribeFailure(IntPtr info, out OperationInfo operation, out TransferData transfer)
+    {
+        operation = new OperationInfo
+        {
+            StructSize = (uint)Marshal.SizeOf(typeof(OperationInfo)),
+            Type = TransferDataOperation,
+            ConnectionKey = Marshal.ReadInt64(info, Offset(typeof(CallbackInfo), "ConnectionKey")),
+            TransferKey = Marshal.ReadInt64(info, Offset(typeof(CallbackInfo), "TransferKey")),
+            RequestKey = Marshal.ReadInt64(info, Offset(typeof(CallbackInfo), "RequestKey")),
+        };
+        transfer = new TransferData
+        {
+            ParamSize = (uint)Marshal.SizeOf(typeof(TransferData)),
+            CompletionStatus = StatusUnsuccessful,
+            Offset = 0,
+            Length = Marshal.ReadInt64(info, Offset(typeof(CallbackInfo), "FileSize")),
+        };
     }
 
     private static int Offset(Type type, string field) { return Marshal.OffsetOf(type, field).ToInt32(); }
@@ -266,14 +335,14 @@ function Get-FetchOwner([int]$ProcessId, [string]$Image, [int[]]$WinSightProcess
 function Get-Fetches([int]$From, [int[]]$WinSightProcessIds) {
     $all = [CloudFilesProbe]::Requests()
     @(for ($i = $From; $i -lt $all.Count; $i++) {
-        $utc, $processId, $image, $commandLine, $file = $all[$i]
+        $utc, $processId, $image, $commandLine, $file, $completion = $all[$i]
         $processId = [int]$processId
         if ((-not $image -or $image -eq 'UNKNOWN') -and $processId -gt 0) {
             $running = Get-Process -Id $processId -ErrorAction SilentlyContinue
             if ($running) { $image = $running.ProcessName }
         }
         [ordered]@{
-            utc = $utc; processId = $processId; image = $image; commandLine = $commandLine; file = $file
+            utc = $utc; processId = $processId; image = $image; commandLine = $commandLine; file = $file; completion = $completion
             owner = Get-FetchOwner -ProcessId $processId -Image $image -WinSightProcessIds $WinSightProcessIds
         }
     })

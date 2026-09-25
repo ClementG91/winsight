@@ -261,6 +261,29 @@ public sealed class QualificationHarnessContractTests
     }
 
     /// <summary>
+    /// The Cloud Files probe fails each download request at once, over the whole file, so no request
+    /// stays pending and every read, by any process, arrives as a request of its own.
+    /// </summary>
+    /// <remarks>
+    /// Found in the first run with attribution (head-fe953fe): the requests came exactly 60 seconds
+    /// apart, one at a time. The platform keeps one request per file and makes every other reader wait
+    /// behind it without a callback of its own: the Win32 primitive waited 90 seconds and its window
+    /// holds only a request from sihost.exe, which the probe left pending for a minute at a time. A read
+    /// by WinSight during the scan, when such a request was pending throughout, would have been counted
+    /// nowhere.
+    /// </remarks>
+    [Fact]
+    public void TheCloudFilesProbeFailsEachDownloadRequestAtOnce()
+    {
+        var probe = Code(Path.Combine(Harness, "..", "..", "Measure-CloudFilesAccess.ps1"));
+        Assert.Contains("public static extern int CfExecute(ref OperationInfo operation, ref TransferData transfer);", probe, StringComparison.Ordinal);
+        Assert.Contains("public static void DescribeFailure(IntPtr info, out OperationInfo operation, out TransferData transfer)", probe, StringComparison.Ordinal);
+        var callback = probe[probe.IndexOf("private static void OnFetch(", StringComparison.Ordinal)..];
+        callback = callback[..callback.IndexOf("\n    }", StringComparison.Ordinal)];
+        Assert.Contains("CfExecute(ref operation, ref transfer)", callback, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// The files people read while a campaign runs are written with read sharing and retried: the
     /// runner's log, status and processed list, and the host operations log.
     /// </summary>

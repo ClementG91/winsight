@@ -158,6 +158,36 @@ try {
     }
     Report ($decoded -eq 'winsight.exe#4242/winsight') "the Cloud Files probe reads the process that asked from a callback laid out as cfapi.h ($decoded)"
 
+    # Each request is failed at once over the whole file. The failure is built from the connection,
+    # transfer and request keys and the file size of the callback, at the x64 offsets of cfapi.h, into
+    # CF_OPERATION_INFO (48 bytes) and the TransferData member of CF_OPERATION_PARAMETERS (40 bytes).
+    $failure = 'not run'
+    if ([IntPtr]::Size -eq 8) {
+        $failure = try {
+            $marshal = [System.Runtime.InteropServices.Marshal]
+            $callbackInfo = $marshal::AllocHGlobal(152)
+            try {
+                foreach ($offset in 0..18) { $marshal::WriteInt64($callbackInfo, $offset * 8, 0) }
+                $marshal::WriteInt32($callbackInfo, 0, 152)
+                $marshal::WriteInt64($callbackInfo, 8, 0x1111)
+                $marshal::WriteInt64($callbackInfo, 80, 12345)
+                $marshal::WriteInt64($callbackInfo, 112, 0x2222)
+                $marshal::WriteInt64($callbackInfo, 144, 0x3333)
+                $operation = New-Object 'CloudFilesProbe+OperationInfo'
+                $transfer = New-Object 'CloudFilesProbe+TransferData'
+                [CloudFilesProbe]::DescribeFailure($callbackInfo, [ref]$operation, [ref]$transfer)
+            }
+            finally { $marshal::FreeHGlobal($callbackInfo) }
+            $layout = $marshal::SizeOf([type][CloudFilesProbe+OperationInfo]) -eq 48 -and $marshal::SizeOf([type][CloudFilesProbe+TransferData]) -eq 40 -and
+                $marshal::OffsetOf([type][CloudFilesProbe+TransferData], 'Length').ToInt64() -eq 32
+            $filled = $operation.StructSize -eq 48 -and $operation.Type -eq 0 -and $operation.ConnectionKey -eq 0x1111 -and $operation.TransferKey -eq 0x2222 -and
+                $operation.RequestKey -eq 0x3333 -and $transfer.ParamSize -eq 40 -and $transfer.CompletionStatus -lt 0 -and $transfer.Offset -eq 0 -and $transfer.Length -eq 12345
+            if ($layout -and $filled) { 'failed at once over the whole file' } else { "layout $layout, fields $filled" }
+        }
+        catch { $_.Exception.Message }
+    }
+    Report ($failure -eq 'failed at once over the whole file') "the Cloud Files probe fails a download request from the keys and size of its callback ($failure)"
+
     # Someone following the runner's log keeps it open for reading. Add-Content fails then (the
     # control); the harness writers append and rewrite through it.
     $followed = Join-Path $work 'runner.log'
