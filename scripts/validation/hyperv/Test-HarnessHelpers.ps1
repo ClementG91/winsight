@@ -67,6 +67,14 @@ try {
     Report ((& $trusts 'S-1-15-3-1' -VirtualMachines) -eq $false) 'another capability is not trusted, even in the VM storage'
     Report ((& $trusts 'S-1-5-83-1-1111-2222-3333-4444') -eq $true -and (& $trusts 'S-1-5-11' -VirtualMachines) -eq $false) 'the per-VM identity is trusted, Authenticated Users are not'
     Report ((& $module { $script:VmWorkerProcessCapability }) -eq $worker) 'the module names the vmWorkerProcess capability SID'
+    Report ((& $trusts 'S-1-3-0') -eq $true -and (& $trusts 'S-1-3-1' -VirtualMachines) -eq $false) 'CREATOR OWNER is trusted, CREATOR GROUP is not'
+
+    # Every refusal at once, so one run shows all there is to fix.
+    $one = Join-Path $work 'refusal-one.bin'
+    $two = Join-Path $work 'refusal-two.bin'
+    foreach ($file in $one, $two) { [IO.File]::WriteAllText($file, 'x') }
+    $listed = try { @(& $module { param($i) Get-ProtectionRefusals -Items $i } ([string[]]@($one, $two))) } catch { @() }
+    Report (@($listed | Where-Object { $_ -like '*refusal-one.bin' }).Count -gt 0 -and @($listed | Where-Object { $_ -like '*refusal-two.bin' }).Count -gt 0) 'Assert-ProtectedPath lists every refusal, not only the first'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

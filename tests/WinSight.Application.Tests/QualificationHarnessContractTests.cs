@@ -56,6 +56,38 @@ public sealed class QualificationHarnessContractTests
         Assert.Contains("-not (Test-TrustedWriter $sid -VirtualMachines:$AllowVirtualMachines)", module, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// CREATOR OWNER is trusted: on each new child it stands for whoever created it, who needed a
+    /// create right only a trusted writer holds. CREATOR GROUP is not: it stands for the creator's
+    /// primary group, an ordinary group.
+    /// </summary>
+    /// <remarks>
+    /// Found at the second storage protection: Hyper-V puts CREATOR OWNER, GENERIC_ALL, inherit only,
+    /// on the folder of each VM, and the check refused it as a writer.
+    /// </remarks>
+    [Fact]
+    public void CreatorOwnerIsTrustedAndCreatorGroupIsNot()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+
+        Assert.Contains("$script:CreatorOwner = 'S-1-3-0'", module, StringComparison.Ordinal);
+        Assert.Contains("$trusted = @($script:LocalSystem, $script:Administrators, $script:CreatorOwner)", module, StringComparison.Ordinal);
+        Assert.DoesNotContain("S-1-3-1", module, StringComparison.Ordinal);
+    }
+
+    /// <summary>The storage check lists every refusal in one error, so one run shows all there is to fix.</summary>
+    [Fact]
+    public void EveryStorageRefusalIsReportedAtOnce()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        var assert = module[module.IndexOf("function Assert-ProtectedPath", StringComparison.Ordinal)..];
+        assert = assert[..assert.IndexOf("\n}", StringComparison.Ordinal)];
+
+        Assert.Contains("@(Get-ProtectionRefusals -Items $items -AllowVirtualMachines:$AllowVirtualMachines)", assert, StringComparison.Ordinal);
+        Assert.Contains("throw ($refusals -join [Environment]::NewLine)", assert, StringComparison.Ordinal);
+        Assert.DoesNotContain("throw \"Writable by", module, StringComparison.Ordinal);
+    }
+
     /// <summary>A capability SID: S-1-15-3-1024 and the SHA-256 of the upper-case name, as eight words.</summary>
     private static string CapabilitySid(string name)
     {

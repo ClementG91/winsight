@@ -14,6 +14,8 @@ $script:LocalSystem = 'S-1-5-18'
 $script:TrustedInstaller = 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464'
 $script:AuthenticatedUsers = 'S-1-5-11'
 $script:VirtualMachines = 'S-1-5-83-0'
+# CREATOR OWNER: a placeholder that stands, on each new child, for whoever created it.
+$script:CreatorOwner = 'S-1-3-0'
 # The capability Hyper-V gives its worker process (vmWorkerProcess: S-1-15-3-1024 and the SHA-256 of
 # the upper-case name), which it grants on the disks of the VMs it runs, next to the per-VM identity
 # (measured on Windows 11 26200: Write on the control VM's data disk). A capability counts only for an
@@ -76,19 +78,23 @@ function New-DirectorySecurity([bool]$UsersRead, [bool]$VirtualMachinesFull = $f
     return $security
 }
 
-# Throws unless $Path is an ordinary directory or file owned by Administrators or SYSTEM that no other
-# principal may write, change or delete - except the Hyper-V worker group where -AllowVirtualMachines
-# says so. -Recurse applies the same test to everything below, which also rules out a reparse point
-# planted anywhere in the tree.
-# Whether a write grant to $Sid leaves a path protected: SYSTEM, Administrators and the per-VM identity
-# Hyper-V grants on the disks of the VM it runs (S-1-5-83-1-*); in the VM storage only, also the
-# Virtual Machines group and the Hyper-V worker capability.
+# Whether a write grant to $Sid leaves a path protected: SYSTEM, Administrators, the per-VM identity
+# Hyper-V grants on the disks of the VM it runs (S-1-5-83-1-*), and CREATOR OWNER, which grants nothing
+# itself: on each new child it stands for whoever created it, who needed a create right that only a
+# trusted writer can hold here (every other writer is refused). CREATOR GROUP is not trusted: it stands
+# for the creator's primary group, an ordinary group. In the VM storage only, also the Virtual Machines
+# group and the Hyper-V worker capability.
 function Test-TrustedWriter([string]$Sid, [switch]$VirtualMachines) {
-    $trusted = @($script:LocalSystem, $script:Administrators)
+    $trusted = @($script:LocalSystem, $script:Administrators, $script:CreatorOwner)
     if ($VirtualMachines) { $trusted += $script:VirtualMachines, $script:VmWorkerProcessCapability }
     return ($Sid -in $trusted) -or ($Sid -like 'S-1-5-83-1-*')
 }
 
+# Throws unless $Path is an ordinary directory or file owned by Administrators or SYSTEM that no other
+# principal may write, change or delete - except the Hyper-V worker identities where
+# -AllowVirtualMachines says so. -Recurse applies the same test to everything below, which also rules
+# out a reparse point planted anywhere in the tree. Every refusal is listed, not just the first, so one
+# run shows all there is to fix.
 function Assert-ProtectedPath {
     param([Parameter(Mandatory)][string]$Path, [switch]$Recurse, [switch]$AllowVirtualMachines)
     # A protected folder under a parent anyone can rename is not protected: the parent goes, and
@@ -110,18 +116,25 @@ function Assert-ProtectedPath {
             }
         }
     }
-    foreach ($item in $items) {
+    $refusals = @(Get-ProtectionRefusals -Items $items -AllowVirtualMachines:$AllowVirtualMachines)
+    if ($refusals.Count -gt 0) { throw ($refusals -join [Environment]::NewLine) }
+}
+
+# One line per reason $Items are not protected: an owner other than Administrators or SYSTEM, a write
+# grant to a principal Test-TrustedWriter does not trust. A reparse point is refused at once.
+function Get-ProtectionRefusals([string[]]$Items, [switch]$AllowVirtualMachines) {
+    foreach ($item in $Items) {
         if ([IO.File]::GetAttributes($item) -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse point: $item" }
         $acl = Get-Acl -LiteralPath $item
         $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-        if ($owner -notin $script:LocalSystem, $script:Administrators) { throw "Not owned by Administrators or SYSTEM ($owner): $item" }
+        if ($owner -notin $script:LocalSystem, $script:Administrators) { "Not owned by Administrators or SYSTEM ($owner): $item" }
         foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
             $sid = $rule.IdentityReference.Value
             # Entries that only children inherit count too: they would make the next file written here
             # writable.
             if ($rule.AccessControlType -eq 'Allow' -and (Test-Grants $rule $script:WriteRights) -and
                 -not (Test-TrustedWriter $sid -VirtualMachines:$AllowVirtualMachines)) {
-                throw "Writable by $sid ($($rule.FileSystemRights)): $item"
+                "Writable by $sid ($($rule.FileSystemRights), $($rule.InheritanceFlags), $($rule.PropagationFlags)): $item"
             }
         }
     }
