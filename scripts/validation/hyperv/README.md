@@ -63,7 +63,8 @@ rehearsal is still not a CI-attested release.
    `{"action":"stage","candidate":"<name>"}`, then `{"action":"qualify","runName":"...","gates":[...],"memoryGB":4}`,
    `{"action":"network","runName":"...","memoryGB":3}` for gate 36 (the operator types the disposable
    password in each VM; the control VM runs with 2 GB, and the run is refused up front if the host
-   cannot hold both VMs plus 0.5 GB), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json`.
+   cannot hold both VMs plus 0.5 GB), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json` and
+   `runner.log` beside it; reading or following them while the runner works is safe (WS-83).
 4. Verify each run as an ordinary user before citing it:
    `.\Verify-QualificationProvenance.ps1 -RunDir <vol>\WinSight-Qualification\sealed\<run> -HarnessCommit <sha>`
    Every check must print PASS: the seal, the harness blob ids against the reviewed commit, the

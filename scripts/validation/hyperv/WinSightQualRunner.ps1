@@ -71,7 +71,7 @@ $statusPath = Join-Path $runnerDir 'status.json'
 $processedPath = Join-Path $runnerDir 'processed.txt'
 function Say([string]$Message) {
     $line = "$(Get-Date -Format o) $Message"
-    Add-Content -LiteralPath (Join-Path $runnerDir 'runner.log') -Value $line
+    Add-SharedLine -Path (Join-Path $runnerDir 'runner.log') -Line $line
     Write-Host $line
 }
 
@@ -120,7 +120,7 @@ function Assert-Harness {
 $processed = New-Object System.Collections.Generic.HashSet[string]
 if (Test-Path -LiteralPath $processedPath) { foreach ($name in Get-Content -LiteralPath $processedPath) { [void]$processed.Add($name) } }
 $status = [ordered]@{ runnerPid = $PID; startedUtc = [DateTime]::UtcNow.ToString('o'); heartbeatUtc = $null; harness = $stamp; candidate = $null; current = $null; history = @() }
-function Save-Status { $status.heartbeatUtc = [DateTime]::UtcNow.ToString('o'); $status | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $statusPath -Encoding UTF8 }
+function Save-Status { $status.heartbeatUtc = [DateTime]::UtcNow.ToString('o'); Write-SharedText -Path $statusPath -Text ($status | ConvertTo-Json -Depth 5) }
 
 # One request file, or $null when it is not a well-formed one. Its content is never echoed: a request
 # that is really a hard link to something else must not have that something copied into a readable log.
@@ -232,7 +232,7 @@ while ((Get-Date) -lt $deadline) {
     }
     if (-not $next) { Save-Status; Start-Sleep -Seconds 5; continue }
     [void]$processed.Add($next.Name)
-    Add-Content -LiteralPath $processedPath -Value $next.Name
+    Add-SharedLine -Path $processedPath -Line $next.Name
     $id = ([IO.Path]::GetFileNameWithoutExtension($next.Name) -replace '[^A-Za-z0-9-]', '')
     if (-not $id) { $id = 'request' }
     $entry = [ordered]@{ id = $id; action = $null; arguments = $null; exit = $null; startedUtc = [DateTime]::UtcNow.ToString('o'); finishedUtc = $null; log = $null; error = $null }

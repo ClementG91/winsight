@@ -42,7 +42,7 @@ foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-Prote
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
-function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [hyper-v] $Message"; Add-Content -LiteralPath $hostLog -Value $line; Write-Host $line }
+function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [hyper-v] $Message"; Add-SharedLine -Path $hostLog -Line $line; Write-Host $line }
 function Remove-DataDisk {
     $found = Remove-WinSightDataDisk -VMName $Name -Path $data
     if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }

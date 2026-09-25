@@ -46,7 +46,7 @@ Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $controlData = Join-Path $Root 'control-data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
-function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [network] $Message"; Add-Content -LiteralPath $hostLog -Value $line; Write-Host $line }
+function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [network] $Message"; Add-SharedLine -Path $hostLog -Line $line; Write-Host $line }
 function Remove-DataDisks {
     $found = Remove-WinSightDataDisk -VMName $Name -Path $data
     if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }

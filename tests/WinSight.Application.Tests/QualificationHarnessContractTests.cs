@@ -137,7 +137,7 @@ public sealed class QualificationHarnessContractTests
             var import = code.IndexOf("Import-Module", StringComparison.Ordinal);
             var owner = code.IndexOf("\nSet-AdministratorsDefaultOwner\n", StringComparison.Ordinal);
             Assert.True(import >= 0 && owner > import, $"{Path.GetFileName(path)} does not set the default owner after importing the module");
-            foreach (var write in new[] { "New-ProtectedDirectory", "Set-Content", "Add-Content", "Copy-ListedFile", "Copy-Item", "Copy-GuestResults", "icacls" })
+            foreach (var write in new[] { "New-ProtectedDirectory", "Set-Content", "Add-Content", "Add-SharedLine", "Write-SharedText", "Copy-ListedFile", "Copy-Item", "Copy-GuestResults", "icacls" })
             {
                 var first = code.IndexOf(write, StringComparison.Ordinal);
                 Assert.True(first < 0 || first > owner, $"{Path.GetFileName(path)} uses {write} before setting the default owner");
@@ -260,6 +260,39 @@ public sealed class QualificationHarnessContractTests
         }
     }
 
+    /// <summary>
+    /// The files people read while a campaign runs are written with read sharing and retried: the
+    /// runner's log, status and processed list, and the host operations log.
+    /// </summary>
+    /// <remarks>
+    /// Found when the runner restarted for the third campaign: a <c>tail -F</c> kept its log open,
+    /// and the next <c>Add-Content</c> failed ("used by another process"), which stopped the runner
+    /// between two requests. Measured under Windows PowerShell 5.1: <c>Add-Content</c> and
+    /// <c>Set-Content</c> fail while any other process holds the file open for reading, even one that
+    /// shares writing. An operator following the log with <c>Get-Content -Wait</c> would do the same,
+    /// and a driver writing the host operations log could stop between the guest's end and the
+    /// collection.
+    /// </remarks>
+    [Fact]
+    public void FilesReadDuringACampaignAreWrittenWithReadSharing()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("function Write-SharedText(", module, StringComparison.Ordinal);
+        Assert.Contains("function Add-SharedLine(", module, StringComparison.Ordinal);
+        Assert.Contains("[IO.FileAccess]::Write, [IO.FileShare]::ReadWrite", module, StringComparison.Ordinal);
+
+        Assert.All(HostScripts(), path => Assert.DoesNotContain("Add-Content", Code(path), StringComparison.Ordinal));
+        var runner = Code(Path.Combine(Harness, "WinSightQualRunner.ps1"));
+        Assert.Contains("Add-SharedLine -Path (Join-Path $runnerDir 'runner.log') -Line $line", runner, StringComparison.Ordinal);
+        Assert.Contains("Add-SharedLine -Path $processedPath -Line $next.Name", runner, StringComparison.Ordinal);
+        Assert.Contains("Write-SharedText -Path $statusPath -Text", runner, StringComparison.Ordinal);
+        Assert.DoesNotContain("Set-Content -LiteralPath $statusPath", runner, StringComparison.Ordinal);
+        foreach (var name in new[] { "Invoke-HyperVQualification.ps1", "Invoke-HyperVNetworkLogon.ps1" })
+        {
+            Assert.Contains("Add-SharedLine -Path $hostLog -Line $line", Code(Path.Combine(Harness, name)), StringComparison.Ordinal);
+        }
+    }
+
     /// <summary>The block whose braces balance, from the first brace at or after <paramref name="from"/>.</summary>
     private static string Block(string code, int from)
     {
@@ -301,7 +334,7 @@ public sealed class QualificationHarnessContractTests
         Assert.DoesNotContain("Remove-Item", runner, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("Out-File", runner, StringComparison.OrdinalIgnoreCase);
         // Every write goes to the protected runner directory, the sealed store or a protected copy.
-        var writes = Regex.Matches(runner, @"(Set-Content|Add-Content)\s+-LiteralPath\s+(?<target>[^\r\n]+)");
+        var writes = Regex.Matches(runner, @"((Set-Content|Add-Content)\s+-LiteralPath|(Add-SharedLine|Write-SharedText)\s+-Path)\s+(?<target>[^\r\n]+)");
         Assert.True(writes.Count >= 5, "the runner's writes were not found");
         foreach (Match write in writes)
         {

@@ -106,5 +106,5 @@ if ((Get-WinSightVmState $Name) -ne 'Off') {
 Get-VMHardDiskDrive -VMName $Name | Where-Object Path -eq $data | Remove-VMHardDiskDrive
 Checkpoint-VM -Name $Name -SnapshotName $Checkpoint
 Write-Host "Ready: $Name, clean checkpoint $Checkpoint, private switch $Switch."
-Add-Content -LiteralPath (Join-Path $EvidenceRoot 'host-operations.txt') -Value "$(Get-Date -Format o) [control] $Name ready, checkpoint $Checkpoint"
+Add-SharedLine -Path (Join-Path $EvidenceRoot 'host-operations.txt') -Line "$(Get-Date -Format o) [control] $Name ready, checkpoint $Checkpoint"
 Write-Host 'Next: queue a network request for the runner.'

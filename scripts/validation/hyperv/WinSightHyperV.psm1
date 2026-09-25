@@ -388,6 +388,31 @@ function Remove-WinSightDataDisk([Parameter(Mandatory)][string]$VMName, [Paramet
     }
 }
 
+# Writes a file that people may be reading while the harness runs: the runner's log, status and
+# processed list, the host operations log. Windows PowerShell 5.1 Add-Content and Set-Content fail
+# while any other process holds the file open for reading, even one that shares writing (measured):
+# an operator following the log stopped the runner. The file is opened with read and write sharing,
+# and a sharing violation from another writer is retried for five seconds. UTF-8, no BOM.
+function Write-SharedText([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][AllowEmptyString()][string]$Text, [switch]$Append) {
+    $mode = if ($Append) { [IO.FileMode]::Append } else { [IO.FileMode]::Create }
+    $bytes = (New-Object System.Text.UTF8Encoding $false).GetBytes($Text)
+    for ($attempt = 1; ; $attempt++) {
+        try {
+            $stream = New-Object IO.FileStream($Path, $mode, [IO.FileAccess]::Write, [IO.FileShare]::ReadWrite)
+            try { $stream.Write($bytes, 0, $bytes.Length) } finally { $stream.Dispose() }
+            return
+        }
+        catch {
+            if ($attempt -ge 20) { throw }
+            Start-Sleep -Milliseconds 250
+        }
+    }
+}
+
+function Add-SharedLine([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][AllowEmptyString()][string]$Line) {
+    Write-SharedText -Path $Path -Text ($Line + "`r`n") -Append
+}
+
 # Refuses a run whose VMs the host cannot hold: $Bytes is what they need, margin included, compared with
 # the memory Windows can hand out now (free and standby pages). Hyper-V gives a VM all its memory at
 # start and fails the start otherwise.
@@ -400,4 +425,4 @@ function Assert-WinSightHostMemory([int64]$Bytes, [string]$Advice) {
 
 Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
-    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory
+    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine

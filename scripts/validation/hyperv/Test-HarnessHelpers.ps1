@@ -157,6 +157,24 @@ try {
         catch { $_.Exception.Message }
     }
     Report ($decoded -eq 'winsight.exe#4242/winsight') "the Cloud Files probe reads the process that asked from a callback laid out as cfapi.h ($decoded)"
+
+    # Someone following the runner's log keeps it open for reading. Add-Content fails then (the
+    # control); the harness writers append and rewrite through it.
+    $followed = Join-Path $work 'runner.log'
+    [IO.File]::WriteAllText($followed, "first`r`n")
+    $follower = [IO.File]::Open($followed, 'Open', 'Read', 'ReadWrite')
+    try {
+        $blocked = try { Add-Content -LiteralPath $followed -Value 'naive' -ErrorAction Stop; $false } catch { $true }
+        $shared = try {
+            & $module { param($p) Add-SharedLine -Path $p -Line 'second'; Add-SharedLine -Path $p -Line 'third' } $followed
+            $appended = [IO.File]::ReadAllText($followed)
+            & $module { param($p) Write-SharedText -Path $p -Text '{"status":1}' } $followed
+            $appended -eq "first`r`nsecond`r`nthird`r`n" -and [IO.File]::ReadAllText($followed) -eq '{"status":1}'
+        }
+        catch { $false }
+    }
+    finally { $follower.Dispose() }
+    Report ($blocked -and $shared) 'the harness appends to and rewrites a file another process is reading (Add-Content cannot)'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete
