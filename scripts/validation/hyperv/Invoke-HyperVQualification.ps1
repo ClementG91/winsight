@@ -43,7 +43,10 @@ Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
 function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [hyper-v] $Message"; Add-Content -LiteralPath $hostLog -Value $line; Write-Host $line }
-function Remove-DataDisk { Get-VMHardDiskDrive -VMName $Name | Where-Object Path -eq $data | Remove-VMHardDiskDrive }
+function Remove-DataDisk {
+    $found = Remove-WinSightDataDisk -VMName $Name -Path $data
+    if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }
+}
 
 $runDir = Join-Path $EvidenceRoot $RunName
 if (-not $Resume -and (Test-Path -LiteralPath $runDir)) { throw "Run $RunName already exists; choose a new name." }

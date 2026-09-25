@@ -120,14 +120,21 @@ function Assert-ProtectedPath {
     if ($refusals.Count -gt 0) { throw ($refusals -join [Environment]::NewLine) }
 }
 
-# One line per reason $Items are not protected: an owner other than Administrators or SYSTEM, a write
+# Whether $Sid may own something protected: SYSTEM or Administrators; in the VM storage only, also the
+# per-VM identity (S-1-5-83-1-*), which owns the differencing disk Hyper-V creates when it restores a
+# checkpoint and which already has every right on its own VM's disks.
+function Test-TrustedOwner([string]$Sid, [switch]$VirtualMachines) {
+    return ($Sid -in $script:LocalSystem, $script:Administrators) -or ($VirtualMachines -and $Sid -like 'S-1-5-83-1-*')
+}
+
+# One line per reason $Items are not protected: an owner Test-TrustedOwner does not trust, a write
 # grant to a principal Test-TrustedWriter does not trust. A reparse point is refused at once.
 function Get-ProtectionRefusals([string[]]$Items, [switch]$AllowVirtualMachines) {
     foreach ($item in $Items) {
         if ([IO.File]::GetAttributes($item) -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse point: $item" }
         $acl = Get-Acl -LiteralPath $item
         $owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
-        if ($owner -notin $script:LocalSystem, $script:Administrators) { "Not owned by Administrators or SYSTEM ($owner): $item" }
+        if (-not (Test-TrustedOwner $owner -VirtualMachines:$AllowVirtualMachines)) { "Not owned by Administrators or SYSTEM ($owner): $item" }
         foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
             $sid = $rule.IdentityReference.Value
             # Entries that only children inherit count too: they would make the next file written here
@@ -355,6 +362,32 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
     (Get-VM -Name $Name -ErrorAction Stop).State.ToString()
 }
 
+# Detaches the data disk $Path from $VMName once the VM is really off. Returns the state the VM was
+# found in when it had to be turned off first, and nothing otherwise. Hyper-V refused the detach a second
+# after a guest had shut itself down ("the operation cannot be performed while the object is in its
+# current state"), so it is retried; and a VM found running again after its run - whoever started it -
+# is turned off, since a guest started again can only overwrite the results this disk carries.
+function Remove-WinSightDataDisk([Parameter(Mandatory)][string]$VMName, [Parameter(Mandatory)][string]$Path, [int]$Attempts = 30) {
+    $found = $null
+    for ($attempt = 1; ; $attempt++) {
+        $state = Get-WinSightVmState $VMName
+        if ($state -ne 'Off') {
+            if (-not $found) { $found = $state }
+            Stop-VM -Name $VMName -TurnOff -Force
+        }
+        $drives = @(Get-VMHardDiskDrive -VMName $VMName | Where-Object Path -eq $Path)
+        if ($drives.Count -eq 0) { return $found }
+        try {
+            $drives | Remove-VMHardDiskDrive -ErrorAction Stop
+            return $found
+        }
+        catch {
+            if ($attempt -ge $Attempts) { throw }
+            Start-Sleep -Seconds 10
+        }
+    }
+}
+
 Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
-    Copy-GuestResults, Get-WinSightVmState
+    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk

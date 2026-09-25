@@ -31,7 +31,7 @@ scripts, le candidat, les disques des VM et les preuves dans des dossiers que to
 authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
 fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
 `Verify-QualificationProvenance.ps1`) mais n'a pas encore tourné, et le code produit a changé depuis
-`259056b` (RA-02 à RA-05, WS-74 à WS-79) : **la tête de la branche n'est pas qualifiée**.
+`259056b` (RA-02 à RA-05, WS-74 à WS-80) : **la tête de la branche n'est pas qualifiée**.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -48,7 +48,7 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **73 défauts** : 68 corrigés et testés (dont cinq dans le
+- **Problèmes trouvés.** L'audit a traité **74 défauts** : 69 corrigés et testés (dont six dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
   1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
@@ -284,6 +284,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-77 | Low | Validation | Le harnais Hyper-V ne démarrait pas sous Windows PowerShell 5.1 : ses scripts avancés (`[CmdletBinding()]`) calculaient des valeurs par défaut de paramètres à partir de `$PSScriptRoot`, que PowerShell 5.1 laisse vide pendant l'évaluation de ces valeurs quand le script est lancé avec `-File` (mesuré ; le même script lancé avec `&` ou par PowerShell 7 le voit). Le dépôt de l'exécuteur et du vérificateur en dépendait depuis la refonte RA-01, tous les emplacements depuis le retrait du lecteur codé en dur ; trouvé au premier lancement de la protection du stockage | la protection du stockage, l'exécuteur et le vérificateur de provenance échouaient avant leur première ligne (« GetPathRoot : le chemin d'accès n'a pas une forme conforme ») ; aucune preuve concernée, le harnais n'avait jamais tourné ; trois scripts de validation portaient le même défaut, sans effet dans la VM qui leur passe les chemins | `scripts/validation/hyperv/*.ps1`, `Test-IpcBoundary.ps1`, `Test-IpcNetworkObserver.ps1`, `Measure-Performance.ps1` | valeurs calculées dans le corps, avec la même expression, seulement si le paramètre est absent ; test de contrat sur les 33 scripts de `scripts/`, en échec sur l'ancien code pour les 11 concernés ; en-têtes des 11 scripts exécutés sous PowerShell 5.1 avec `-File` : chemins attendus | Corrigé |
 | WS-78 | Low | Validation | La vérification du stockage des VM ne connaissait pas les entrées qu'Hyper-V pose lui-même : elle ne connaissait que l'identité propre à chaque VM (`S-1-5-83-1-*`) et refusait l'écriture accordée à la capacité du processus de travail (`vmWorkerProcess`, `S-1-15-3-1024-…`) sur le disque de données de la VM de contrôle, puis l'entrée CREATOR OWNER (GENERIC_ALL, héritage seul) du dossier de chaque VM ; elle s'arrêtait au premier refus, une passe de protection par entrée ; le scellement des empreintes lisait ensuite avec `Get-FileHash`, qui échoue sur la configuration d'un point de contrôle que le service de gestion Hyper-V garde ouverte même VM éteinte | protection du stockage impossible, donc aucune passe VM ; rien de modifié au-delà du propriétaire des disques et du verrou du dossier parent | `WinSightHyperV.psm1` | la capacité, et elle seule, acceptée dans le stockage des VM seulement (une capacité ne compte que pour un jeton AppContainer, au second de ses deux contrôles d'accès, et ne donne jamais l'écriture à un utilisateur local ; SID recalculé comme Windows le fait, SHA-256 du nom en majuscules, et vérifié par `DeriveCapabilitySidsFromName`) ; CREATOR OWNER accepté (il désigne, sur chaque nouvel élément, son créateur, qui devait déjà détenir un droit de création réservé aux comptes de confiance), CREATOR GROUP toujours refusé (le groupe principal du créateur est un groupe ordinaire) ; tous les refus listés en une fois ; empreintes lues avec tous les modes de partage, et un fichier que son détenteur ne laisse pas lire nommé dans le scellement sans empreinte plutôt que de faire échouer une protection déjà en place ; tests de contrat et huit autocontrôles PowerShell 5.1, en échec sur les modules précédents | Corrigé |
 | WS-79 | Medium | Validation | Sur un Windows client, un processus élevé crée ses fichiers au nom du compte de l'opérateur (réglage par défaut « créateur de l'objet ») : les 400 fichiers écrits par le premier exécuteur appartiennent à ce compte. Le harnais refait fixait le propriétaire de ses dossiers protégés, pas celui des fichiers qu'il y copie ou y écrit | le propriétaire d'un fichier peut toujours en changer les droits : tout processus du compte de l'opérateur aurait pu modifier une copie protégée ou les preuves scellées, ce que la vérification de provenance, qui teste seulement le refus d'une écriture, n'aurait pas vu ; l'exécuteur, qui revérifie sa copie du harnais, aurait par ailleurs refusé de démarrer | `WinSightHyperV.psm1` et les six scripts élevés | chaque script élevé fait des Administrateurs le propriétaire par défaut de son jeton (`SetTokenInformation(TokenOwner)`, hérité par les processus qu'il lance) avant de créer quoi que ce soit, ce que Windows n'accorde qu'à un jeton élevé ; test de contrat sur les six scripts et autocontrôle PowerShell 5.1 (le propre SID accepté, Administrateurs refusé hors élévation, erreur 1307), en échec sur les scripts précédents | Corrigé |
+| WS-80 | Low | Validation | Première passe complète : l'invité s'est éteint seul après 121 minutes, puis le retrait du disque de transport a échoué une seconde plus tard (« l'opération ne peut pas être effectuée tant que l'objet se trouve dans son état actuel ») ; le pilote s'est arrêté sans rapatrier les résultats, et la VM, redémarrée avec un disque qui disait toujours « qualify », a rejoué toutes les portes par-dessus. La passe suivante a été refusée : restaurer le point de contrôle crée un disque différentiel dont le propriétaire est l'identité de la VM | deux heures de passe perdues, résultats écrasés ; aucune preuve scellée | `WinSightHyperV.psm1`, `Invoke-HyperVQualification.ps1`, `Invoke-HyperVNetworkLogon.ps1`, `guest/run-guest-checks.ps1` | retrait du disque réessayé jusqu'à ce que la VM soit vraiment éteinte, VM trouvée relancée éteinte et consignée ; l'invité écrit « done » avant de s'éteindre et s'éteint aussitôt s'il redémarre ; identité de la VM acceptée comme propriétaire dans le stockage des VM seulement ; test de contrat et autocontrôle PowerShell 5.1, en échec sur le harnais précédent | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -388,7 +389,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 610 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 611 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -609,7 +610,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 610 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 611 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -647,7 +648,7 @@ ci-dessous, par thème, avec la justification.
 | Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1`, `Test-InstallerServiceUninstall.ps1`, `Test-InstallerUpgrade.ps1` | WS-13, WS-63 |
 | Mesure | `scripts/Measure-Performance.ps1` | outil de mesure reproductible (D3) |
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
-| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77 à WS-79, WS-40 (mesure) |
+| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77 à WS-80, WS-40 (mesure) |
 | Lecture automatique et attribution | `Core/AutomaticFileAccess.cs`, `AutomaticFileMutation.cs`, `Attribution/WriteAttributionWatcher.cs` | WS-40, WS-73 |
 | Contre-audit : nom d'origine par le handle | `Core/PeResources.cs`, `VersionResource.cs`, `Persistence/PersistenceScanner.cs`, `CommandLine.cs`, `InterpreterAbuseTriage.cs` | RA-02, WS-74 |
 | Contre-audit : Guardian incertain | `Persistence/PersistenceCoverageGain.cs`, `PersistenceMonitorCore.cs`, `PersistenceMonitor*.cs`, `Application/GuardianHost.cs`, `Adapters.Alerts.cs`, `Dashboard/MainWindow.Monitors.cs` | RA-03 |

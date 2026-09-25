@@ -45,8 +45,10 @@ $controlData = Join-Path $Root 'control-data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
 function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [network] $Message"; Add-Content -LiteralPath $hostLog -Value $line; Write-Host $line }
 function Remove-DataDisks {
-    Get-VMHardDiskDrive -VMName $Name | Where-Object Path -eq $data | Remove-VMHardDiskDrive
-    Get-VMHardDiskDrive -VMName $ControlName | Where-Object Path -eq $controlData | Remove-VMHardDiskDrive
+    $found = Remove-WinSightDataDisk -VMName $Name -Path $data
+    if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }
+    $found = Remove-WinSightDataDisk -VMName $ControlName -Path $controlData
+    if ($found) { Write-HostLog "$ControlName was $found, not off, when its data disk was detached: turned off" }
 }
 $network = [ordered]@{
     targetAddress = '192.168.250.10'; controlAddress = '192.168.250.20'; prefixLength = 24; httpPort = 8088

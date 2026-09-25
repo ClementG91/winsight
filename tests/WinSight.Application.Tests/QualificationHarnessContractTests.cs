@@ -145,6 +145,39 @@ public sealed class QualificationHarnessContractTests
         }
     }
 
+    /// <summary>
+    /// A run ends once: the guest marks its disk done before shutting down and shuts down at once if
+    /// started again, and the host detaches the data disk only when the VM is really off, turning off a
+    /// VM that was started again rather than failing with the results uncollected.
+    /// </summary>
+    /// <remarks>
+    /// Found in the first full run: the guest shut itself down after 121 minutes, then detaching the data
+    /// disk failed ("cannot be performed while the object is in its current state"), the driver stopped
+    /// without collecting, and the VM, started again with its disk still saying "qualify", ran every gate
+    /// again over the results. The next run was refused as well: restoring the checkpoint had created a
+    /// differencing disk owned by the VM's own identity.
+    /// </remarks>
+    [Fact]
+    public void ARunEndsOnceAndIsAlwaysCollected()
+    {
+        var guest = Code(Path.Combine(Harness, "guest", "run-guest-checks.ps1"));
+        Assert.Contains("'done' {", guest, StringComparison.Ordinal);
+        Assert.Contains("Set-Content -LiteralPath '$modeFile' -Value 'done'; Stop-Computer -Force", guest, StringComparison.Ordinal);
+
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("function Remove-WinSightDataDisk", module, StringComparison.Ordinal);
+        Assert.Contains("Stop-VM -Name $VMName -TurnOff -Force", module, StringComparison.Ordinal);
+        foreach (var name in new[] { "Invoke-HyperVQualification.ps1", "Invoke-HyperVNetworkLogon.ps1" })
+        {
+            var driver = Code(Path.Combine(Harness, name));
+            Assert.DoesNotContain("Remove-VMHardDiskDrive", driver, StringComparison.Ordinal);
+            Assert.Contains("Remove-WinSightDataDisk -VMName $Name -Path $data", driver, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("function Test-TrustedOwner([string]$Sid, [switch]$VirtualMachines)", module, StringComparison.Ordinal);
+        Assert.Contains("-not (Test-TrustedOwner $owner -VirtualMachines:$AllowVirtualMachines)", module, StringComparison.Ordinal);
+    }
+
     /// <summary>A capability SID: S-1-15-3-1024 and the SHA-256 of the upper-case name, as eight words.</summary>
     private static string CapabilitySid(string name)
     {

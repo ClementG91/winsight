@@ -90,6 +90,15 @@ try {
     finally { $exclusive.Dispose() }
     Report ($none -eq 'none') 'Get-SharedFileHash answers nothing, without failing, for a file held with no sharing'
 
+    # Restoring a checkpoint gives the VM a new differencing disk owned by the VM's own identity: an
+    # owner the storage check accepts in the VM storage, and nowhere else.
+    $owns = {
+        param($Sid, [switch]$VirtualMachines)
+        try { [bool](& $module { param($s, $v) Test-TrustedOwner $s -VirtualMachines:$v } $Sid $VirtualMachines.IsPresent) } catch { $null }
+    }
+    $vmIdentity = 'S-1-5-83-1-3190545330-1080910426-1459921588-4136893788'
+    Report ((& $owns $vmIdentity -VirtualMachines) -eq $true -and (& $owns $vmIdentity) -eq $false -and (& $owns 'S-1-5-11' -VirtualMachines) -eq $false -and (& $owns 'S-1-5-32-544') -eq $true) 'a VM identity may own what is in the VM storage only'
+
     # The elevated scripts make Administrators the default owner of what they create. Unelevated, the
     # call goes through for the account's own SID and Windows refuses Administrators (1307): it asks
     # for exactly that, and only an elevated token may have it.
