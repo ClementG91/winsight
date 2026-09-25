@@ -32,17 +32,7 @@ public static partial class Adapters
         {
             // Said once, as its own row, rather than folded into each finding: it qualifies every
             // "not writable" answer of the scan, including the ones that produced no row at all.
-            b.Add(
-                Severity.Info,
-                "writability evaluated for well-known groups",
-                "this process has no non-elevated token (SYSTEM, a service account or UAC off), so "
-                + "directory ACLs were read for Users, Authenticated Users, Everyone and Interactive; "
-                + "a grant to one named user is not seen - run unelevated for the full evaluation",
-                new Dictionary<string, string?>
-                {
-                    ["kind"] = "evaluationMethod",
-                    ["method"] = nameof(WriteAccessEvaluation.WellKnownPrincipals),
-                });
+            AddWellKnownPrincipalNotice(b);
         }
         foreach (var raw in findings.Where(f => !flaggedOnly || f.Exposure != HijackExposure.Latent))
         {
@@ -80,6 +70,29 @@ public static partial class Adapters
             ? "nothing found that another program could run in place of"
             : $"{findings.Count} pre-emptable configuration(s), {exploitable} exploitable now");
     }
+
+    /// <summary>
+    /// The notice that this scan graded writability for the well-known unprivileged groups only.
+    /// </summary>
+    /// <remarks>
+    /// A limit of the check, not a finding, so it is <see cref="Severity.Unverified"/>, like the other
+    /// limits of a scan. It stays in the flagged view: a clean flagged list would otherwise hide that
+    /// grants to one named user went unseen. It is left out of the notable count, so it never moves an
+    /// exit code. As <see cref="Severity.Info"/> it leaked into <c>hijack --flagged</c> on every
+    /// machine without a non-elevated token, which the CI runners (UAC off) showed.
+    /// </remarks>
+    internal static void AddWellKnownPrincipalNotice(ToolReport.Builder builder) =>
+        builder.Add(
+            Severity.Unverified,
+            "writability evaluated for well-known groups",
+            "this process has no non-elevated token (SYSTEM, a service account or UAC off), so "
+            + "directory ACLs were read for Users, Authenticated Users, Everyone and Interactive; "
+            + "a grant to one named user is not seen - run unelevated for the full evaluation",
+            new Dictionary<string, string?>
+            {
+                ["kind"] = "evaluationMethod",
+                ["method"] = nameof(WriteAccessEvaluation.WellKnownPrincipals),
+            });
 
     private static string HijackDetail(HijackFinding finding) => finding.Kind switch
     {

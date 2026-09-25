@@ -34,7 +34,7 @@ fait, pas une provenance attestée. Le harnais a été refait (`scripts/validati
 WS-76). **Requalifié les 25 et 26 septembre avec le harnais refait** (§17.4, provenance vérifiée pour chaque passe) :
 la passe complète `head-fe953fe` (32 portes, 0 échec), la porte 17 repassée avec la mesure corrigée
 (`gate17-711ded0`) et la porte 36 depuis la VM de contrôle (`net-711ded0b`, 10/10). Le code produit de la tête est
-celui de ces candidats. Ce sont des répétitions locales non signées, pas des preuves attestées par la CI.
+celui de ces candidats, à la gravité d'un avis près (WS-86). Ce sont des répétitions locales non signées, pas des preuves attestées par la CI.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -51,7 +51,7 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **79 défauts** : 74 corrigés et testés (dont onze dans le
+- **Problèmes trouvés.** L'audit a traité **80 défauts** : 75 corrigés et testés (dont onze dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
   1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
@@ -293,6 +293,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-83 | Low | Validation | Sous Windows PowerShell 5.1, `Add-Content` et `Set-Content` échouent dès qu'un autre processus tient le fichier ouvert en lecture, même un lecteur qui partage l'écriture (mesuré). Or l'exécuteur et les pilotes écrivaient ainsi les fichiers qu'on lit pendant une campagne : journal, état, liste des requêtes traitées, journal des opérations hôte. Au redémarrage de l'exécuteur pour la troisième campagne, un `tail -F` sur le journal (la surveillance de l'agent) l'a arrêté entre deux requêtes, la qualification déjà marquée traitée et jamais lancée ; relancé, il s'est arrêté à sa première ligne | un opérateur qui suit le journal (`Get-Content -Wait`, un éditeur) arrête l'exécuteur, ou un pilote entre la fin de l'invité et la collecte ; aucune preuve concernée cette fois, aucune VM démarrée | `WinSightHyperV.psm1`, `WinSightQualRunner.ps1`, `Invoke-HyperVQualification.ps1`, `Invoke-HyperVNetworkLogon.ps1`, `New-WinSightControlVm.ps1` | ces quatre fichiers écrits par un flux ouvert avec partage lecture et écriture (`Write-SharedText`, `Add-SharedLine`), une violation de partage réessayée cinq secondes ; plus aucun `Add-Content` dans les scripts hôtes ; test de contrat, et autocontrôle PowerShell 5.1 qui garde le fichier ouvert en lecture (`Add-Content` y échoue, les deux fonctions y écrivent), en échec sur le harnais précédent | Corrigé |
 | WS-84 | Low | Validation | Après la restauration des points de contrôle, l'étape réseau interrogeait aussitôt les VM restaurées (carte réseau, mémoire), sans réessayer. Pendant une restauration, Hyper-V reconstruit les objets de la VM et peut répondre un instant « objet introuvable ». À la première passe réseau réussie du harnais refait (`net-711ded0b`, porte 36 10/10), la preuve était scellée, puis cette requête a échoué et le pilote a fini en erreur | une porte réussie rapportée en échec par l'exécuteur, sans la ligne de restauration au journal ; les points de contrôle étaient restaurés et la preuve intacte | `WinSightHyperV.psm1`, `Invoke-HyperVNetworkLogon.ps1` | chaque requête aux VM restaurées réessayée pendant une minute (`Invoke-WinSightVmRetry`, toutes les 2 s, puis l'erreur d'origine) ; le retrait du disque de données, appelé lui aussi juste après une restauration, réessaie ses requêtes ; test de contrat et autocontrôle PowerShell 5.1, en échec sur le harnais précédent | Corrigé |
 | WS-85 | Low | Validation | `Verify-QualificationProvenance.ps1` lisait `results.json` à la racine de la passe, alors qu'une passe réseau garde celui de la cible sous `target\results.json`. Le vérificateur n'avait jamais vérifié une passe réseau du harnais refait : sur `net-711ded0b`, il s'est arrêté à son quatrième contrôle (chemin introuvable) | une passe réseau ne pouvait pas être citée comme preuve liée à sa provenance | `Verify-QualificationProvenance.ps1` | résultats lus à la racine ou sous `target\` ; si aucun des deux n'existe, le contrôle échoue (« no results.json ») ; test de contrat en échec sur le vérificateur précédent ; `net-711ded0b` vérifiée ensuite : 11/11 | Corrigé |
+| WS-86 | Low | Hijack | Sans jeton non élevé (SYSTEM, compte de service, UAC désactivé), le scan hijack juge l'écriture pour les groupes connus et le signale par un avis de gravité `Info`, que `hijack --flagged` montrait alors que la vue signalée refuse `Info`. Trouvé par la première CI de la branche : les runners GitHub tournent avec l'UAC désactivé. La même CI a fait échouer trois tests du mémo de la sonde, qui supposaient un dossier temporaire inscriptible par un utilisateur non privilégié : c'est vrai sur un volume qui accorde « Modifier » aux utilisateurs authentifiés, faux dans le profil d'un administrateur | une ligne d'information dans la vue « à surveiller » des postes sans jeton non élevé ; la CI de la branche en échec | `Adapters.Hijack.cs`, `WritabilityProbeMemoTests.cs` | avis en `Unverified`, comme les autres limites d'un scan : il reste dans la vue signalée (une liste propre cacherait que les droits accordés à un utilisateur nommé n'ont pas été vus) et hors du compte « notable », donc sans effet sur le code de sortie ; les tests du mémo accordent « Modifier » aux utilisateurs authentifiés sur leur dossier, inscriptible sous les deux évaluations ; test en échec sur l'ancien code (`Info` au lieu de `Unverified`) | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -397,7 +398,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 616 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 617 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -618,7 +619,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 616 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 617 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -630,7 +631,7 @@ ci-dessous, par thème, avec la justification.
 | Santé des capteurs | `Core/SensorHealth.cs`, `NetMonitor/EtwSensorHealthTracker.cs`, `DnsEventDelivery.cs`, watchers Persistence/Attribution/NetMonitor, `PersistenceMonitor.cs` | WS-25, WS-27 |
 | Guardian | `Persistence/RegistryChangeWatcher.cs`, `FileSystemPersistenceWatcher.cs`, `FilePersistenceBaselineStore.cs`, `UserHiveEnumerator.cs` | WS-03, WS-07, WS-12 |
 | Réponse | `Response/*` (contrôleur, inspecteur, processus protégés, journal, quarantaine, règles), `Application/PersistenceResponder.cs`, `RegistryAndFilePersistenceMutator.cs` | WS-04, WS-05, WS-17 à WS-20, WS-23, WS-33 |
-| Hijack | `Hijack/UnprivilegedWriteAccess.cs`, `WritabilityProbe.cs`, `HijackTriage.cs`, `HijackScanner.cs`, `UnquotedPath.cs`, `SideBySideStore.cs` | WS-01, WS-02, WS-29, WS-30, WS-32, WS-75, WS-76 |
+| Hijack | `Hijack/UnprivilegedWriteAccess.cs`, `WritabilityProbe.cs`, `HijackTriage.cs`, `HijackScanner.cs`, `UnquotedPath.cs`, `SideBySideStore.cs` | WS-01, WS-02, WS-29, WS-30, WS-32, WS-75, WS-76, WS-86 |
 | MCP | `Mcp/McpScanService.cs`, `UntrustedText.cs`, `Application/Adapters.cs`, `PersistenceMonitorPresenter.cs` | WS-08 à WS-10 |
 | Rançongiciel | `Ransomware/RansomwareFileWatcher.cs`, `RansomwareBurstDetector.cs`, `RansomwareEntropySampler.cs`, `CanaryManager.cs`, `CanaryFile.cs` | WS-11, WS-23, WS-24 |
 | Pare-feu | `FirewallService/EnforcementCoordinator.cs`, `OutboundObserverService.cs`, `Firewall/PendingOutboundLog.cs`, `FirewallRequestDispatcher.cs`, `FirewallPolicyStore.cs` | WS-15, WS-26 |
@@ -806,8 +807,10 @@ signés : des répétitions, pas des preuves attestées par la CI.
 
 **Le code produit de la tête est qualifié en x64** : `head-fe953fe` pour toutes les portes sauf la 36 (32 portes,
 0 échec), `gate17-711ded0` pour la porte 17 avec la mesure corrigée, `net-711ded0b` pour la porte 36. Le code
-produit (`src`, `installer`) est identique entre ces candidats et la tête ; les commits suivants n'ont touché que
-le harnais, les tests et la documentation. Ce sont des répétitions locales non signées, pas des preuves attestées
+produit (`src`, `installer`) est celui de ces candidats, à une exception près : la gravité de l'avis « évaluée
+pour les groupes connus » du scan hijack (WS-86), émis seulement sans jeton non élevé, ce qui n'arrive jamais dans
+les passes VM (le harnais y tourne élevé, UAC actif). Les autres commits n'ont touché que le harnais, les tests et
+la documentation. Ce sont des répétitions locales non signées, pas des preuves attestées
 par la CI. Restent hors de portée : ARM64 natif, signature Authenticode, endurance, postes multi-utilisateurs.
 
 ---

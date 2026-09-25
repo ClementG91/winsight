@@ -1,3 +1,6 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
+
 using WinSight.Hijack;
 using Xunit;
 
@@ -22,11 +25,30 @@ namespace WinSight.Hijack.Tests;
 /// </remarks>
 public sealed class WritabilityProbeMemoTests
 {
+    /// <summary>
+    /// A directory an unprivileged user can write to, wherever the tests run.
+    /// </summary>
+    /// <remarks>
+    /// The probe answers for the current user without elevation, or, when the process has no such
+    /// token (a CI runner with UAC off, a service), for the well-known unprivileged groups. The temp
+    /// directory of an administrator's profile is writable by that administrator only: on the CI
+    /// runners the probe rightly answered "not writable" and these tests failed, while a temp
+    /// directory on a volume granting Authenticated Users "Modify" hid it. The grant makes the
+    /// directory writable under both evaluations.
+    /// </remarks>
     private static string TempDir()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"winsight-probe-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        return directory;
+        var directory = new DirectoryInfo(Path.Combine(Path.GetTempPath(), $"winsight-probe-{Guid.NewGuid():N}"));
+        directory.Create();
+        var security = directory.GetAccessControl();
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid, null),
+            FileSystemRights.Modify,
+            InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None,
+            AccessControlType.Allow));
+        directory.SetAccessControl(security);
+        return directory.FullName;
     }
 
     /// <summary>
