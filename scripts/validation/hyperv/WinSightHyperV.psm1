@@ -230,6 +230,48 @@ function Get-SharedFileHash([Parameter(Mandatory)][string]$Path) {
     }
 }
 
+# On client Windows an elevated process creates files owned by the operator's own account (the
+# "Object creator" default), and an owner may always re-permission: any process running as the
+# operator could then change a protected copy or the sealed evidence. Every elevated script calls
+# Set-AdministratorsDefaultOwner before it creates anything, so what it and the processes it starts
+# create is owned by Administrators. Windows allows that default owner only to an elevated token.
+function Set-DefaultOwner([Parameter(Mandatory)][string]$Sid) {
+    if (-not ('WinSightHarness.TokenOwner' -as [type])) {
+        Add-Type -Namespace WinSightHarness -Name TokenOwner -MemberDefinition @'
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+private static extern System.IntPtr GetCurrentProcess();
+[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+private static extern bool OpenProcessToken(System.IntPtr process, uint access, out System.IntPtr token);
+[System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
+private static extern bool SetTokenInformation(System.IntPtr token, int informationClass, ref System.IntPtr owner, int length);
+[System.Runtime.InteropServices.DllImport("kernel32.dll")]
+private static extern bool CloseHandle(System.IntPtr handle);
+// TOKEN_OWNER holds a single pointer to the owner SID; 4 is TokenOwner, 0x80 TOKEN_ADJUST_DEFAULT.
+public static int Set(byte[] sid) {
+    System.Runtime.InteropServices.GCHandle pinned = System.Runtime.InteropServices.GCHandle.Alloc(sid, System.Runtime.InteropServices.GCHandleType.Pinned);
+    System.IntPtr token = System.IntPtr.Zero;
+    try {
+        if (!OpenProcessToken(GetCurrentProcess(), 0x80, out token)) { return System.Runtime.InteropServices.Marshal.GetLastWin32Error(); }
+        System.IntPtr owner = pinned.AddrOfPinnedObject();
+        if (!SetTokenInformation(token, 4, ref owner, System.IntPtr.Size)) { return System.Runtime.InteropServices.Marshal.GetLastWin32Error(); }
+        return 0;
+    }
+    finally {
+        if (token != System.IntPtr.Zero) { CloseHandle(token); }
+        pinned.Free();
+    }
+}
+'@
+    }
+    $identifier = New-Object System.Security.Principal.SecurityIdentifier $Sid
+    $bytes = New-Object byte[] $identifier.BinaryLength
+    $identifier.GetBinaryForm($bytes, 0)
+    $code = [WinSightHarness.TokenOwner]::Set($bytes)
+    if ($code -ne 0) { throw "$Sid could not be made the default owner of new files (Win32 error $code)." }
+}
+
+function Set-AdministratorsDefaultOwner { Set-DefaultOwner -Sid $script:Administrators }
+
 function Get-GitBlobId([Parameter(Mandatory)][string]$Path) {
     $bytes = [IO.File]::ReadAllBytes($Path)
     $header = [Text.Encoding]::ASCII.GetBytes("blob $($bytes.Length)`0")
@@ -313,6 +355,6 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
     (Get-VM -Name $Name -ErrorAction Stop).State.ToString()
 }
 
-Export-ModuleMember -Function Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
+Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
     Copy-GuestResults, Get-WinSightVmState

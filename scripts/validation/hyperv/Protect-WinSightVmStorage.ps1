@@ -26,6 +26,7 @@ if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Wi
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force
+Set-AdministratorsDefaultOwner
 
 foreach ($vm in $VmNames) {
     $found = Get-VM -Name $vm -ErrorAction SilentlyContinue

@@ -49,6 +49,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $Host.UI.RawUI.WindowTitle = 'WinSight qualification runner (elevated) - leave open'
 Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force
+Set-AdministratorsDefaultOwner
 
 # The files the harness consists of, relative to scripts\validation\hyperv. Nothing else is copied.
 $HarnessFiles = @(

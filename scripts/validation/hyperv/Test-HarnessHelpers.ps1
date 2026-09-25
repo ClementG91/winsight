@@ -89,6 +89,14 @@ try {
     try { $none = try { $result = & $module { param($p) Get-SharedFileHash -Path $p } $held; if ($null -eq $result) { 'none' } else { $result } } catch { 'threw' } }
     finally { $exclusive.Dispose() }
     Report ($none -eq 'none') 'Get-SharedFileHash answers nothing, without failing, for a file held with no sharing'
+
+    # The elevated scripts make Administrators the default owner of what they create. Unelevated, the
+    # call goes through for the account's own SID and Windows refuses Administrators (1307): it asks
+    # for exactly that, and only an elevated token may have it.
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $ownSid = try { & $module { param($s) Set-DefaultOwner -Sid $s } $me; 'set' } catch { $_.Exception.Message }
+    $admins = try { & $module { Set-AdministratorsDefaultOwner }; 'set' } catch { $_.Exception.Message }
+    Report ($ownSid -eq 'set' -and $admins -match 'Win32 error 1307') 'Set-AdministratorsDefaultOwner asks Windows for Administrators as default owner (refused unelevated)'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

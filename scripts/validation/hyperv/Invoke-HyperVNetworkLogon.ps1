@@ -37,6 +37,7 @@ if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hy
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
+Set-AdministratorsDefaultOwner
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'

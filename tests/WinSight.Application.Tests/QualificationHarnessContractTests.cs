@@ -109,6 +109,42 @@ public sealed class QualificationHarnessContractTests
         Assert.Contains("([System.IO.FileShare]'ReadWrite, Delete')", module, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Every elevated harness script makes Administrators the default owner of what it creates, before
+    /// it creates anything.
+    /// </summary>
+    /// <remarks>
+    /// On client Windows an elevated process creates files owned by the operator's own account (the
+    /// "Object creator" default): the 400 files the first runner wrote are all owned by it. An owner may
+    /// always re-permission, so any process running as the operator could have changed a protected copy
+    /// or the sealed evidence - which the provenance check, testing only that a write is refused, would
+    /// not have seen.
+    /// </remarks>
+    [Fact]
+    public void ElevatedScriptsCreateFilesOwnedByAdministrators()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("function Set-AdministratorsDefaultOwner", module, StringComparison.Ordinal);
+        Assert.Contains("SetTokenInformation(token, 4, ref owner, System.IntPtr.Size)", module, StringComparison.Ordinal);
+
+        var elevated = Directory.GetFiles(Harness, "*.ps1")
+            .Where(path => File.ReadAllText(path).Contains("#Requires -RunAsAdministrator", StringComparison.Ordinal))
+            .ToArray();
+        Assert.Equal(6, elevated.Length);
+        foreach (var path in elevated)
+        {
+            var code = Code(path);
+            var import = code.IndexOf("Import-Module", StringComparison.Ordinal);
+            var owner = code.IndexOf("\nSet-AdministratorsDefaultOwner\n", StringComparison.Ordinal);
+            Assert.True(import >= 0 && owner > import, $"{Path.GetFileName(path)} does not set the default owner after importing the module");
+            foreach (var write in new[] { "New-ProtectedDirectory", "Set-Content", "Add-Content", "Copy-ListedFile", "Copy-Item", "Copy-GuestResults", "icacls" })
+            {
+                var first = code.IndexOf(write, StringComparison.Ordinal);
+                Assert.True(first < 0 || first > owner, $"{Path.GetFileName(path)} uses {write} before setting the default owner");
+            }
+        }
+    }
+
     /// <summary>A capability SID: S-1-15-3-1024 and the SHA-256 of the upper-case name, as eight words.</summary>
     private static string CapabilitySid(string name)
     {

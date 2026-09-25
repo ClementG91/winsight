@@ -37,6 +37,7 @@ $ErrorActionPreference = 'Stop'
 $Gates = @($Gates | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
+Set-AdministratorsDefaultOwner
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
