@@ -55,6 +55,18 @@ try {
     $module = Get-Module WinSightHyperV
     Report (& $module { param($Rule) Test-Grants $Rule $script:WriteRights } $generic) 'a GENERIC_ALL inheritable entry counts as a write grant'
     Report (Throws { Assert-ProtectedPath -Path $source -Recurse } 'Reparse point|Not owned|Writable by|renamed|Children of') 'Assert-ProtectedPath -Recurse refuses a tree holding a junction'
+
+    # Hyper-V grants its worker process capability on the disks of the VMs it runs. The check trusts
+    # that one capability in the VM storage and nowhere else, and still refuses any other.
+    $worker = 'S-1-15-3-1024-2268835264-3721307629-241982045-173645152-1490879176-104643441-2915960892-1612460704'
+    $trusts = {
+        param($Sid, [switch]$VirtualMachines)
+        try { [bool](& $module { param($s, $v) Test-TrustedWriter $s -VirtualMachines:$v } $Sid $VirtualMachines.IsPresent) } catch { $null }
+    }
+    Report ((& $trusts $worker -VirtualMachines) -eq $true -and (& $trusts $worker) -eq $false) 'the Hyper-V worker capability is trusted in the VM storage only'
+    Report ((& $trusts 'S-1-15-3-1' -VirtualMachines) -eq $false) 'another capability is not trusted, even in the VM storage'
+    Report ((& $trusts 'S-1-5-83-1-1111-2222-3333-4444') -eq $true -and (& $trusts 'S-1-5-11' -VirtualMachines) -eq $false) 'the per-VM identity is trusted, Authenticated Users are not'
+    Report ((& $module { $script:VmWorkerProcessCapability }) -eq $worker) 'the module names the vmWorkerProcess capability SID'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

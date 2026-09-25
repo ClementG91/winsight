@@ -27,6 +27,43 @@ public sealed class QualificationHarnessContractTests
     private static string Code(string path) => string.Join('\n', File.ReadAllLines(path)
         .Where(line => !line.TrimStart().StartsWith('#')));
 
+    /// <summary>
+    /// The storage check trusts the capability Hyper-V gives its worker process, which Hyper-V grants
+    /// on the disks of the VMs it runs, and only in the VM storage.
+    /// </summary>
+    /// <remarks>
+    /// Found at the first storage protection: Hyper-V had granted this capability Write on the control
+    /// VM's data disk, and the check, which knew only the per-VM identity, refused the storage. A
+    /// capability counts only for an AppContainer token, in the second of its two access checks, so it
+    /// never lets a local user write. The SID is derived here the way Windows derives it - the SHA-256
+    /// of the capability's upper-case name - so a wrong constant fails.
+    /// </remarks>
+    [Fact]
+    public void TheHyperVWorkerCapabilityIsTrustedOnlyInTheVirtualMachineStorage()
+    {
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+
+        Assert.Contains($"$script:VmWorkerProcessCapability = '{CapabilitySid("vmWorkerProcess")}'", module, StringComparison.Ordinal);
+        var start = module.IndexOf("function Test-TrustedWriter", StringComparison.Ordinal);
+        Assert.True(start >= 0, "Test-TrustedWriter was not found");
+        var body = module[start..module.IndexOf("\n}", start, StringComparison.Ordinal)];
+        Assert.Contains(
+            "if ($VirtualMachines) { $trusted += $script:VirtualMachines, $script:VmWorkerProcessCapability }",
+            body,
+            StringComparison.Ordinal);
+        // Its definition and the VM-storage branch: trusted nowhere else.
+        Assert.Equal(2, Regex.Count(module, @"\$script:VmWorkerProcessCapability\b"));
+        Assert.Contains("-not (Test-TrustedWriter $sid -VirtualMachines:$AllowVirtualMachines)", module, StringComparison.Ordinal);
+    }
+
+    /// <summary>A capability SID: S-1-15-3-1024 and the SHA-256 of the upper-case name, as eight words.</summary>
+    private static string CapabilitySid(string name)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.Unicode.GetBytes(name.ToUpperInvariant()));
+        var words = Enumerable.Range(0, 8).Select(i => BitConverter.ToUInt32(hash, i * 4));
+        return "S-1-15-3-1024-" + string.Join('-', words);
+    }
+
     [Fact]
     public void NoElevatedHostScriptDeletesRecursively()
     {
