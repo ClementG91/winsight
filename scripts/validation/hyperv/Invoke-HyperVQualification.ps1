@@ -14,8 +14,8 @@ param(
     [Parameter(Mandatory)][string]$CandidateDir,
     [Parameter(Mandatory)][string]$HarnessDir,
     [Parameter(Mandatory)][string]$EvidenceRoot,
-    # Default locations are at the root of the volume this script runs from; pass a path to use another.
-    [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
+    # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
+    [string]$Root,
     [string]$Name = 'WinSight-Qualification-HV',
     [string]$Checkpoint = 'S0-hyperv-autorun',
     [string]$RunName = ('hv-run-' + (Get-Date -Format 'yyyyMMdd-HHmm')),
@@ -27,6 +27,11 @@ param(
     # Collect a run whose driver was closed while the VM kept going: wait for it to power off, then seal and restore.
     [switch]$Resume
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
+
 $ErrorActionPreference = 'Stop'
 # 'a,b' arrives as one string through powershell.exe -File; accept both forms.
 $Gates = @($Gates | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })

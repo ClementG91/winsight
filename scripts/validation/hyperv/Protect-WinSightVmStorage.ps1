@@ -10,13 +10,19 @@
 # changed since, and rebuilding the VM into protected storage is what removes the earlier doubt.
 [CmdletBinding()]
 param(
-    # Default locations are at the root of the volume this script runs from; pass a path to use another.
-    [string]$VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
-    [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification'),
+    # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
+    [string]$VmRoot,
+    [string]$Root,
     [string[]]$VmNames = @('WinSight-Qualification-HV', 'WinSight-Control-HV'),
     # Also protect a parent folder of the VM storage that holds other things.
     [switch]$AllowAncestorChange
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $VmRoot) { $VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
+if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification') }
+
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force

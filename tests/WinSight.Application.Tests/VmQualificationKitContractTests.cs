@@ -105,12 +105,13 @@ public sealed class VmQualificationKitContractTests
         var script = File.ReadAllText(Path.Combine(
             RepositoryRoot, "scripts", "Test-IpcBoundary.ps1"));
 
+        // Resolved in the body, not as parameter defaults (ScriptParameterDefaultContractTests).
         Assert.Contains(
-            "[string]$CliPath = (Join-Path $PSScriptRoot 'winsight.exe')",
+            "if (-not $CliPath) { $CliPath = (Join-Path $PSScriptRoot 'winsight.exe') }",
             script,
             StringComparison.Ordinal);
         Assert.Contains(
-            "[string]$ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe')",
+            "if (-not $ServicePath) { $ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe') }",
             script,
             StringComparison.Ordinal);
         Assert.DoesNotContain(@"C:\Program Files\WinSight-VM", script, StringComparison.Ordinal);

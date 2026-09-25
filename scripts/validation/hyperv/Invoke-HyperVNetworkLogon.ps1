@@ -17,8 +17,8 @@ param(
     [Parameter(Mandatory)][string]$EvidenceRoot,
     [string]$Name = 'WinSight-Qualification-HV',
     [string]$ControlName = 'WinSight-Control-HV',
-    # Default locations are at the root of the volume this script runs from; pass a path to use another.
-    [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
+    # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
+    [string]$Root,
     [string]$Checkpoint = 'S0-hyperv-autorun',
     [string]$ControlCheckpoint = 'C0-control',
     [string]$Switch = 'WinSight-Qual-Private',
@@ -29,6 +29,11 @@ param(
     # then collect, seal and restore. Nothing is staged or started.
     [switch]$Resume
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
+
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force

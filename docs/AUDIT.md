@@ -31,7 +31,7 @@ scripts, le candidat, les disques des VM et les preuves dans des dossiers que to
 authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
 fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
 `Verify-QualificationProvenance.ps1`) mais n'a pas encore tourné, et le code produit a changé depuis
-`259056b` (RA-02 à RA-05, WS-74 à WS-76) : **la tête de la branche n'est pas qualifiée**.
+`259056b` (RA-02 à RA-05, WS-74 à WS-77) : **la tête de la branche n'est pas qualifiée**.
 
 **Ce qui n'a pas pu être validé ici, et ne doit pas être présumé** : ARM64 natif, signature
 Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque section précise ce qui a
@@ -48,7 +48,7 @@ Authenticode, essai d'endurance (soak), machines multi-utilisateurs. Chaque sect
   de rapport unique partagé par CLI, tableau de bord et MCP, aucun appel réseau implicite, une
   frontière privilégiée solide (tube nommé authentifié + modèle de capacités + vérification de
   l'identité du serveur), un serveur MCP en lecture seule.
-- **Problèmes trouvés.** L'audit a traité **70 défauts** : 65 corrigés et testés (dont deux dans le
+- **Problèmes trouvés.** L'audit a traité **71 défauts** : 66 corrigés et testés (dont trois dans le
   kit de qualification VM), 4 rendus explicites dans la documentation (dont WS-60, mesuré en VM), et
   1 ouvert, WS-53 (runtime partagé), qui est un chantier de paquet. Les 11 de sévérité *High* sont
   tous corrigés :
@@ -281,6 +281,7 @@ corrections sont couvertes par des tests nommés dans l'historique de la branche
 | WS-74 | High | Persistance | Le nom compilé dans l'image était lu par `FileVersionInfo`, qui prend la ressource localisée du fichier de langue : `powershell.exe`, `cmd.exe`, `mshta.exe`, `rundll32.exe` et `regsvr32.exe` se nommaient `*.MUI` (mesuré sur Windows 11 26200), un nom absent de la table des interpréteurs, et ce nom prime sur le chemin | `powershell -enc <charge>` dans une clé Run restait une entrée ordinaire signée Microsoft, jamais signalée ; livré dans la v0.12.0 et la v0.13.0 | `PersistenceScanner.cs`, `InterpreterAbuseTriage.cs` | ressource de version de l'image elle-même, lue par le handle acquis (`PeResources`, `VersionResource`) ; suffixe `.mui` retiré des entrées déjà enregistrées ; test de bout en bout sur le vrai `powershell.exe`, en échec sur l'ancien code | Corrigé |
 | WS-75 | Medium | Hijack | Le contrôle d'écriture ne demandait à Windows que le droit de créer (`FILE_ADD_FILE`), jamais ceux qui permettent de se l'accorder : `WRITE_DAC`, que le propriétaire détient sans aucune entrée, et `WRITE_OWNER`, qui permet de le devenir. Trouvé en corrigeant un test qui ne passait qu'avec TEMP sous le profil (C:) : il changeait le propriétaire, ce qui exige `WRITE_OWNER` | un dossier qu'un utilisateur standard possède (créé par lui, puis verrouillé par un administrateur qui a gardé le propriétaire) : entrée du PATH, dossier de service ou chemin non cité, jugé non plantable par l'utilisateur même qui peut le rouvrir | `UnprivilegedWriteAccess.cs` | `AccessCheck` en `MAXIMUM_ALLOWED` (droits implicites du propriétaire compris) ; si seul `WRITE_OWNER` revient, question reposée sur le descripteur tel qu'il serait après la prise de possession ; modèle des groupes connus : `WRITE_DAC`, `WRITE_OWNER` et propriétaire comptés, entrée `OWNER RIGHTS` respectée ; sémantique mesurée sur Windows 11 26200 (un refus explicite n'ôte pas le `WRITE_DAC` du propriétaire, une entrée `OWNER RIGHTS` si) ; 8 tests en échec sur l'ancien code ; pas de porte VM dédiée (la porte 06 ne vérifie que le contrat du rapport) | Corrigé |
 | WS-76 | Low | Hijack | Le descripteur de sécurité était lu sans le niveau d'intégrité obligatoire (étiquette) : un dossier étiqueté au-dessus de *Medium* refuse toute écriture au jeton d'un utilisateur standard, quelle que soit sa DACL, mais les deux méthodes jugeaient la DACL seule. Relevé par la revue indépendante de WS-75, qui en élargissait la portée (WRITE_DAC et WRITE_OWNER comptés) | un dossier étiqueté *High* ou *System* accordant la création aux utilisateurs présenté comme plantable : une fausse accusation, rare (peu de dossiers portent une telle étiquette) | `AutomaticFileAccess.cs`, `UnprivilegedWriteAccess.cs` | étiquette lue avec le descripteur (`LABEL_SECURITY_INFORMATION`, READ_CONTROL suffit) ; `AccessCheck` l'applique de lui-même (mesuré : les drapeaux NR ou NX seuls bloquent aussi l'écriture, par la politique « pas d'écriture montante » de tout jeton standard) ; le modèle des groupes connus refuse un dossier étiqueté au-dessus de *Medium* ; 6 tests en échec sur l'ancien code. La même revue a relevé deux points mineurs corrigés avec : une double libération possible du tampon de privilèges si sa réallocation échouait, et la lecture du propriétaire hors de la garde d'exceptions | Corrigé |
+| WS-77 | Low | Validation | Le harnais Hyper-V ne démarrait pas sous Windows PowerShell 5.1 : ses scripts avancés (`[CmdletBinding()]`) calculaient des valeurs par défaut de paramètres à partir de `$PSScriptRoot`, que PowerShell 5.1 laisse vide pendant l'évaluation de ces valeurs quand le script est lancé avec `-File` (mesuré ; le même script lancé avec `&` ou par PowerShell 7 le voit). Le dépôt de l'exécuteur et du vérificateur en dépendait depuis la refonte RA-01, tous les emplacements depuis le retrait du lecteur codé en dur ; trouvé au premier lancement de la protection du stockage | la protection du stockage, l'exécuteur et le vérificateur de provenance échouaient avant leur première ligne (« GetPathRoot : le chemin d'accès n'a pas une forme conforme ») ; aucune preuve concernée, le harnais n'avait jamais tourné ; trois scripts de validation portaient le même défaut, sans effet dans la VM qui leur passe les chemins | `scripts/validation/hyperv/*.ps1`, `Test-IpcBoundary.ps1`, `Test-IpcNetworkObserver.ps1`, `Measure-Performance.ps1` | valeurs calculées dans le corps, avec la même expression, seulement si le paramètre est absent ; test de contrat sur les 33 scripts de `scripts/`, en échec sur l'ancien code pour les 11 concernés ; en-têtes des 11 scripts exécutés sous PowerShell 5.1 avec `-File` : chemins attendus | Corrigé |
 
 ### 4.2 Ouverts ou documentés
 
@@ -385,7 +386,7 @@ Ce sont des observations d'une machine à un commit, pas des budgets.
 | `input --watch` au repos | 0,05 % d'un cœur, 25 Mo | |
 | Sortie JSON `persistence` | 5,3 Mo (4 541 entrées dont 3 941 CLSID HKCU) → 0,9 Mo (698 entrées) | WS-54 |
 | Installeur / archive / installé | 116 Mo / 170 Mo / 431 Mo | WS-53 |
-| Suite de tests complète | ~5 min, 3 571 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
+| Suite de tests complète | ~5 min, 3 605 tests (2 976 au début de l'audit), 0 échec | Release, 23 projets |
 
 Non mesuré : CPU et mémoire du tableau de bord au repos avec tous les moniteurs (il partagerait l'état
 de l'installation réelle de ce poste), débit d'événements ETW soutenable, latence de détection bout à
@@ -606,7 +607,7 @@ mesure.
 ## 17. Changes applied during audit
 
 Tous les changements sont couverts par des tests ajoutés ou adaptés ; sur l'arbre final, la suite
-complète (3 571 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
+complète (3 605 tests, 0 échec), le build Release (0 avertissement, avertissements traités comme
 erreurs), `dotnet format --verify-no-changes` et `git diff --check` passent. Les nouveaux tests des
 correctifs principaux ont été vérifiés en échec sur l'ancien code avant d'être validés sur le nouveau. La liste exhaustive des fichiers est dans l'historique de la branche ;
 ci-dessous, par thème, avec la justification.
@@ -644,7 +645,7 @@ ci-dessous, par thème, avec la justification.
 | Installeur | `installer/WinSight.iss`, `scripts/Test-Installer.ps1`, `Test-InstallerServiceUninstall.ps1`, `Test-InstallerUpgrade.ps1` | WS-13, WS-63 |
 | Mesure | `scripts/Measure-Performance.ps1` | outil de mesure reproductible (D3) |
 | Documentation | `README.md`, `docs/THREAT_MODEL.md`, `WFP_DESIGN.md`, `RECOVERY.md`, `DETECTIONS.md`, `ARCHITECTURE.md`, `MCP.md`, `INSTALLATION.md`, `OBJECTIVE_SEE_PARITY.md`, `ROADMAP.md`, `RANSOMWARE_DESIGN.md`, `GUARDIAN_DESIGN.md`, `ATTRIBUTION_DESIGN.md`, ce fichier | §15 |
-| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1` | WS-71, WS-72, WS-40 (mesure) |
+| Kit de qualification VM | `docs/validation/VM_QUALIFICATION_KIT.md`, `VmQualificationKitContractTests.cs`, `scripts/Measure-CloudFilesAccess.ps1`, `ScriptParameterDefaultContractTests.cs` | WS-71, WS-72, WS-77, WS-40 (mesure) |
 | Lecture automatique et attribution | `Core/AutomaticFileAccess.cs`, `AutomaticFileMutation.cs`, `Attribution/WriteAttributionWatcher.cs` | WS-40, WS-73 |
 | Contre-audit : nom d'origine par le handle | `Core/PeResources.cs`, `VersionResource.cs`, `Persistence/PersistenceScanner.cs`, `CommandLine.cs`, `InterpreterAbuseTriage.cs` | RA-02, WS-74 |
 | Contre-audit : Guardian incertain | `Persistence/PersistenceCoverageGain.cs`, `PersistenceMonitorCore.cs`, `PersistenceMonitor*.cs`, `Application/GuardianHost.cs`, `Adapters.Alerts.cs`, `Dashboard/MainWindow.Monitors.cs` | RA-03 |

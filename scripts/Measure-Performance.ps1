@@ -17,7 +17,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$CliPath = (Join-Path $PSScriptRoot "..\src\WinSight.Cli\bin\Release\net10.0-windows10.0.19041.0\winsight.exe"),
+    [string]$CliPath,
 
     [string[]]$Scanners = @("persistence", "net", "dns", "extensions", "hosts", "certs", "input",
         "integrity", "drivers", "hijack", "processes", "all"),
@@ -32,6 +32,10 @@ param(
 
     [string]$OutputPath
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $CliPath) { $CliPath = (Join-Path $PSScriptRoot "..\src\WinSight.Cli\bin\Release\net10.0-windows10.0.19041.0\winsight.exe") }
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest

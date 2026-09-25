@@ -36,10 +36,15 @@
 [CmdletBinding()]
 param(
     # The shipped CLI and service default to the protected package beside this script.
-    [string]$CliPath = (Join-Path $PSScriptRoot 'winsight.exe'),
-    [string]$ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe'),
+    [string]$CliPath,
+    [string]$ServicePath,
     [switch]$NetworkLogon
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $CliPath) { $CliPath = (Join-Path $PSScriptRoot 'winsight.exe') }
+if (-not $ServicePath) { $ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe') }
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest

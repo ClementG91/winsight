@@ -19,8 +19,8 @@
 param(
     [Parameter(Mandatory)][string]$HarnessDir,
     [Parameter(Mandatory)][string]$EvidenceRoot,
-    # Default locations are at the root of the volume this script runs from; pass a path to use another.
-    [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
+    # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
+    [string]$Root,
     [string]$TargetName = 'WinSight-Qualification-HV',
     [string]$Name = 'WinSight-Control-HV',
     [string]$Switch = 'WinSight-Qual-Private',
@@ -28,6 +28,11 @@ param(
     [int64]$MemoryBytes = 3GB,
     [int]$SettleTimeoutMinutes = 45
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
+
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force

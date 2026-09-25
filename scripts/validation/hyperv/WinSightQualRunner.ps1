@@ -30,13 +30,21 @@
 #   {"action":"stop"}
 [CmdletBinding()]
 param(
-    [string]$Repository = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))),
-    # Default locations are at the root of the volume this script runs from; pass a path to use another.
-    [string]$Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification'),
-    [string]$Requests = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification-Requests'),
-    [string]$VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification'),
+    [string]$Repository,
+    # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
+    [string]$Root,
+    [string]$Requests,
+    [string]$VmRoot,
     [int]$Hours = 24
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $Repository) { $Repository = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))) }
+if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification') }
+if (-not $Requests) { $Requests = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification-Requests') }
+if (-not $VmRoot) { $VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $Host.UI.RawUI.WindowTitle = 'WinSight qualification runner (elevated) - leave open'
