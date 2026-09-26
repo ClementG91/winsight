@@ -10,15 +10,15 @@
 #
 #   $Requests   user-writable. Read-only here: a request is parsed, never moved, rewritten or deleted.
 #   $Root       created by this runner with an administrators-only DACL, or refused:
-#     harness\<stamp>\   the scripts copied from the repository at start (no user access)
+#     harness\<stamp>\   scripts copied from the authenticated installation (no user access)
 #     candidates\<id>\   a candidate staged from $Requests\candidates\<name> (no user access)
 #     sealed\            manifests and evidence (Authenticated Users: read)
 #     runner\            status, log, action logs, processed request names (Authenticated Users: read)
 #   $VmRoot     the VM disks: must already be administrators-only (Protect-WinSightVmStorage.ps1).
 #
-# Everything elevated runs from the protected copies, whose SHA-256 and git blob ids are re-checked
-# before every action and sealed, with this runner's own, for Verify-QualificationProvenance.ps1 to
-# hold against the reviewed commit.
+# RB-01: launch only from the installation made by the externally authenticated standalone
+# bootstrap. The runner and its imports must already be protected before the first instruction.
+# The protected bootstrap receipt is carried into each run for the independently pinned verifier.
 #
 # Requests (unique file names; a name is processed once):
 #   {"action":"ping"}
@@ -30,7 +30,6 @@
 #   {"action":"stop"}
 [CmdletBinding()]
 param(
-    [string]$Repository,
     # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
     [string]$Root,
     [string]$Requests,
@@ -38,9 +37,11 @@ param(
     [int]$Hours = 24
 )
 
+# Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::GetFolderPath('System'), 'WindowsPowerShell\v1.0\Modules')
+
 # Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
 # empty in the defaults of an advanced script started with -File.
-if (-not $Repository) { $Repository = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))) }
 if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification') }
 if (-not $Requests) { $Requests = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification-Requests') }
 if (-not $VmRoot) { $VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
@@ -49,15 +50,23 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2
 $Host.UI.RawUI.WindowTitle = 'WinSight qualification runner (elevated) - leave open'
 Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'QualificationProvenance.psm1') -Force
+Assert-ProtectedPath -Path $PSScriptRoot -Recurse
+$bootstrapReceiptPath = Join-Path $PSScriptRoot 'bootstrap-provenance.json'
+$bootstrap = Get-Content -LiteralPath $bootstrapReceiptPath -Raw | ConvertFrom-Json
+$sourceEntries = @(Get-FileManifest $PSScriptRoot | Where-Object { $_ -notmatch '  bootstrap-provenance\.json$' } | ForEach-Object {
+        $parts = $_ -split '  ', 3
+        [pscustomobject]@{ Sha256 = $parts[0]; Blob = $parts[1]; Relative = $parts[2] }
+    })
+if (-not (Test-QualificationBootstrap -Receipt $bootstrap -HarnessEntries $sourceEntries -ExpectedCommit $bootstrap.harnessCommit -ExpectedLauncherSha256 $bootstrap.launcherSha256)) {
+    throw 'The protected installation does not match its authenticated bootstrap receipt.'
+}
+$bootstrapHash = (Get-FileHash -LiteralPath $bootstrapReceiptPath -Algorithm SHA256).Hash
 Set-AdministratorsDefaultOwner
 
 # The files the harness consists of, relative to scripts\validation\hyperv. Nothing else is copied.
-$HarnessFiles = @(
-    'WinSightHyperV.psm1', 'WinSightQualRunner.ps1', 'Invoke-HyperVQualification.ps1', 'Invoke-HyperVNetworkLogon.ps1',
-    'New-WinSightControlVm.ps1', 'guest\run-guest-checks.ps1', 'guest\control-network-logon.ps1',
-    'guest\qualify.ps1', 'guest\operator-automation.ps1'
-)
-$HarnessSource = Join-Path $Repository 'scripts\validation\hyperv'
+$HarnessFiles = @(Get-QualificationHarnessFiles)
+$HarnessSource = $PSScriptRoot
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 
 # --- The protected root ---------------------------------------------------------------------------------
@@ -89,31 +98,13 @@ New-ProtectedDirectory -Path $harness
 foreach ($file in $HarnessFiles) { Copy-ListedFile -SourceRoot $HarnessSource -Relative $file -DestinationRoot $harness -MaximumBytes 1MB }
 Assert-ProtectedPath -Path $harness -Recurse
 $harnessManifest = @(Get-FileManifest $harness)
-# The commit the harness claims to come from, for the record only: the verifier checks the files
-# themselves against the reviewed commit. In a worktree .git is a file naming the real git directory.
-# Only a value shaped like a commit or a ref is written down, so a crafted .git cannot make this
-# elevated process copy another file's first line into a readable manifest.
-function Get-ClaimedHead([string]$RepositoryRoot) {
-    $dotGit = Join-Path $RepositoryRoot '.git'
-    $gitDir = $dotGit
-    if (Test-Path -LiteralPath $dotGit -PathType Leaf) {
-        $pointer = [string](Get-Content -LiteralPath $dotGit -TotalCount 1)
-        if ($pointer -notmatch '^gitdir: (?<dir>.+)$') { return 'unrecognised' }
-        $gitDir = $Matches['dir'].Trim()
-    }
-    $head = Join-Path $gitDir 'HEAD'
-    if (-not (Test-Path -LiteralPath $head -PathType Leaf)) { return 'unknown' }
-    $value = [string](Get-Content -LiteralPath $head -TotalCount 1)
-    if ($value -match '^([0-9a-f]{40}|ref: refs/[A-Za-z0-9._/-]{1,200})$') { return $value }
-    return 'unrecognised'
-}
-$claimedHead = Get-ClaimedHead $Repository
 $manifestPath = Join-Path $sealed "harness-$stamp.txt"
-@("# harness copied $stamp from $HarnessSource", "# repository HEAD as found (unverified): $claimedHead",
+@("# harness copied $stamp from authenticated installation $HarnessSource", "# authenticated commit: $($bootstrap.harnessCommit)",
   "# runner: $(Get-GitBlobId $PSCommandPath)  $PSCommandPath") + $harnessManifest | Set-Content -LiteralPath $manifestPath
 Say "harness $stamp copied ($($HarnessFiles.Count) files); manifest $manifestPath"
 function Assert-Harness {
     if (@(Get-FileManifest $harness) -join "`n" -ne ($harnessManifest -join "`n")) { throw 'The protected harness changed.' }
+    if ((Get-FileHash -LiteralPath $bootstrapReceiptPath -Algorithm SHA256).Hash -ne $bootstrapHash) { throw 'The bootstrap receipt changed.' }
 }
 
 # --- Requests -------------------------------------------------------------------------------------------
@@ -248,7 +239,7 @@ while ((Get-Date) -lt $deadline) {
         if ($entry.action -eq 'stage') { Say "staged candidate $(Invoke-Stage $request)"; continue }
         # Checked again before every run, not only at start: the disks are what the evidence comes from.
         Assert-ProtectedPath -Path $VmRoot -Recurse -AllowVirtualMachines
-        if ($entry.action -ne 'control') { $arguments += @('-CandidateDir', (Assert-Candidate)) }
+        if ($entry.action -ne 'control') { $arguments += @('-CandidateDir', (Assert-Candidate), '-BootstrapReceipt', $bootstrapReceiptPath) }
         $arguments += @('-HarnessDir', $harness, '-EvidenceRoot', $sealed, '-Root', $VmRoot)
         $log = Join-Path $runnerDir "logs\$id-$stamp.log"
         $entry.log = $log

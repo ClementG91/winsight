@@ -23,6 +23,24 @@ public sealed class QualificationHarnessContractTests
 
     private static string Read(string name) => File.ReadAllText(Path.Combine(Harness, name));
 
+    [Fact]
+    public void ProtectedEntryPointsExcludeUserControlledModuleSearchPathsBeforeAnyImports()
+    {
+        const string systemModules = "$env:PSModulePath = [IO.Path]::Combine([Environment]::GetFolderPath('System'), 'WindowsPowerShell\\v1.0\\Modules')";
+        foreach (var name in new[] { "WinSightQualRunner.ps1", "Verify-QualificationProvenance.ps1",
+            "Invoke-HyperVQualification.ps1", "Invoke-HyperVNetworkLogon.ps1", "New-WinSightControlVm.ps1",
+            "New-WinSightHyperVVm.ps1", "Protect-WinSightVmStorage.ps1", "TrustedQualificationBootstrap.ps1" })
+        {
+            var source = Code(Path.Combine(Harness, name));
+            var guard = source.IndexOf(systemModules, StringComparison.Ordinal);
+            var firstCmdlet = Regex.Match(source, @"\b(Import-Module|Join-Path|New-Object|Get-Date|Set-StrictMode)\b");
+            Assert.True(guard >= 0 && firstCmdlet.Success && guard < firstCmdlet.Index,
+                $"{name} must restrict module lookup before using a cmdlet, including parameter defaults");
+        }
+        var entry = Read("Invoke-VerifiedQualificationLauncher.ps1");
+        Assert.Equal(2, Regex.Count(entry, Regex.Escape(systemModules)));
+    }
+
     /// <summary>The code of a script without its comment lines, which name what the code must not do.</summary>
     private static string Code(string path) => string.Join('\n', File.ReadAllLines(path)
         .Where(line => !line.TrimStart().StartsWith('#')));
@@ -435,16 +453,61 @@ public sealed class QualificationHarnessContractTests
     public void TheRunnerCopiesExactlyTheHarnessFilesThatExist()
     {
         var runner = Read("WinSightQualRunner.ps1");
-        var list = Regex.Match(runner, @"\$HarnessFiles = @\((?<files>[^)]*)\)").Groups["files"].Value;
+        Assert.Contains("$HarnessFiles = @(Get-QualificationHarnessFiles)", runner, StringComparison.Ordinal);
+        var inventory = Read("QualificationProvenance.psm1");
+        var list = Regex.Match(inventory, @"function Get-QualificationHarnessFiles\s*\{\s*@\((?<files>[^)]*)\)").Groups["files"].Value;
         var files = Regex.Matches(list, "'(?<file>[^']+)'").Select(match => match.Groups["file"].Value).ToArray();
 
         Assert.NotEmpty(files);
         Assert.All(files, file => Assert.True(File.Exists(Path.Combine(Harness, file)), $"{file} is listed but missing"));
+        var generator = Read("New-TrustedQualificationLauncher.ps1");
+        var generatedList = Regex.Match(generator, @"\$relativePaths = @\((?<files>[^)]*)\)").Groups["files"].Value;
+        var generatedFiles = Regex.Matches(generatedList, "'(?<file>[^']+)'").Select(match => match.Groups["file"].Value).ToArray();
+        Assert.Equal(files.Order(StringComparer.Ordinal), generatedFiles.Order(StringComparer.Ordinal));
         // What a run stages from the harness must be in the list the runner copies and re-hashes.
         foreach (var staged in new[] { "guest\\qualify.ps1", "guest\\operator-automation.ps1", "guest\\run-guest-checks.ps1", "guest\\control-network-logon.ps1" })
         {
             Assert.Contains(staged, files);
         }
+    }
+
+    [Theory]
+    [InlineData("Test-QualificationProvenance.ps1")]
+    [InlineData("Test-TrustedQualification.ps1")]
+    [InlineData("Test-TrustedQualificationGenerator.ps1")]
+    public async Task TheTrustBoundaryBehavioralChecksPassWithoutElevation(string script)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+                "WindowsPowerShell", "v1.0", "powershell.exe"),
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        // dotnet test may inherit PowerShell 7's module path. This child intentionally exercises
+        // the Windows PowerShell 5.1 system modules used by the trusted operator entry point.
+        start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
+            "WindowsPowerShell", "v1.0", "Modules");
+        foreach (var argument in new[] { "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", Path.Combine(Harness, script) })
+        {
+            start.ArgumentList.Add(argument);
+        }
+        using var process = System.Diagnostics.Process.Start(start)!;
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+        try
+        {
+            await process.WaitForExitAsync(deadline.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(entireProcessTree: true);
+            throw;
+        }
+        Assert.True(process.ExitCode == 0, $"{script} exited {process.ExitCode}: {await output}\n{await error}");
     }
 
     [Fact]

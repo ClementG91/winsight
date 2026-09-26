@@ -18,7 +18,8 @@ changed a script before a run or a result after it. Now:
 | Location | Who can write | What the runner does there |
 |---|---|---|
 | `<vol>\WinSight-Qualification-Requests` | the requesting user | reads request files (≤ 4 KB), never writes, moves or deletes; reads `candidates\<name>` when asked to stage it |
-| `<vol>\WinSight-Qualification\harness\<stamp>` | administrators | the harness copied from this folder at start, re-hashed before every action |
+| `<protected-installation>` | administrators (users read) | runner and verifier installed by the independently authenticated launcher |
+| `<vol>\WinSight-Qualification\harness\<stamp>` | administrators | the harness copied from the protected installation, re-hashed before every action |
 | `<vol>\WinSight-Qualification\candidates\<id>` | administrators | a candidate copied file by file on a `stage` request, re-hashed before every action |
 | `<vol>\WinSight-Qualification\sealed` | administrators (users read) | manifests, host log, one new directory per run |
 | `<vol>\WinSight-Qualification\runner` | administrators (users read) | status, log, action logs, processed request names |
@@ -34,33 +35,67 @@ list of files, refusing reparse points; never delete recursively (Windows PowerS
 it, and results come back file by file without entering a link, because the guest runs the candidate
 as an administrator.
 
-What this does not close (RB-01): the entry-point script is launched elevated from a checkout that
-can be modified by an ordinary local user before the UAC prompt. The runner's own git blob id is a
-comment in the manifest; the verifier ignores comments and checks the protected copies made *after*
-startup. An altered entry point could execute first, then copy the reviewed bytes and leave all
-post-run manifest checks passing. The verifier itself is also launched from that checkout. Do not
-describe a passing verifier as proof that the elevated entry point was the reviewed code. Before
-another host qualification is trusted as provenance evidence, use an independently authenticated,
-administrator-protected launcher and verifier, then rerun the affected gates. Until then these
-passes are functional local rehearsals with an unclosed host-startup trust boundary, not CI-attested
-release validation.
+RB-01: **never elevate a script from the checkout.** Earlier instructions did this before creating
+the protected copies. A changed entry point could run first, then copy reviewed bytes, leaving all
+11 post-run checks green. The runner's comment containing its own blob could not authenticate its
+execution. Historical passes retain that limitation; their evidence is never rewritten.
+
+The current entry path is a self-contained release launcher containing the exact committed harness
+bytes, including the verifier. An independently trusted SHA-256 authenticates the complete launcher
+in memory before any of its code runs. The same buffer is executed, so no checked pathname is
+reopened. It creates an admin-owned installation, verifies the complete file inventory, and records
+the external launcher digest and commit in `bootstrap-provenance.json`. The runner copies only from
+that protected installation and carries its receipt into each run. The verifier, also run from the
+protected installation, requires the operator's external digest and rejects missing receipts,
+partial manifests/artifact sets, or an unsuccessful identity gate (RB-04).
+
+The byte-substitution, manifest and generation tests run unelevated under Windows PowerShell 5.1.
+Actual elevated installation, pre-launch substitution trials and new VM passes remain operator
+acceptance gates; implementing this path does not retroactively authenticate old runs.
+
+## Authenticate and install the harness (operator only)
+
+1. From an independently trusted review context, verify the release launcher's GitHub build
+   attestation against the repository, release workflow, tag and source commit, and obtain its
+   SHA-256 from that verified attestation. The asset is
+   `winsight-v<version>-qualification.ps1`; its `.sha256` alone, read beside a mutable local file,
+   is not a trust anchor. The reviewed source commit and the operator-pasted entry code are also
+   part of this trust decision. Local development launchers can be generated unelevated with
+   `New-TrustedQualificationLauncher.ps1 -Commit <40-hex-commit> -OutputPath <new-file.ps1>`;
+   authenticate their digest in an independent trusted context before using them.
+2. Open a fresh elevated **Windows PowerShell 5.1**, using the system executable with `-NoProfile`.
+   Copy the two functions from the independently reviewed immutable source of
+   `Invoke-VerifiedQualificationLauncher.ps1` into that console. **Do not use `-File`, dot-source,
+   or import the checkout's copy.** The functions download only the named HTTPS release asset,
+   enforce a size bound, hash it and execute exactly the verified byte buffer.
+3. In that console, install to a new local path whose parent already exists, for example:
+
+   ```powershell
+   Install-WinSightTrustedHarness `
+       -LauncherUri 'https://github.com/ClementG91/winsight/releases/download/v0.14.1/winsight-v0.14.1-qualification.ps1' `
+       -ExpectedSha256 '<digest from the independently verified attestation>' `
+       -Destination 'D:\WinSight-TrustedHarness-<commit>'
+   ```
+
+   Existing destinations are refused. Files and directories, including their ancestors, must be
+   protected against replacement by ordinary users. Only this protected installation may supply
+   elevated scripts or the verifier. Use explicit paths below when qualification data is on a
+   different volume from the installation.
 
 ## Once
 
-1. Build the VMs (`New-WinSightHyperVVm.ps1`, then the runner's `control` request for the second VM).
-2. Protect their storage, elevated: `.\Protect-WinSightVmStorage.ps1`. It seals the disk hashes in
+1. From the protected installation, build the VMs (`New-WinSightHyperVVm.ps1`, then the runner's
+   `control` request for the second VM), passing the intended data-volume paths.
+2. Protect their storage with the protected `Protect-WinSightVmStorage.ps1`. It seals the disk hashes in
    `<vol>\WinSight-Qualification\sealed\vm-storage-<stamp>.txt`. A VM whose disks sat in a folder any
    user could modify is only as trustworthy as that folder was; rebuilding it into protected storage is
    what removes the doubt about the past.
 
 ## Each campaign
 
-1. Commit the harness and note the commit (`git rev-parse HEAD`). Check it out as a worktree on the
-   volume that will hold the qualification data (`git worktree add <vol>\WinSight-Build\wt-<sha> <sha>`)
-   and start the runner from that clean tree, elevated (the operator accepts the UAC prompt). This
-   historical procedure does **not** close RB-01; do not use it for new provenance claims until the
-   trusted-launch requirement above is implemented and verified:
-   `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<vol>\WinSight-Build\wt-<sha>\scripts\validation\hyperv\WinSightQualRunner.ps1'`
+1. After authentication and installation above, start the protected runner in the operator console:
+   `& '<protected-installation>\WinSightQualRunner.ps1' -Root '<vol>\WinSight-Qualification' -Requests '<vol>\WinSight-Qualification-Requests' -VmRoot '<vol>\Hyper-V\WinSight-Qualification'`.
+   It refuses a writable installation, missing bootstrap receipt, changed bytes, or unsafe VM storage.
 2. Build the candidate unelevated from a clean checkout of the commit (a worktree on a drive with
    room: `Build-Release.ps1 -Version <v> -Architectures x64 -DisableSignature`), then assemble it with
    `New-QualificationCandidate.ps1 -BuildTree <checkout> -Name <name> -PreviousInstaller <published setup>
@@ -73,17 +108,27 @@ release validation.
    password in each VM; the control VM runs with 2 GB, and the run is refused up front if the host
    cannot hold both VMs plus 0.5 GB), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json` and
    `runner.log` beside it; reading or following them while the runner works is safe (WS-83).
-4. Verify each run as an ordinary user before citing it:
-   `.\Verify-QualificationProvenance.ps1 -RunDir <vol>\WinSight-Qualification\sealed\<run> -HarnessCommit <sha>`
+4. Verify each run as an ordinary user, from the protected installation, before citing it:
+   `& '<protected-installation>\Verify-QualificationProvenance.ps1' -RunDir '<vol>\WinSight-Qualification\sealed\<run>' -HarnessCommit <sha> -LauncherSha256 <independently-trusted-digest> -Repository <reviewed-checkout> -Root '<vol>\WinSight-Qualification' -VmRoot '<vol>\Hyper-V\WinSight-Qualification'`.
    Every check must print PASS: the seal, the harness blob ids against the reviewed commit, the
-   candidate scripts against the candidate's commit, the artifacts the guest checked against those
+   authenticated bootstrap, complete candidate scripts against the candidate's commit, the full
+   artifact triplet and successful identity gate against those
    staged, and a refused write for the evidence, the protected harness and candidates, the VM storage
    and the protected root.
+
+Use fresh `-NoProfile` system Windows PowerShell 5.1 processes for the runner, other host scripts
+and verifier. Their module search path is restricted to OS modules before any imports; a session
+that already loaded untrusted functions or modules is not a trusted execution environment.
 
 ## Files
 
 | File | Runs | Purpose |
 |---|---|---|
+| `New-TrustedQualificationLauncher.ps1` | build/CI, unelevated | deterministic standalone launcher from exact committed Git blobs |
+| `Invoke-VerifiedQualificationLauncher.ps1` | operator-pasted trusted functions | externally pinned digest, then execution of the same memory buffer |
+| `TrustedQualificationBootstrap.ps1` | generated launcher, elevated | authenticated payload validation and protected installation |
+| `QualificationProvenance.psm1` | host | complete-inventory, receipt and artifact identity checks |
+| `Test-QualificationProvenance.ps1`, `Test-TrustedQualification*.ps1` | tests, unelevated | tamper rejection and generation behavior; no elevated bootstrap execution |
 | `WinSightQualRunner.ps1` | host, elevated, long-lived | request loop, protected copies, staging |
 | `Invoke-HyperVQualification.ps1` | host, elevated, per run | stage, run, collect, seal, restore |
 | `Invoke-HyperVNetworkLogon.ps1` | host, elevated, per run | gate 36 with the control VM |

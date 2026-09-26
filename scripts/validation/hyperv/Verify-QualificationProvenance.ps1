@@ -10,19 +10,25 @@
 param(
     [Parameter(Mandatory)][string]$RunDir,
     [Parameter(Mandatory)][ValidatePattern('^[0-9a-f]{40}$')][string]$HarnessCommit,
-    [string]$Repository,
+    [Parameter(Mandatory)][ValidatePattern('^[0-9a-fA-F]{64}$')][string]$LauncherSha256,
+    [Parameter(Mandatory)][string]$Repository,
     # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
     [string]$Root,
     [string]$VmRoot
 )
 
+# Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::GetFolderPath('System'), 'WindowsPowerShell\v1.0\Modules')
+
 # Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
 # empty in the defaults of an advanced script started with -File.
-if (-not $Repository) { $Repository = (Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))) }
 if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'WinSight-Qualification') }
 if (-not $VmRoot) { $VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
 
 $ErrorActionPreference = 'Stop'
+Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'QualificationProvenance.psm1') -Force
+Assert-ProtectedPath -Path $PSScriptRoot -Recurse
 $failures = 0
 function Report([bool]$Passed, [string]$Check, [string]$Detail = '') {
     $script:failures += [int](-not $Passed)
@@ -30,7 +36,7 @@ function Report([bool]$Passed, [string]$Check, [string]$Detail = '') {
 }
 $git = (Get-Command git -ErrorAction Stop).Source
 function Get-BlobAt([string]$Commit, [string]$Path) {
-    $blob = & $git -C $Repository rev-parse --verify --quiet "${Commit}:$Path" 2>$null
+    $blob = & $git --no-replace-objects -C $Repository rev-parse --verify --quiet "${Commit}:$Path" 2>$null
     if ($LASTEXITCODE -ne 0) { return $null }
     return [string]$blob
 }
@@ -46,6 +52,18 @@ if ($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))
     throw 'Run this unelevated: the write checks must be made as an ordinary user.'
 }
 $RunDir = [IO.Path]::GetFullPath($RunDir).TrimEnd('\')
+Assert-ProtectedPath -Path $RunDir -Recurse
+
+# Both the verifier being executed and the runner's receipt must match the operator's independent
+# launcher digest. Old runs without this pre-launch receipt fail closed; no retrospective attestation.
+$installationReceipt = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'bootstrap-provenance.json') -Raw | ConvertFrom-Json
+$installation = @(Get-FileManifest $PSScriptRoot | Where-Object { $_ -notmatch '  bootstrap-provenance\.json$' } | ForEach-Object {
+        $parts = $_ -split '  ', 3
+        [pscustomobject]@{ Sha256 = $parts[0]; Blob = $parts[1]; Relative = $parts[2] }
+    })
+if (-not (Test-QualificationBootstrap -Receipt $installationReceipt -HarnessEntries $installation -ExpectedCommit $HarnessCommit -ExpectedLauncherSha256 $LauncherSha256)) {
+    throw 'Verifier installation does not match the independently pinned launcher.'
+}
 
 # --- 1. Seal ------------------------------------------------------------------------------------------
 $sums = Join-Path $RunDir 'SHA256SUMS.txt'
@@ -61,7 +79,10 @@ Report ($mismatch.Count -eq 0 -and $actual.Count -eq $listed.Count) 'evidence ma
 # --- 2. Harness -----------------------------------------------------------------------------------------
 $harness = @(Read-Manifest (Join-Path $RunDir 'provenance-harness.txt'))
 $drift = @($harness | Where-Object { (Get-BlobAt $HarnessCommit ("scripts/validation/hyperv/" + ($_.Relative -replace '\\', '/'))) -ne $_.Blob } | ForEach-Object Relative)
-Report ($harness.Count -gt 0 -and $drift.Count -eq 0) "harness is commit $($HarnessCommit.Substring(0, 12))" ($drift -join ', ')
+Report ((Test-QualificationManifest -Entries $harness -ExpectedPaths @(Get-QualificationHarnessFiles)) -and $drift.Count -eq 0) "complete harness is commit $($HarnessCommit.Substring(0, 12))" ($drift -join ', ')
+$bootstrapFile = Join-Path $RunDir 'provenance-bootstrap.json'
+$bootstrap = if (Test-Path -LiteralPath $bootstrapFile) { Get-Content -LiteralPath $bootstrapFile -Raw | ConvertFrom-Json } else { $null }
+Report (Test-QualificationBootstrap -Receipt $bootstrap -HarnessEntries $harness -ExpectedCommit $HarnessCommit -ExpectedLauncherSha256 $LauncherSha256) 'runner bootstrap matches the independently pinned launcher'
 
 # --- 3. Candidate ---------------------------------------------------------------------------------------
 $candidateFile = Join-Path $RunDir 'provenance-candidate.txt'
@@ -71,18 +92,16 @@ $scripts = @($candidate | Where-Object { $_.Relative -like 'source\scripts\*' })
 $scriptDrift = @($scripts | Where-Object {
         (Get-BlobAt $claimed ('scripts/' + ($_.Relative.Substring('source\scripts\'.Length) -replace '\\', '/'))) -ne $_.Blob
     } | ForEach-Object Relative)
-Report ($claimed -match '^[0-9a-f]{40}$' -and $scripts.Count -gt 0 -and $scriptDrift.Count -eq 0) "candidate scripts are commit $($claimed.Substring(0, [Math]::Min(12, $claimed.Length)))" ($scriptDrift -join ', ')
+$expectedScripts = @()
+if ($claimed -cmatch '^[0-9a-f]{40}$') {
+    $trackedScripts = @(& $git --no-replace-objects -C $Repository ls-tree -r --name-only $claimed -- scripts 2>$null)
+    if ($LASTEXITCODE -eq 0) { $expectedScripts = @($trackedScripts | ForEach-Object { 'source\' + ($_ -replace '/', '\') }) }
+}
+Report ((Test-QualificationManifest -Entries $scripts -ExpectedPaths $expectedScripts) -and $scriptDrift.Count -eq 0) "complete candidate scripts are commit $($claimed.Substring(0, [Math]::Min(12, $claimed.Length)))" ($scriptDrift -join ', ')
 # A qualification run keeps the guest's results at its root, a network run keeps the target's under target\.
 $resultsFile = @('results.json', 'target\results.json' | ForEach-Object { Join-Path $RunDir $_ } | Where-Object { Test-Path -LiteralPath $_ })[0]
 $results = if ($resultsFile) { Get-Content -LiteralPath $resultsFile -Raw | ConvertFrom-Json } else { $null }
-$artifactDrift = @(if ($results) {
-        $results.candidate.artifacts.PSObject.Properties | Where-Object {
-            $name = $_.Name
-            $staged = $candidate | Where-Object Relative -eq $name
-            -not $staged -or $staged.Sha256 -ne $_.Value
-        } | ForEach-Object Name
-    })
-Report ($null -ne $results -and $results.candidate.commit -eq $claimed -and $artifactDrift.Count -eq 0) 'the guest checked the artifacts the runner staged' $(if ($results) { $artifactDrift -join ', ' } else { 'no results.json in the run' })
+Report (Test-QualificationArtifacts -Entries $candidate -Results $results -ExpectedCommit $claimed) 'successful identity gate checked the complete staged artifact triplet' $(if (-not $results) { 'no results.json in the run' })
 
 # --- 4. Nobody else can write --------------------------------------------------------------------------
 function Test-WriteRefused([string]$Check, [scriptblock]$Attempt) {
