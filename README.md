@@ -216,7 +216,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | **Current production readiness is not established.** The September security audit found defects outside the historical qualification scenarios. The corrected candidate needs fresh CI and isolated VM qualification; Authenticode remains excluded from this verdict |
+| **x64** | **v0.14.0's product code is qualified on x64 VMs as a local rehearsal** after the September security audit: 32 gates without a failure, Cloud Files downloads attributed to their process, Network Logon 10/10, harness provenance verified. The published binaries are CI-built and attested, unsigned by policy, and were not themselves run in the VM; see [production readiness](docs/PRODUCTION_READINESS.md) |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 > **CodeQL runs through GitHub's default setup, not a workflow in this repository.** The run IDs
@@ -228,6 +228,7 @@ each run bound to the commit and CI run that built it:
 
 | Gate | Result | Record |
 |---|---|---|
+| v0.14.0 product code, full x64 campaign with the rebuilt harness (local unsigned candidates) | 32 gates PASS, gate 36 10/10, provenance 11/11 per run | [record](docs/validation/2026-09-26-x64-qualification-fe953fe.md) |
 | Published v0.12.0 downloads, supply chain, x64 install/MCP/EN-FR-ES smoke and cleanup | PASS | [record](docs/validation/2026-09-01-v0.12.0-published-release.md) |
 | Historical v0.12.0 x64 installer, ETW, WFP/SCM, trust, local/Network IPC and cleanup | PASS | [record](docs/validation/2026-09-01-x64-qualification-dbaded1.md) |
 | WFP enforcement, SCM, rollback, per-app scoping | 25 checks, 0 failures | [record](docs/validation/2026-07-23-wfp-qualification-f0a3f16.md) |
@@ -236,8 +237,8 @@ each run bound to the commit and CI run that built it:
 | Historical v0.11.6 x64 ETW, WFP/SCM, trust, local/Network IPC, installer and cleanup | 19/19 ETW, 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer | [record](docs/validation/2026-08-23-x64-qualification-8486155.md) |
 | Exact dashboard settings layout, posture interpretation, installer and EN/FR/ES smoke | PASS | [record](docs/validation/2026-08-25-ui-windows-posture-3912d67.md) |
 
-Each record covers its named checks on its exact binaries; none covers the defects identified in
-the September audit or qualifies the corrected working tree. The 2026-08-23 campaign closed the
+Each record covers its named checks on its exact binaries. The 2026-09-26 record qualifies the
+code corrected by the September audit, as local unsigned candidates; the older records predate it. The 2026-08-23 campaign closed the
 former IPC-path, Network Logon and host-control gaps; the 2026-08-25 record
 qualifies only the changed dashboard/package surface and does not pretend to rerun those privileged
 gates. Native Arm64 privileged gates, x64-on-Arm64 identity and independent EN/FR/ES review remain
