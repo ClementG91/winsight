@@ -332,23 +332,26 @@ corrigés avec un test en échec sur l'état précédent :
 | RA-05 | l'`ImagePath` non guillemeté était coupé au premier « .exe » : un dossier `tools.exe` sur le chemin faisait passer le service de cette installation pour étranger, et la désinstallation continuait | exécutable reconnu comme début de la commande, avec ou sans extension ; cas VM ajouté | `df92198` |
 | RA-01 | les vérifications s'arrêtaient au dossier protégé ; le dossier `Hyper-V` à la racine de ce volume, parent du stockage des VM, appartient au compte ordinaire et reste renommable par les utilisateurs authentifiés | chaîne des parents vérifiée jusqu'à la racine (propriétaire, suppression, DACL, suppression des enfants), droits génériques comptés ; parents verrouillés par `Protect-WinSightVmStorage.ps1`, stockage revérifié avant chaque passe | `066b3e1` |
 
-### 4.4 Contre-audit post-publication (Codex, 26 septembre 2026)
+### 4.4 Contre-audit post-publication (Codex, 26–27 septembre 2026)
 
 Base relue : `main` à `6844750` (v0.14.0), historique `v0.13.0..v0.14.0`, code, tests,
-harnais et dossiers de qualification. Travail correctif sur la branche locale
-`audit/codex-post-release-2026-09` dans `D:\WinSight-Build\work` ; aucun lancement élevé,
-changement de service, WFP, VM, installation, désinstallation, publication ou modification des
-preuves scellées. Les résultats du §17.4 sont des comptes rendus historiques relus, **pas** des
+harnais et dossiers de qualification. Travail correctif sur
+`audit/codex-post-release-2026-09` ; patch v0.14.1 préparé à la demande de l'utilisateur.
+Aucun lancement élevé sur le poste, changement de service, WFP, VM, installation,
+désinstallation ou modification des preuves scellées. Les résultats du §17.4 sont des comptes rendus historiques relus, **pas** des
 passes Hyper-V exécutées pendant ce contre-audit. Un test unitaire vert ne remplace pas une preuve
 du comportement privilégié ni de la provenance des octets publiés.
 
 | ID | Gravité | Constat | Preuve (fichier:ligne) | Scénario d'échec | Correction et test | Statut |
 |---|---|---|---|---|---|---|
-| RB-01 | Haute, harnais hôte | L'entrée élevée et le vérificateur sont lancés depuis un worktree accessible en écriture aux utilisateurs authentifiés sur l'hôte contrôlé (`icacls`). Le manifeste est calculé *après* le démarrage et le blob du runner n'est qu'un commentaire écarté par le vérificateur. | `scripts/validation/hyperv/README.md:58-63` ; `WinSightQualRunner.ps1:108-115` ; `Verify-QualificationProvenance.ps1:37-40,67-70` | Un acteur local modifie le script avant l'UAC, fait exécuter du code élevé, puis recopie les octets revus : les 11 contrôles après coup peuvent rester verts. Aucun PoC privilégié exécuté sur ce poste ; ce n'est pas une exploitation du produit démontrée. | Documentation corrigée. Correction du harnais **non faite** : ancre externe, lanceur et vérificateur indépendamment authentifiés et protégés avant lancement ; test de substitution pré-UAC en VM jetable, puis passes opérateur. | **Ouvert**. Les anciennes passes x64 sont des répétitions fonctionnelles, non une preuve indépendante de provenance du démarrage hôte. |
-| RB-02 | Moyenne, Guardian | Un gain de couverture limite `Entries` à 4 096 ; `Unlisted` n'a pas d'identité à retrancher de la ligne de base si sa livraison échoue. | `src/WinSight.Persistence/PersistenceCoverageGain.cs:16-24` ; `PersistenceMonitorCore.cs:266-272` ; `PersistenceMonitor.Delivery.cs:40-55` | La 4 097e entrée est sauvegardée comme connue, donc ne redonne aucune annonce au redémarrage après échec de livraison. | `GuardianUncertainArrivalTests.cs:223` : rouge avant correction (entrée hors liste présente dans la baseline), vert après. `TrySaveBaseline` reporte toute la sauvegarde pendant qu'un gain non livré a `Unlisted > 0` ; les autres annonces peuvent être rejouées. | **Corrigé sur branche locale** ; intégration journal disque plein et UI à revalider. |
+| RB-01 | Haute, harnais hôte | L'entrée élevée et le vérificateur étaient lancés depuis un worktree accessible en écriture aux utilisateurs authentifiés. Le manifeste calculé après le démarrage ne pouvait authentifier l'entrée. | Source `v0.14.0` : `scripts/validation/hyperv/README.md:58-63`, `WinSightQualRunner.ps1:108-115`, `Verify-QualificationProvenance.ps1:37-40,67-70` | Substitution pré-UAC, exécution élevée, puis copie des octets revus : les contrôles après coup peuvent rester verts. Aucun PoC privilégié exécuté ici ; ce n'est pas une exploitation du produit démontrée. | Lanceur autonome généré depuis les blobs du commit ; empreinte authentifiée indépendamment, vérification et exécution du même tampon, installation protégée du runner et du vérificateur, reçu scellé par campagne et épinglage externe au contrôle. Recherche des modules limitée au système. Tests de substitution en mémoire et de génération déterministe ; procédure opérateur réécrite. | **Implémenté, acceptation élevée encore ouverte** : essai pré-lancement en VM jetable, campagne complète hors 36, 01/17/99 puis réseau 01/36/99. Aucune authentification rétroactive des anciennes passes. |
+| RB-02 | Moyenne, Guardian | Un gain de couverture limite `Entries` à 4 096 ; `Unlisted` n'a pas d'identité à retrancher de la ligne de base si sa livraison échoue. | `src/WinSight.Persistence/PersistenceCoverageGain.cs:16-24` ; `PersistenceMonitorCore.cs:266-272` ; `PersistenceMonitor.Delivery.cs:40-55` | La 4 097e entrée est sauvegardée comme connue, donc ne redonne aucune annonce au redémarrage après échec de livraison. | `TrySaveBaseline` reporte toute la sauvegarde pendant qu'un gain non livré a `Unlisted > 0`. Cas initial et deux régressions `GuardianCoverageGainDurabilityTests` rouges sans la garde, verts avec : fichier réel inchangé, réessai vivant avec plusieurs abonnés, arrêt et redémarrage, puis sauvegarde après acquittement. | **Corrigé et testé** ; les autres annonces peuvent être rejouées. Intégration journal disque plein et UI à revalider en VM. |
 | RB-03 | Basse, documentation MCP | Le changelog affirmait que 90 s libèrent le verrou, tandis que le code conserve le verrou quand un fournisseur ignore l'annulation. | `CHANGELOG.md:21-23` (ancien texte dans `v0.14.0`) ; `src/WinSight.Mcp/McpScanService.cs:126-176` | Une requête suivante reste refusée jusqu'au retour du fournisseur malgré l'affirmation de libération immédiate. | Texte corrigé : annulation demandée au délai, verrou libéré au retour ; comportement et tests existants inchangés. | **Corrigé, documentation**. |
+| RB-04 | Moyenne, preuves | Le vérificateur acceptait un sous-ensemble du harnais ou des scripts, une carte d'artefacts vide/incomplète et une porte d'identité absente ou en échec. | Source `v0.14.0` : `scripts/validation/hyperv/Verify-QualificationProvenance.ps1:67` ; remplacement : `QualificationProvenance.psm1:14` | Des preuves cohérentes entre elles mais incomplètes sont annoncées vérifiées. | Ensembles exacts sans doublons, formats d'empreinte, triplet archive/installeur/SBOM de même version/architecture, commit et porte 01 PASS requis ; reçu de bootstrap lié à l'empreinte externe. Tests PowerShell : 12 échecs sur 19 avant correction, 25/25 après ajout des cas de reçu. | **Corrigé et testé sans élévation** ; qualification complète du harnais liée à RB-01. |
+| RB-05 | Basse, release | Une erreur native de restore/build/format pouvait être masquée par la commande suivante dans la même étape PowerShell. | `.github/workflows/release.yml`, étapes `Restore, build and test tagged source` et `Verify formatting and dependencies` | Format en échec, audit des dépendances réussi, étape néanmoins verte. | Contrôle immédiat de `$LASTEXITCODE` après chaque commande concernée ; trois cas de contrat rouges avant, verts après. | **Corrigé**, exécution du pipeline requise à la livraison. |
+| RB-06 | Basse, chemin signé latent | Le SBOM était calculé avant signature des exécutables qu'il décrit. | `scripts/Build-Release.ps1`, ordre signature / `dotnet sbom-tool generate` / compression | Une activation future de la signature produit un inventaire dont les empreintes ne correspondent plus au paquet final. La politique courante non signée n'exerce pas le défaut. | Signature des exécutables avant génération du SBOM ; contrat d'ordre rouge avant, vert après. | **Corrigé**, chaîne Authenticode réelle toujours non qualifiée. |
 
-RB-02 est commité dans `1e9f370` (branche locale, ni poussé ni fusionné). Sous PowerShell avec
+Premier correctif RB-02 : `1e9f370`. Sous PowerShell avec
 `TEMP`/`TMP=D:\WinSight-Build\tmp` et `DOTNET_CLI_HOME=D:\WinSight-Build\dotnet-home`, commande
 ciblée : `dotnet test tests/WinSight.Persistence.Tests/WinSight.Persistence.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~AnUndeliveredGainBeyondTheListingLimitDoesNotSilentlySaveOverflowEntries --nologo`.
 Avant le correctif : 0/1, échec `Assert.DoesNotContain` sur `Hidden4096` dans la baseline sauvegardée ;
@@ -357,13 +360,29 @@ après : 1/1. `dotnet test winsight.sln -c Release --nologo` : 23 projets de tes
 et `git diff --check` : sortie 0, aucun changement requis. Ces commandes n'exécutent pas les
 portes privilégiées.
 
+Compléments du 27 septembre : les deux tests `GuardianCoverageGainDurabilityTests` échouent
+sur le fichier réel de baseline après retrait de la seule garde RB-02 (2/2 rouges), puis passent
+après restauration (2/2 verts). `Test-TrustedQualification.ps1` : 13 contrôles verts de
+vérification du tampon et du payload ; `Test-TrustedQualificationGenerator.ps1` : 7 contrôles
+verts, dont indépendance des fichiers de travail modifiés, liaison au commit, analyse syntaxique
+PowerShell 5.1 et refus d'écrasement. Ces scripts sont exécutés par les tests Application en CI,
+sans démarrer le bootstrap privilégié. Les cinq nouveaux contrats de release (trois codes de
+sortie, ordre SBOM et couverture du lanceur) ont échoué avant les changements puis passé.
+
+Validation finale locale du patch : `dotnet test winsight.sln -c Release --no-restore --nologo
+--logger "trx;LogFilePrefix=post-audit-0141"` : **23 rapports, 3 635 tests PASS, aucun échec ni
+ignoré**. `dotnet format winsight.sln --verify-no-changes --no-restore` et `git diff --check` :
+sortie 0. Les 21 scripts du harnais passent l'analyse syntaxique Windows PowerShell 5.1 et les
+27 autocontrôles `Test-HarnessHelpers.ps1` passent sans élévation. Le contrat d'isolation des
+modules a été rouge avant les gardes puis vert dans la suite complète. Ces contrôles ne ferment
+pas les portes opérateur/VM ni la vérification ultérieure des artefacts CI publiés.
+
 Relecture adversariale additionnelle : MCP (projection du texte non fiable, garde du champ
 `command`, frontière des effets de bord, annulation), Hijack (droits effectifs/étiquettes, fichier
 planté, liaison SxS), réponse (identité PID/handle, journal d'intention et issue partielle), accès
-automatique aux fichiers, désinstallation Inno et portes CI/release. Aucun autre défaut **confirmé**
-dans les chemins relus ; cela n'est ni une preuve d'absence de défaut ni une validation dynamique des
-scénarios privilégiés. Le site `winsight-web` optionnel et le statut courant de GitHub n'ont pas été
-contre-vérifiés ici.
+automatique aux fichiers, désinstallation Inno et portes CI/release. Les constats supplémentaires
+confirmés sont RB-04 à RB-06 ci-dessus ; cela n'est ni une preuve d'absence de défaut ni une validation
+dynamique des scénarios privilégiés. Le site `winsight-web` optionnel n'a pas été contre-vérifié ici.
 
 Contrôle ciblé des 11 High de l'audit antérieur (code actuel + régressions existantes, toutes
 incluses dans la suite Release verte). « Sensible à l'ancien code » désigne une assertion dont la
@@ -385,10 +404,10 @@ ne sont pas requalifiées indépendamment par ce seul tableau.
 | WS-73 | `CreateDispositionTests.OpeningAnExistingFileIsNotAWrite` et `AnOpenerRecordedAfterTheWriterWouldHaveTakenItsPlace` | `OPEN_EXISTING` ne remplace plus l'auteur ; attribution ETW en VM non reroulée. |
 | WS-74 | `OriginalFileNameScanTests.TheGenuineInterpreterIsFlaggedWhenHandedAnEncodedCommand` et `AnImageWhoseDataIsNotLocalIsNotReadForItsName` | Ressource de l'image acquise, sans nom `.MUI` ni lecture hors ligne ; porte Cloud Files 17 non reroulée. |
 
-Verdict par périmètre : **Guardian conditionnel** au correctif RB-02 et à sa suite complète ;
-**harnais/provenance hôte non qualifié** tant que RB-01 reste ouvert ; **MCP, Hijack, réponse,
-lecture automatique, SxS, installateur et CI** sans nouveau défaut confirmé par cette revue statique,
-mais sans nouveau feu vert VM/CI ; **publication v0.14.0** non requalifiée par ce travail.
+Verdict par périmètre : **Guardian corrigé avec régressions durables**, à requalifier dans le produit ;
+**harnais/provenance hôte implémenté mais acceptation élevée non qualifiée** ; **MCP, Hijack, réponse,
+lecture automatique, SxS et installateur** sans nouveau défaut confirmé dans cette passe ;
+**release durcie** par RB-05/RB-06 ; **publication v0.14.0** non requalifiée par ce travail.
 Restent explicitement hors preuve : ARM64 natif, x64 émulé sur ARM64, multi-utilisateur,
 Authenticode, débit ETW, endurance, WS-53, échec injecté du harnais en VM, octets exacts de la
 release CI et issue des derniers workflows distants.

@@ -86,7 +86,9 @@ jobs:
         shell: pwsh
         run: |
           dotnet restore winsight.sln
+          if ($LASTEXITCODE -ne 0) { throw "Release restore failed." }
           dotnet build winsight.sln -c Release --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
           # Keep the release oracle deterministic on the smaller native Arm64 runner. Running all
           # test projects at once can starve independent five-second filesystem/concurrency
           # rendezvous even though each project passes on the same runner in the CI coverage gate.
@@ -97,6 +99,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet format winsight.sln --verify-no-changes --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "Release formatting check failed." }
           ./scripts/Test-VulnerablePackages.ps1
 
       # Signing happens inside Build-Release.ps1, before archives are compressed and before any
@@ -140,6 +143,14 @@ jobs:
             -Architecture ${{ matrix.architecture }} `
             -InstallerLanguage ${{ matrix.installer_language }}
 
+      - name: Build independently authenticated qualification launcher
+        if: matrix.architecture == 'x64'
+        shell: pwsh
+        run: |
+          ./scripts/validation/hyperv/New-TrustedQualificationLauncher.ps1 `
+            -Commit $env:RELEASE_SHA `
+            -OutputPath "out/release/winsight-$env:RELEASE_TAG-qualification.ps1"
+
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -149,6 +160,7 @@ jobs:
             out/release/*.exe
             out/release/*.json
             out/release/*.sha256
+            out/release/*-qualification.ps1
           if-no-files-found: error
 
   # Pinned for the same reason as `build`: this job re-verifies the checksums and creates the public
@@ -180,7 +192,8 @@ jobs:
             "winsight-$version-win-x64.spdx.json",
             "winsight-$version-win-arm64.zip",
             "winsight-$version-win-arm64-setup.exe",
-            "winsight-$version-win-arm64.spdx.json"
+            "winsight-$version-win-arm64.spdx.json",
+            "winsight-$version-qualification.ps1"
           )
           $files = @(Get-ChildItem -LiteralPath release-assets -File)
           $actualArtifacts = @($files | Where-Object Extension -ne '.sha256' | ForEach-Object Name)
@@ -209,6 +222,7 @@ jobs:
           subject-path: |
             release-assets/*.zip
             release-assets/*-setup.exe
+            release-assets/*-qualification.ps1
 
       # The SBOM covers the installer as well as the archive, and it always did in substance:
       # Build-Release.ps1 generates it from the package directory, and that same directory is what

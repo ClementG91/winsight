@@ -16,6 +16,13 @@ Per architecture (`x64`, `arm64`):
 
 Plus GitHub **build provenance** and **SBOM attestations**, signed by GitHub's OIDC identity.
 
+From v0.14.1, also `winsight-v<version>-qualification.ps1` and its `.sha256`: a standalone
+qualification-harness launcher assembled from the tagged commit's exact Git blobs. This script
+has a **build-provenance attestation**, not a binary-package SBOM attestation. It is not an ordinary
+double-click installer: follow the independent digest authentication and protected-installation
+procedure in [`scripts/validation/hyperv/README.md`](../scripts/validation/hyperv/README.md).
+Downloading a script and its neighboring checksum does not by itself establish trust.
+
 ## Cutting a release
 
 1. Bump `<Version>` in `Directory.Build.props`. The workflow refuses to build if the tag and the
@@ -49,8 +56,8 @@ pin: each build job records `ImageOS` and `ImageVersion` in the workflow run sum
 
 ## Authenticode signing
 
-Signing runs inside `Build-Release.ps1`, deliberately **before** archives are compressed and
-**before** any checksum is computed. Signing afterwards would leave every published hash describing
+Signing runs inside `Build-Release.ps1`, deliberately **before** the package SBOM is generated,
+archives are compressed and any checksum is computed. Signing afterwards would leave hashes describing
 bytes that no longer exist.
 
 Every public release to date, through v0.14.0, is unsigned. The signed

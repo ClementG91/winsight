@@ -1,3 +1,36 @@
+## 0.14.1 - 2026-09-27
+
+### Fixed
+
+- Guardian (RB-02): when an undelivered coverage-gain notice contains more than 4,096 entries,
+  retain the entire durable baseline until every subscriber has accepted the notice. Overflow
+  entries must not silently become known after an unsuccessful delivery. Regressions cover live
+  retries, multiple subscribers, the real baseline file, shutdown and restart; they fail without
+  the guard. Other notices may replay while the baseline is retained.
+- Qualification harness (RB-01, RB-04): publish a self-contained, checksummed and provenance-attested
+  launcher built from exact committed blobs. The operator must independently authenticate its digest
+  and execute the same verified memory buffer before installing the protected runner and verifier.
+  Each run carries the bootstrap receipt; verification requires an external launcher pin, the full
+  harness and candidate-script inventories, a complete artifact triplet and a successful identity
+  gate. Never elevate scripts from a writable checkout. See the
+  [operator procedure](scripts/validation/hyperv/README.md).
+- Release gates (RB-05): a failing restore, build or formatting command now stops the release step
+  immediately, even if a later command would succeed.
+- Signed-package SBOM ordering (RB-06): generate the SBOM after signing package executables, so its
+  file hashes describe the bytes archived and installed. The published distribution policy remains
+  explicitly unsigned; the real Authenticode chain is still unqualified.
+- MCP documentation (RB-03): the 90-second deadline requests cancellation. A provider that ignores
+  it retains the scan gate until it returns; the deadline does not force-release the gate.
+
+### Validation limits
+
+The new harness has unelevated Windows PowerShell 5.1 behavioral and contract tests, including
+tamper rejection and deterministic generation despite a dirty checkout. Its elevated installation
+and pre-launch substitution trial still require a disposable VM and an operator-led campaign.
+Historical x64 rehearsals did not authenticate the old elevated entry point before execution;
+they do not qualify these new binaries. Native Arm64 privileged runtime, x64-on-Arm64, multi-user,
+soak and signed Authenticode acceptance remain open. See [`docs/AUDIT.md` §4.4](docs/AUDIT.md).
+
 ## 0.14.0 - 2026-09-26
 
 This release carries the fixes of the September 2026 security audit. The full report, with each

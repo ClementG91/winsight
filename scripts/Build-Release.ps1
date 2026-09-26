@@ -138,6 +138,29 @@ foreach ($architecture in $Architectures)
         Write-Output "Skipping the $architecture MCP execution test on this $nativeArchitecture host; native CI runs it."
     }
 
+    # Finalize signatures before the SBOM records executable hashes. The inventory embedded in
+    # the archive and attested for the installer must describe the same final payload bytes.
+    $signTargets = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -Filter '*.exe' |
+        ForEach-Object { $_.FullName })
+    if ($signTargets.Count -eq 0)
+    {
+        throw "No executables found to sign under $packageRoot."
+    }
+    if ($DisableSignature)
+    {
+        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
+            -Path $signTargets -CertificateBase64 "" -CertificatePassword ""
+    }
+    else
+    {
+        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
+            -Path $signTargets -RequireSignature:$RequireSignature
+    }
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Signing stage failed for $rid."
+    }
+
     if (-not $SkipSbom)
     {
         $namespace = "https://github.com/ClementG91/winsight/releases/tag/v$Version/$rid"
@@ -172,29 +195,6 @@ foreach ($architecture in $Architectures)
         }
         $sbomHash = (Get-FileHash -LiteralPath $sbomPath -Algorithm SHA256).Hash.ToLowerInvariant()
         Set-Content -LiteralPath "$sbomPath.sha256" -Value "$sbomHash  $sbomName" -Encoding ascii
-    }
-
-    # Sign before compressing and before any hash is taken, so the archive carries signed bytes and
-    # every published checksum covers them. Signing afterwards would quietly invalidate both.
-    $signTargets = @(Get-ChildItem -LiteralPath $packageRoot -Recurse -Filter '*.exe' |
-        ForEach-Object { $_.FullName })
-    if ($signTargets.Count -eq 0)
-    {
-        throw "No executables found to sign under $packageRoot."
-    }
-    if ($DisableSignature)
-    {
-        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
-            -Path $signTargets -CertificateBase64 "" -CertificatePassword ""
-    }
-    else
-    {
-        & (Join-Path $PSScriptRoot "Sign-Artifacts.ps1") `
-            -Path $signTargets -RequireSignature:$RequireSignature
-    }
-    if ($LASTEXITCODE -ne 0)
-    {
-        throw "Signing stage failed for $rid."
     }
 
     $archiveName = "winsight-v$Version-$rid.zip"

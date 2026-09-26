@@ -216,7 +216,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | **v0.14.0's product code was exercised in local x64 VM rehearsals** after the September security audit: 32 gates without a failure, Cloud Files downloads attributed to their process, Network Logon 10/10. Post-run harness checks passed, but the elevated entry point was not independently authenticated before launch (RB-01). The published binaries are CI-built and attested, unsigned by policy, and were not themselves run in the VM; see [production readiness](docs/PRODUCTION_READINESS.md) |
+| **x64** | **v0.14.1 fixes Guardian overflow durability and replaces the qualification entry path**, with regression tests. The new trusted harness still needs an operator-led elevated installation/substitution trial and a fresh VM campaign. v0.14.0's local rehearsals did not independently authenticate the elevated entry point (RB-01), and do not qualify v0.14.1 or the exact CI binaries. Distribution remains unsigned; see [production readiness](docs/PRODUCTION_READINESS.md) |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 > **CodeQL runs through GitHub's default setup, not a workflow in this repository.** The run IDs

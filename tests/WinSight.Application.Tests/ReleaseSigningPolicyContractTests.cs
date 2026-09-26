@@ -8,6 +8,41 @@ public sealed class ReleaseSigningPolicyContractTests
         AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     [Fact]
+    public void TheSbomDescribesTheExecutableBytesAfterSigning()
+    {
+        var script = File.ReadAllText(Path.Combine(RepositoryRoot, "scripts", "Build-Release.ps1"));
+        var signingComplete = script.IndexOf("Signing stage failed for $rid.", StringComparison.Ordinal);
+        var inventory = script.IndexOf("dotnet tool run sbom-tool generate", StringComparison.Ordinal);
+        var archive = script.IndexOf("Compress-Archive", StringComparison.Ordinal);
+        Assert.True(signingComplete >= 0 && inventory > signingComplete && archive > inventory,
+            "The executable signatures must be finalized before SBOM hashes and compression.");
+    }
+
+    [Theory]
+    [InlineData("dotnet restore winsight.sln")]
+    [InlineData("dotnet build winsight.sln -c Release --no-restore")]
+    [InlineData("dotnet format winsight.sln --verify-no-changes --no-restore")]
+    public void AReleaseNativeFailureIsCheckedBeforeAnotherCommandCanMaskIt(string command)
+    {
+        var workflow = File.ReadAllText(Path.Combine(RepositoryRoot, ".github", "workflows", "release.yml"));
+        var lines = workflow.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var index = Array.FindIndex(lines, line => line.Trim() == command);
+        Assert.True(index >= 0, "Release command not found.");
+        Assert.StartsWith("if ($LASTEXITCODE -ne 0) { throw ", lines[index + 1].Trim(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheQualificationLauncherIsChecksummedAndAttestedAsAReleaseAsset()
+    {
+        var workflow = File.ReadAllText(Path.Combine(RepositoryRoot, ".github", "workflows", "release.yml"));
+        Assert.Contains("New-TrustedQualificationLauncher.ps1", workflow, StringComparison.Ordinal);
+        Assert.Contains("-Commit $env:RELEASE_SHA", workflow, StringComparison.Ordinal);
+        Assert.Contains("\"winsight-$version-qualification.ps1\"", workflow, StringComparison.Ordinal);
+        Assert.Contains("release-assets/*-qualification.ps1", workflow, StringComparison.Ordinal);
+        Assert.Contains("out/release/*-qualification.ps1", workflow, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReleaseWorkflowRequiresAnExplicitBooleanSigningPolicy()
     {
         var workflow = File.ReadAllText(Path.Combine(
