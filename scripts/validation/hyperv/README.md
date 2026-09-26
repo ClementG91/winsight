@@ -34,10 +34,16 @@ list of files, refusing reparse points; never delete recursively (Windows PowerS
 it, and results come back file by file without entering a link, because the guest runs the candidate
 as an administrator.
 
-What this does not close: someone running as the operator at the moment the operator starts the
-runner could still alter it first. The runner records its own git blob id and the harness it copied,
-so `Verify-QualificationProvenance.ps1` detects that afterwards against the reviewed commit. A local
-rehearsal is still not a CI-attested release.
+What this does not close (RB-01): the entry-point script is launched elevated from a checkout that
+can be modified by an ordinary local user before the UAC prompt. The runner's own git blob id is a
+comment in the manifest; the verifier ignores comments and checks the protected copies made *after*
+startup. An altered entry point could execute first, then copy the reviewed bytes and leave all
+post-run manifest checks passing. The verifier itself is also launched from that checkout. Do not
+describe a passing verifier as proof that the elevated entry point was the reviewed code. Before
+another host qualification is trusted as provenance evidence, use an independently authenticated,
+administrator-protected launcher and verifier, then rerun the affected gates. Until then these
+passes are functional local rehearsals with an unclosed host-startup trust boundary, not CI-attested
+release validation.
 
 ## Once
 
@@ -51,7 +57,9 @@ rehearsal is still not a CI-attested release.
 
 1. Commit the harness and note the commit (`git rev-parse HEAD`). Check it out as a worktree on the
    volume that will hold the qualification data (`git worktree add <vol>\WinSight-Build\wt-<sha> <sha>`)
-   and start the runner from that clean tree, elevated (the operator accepts the UAC prompt):
+   and start the runner from that clean tree, elevated (the operator accepts the UAC prompt). This
+   historical procedure does **not** close RB-01; do not use it for new provenance claims until the
+   trusted-launch requirement above is implemented and verified:
    `Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','<vol>\WinSight-Build\wt-<sha>\scripts\validation\hyperv\WinSightQualRunner.ps1'`
 2. Build the candidate unelevated from a clean checkout of the commit (a worktree on a drive with
    room: `Build-Release.ps1 -Version <v> -Architectures x64 -DisableSignature`), then assemble it with

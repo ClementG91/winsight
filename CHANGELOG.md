@@ -18,8 +18,9 @@ findings, 75 fixed with tests, 4 documented as limits, 1 open (WS-53, a shared-r
 - MCP server (WS-08, WS-09, WS-10, WS-61, RA-06): command lines, whose arguments are where services
   keep their secrets, no longer reach the model through the hijack context or alert details; the
   full line travels only in the gated `command` field. Model-facing text escapes invisible, Tag and
-  line-separator characters on every Unicode plane. The 90-second timeout now cancels the scan and
-  releases its lock. Path redaction stops at path boundaries. A test walks the IL call graph from
+  line-separator characters on every Unicode plane. The 90-second timeout requests cancellation;
+  the scan lock remains held until a provider that ignores cancellation actually returns. Path
+  redaction stops at path boundaries. A test walks the IL call graph from
   every MCP method and finds no path to a mutating API, named pipes and path-based file writes
   included.
 - Response actions (WS-04, WS-05, WS-17, WS-18, WS-19, WS-20, WS-33): process actions go through the

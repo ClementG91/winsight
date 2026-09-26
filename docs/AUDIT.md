@@ -5,7 +5,7 @@
 | Date | 2026-09-21, mis à jour du 23 au 26 septembre |
 | Base | `main` @ `4a361a6` (v0.13.0) |
 | Périmètre | dépôt complet : code, tests, docs, CI/CD, scripts de build/release, installeur |
-| Auteurs de l'audit | Claude Code (sessions du 18-19, du 21, du 22-23, du 24 et du 25-26 septembre) et Codex (20-21 septembre, contre-audit indépendant le 24, §4.3), travaillant sur le même arbre et se relisant mutuellement |
+| Auteurs de l'audit | Claude Code (sessions du 18-19, du 21, du 22-23, du 24 et du 25-26 septembre) et Codex (20-21 septembre, contre-audits indépendants les 24 et 26, §4.3-4.4), travaillant sur le même arbre et se relisant mutuellement |
 | Environnement de validation | Windows 11 Pro 10.0.26200 x64, compte administrateur à jeton scindé (UAC), processus non élevé, SDK .NET 10.0.303 |
 | État livré | fusionné dans `main` ([#161](https://github.com/ClementG91/winsight/pull/161)), publié en v0.14.0 le 26 septembre |
 
@@ -31,7 +31,7 @@ scripts, le candidat, les disques des VM et les preuves dans des dossiers que to
 authentifié pouvait modifier (RA-01) : ce sont des preuves fonctionnelles de ce que ces octets ont
 fait, pas une provenance attestée. Le harnais a été refait (`scripts/validation/hyperv`, vérifié par
 `Verify-QualificationProvenance.ps1`), et le code produit a changé depuis `259056b` (RA-02 à RA-05, WS-74 à
-WS-76). **Requalifié les 25 et 26 septembre avec le harnais refait** (§17.4, provenance vérifiée pour chaque passe) :
+WS-76). **Répété les 25 et 26 septembre avec le harnais refait** (§17.4, manifestes vérifiés après chaque passe, mais provenance du démarrage hôte non établie selon RB-01 au §4.4) :
 la passe complète `head-fe953fe` (32 portes, 0 échec), la porte 17 repassée avec la mesure corrigée
 (`gate17-711ded0`) et la porte 36 depuis la VM de contrôle (`net-711ded0b`, 10/10). Le code produit de la tête est
 celui de ces candidats, à la gravité d'un avis près (WS-86). Ce sont des répétitions locales non signées, pas des preuves attestées par la CI.
@@ -331,6 +331,67 @@ corrigés avec un test en échec sur l'état précédent :
 | RA-04 | le manifeste vient de l'image scannée : un assemblage inventé sous la clé Visual C++ atteignait tout composant Visual C++ | un assemblage lié n'atteint que lui-même et, pour une bibliothèque Visual C++ (MFC, ATL, OpenMP), le CRT de la même version | `dc9f080` |
 | RA-05 | l'`ImagePath` non guillemeté était coupé au premier « .exe » : un dossier `tools.exe` sur le chemin faisait passer le service de cette installation pour étranger, et la désinstallation continuait | exécutable reconnu comme début de la commande, avec ou sans extension ; cas VM ajouté | `df92198` |
 | RA-01 | les vérifications s'arrêtaient au dossier protégé ; le dossier `Hyper-V` à la racine de ce volume, parent du stockage des VM, appartient au compte ordinaire et reste renommable par les utilisateurs authentifiés | chaîne des parents vérifiée jusqu'à la racine (propriétaire, suppression, DACL, suppression des enfants), droits génériques comptés ; parents verrouillés par `Protect-WinSightVmStorage.ps1`, stockage revérifié avant chaque passe | `066b3e1` |
+
+### 4.4 Contre-audit post-publication (Codex, 26 septembre 2026)
+
+Base relue : `main` à `6844750` (v0.14.0), historique `v0.13.0..v0.14.0`, code, tests,
+harnais et dossiers de qualification. Travail correctif sur la branche locale
+`audit/codex-post-release-2026-09` dans `D:\WinSight-Build\work` ; aucun lancement élevé,
+changement de service, WFP, VM, installation, désinstallation, publication ou modification des
+preuves scellées. Les résultats du §17.4 sont des comptes rendus historiques relus, **pas** des
+passes Hyper-V exécutées pendant ce contre-audit. Un test unitaire vert ne remplace pas une preuve
+du comportement privilégié ni de la provenance des octets publiés.
+
+| ID | Gravité | Constat | Preuve (fichier:ligne) | Scénario d'échec | Correction et test | Statut |
+|---|---|---|---|---|---|---|
+| RB-01 | Haute, harnais hôte | L'entrée élevée et le vérificateur sont lancés depuis un worktree accessible en écriture aux utilisateurs authentifiés sur l'hôte contrôlé (`icacls`). Le manifeste est calculé *après* le démarrage et le blob du runner n'est qu'un commentaire écarté par le vérificateur. | `scripts/validation/hyperv/README.md:58-63` ; `WinSightQualRunner.ps1:108-115` ; `Verify-QualificationProvenance.ps1:37-40,67-70` | Un acteur local modifie le script avant l'UAC, fait exécuter du code élevé, puis recopie les octets revus : les 11 contrôles après coup peuvent rester verts. Aucun PoC privilégié exécuté sur ce poste ; ce n'est pas une exploitation du produit démontrée. | Documentation corrigée. Correction du harnais **non faite** : ancre externe, lanceur et vérificateur indépendamment authentifiés et protégés avant lancement ; test de substitution pré-UAC en VM jetable, puis passes opérateur. | **Ouvert**. Les anciennes passes x64 sont des répétitions fonctionnelles, non une preuve indépendante de provenance du démarrage hôte. |
+| RB-02 | Moyenne, Guardian | Un gain de couverture limite `Entries` à 4 096 ; `Unlisted` n'a pas d'identité à retrancher de la ligne de base si sa livraison échoue. | `src/WinSight.Persistence/PersistenceCoverageGain.cs:16-24` ; `PersistenceMonitorCore.cs:266-272` ; `PersistenceMonitor.Delivery.cs:40-55` | La 4 097e entrée est sauvegardée comme connue, donc ne redonne aucune annonce au redémarrage après échec de livraison. | `GuardianUncertainArrivalTests.cs:223` : rouge avant correction (entrée hors liste présente dans la baseline), vert après. `TrySaveBaseline` reporte toute la sauvegarde pendant qu'un gain non livré a `Unlisted > 0` ; les autres annonces peuvent être rejouées. | **Corrigé sur branche locale** ; intégration journal disque plein et UI à revalider. |
+| RB-03 | Basse, documentation MCP | Le changelog affirmait que 90 s libèrent le verrou, tandis que le code conserve le verrou quand un fournisseur ignore l'annulation. | `CHANGELOG.md:21-23` (ancien texte dans `v0.14.0`) ; `src/WinSight.Mcp/McpScanService.cs:126-176` | Une requête suivante reste refusée jusqu'au retour du fournisseur malgré l'affirmation de libération immédiate. | Texte corrigé : annulation demandée au délai, verrou libéré au retour ; comportement et tests existants inchangés. | **Corrigé, documentation**. |
+
+RB-02 est commité dans `1e9f370` (branche locale, ni poussé ni fusionné). Sous PowerShell avec
+`TEMP`/`TMP=D:\WinSight-Build\tmp` et `DOTNET_CLI_HOME=D:\WinSight-Build\dotnet-home`, commande
+ciblée : `dotnet test tests/WinSight.Persistence.Tests/WinSight.Persistence.Tests.csproj -c Release --no-restore --filter FullyQualifiedName~AnUndeliveredGainBeyondTheListingLimitDoesNotSilentlySaveOverflowEntries --nologo`.
+Avant le correctif : 0/1, échec `Assert.DoesNotContain` sur `Hidden4096` dans la baseline sauvegardée ;
+après : 1/1. `dotnet test winsight.sln -c Release --nologo` : 23 projets de tests, aucun échec
+(3 618 tests après ajout du cas). `dotnet format winsight.sln --verify-no-changes --no-restore`
+et `git diff --check` : sortie 0, aucun changement requis. Ces commandes n'exécutent pas les
+portes privilégiées.
+
+Relecture adversariale additionnelle : MCP (projection du texte non fiable, garde du champ
+`command`, frontière des effets de bord, annulation), Hijack (droits effectifs/étiquettes, fichier
+planté, liaison SxS), réponse (identité PID/handle, journal d'intention et issue partielle), accès
+automatique aux fichiers, désinstallation Inno et portes CI/release. Aucun autre défaut **confirmé**
+dans les chemins relus ; cela n'est ni une preuve d'absence de défaut ni une validation dynamique des
+scénarios privilégiés. Le site `winsight-web` optionnel et le statut courant de GitHub n'ont pas été
+contre-vérifiés ici.
+
+Contrôle ciblé des 11 High de l'audit antérieur (code actuel + régressions existantes, toutes
+incluses dans la suite Release verte). « Sensible à l'ancien code » désigne une assertion dont la
+condition contredit l'ancien comportement décrit par le diff ; **les 11 versions antérieures
+n'ont pas été reconstruites ni exécutées ici**. Ainsi, leurs démonstrations rouge/verte historiques
+ne sont pas requalifiées indépendamment par ce seul tableau.
+
+| High | Assertion pertinente relue | Tentative de contournement / limite de cette passe |
+|---|---|---|
+| WS-01 | `PlantedObjectRightsTests.TheSystemDriveRootGrantsFoldersNotFilesToAStandardUser` et `UnprivilegedWriteAccessTests` | Droits fichier/dossier, ACE héritage seul, propriétaire/OWNER RIGHTS, étiquette et repli groupes connus : assertions sensibles à l'ancien calcul ; aucun essai sous SYSTEM/UAC désactivé ici. |
+| WS-02 | `PlantedObjectRightsTests.AnAbsentPathEntryWhoseParentAllowsNewFoldersIsExploitable` et `ANestedAbsentPathEntryIsAskedAboutItsFirstMissingFolder` | Premier ancêtre créable demandé en droit dossier, pas fichier ; aucun chemin hostile réel planté. |
+| WS-03 | `RegistryWatcherKeyLifecycleTests.AKeyCreatedAfterStartIsWatchedFromItsAncestorAndThenDirectly` et `AKeyDeletedAndRecreatedIsStillWatched` | Vie des clés couverte sur HKCU jetable ; pertes et refus d'accès sous privilèges différents non rejoués. |
+| WS-08 | `SensitiveDetailTests`, `PersistenceMonitorPresenterTests.AnUnresolvedArrivalIsNamedWithoutItsArguments`, `McpResultProjectorTests.ProtectedEvidence_RedactsProfileAndDropsCommandFields` | Arguments absents du texte normal et champ `command` retenu ; l'inventaire statique des producteurs ne prouve pas l'absence de tout nouveau producteur futur. |
+| WS-17 | `PersistenceResponderRealTests.ARegistryValueReplacedAfterCaptureIsNotRemoved` et `AStartupFileReplacedAfterCaptureIsNotRemoved` | Remplacement après capture refusé ; le repli sans TxR garde la fenêtre concurrente documentée WS-64. |
+| WS-18 | `PersistenceResponderRealTests.ARealHkcuValueIsQuarantinedRemovedAndRestoredExactly(false)` et `AChangedValueIsNotRemoved(false)` | Repli sans transaction exercé en HKCU ; erreur TxR 6801 et comportements machine/VM non reproduits ici. |
+| WS-19 | `ProcessResponderTests.AnUnavailableAuditIntentPreventsTheProcessAction`, `ACompletionJournalFailureCannotReadAsAFullSuccess` et équivalents `PersistenceResponderTests` | Intentions puis résultats, issue partielle ; panne réelle du journal et redémarrage UI non injectés. |
+| WS-20 | `ProtectedProcessesIdentityTests.WindowsCriticalNamesRequireTheRealSystemDirectory` et `ProcessResponderTests.AProcessOnlyRenamedLikeAProtectedBinaryDoesNotEvadeResponse` | Faux homonyme refusé comme identité protégée ; processus système réels non touchés. |
+| WS-22 | `AutomaticFileAccessTests.AReparseComponentInsideThePathIsRefusedWhenLinksAreAvailable` et `AnAcquiredFileIsReadByHandleAndDetectsAPathReplacement` | Jonction interne et substitution après acquisition ; aucun rappel Cloud Files ni accès UNC réellement provoqué dans cette passe. |
+| WS-73 | `CreateDispositionTests.OpeningAnExistingFileIsNotAWrite` et `AnOpenerRecordedAfterTheWriterWouldHaveTakenItsPlace` | `OPEN_EXISTING` ne remplace plus l'auteur ; attribution ETW en VM non reroulée. |
+| WS-74 | `OriginalFileNameScanTests.TheGenuineInterpreterIsFlaggedWhenHandedAnEncodedCommand` et `AnImageWhoseDataIsNotLocalIsNotReadForItsName` | Ressource de l'image acquise, sans nom `.MUI` ni lecture hors ligne ; porte Cloud Files 17 non reroulée. |
+
+Verdict par périmètre : **Guardian conditionnel** au correctif RB-02 et à sa suite complète ;
+**harnais/provenance hôte non qualifié** tant que RB-01 reste ouvert ; **MCP, Hijack, réponse,
+lecture automatique, SxS, installateur et CI** sans nouveau défaut confirmé par cette revue statique,
+mais sans nouveau feu vert VM/CI ; **publication v0.14.0** non requalifiée par ce travail.
+Restent explicitement hors preuve : ARM64 natif, x64 émulé sur ARM64, multi-utilisateur,
+Authenticode, débit ETW, endurance, WS-53, échec injecté du harnais en VM, octets exacts de la
+release CI et issue des derniers workflows distants.
 
 ---
 
@@ -790,14 +851,16 @@ chaque passe) ; leur équivalent dans l'historique publié :
 
 Premières passes du harnais refait (`scripts/validation/hyperv`, RA-01) : exécuteur élevé lancé par
 l'opérateur depuis une extraction du commit sur le volume de données, copies protégées du harnais et
-du candidat, stockage des VM et preuves réservés aux administrateurs, provenance vérifiée par
-`Verify-QualificationProvenance.ps1` sous un compte ordinaire. Candidats construits localement, non
-signés : des répétitions, pas des preuves attestées par la CI.
+du candidat, stockage des VM et preuves réservés aux administrateurs, manifestes vérifiés après
+chaque passe par `Verify-QualificationProvenance.ps1` sous un compte ordinaire. Le terme « provenance »
+dans les lignes historiques ci-dessous signifie ces contrôles après coup ; **il n'authentifie pas
+l'entrée élevée avant son lancement** (RB-01, §4.4). Candidats construits localement, non signés :
+des répétitions fonctionnelles, pas des preuves attestées par la CI.
 
 | Passe | Candidat | Résultat | Ce qu'elle a appris |
 |---|---|---|---|
 | `head-72c48a7` | `72c48a7` | perdue | l'invité s'est éteint après 121 minutes, le retrait du disque a échoué, la VM a rejoué les portes (WS-80) ; rien de scellé |
-| `head-771a67b` | `771a67b` | **30 PASS, 1 FAIL**, 36 NOT_RUN (passe à part) ; provenance : 11/11 PASS | première passe attestée de bout en bout ; 17 : le scan de persistance a vu une demande de téléchargement que la sonde ne savait pas attribuer (WS-82) |
+| `head-771a67b` | `771a67b` | **30 PASS, 1 FAIL**, 36 NOT_RUN (passe à part) ; contrôles après coup : 11/11 PASS | première passe vérifiée après coup ; 17 : le scan de persistance a vu une demande de téléchargement que la sonde ne savait pas attribuer (WS-82) |
 | `net-771a67b` | `771a67b` | non démarrée | la VM de contrôle n'a pas obtenu sa mémoire après le démarrage de la cible (WS-81) |
 | `head-bf9aad9` | `bf9aad9` | non démarrée | candidat chargé, puis l'exécuteur s'est arrêté sur une écriture de son journal qu'un lecteur tenait ouvert (WS-83) |
 | `head-fe953fe` | `fe953fe` | **32 portes, 0 FAIL**, 36 NOT_RUN (passe à part) ; provenance : 11/11 PASS | qualification complète ; 17 : demandes de téléchargement de `sihost.exe` seulement, aucune de WinSight, mais une lecture attendant derrière une demande de sihost n'aurait pas été vue (WS-82, second temps) |
@@ -805,13 +868,14 @@ signés : des répétitions, pas des preuves attestées par la CI.
 | `net-711ded0b` | `711ded0` | **porte 36 : 10/10** (ouverture de session réseau 7/7, observateur 3/3), 99 PASS ; contrôle 7/7 ; provenance : 11/11 PASS | le pilote a fini en erreur après le scellement (WS-84) ; passe vérifiée avec le vérificateur corrigé (WS-85) |
 | `gate17-711ded0` | `711ded0` | **17 PASS**, 01 et 99 PASS ; provenance : 11/11 PASS | aucune demande de téléchargement ni pendant l'attente ni pendant le scan (22 s, entrée listée, image refusée) ; les primitives montrent que la mesure voit désormais chaque lecture : chacune arrive à son nom (`powershell.exe`) et échoue aussitôt (erreur 389) |
 
-**Le code produit de la tête est qualifié en x64** : `head-fe953fe` pour toutes les portes sauf la 36 (32 portes,
+**Le code produit de la tête a été exercé en x64** : `head-fe953fe` pour toutes les portes sauf la 36 (32 portes,
 0 échec), `gate17-711ded0` pour la porte 17 avec la mesure corrigée, `net-711ded0b` pour la porte 36. Le code
 produit (`src`, `installer`) est celui de ces candidats, à une exception près : la gravité de l'avis « évaluée
 pour les groupes connus » du scan hijack (WS-86), émis seulement sans jeton non élevé, ce qui n'arrive jamais dans
 les passes VM (le harnais y tourne élevé, UAC actif). Les autres commits n'ont touché que le harnais, les tests et
 la documentation. Ce sont des répétitions locales non signées, pas des preuves attestées
-par la CI. Restent hors de portée : ARM64 natif, signature Authenticode, endurance, postes multi-utilisateurs.
+par la CI ; RB-01 empêche d'en faire une preuve indépendante de provenance de l'exécution hôte.
+Restent hors de portée : ARM64 natif, signature Authenticode, endurance, postes multi-utilisateurs.
 
 ---
 
@@ -821,7 +885,7 @@ par la CI. Restent hors de portée : ARM64 natif, signature Authenticode, endura
 
 - Relire et fusionner la branche d'audit par thème. Qualification x64 : `259056b` a passé 31 portes
   sur 31 (§17.2), sous la réserve RA-01 ; la tête a été requalifiée avec le harnais refait (§17.4 : `head-fe953fe`,
-  `gate17-711ded0`, `net-711ded0b`, provenance vérifiée) ; restent ARM64, la signature Authenticode,
+  `gate17-711ded0`, `net-711ded0b`, contrôles après coup 11/11 mais réserve RB-01) ; restent ARM64, la signature Authenticode,
   l'endurance et les postes multi-utilisateurs.
 - `PRODUCTION_READINESS.md` : distinction faite (RA-07) ; déclarer le candidat seulement après cette
   requalification.
