@@ -23,6 +23,31 @@ public sealed class AdaptersTests
         Assert.Equal("2", finding.Fields["unknownSignatures"]);
     }
 
+    /// <summary>
+    /// The notice that a hijack scan graded writability for the well-known groups only is a limit of
+    /// the check: it stays in the flagged view and never counts as a notable finding.
+    /// </summary>
+    /// <remarks>
+    /// Found by the first CI run of the audit branch: the runners have no non-elevated token (UAC
+    /// off), the notice was <see cref="Severity.Info"/>, and <c>hijack --flagged</c> showed it, which
+    /// the flagged view refuses. Hiding it instead would leave a clean flagged list while grants to
+    /// one named user went unseen, so it is <see cref="Severity.Unverified"/>, like the other limits
+    /// of a scan.
+    /// </remarks>
+    [Fact]
+    public void TheWellKnownGroupsNoticeStaysInTheFlaggedViewWithoutCountingAsNotable()
+    {
+        var builder = new ToolReport.Builder("hijack");
+
+        Adapters.AddWellKnownPrincipalNotice(builder);
+        var report = builder.Build("done");
+
+        var notice = Assert.Single(report.Items);
+        Assert.Equal(Severity.Unverified, notice.Severity);
+        Assert.Equal("evaluationMethod", notice.Fields["kind"]);
+        Assert.Equal(0, report.NotableCount);
+    }
+
     [Fact]
     public void CompleteSignatureCoverageAddsNoFinding()
     {
@@ -100,7 +125,7 @@ public sealed class AdaptersTests
     [Fact]
     public void DocumentedCommandCount_MatchesTheNumberTheReadmeClaims()
     {
-        const int ReadmeClaimsVerbs = 27;
+        const int ReadmeClaimsVerbs = 28;
 
         Assert.True(
             CliHelp.DocumentedCommands.Count == ReadmeClaimsVerbs,

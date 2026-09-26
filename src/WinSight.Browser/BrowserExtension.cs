@@ -11,7 +11,7 @@ namespace WinSight.Browser;
 /// <param name="Version">Extension version.</param>
 /// <param name="Permissions">Declared API permissions.</param>
 /// <param name="HostPermissions">Declared host/match permissions.</param>
-/// <param name="Path">Path to the manifest's version directory.</param>
+/// <param name="Path">Path to the directory holding the manifest.</param>
 public sealed record BrowserExtension(
     string Browser,
     string Id,
@@ -21,6 +21,18 @@ public sealed record BrowserExtension(
     IReadOnlyList<string> HostPermissions,
     string Path)
 {
+    /// <summary>Where the browser loads it from.</summary>
+    public ExtensionLocation Location { get; init; } = ExtensionLocation.Profile;
+
+    /// <summary>
+    /// Loaded from a folder rather than installed: it had no store review, and it is how
+    /// sideloaders persist (developer mode, <c>--load-extension</c>, or a forged preferences entry).
+    /// </summary>
+    public bool LoadedFromFolder => Location != ExtensionLocation.Profile;
+
+    /// <summary>Worth the operator's attention: broad reach, or loaded from a folder.</summary>
+    public bool Notable => HighRisk || LoadedFromFolder;
+
     /// <summary>
     /// API permissions that grant broad reach over browsing, network or the host — the ones
     /// worth reviewing on an unfamiliar extension.

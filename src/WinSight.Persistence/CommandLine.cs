@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.RegularExpressions;
 
 using WinSight.Core;
 
@@ -22,7 +23,14 @@ public enum ImageResolutionStatus
 public readonly record struct ExecutableResolution(
     string? ImagePath,
     string? ExpectedPath,
-    ImageResolutionStatus Status);
+    ImageResolutionStatus Status)
+{
+    /// <summary>
+    /// The file the resolution found, for <see cref="ImageResolutionStatus.Present"/>. A later read
+    /// of the image is accepted only from this same file, not from whatever the path names by then.
+    /// </summary>
+    public AutomaticFileAccess.FileIdentity? Identity { get; init; }
+}
 
 /// <summary>
 /// Best-effort extraction of the executable path from an autostart command string.
@@ -30,8 +38,12 @@ public readonly record struct ExecutableResolution(
 /// and often carrying environment variables (e.g. %SystemRoot%). This resolves the
 /// leading executable so its signature can be checked.
 /// </summary>
-public static class CommandLine
+public static partial class CommandLine
 {
+    // The directories under System32 the WOW64 file system redirector leaves alone.
+    private static readonly string[] RedirectionExemptions =
+        ["catroot", "catroot2", @"drivers\etc", "driverstore", "logfiles", "spool"];
+
     /// <summary>
     /// Returns the resolved, existing executable path for a raw command, or null when
     /// it cannot be resolved to a real file. Handles surrounding quotes, trailing
@@ -45,15 +57,23 @@ public static class CommandLine
     /// is absent or inaccessible. Callers can therefore report the real condition
     /// instead of collapsing it into an ambiguous missing-signature verdict.
     /// </summary>
-    public static ExecutableResolution ResolveExecutable(string? command)
+    public static ExecutableResolution ResolveExecutable(string? command) =>
+        ResolveExecutable(command, LoaderContext.Native);
+
+    /// <summary>
+    /// Resolves a command as the process that loads it would: through WOW64's redirection when that
+    /// process is 32-bit, and with the variables of the account it runs as.
+    /// </summary>
+    public static ExecutableResolution ResolveExecutable(string? command, LoaderContext? loader)
     {
+        loader ??= LoaderContext.Native;
         if (string.IsNullOrWhiteSpace(command))
         {
             return new(null, null, ImageResolutionStatus.Unresolved);
         }
 
-        var expanded = Environment.ExpandEnvironmentVariables(command.Trim());
-        var exe = expanded.StartsWith('"') ? FirstQuoted(expanded) : FirstToken(expanded);
+        var expanded = Expand(command.Trim(), loader);
+        var exe = expanded.StartsWith('"') ? FirstQuoted(expanded) : FirstToken(expanded, loader);
         if (string.IsNullOrEmpty(exe))
         {
             return new(null, null, ImageResolutionStatus.Unresolved);
@@ -66,7 +86,7 @@ public static class CommandLine
         // as-is (\SystemRoot\..., \??\C:\..., or a bare "system32\drivers\x.sys"
         // relative to %SystemRoot%). Without this, every Windows driver resolves to
         // "no image" and gets flagged suspicious, 150+ false positives on a clean box.
-        foreach (var candidate in NtPathCandidates(exe))
+        foreach (var candidate in NtPathCandidates(exe).Select(path => Redirect(path, loader)))
         {
             var probe = Probe(candidate);
             if (probe.Status == ImageResolutionStatus.Present)
@@ -89,7 +109,7 @@ public static class CommandLine
         // extension. Without %windir% the legitimate default shell reads as "no image".
         if (!exe.Contains('\\') && !exe.Contains('/'))
         {
-            foreach (var candidate in BareModuleCandidates(exe))
+            foreach (var candidate in BareModuleCandidates(exe).Select(path => Redirect(path, loader)))
             {
                 var probe = Probe(candidate);
                 if (probe.Status == ImageResolutionStatus.Present)
@@ -113,6 +133,81 @@ public static class CommandLine
             : expected is not null
                 ? new(null, expected, ImageResolutionStatus.FileMissing)
                 : new(null, null, ImageResolutionStatus.Unresolved);
+    }
+
+    /// <summary>
+    /// Expands <c>%NAME%</c> references as the loading process would. In the scanner's own context
+    /// this is <see cref="Environment.ExpandEnvironmentVariables(string)"/>; for another account its
+    /// variables win, and a per-account one it does not define stays unexpanded; in a 32-bit process
+    /// <c>%ProgramFiles%</c> and <c>%CommonProgramFiles%</c> name the x86 folders.
+    /// </summary>
+    internal static string Expand(string text, LoaderContext loader)
+    {
+        if (loader.Environment is null && !loader.Wow64)
+        {
+            return Environment.ExpandEnvironmentVariables(text);
+        }
+        return VariableReference().Replace(text, match => Lookup(match.Groups[1].Value, loader) ?? match.Value);
+    }
+
+    private static string? Lookup(string name, LoaderContext loader)
+    {
+        if (loader.Environment is { } environment)
+        {
+            if (environment.TryGetValue(name, out var value))
+            {
+                return value;
+            }
+            if (LoaderContext.PerAccountVariables.Contains(name))
+            {
+                return null;
+            }
+        }
+        if (loader.Wow64)
+        {
+            if (name.Equals("ProgramFiles", StringComparison.OrdinalIgnoreCase))
+            {
+                return Environment.GetEnvironmentVariable("ProgramFiles(x86)");
+            }
+            if (name.Equals("CommonProgramFiles", StringComparison.OrdinalIgnoreCase))
+            {
+                return Environment.GetEnvironmentVariable("CommonProgramFiles(x86)");
+            }
+        }
+        return Environment.GetEnvironmentVariable(name);
+    }
+
+    [GeneratedRegex("%([^%]+)%")]
+    private static partial Regex VariableReference();
+
+    /// <summary>
+    /// <paramref name="path"/> as a 32-bit process opens it: <c>System32</c> is <c>SysWOW64</c>
+    /// except for the directories the redirector exempts, and <c>Sysnative</c> is the real
+    /// <c>System32</c>. Unchanged for a 64-bit process.
+    /// </summary>
+    internal static string Redirect(string path, LoaderContext loader)
+    {
+        if (!loader.Wow64)
+        {
+            return path;
+        }
+        var windir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
+        var sysnative = Path.Combine(windir, "Sysnative") + '\\';
+        if (path.StartsWith(sysnative, StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.Combine(system, path[sysnative.Length..]);
+        }
+        var system32 = system + '\\';
+        if (!path.StartsWith(system32, StringComparison.OrdinalIgnoreCase))
+        {
+            return path;
+        }
+        var rest = path[system32.Length..];
+        return RedirectionExemptions.Any(exempt => rest.Equals(exempt, StringComparison.OrdinalIgnoreCase)
+                || rest.StartsWith(exempt + '\\', StringComparison.OrdinalIgnoreCase))
+            ? path
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.SystemX86), rest);
     }
 
     /// <summary>
@@ -192,7 +287,9 @@ public static class CommandLine
         foreach (var entry in path.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
             var directory = entry.Trim('"');
-            if (directory.Length == 0 || !seen.Add(directory))
+            // A relative entry ("." or "tools") is relative to the directory of whichever process
+            // launches the command, not to WinSight's; it has no answer here.
+            if (directory.Length == 0 || !Path.IsPathFullyQualified(directory) || !seen.Add(directory))
             {
                 continue;
             }
@@ -207,6 +304,14 @@ public static class CommandLine
 
     private static ExecutableResolution Probe(string candidate)
     {
+        // Every candidate generator yields fully qualified paths; this keeps it so. A relative path
+        // would be resolved against the scanner's working directory, which says nothing about the
+        // file Windows loads.
+        if (!Path.IsPathFullyQualified(candidate))
+        {
+            return new(null, null, ImageResolutionStatus.Unresolved);
+        }
+
         string full;
         try
         {
@@ -217,16 +322,17 @@ public static class CommandLine
             return new(null, null, ImageResolutionStatus.Unresolved);
         }
 
-        if (!AutomaticFileAccess.IsLocal(full))
-        {
-            return new(null, full, ImageResolutionStatus.Unresolved);
-        }
-
         try
         {
-            var attributes = File.GetAttributes(full);
-            return (attributes & FileAttributes.Directory) == 0
-                ? new(full, full, ImageResolutionStatus.Present)
+            using var lease = AutomaticFileAccess.TryAcquire(full);
+            if (lease is not null)
+            {
+                return !lease.IsDirectory && lease.IsCurrent()
+                    ? new(full, full, ImageResolutionStatus.Present) { Identity = lease.Identity }
+                    : new(null, full, ImageResolutionStatus.Unresolved);
+            }
+            return AutomaticFileAccess.IsLocal(full)
+                ? new(null, full, ImageResolutionStatus.FileMissing)
                 : new(null, full, ImageResolutionStatus.Unresolved);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
@@ -251,7 +357,21 @@ public static class CommandLine
     /// then <c>\SystemRoot\</c> and <c>\??\</c> prefixes stripped/mapped, and a
     /// System-root-relative fallback for the common bare "system32\drivers\x.sys".
     /// </summary>
-    public static IEnumerable<string> NtPathCandidates(string exe)
+    /// <remarks>
+    /// <b>Only fully qualified candidates.</b> The token used to be probed first as written, so a
+    /// relative one - <c>System32\drivers\x.sys</c>, the form 210 driver registrations use on the
+    /// development machine - was resolved against whatever directory WinSight happened to run in,
+    /// before the Windows directory. That directory has nothing to do with where Windows loads from.
+    /// Measured: the 3ware driver read SignatureValid from <c>C:\Windows</c> and Unsigned, with an
+    /// image under a temporary folder, when the scan ran from a folder holding a dummy
+    /// <c>System32\drivers\3ware.sys</c> - so the verdict followed the launch folder, and a signed
+    /// file planted there could answer for a registration. The same held for what a stripped
+    /// <c>\??\</c> prefix left behind (<c>GLOBALROOT\...</c>, <c>UNC\...</c>).
+    /// </remarks>
+    public static IEnumerable<string> NtPathCandidates(string exe) =>
+        RawNtPathCandidates(exe).Where(Path.IsPathFullyQualified);
+
+    private static IEnumerable<string> RawNtPathCandidates(string exe)
     {
         yield return exe;
 
@@ -288,7 +408,9 @@ public static class CommandLine
 
     // Unquoted commands may contain a space in the path (e.g. C:\Program Files\...).
     // Grow the candidate token by token and return the longest prefix that is a file.
-    private static string FirstToken(string s)
+    // Only a fully qualified prefix is looked up: a relative one would be answered by
+    // whatever the scanner's working directory happens to hold (see NtPathCandidates).
+    private static string FirstToken(string s, LoaderContext loader)
     {
         var parts = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var candidate = new StringBuilder();
@@ -299,10 +421,10 @@ public static class CommandLine
                 candidate.Append(' ');
             }
             candidate.Append(parts[i]);
-            if (AutomaticFileAccess.IsLocal(candidate.ToString())
-                && File.Exists(candidate.ToString()))
+            var prefix = candidate.ToString();
+            if (Path.IsPathFullyQualified(prefix) && AutomaticFileAccess.FileExists(Redirect(prefix, loader)))
             {
-                return candidate.ToString();
+                return prefix;
             }
         }
 

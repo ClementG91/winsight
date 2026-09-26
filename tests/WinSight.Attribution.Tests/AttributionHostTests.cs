@@ -1,4 +1,6 @@
+using WinSight.Core;
 using WinSight.NetMonitor;
+
 using Xunit;
 
 namespace WinSight.Attribution.Tests;
@@ -84,6 +86,20 @@ public sealed class AttributionHostTests
         var health = host.Health;
         Assert.Equal(1, health.UnannouncedKey);
         Assert.Equal(1, health.UntranslatablePath);
+    }
+
+    [Fact]
+    public void NativeEtwLossIsCarriedIntoAttributionHealth()
+    {
+        var watcher = new ScriptedWatcher(eventsLost: 7);
+        using var host = new AttributionHost(watcher);
+
+        host.Start();
+        watcher.Delivered.Wait(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(7, host.Health.EventsLost);
+        Assert.True(host.Health.CoverageIncomplete);
+        Assert.Equal("Write attribution ETW", host.Health.Sensor?.Name);
     }
 
     [Fact]
@@ -264,7 +280,8 @@ public sealed class AttributionHostTests
         IReadOnlyList<UnattributedWrite>? misses = null,
         bool refuse = false,
         bool blockUntilCancelled = false,
-        Exception? failure = null) : IWriteWatcher
+        Exception? failure = null,
+        long eventsLost = 0) : IWriteWatcher, ISensorHealthSource
     {
         private int _starts;
 
@@ -273,6 +290,17 @@ public sealed class AttributionHostTests
         public ManualResetEventSlim Delivered { get; } = new();
 
         public ManualResetEventSlim Completed { get; } = new();
+
+        public SensorHealthSnapshot SensorHealth => new(
+            "Write attribution ETW",
+            SensorLifecycle.Running,
+            RequestedSources: 1,
+            ActiveSources: 1,
+            ObservedEvents: 0,
+            LostEvents: eventsLost,
+            RecoveryAttempts: 0,
+            SuccessfulRecoveries: 0,
+            DeliveryFailures: 0);
 
         public void Watch(
             Action<WriteObservation> onWrite,

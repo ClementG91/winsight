@@ -62,7 +62,8 @@ public sealed class FileHolderIdentifierTests
     {
         var locks = new FakeLocks { Holders = [Holder(9000, 1)] };
         var inspector = new MapInspector();
-        inspector.Add(9000, Identity(9000, 1, @"C:\Windows\System32\lsass.exe"), "lsass.exe");
+        inspector.Add(9000, Identity(9000, 1, Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows), "System32", "lsass.exe")), "lsass.exe");
 
         var id = new FileHolderIdentifier(locks, inspector).Identify(Touched);
 
@@ -109,6 +110,5 @@ public sealed class FileHolderIdentifierTests
         public ProcessIdentity? Capture(int pid, bool hashImage = false) =>
             _identities.TryGetValue(pid, out var v) ? v : null;
 
-        public string? ImageFileName(int pid) => _names.TryGetValue(pid, out var v) ? v : null;
     }
 }

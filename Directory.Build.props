@@ -1,6 +1,6 @@
 <Project>
-  <!-- Shared build settings for every WinSight project. User-mode components target
-       the .NET 10 LTS Windows contract; the kernel driver lives outside this graph. -->
+  <!-- Shared build settings for every WinSight project. All current WinSight components are
+       user-mode and target the .NET 10 LTS Windows contract; no WinSight kernel driver exists. -->
   <PropertyGroup>
     <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <LangVersion>latest</LangVersion>

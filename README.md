@@ -16,6 +16,7 @@
 <p align="center">
   <a href="https://github.com/ClementG91/winsight/actions/workflows/ci.yml"><img src="https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
+  <a href="https://www.bestpractices.dev/projects/14751"><img src="https://www.bestpractices.dev/projects/14751/badge" alt="OpenSSF Best Practices" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2010%2022H2%2B%20%2F%2011-informational" alt="Platform: Windows 10 22H2 or later" />
   <img src="https://img.shields.io/badge/.NET-10.0_LTS-512bd4" alt=".NET 10 LTS" />
   <img src="https://img.shields.io/badge/production%20readiness-not%20established-critical" alt="Production readiness not established" />
@@ -32,8 +33,8 @@ traffic at the kernel filtering layer.
 > machine happen only when you choose them, are revalidated first, are recorded in an append-only
 > journal (`winsight actions`), and can be undone: blocking a startup item from a Guardian alert
 > (restorable with `winsight restore`), allowing one (revocable with `winsight revoke`), and
-> suspending, resuming or terminating a process (`--confirm` required). Beyond those, two features
-> write to disk, and both say so here:
+> suspending, resuming or terminating a process (`--confirm` required). Beyond those, one feature
+> writes to disk, and says so here:
 >
 > - **Ransomware protection** creates its decoy files. It stays off until you turn it on. Cleanup
 >   removes only files whose recorded identity and original content still match; modified,
@@ -41,12 +42,12 @@ traffic at the kernel filtering layer.
 >   ordinary visible files in Documents, Desktop, Pictures, Downloads, Videos and Music - they are
 >   not hidden, because a good many ransomware families skip hidden files and a decoy that is
 >   skipped is not a decoy.
-> - **The hijack scan** creates a uniquely named temporary file, and immediately deletes it, in each
->   directory whose writability it reports on - `C:\`, `C:\Program Files`, every auto-start
->   service's directory and every machine `PATH` entry. It never overwrites anything. This is how it
->   answers "could somebody plant a file here" by asking the filesystem instead of reasoning about
->   ACLs, and it runs as part of the default overview. Endpoint protection and Controlled Folder
->   Access may notice.
+>
+> The hijack scan no longer writes anything. It used to create and delete a probe file in every
+> directory it graded; it now asks Windows (`AccessCheck`) whether the current user, without
+> elevation, could create a file or folder there. Run as SYSTEM or with UAC disabled, where no
+> non-elevated token exists, it reads the directory ACL for the well-known unprivileged groups
+> instead and says so in the report.
 >
 > The firewall blocks only what you tell it to.
 
@@ -59,16 +60,17 @@ traffic at the kernel filtering layer.
 | **Persistence scanner** | KnockKnock | 27 autostart surfaces, catalog-aware Authenticode verdicts, command-line triage for signed interpreters handed someone else's payload, optional VirusTotal enrichment |
 | **Outbound firewall** | LuLu | Per-application block/allow enforced through the Windows Filtering Platform; audit-only until you arm it |
 | **Guardian** | BlockBlock | A decision window the moment a new startup item appears - Allow, Block (quarantined, restorable) or decide later - plus reconciliation of what changed while WinSight was not running |
-| **Ransomware detection** | RansomWhere? | Visible machine-varied decoy files, rename/delete-burst and entropy-on-write heuristics |
-| **Camera & mic monitor** | OverSight | Which application turned the webcam or microphone on, with per-store read coverage |
-| **Connections & DNS** | Netiquette, DNSMonitor | Live outbound connections and DNS queries, attributed to processes |
+| **Ransomware detection** | RansomWhere? | Visible machine-varied decoys, rename/delete bursts, entropy-on-write, and bounded container-signature integrity checks |
+| **Camera & mic monitor** | OverSight | ConsentStore activation history/transitions with per-store read coverage and best-effort application/process matching |
+| **Connections & DNS** | Netiquette, DNSMonitor | TCP/UDP connection-table snapshots plus live DNS queries, attributed to processes where Windows exposes an owner |
 | **Signature verification** | What's Your Sign? | Authenticode, catalog and verified MSIX package verdicts, used by every tool - and for any file from File Explorer's "Check signature with WinSight" (an out-of-process window: verdict, signer, trust caveats, MD5/SHA-1/SHA-256) or `winsight sign` |
 | **Hijack scan** | DHS | Unquoted service paths, writable service directories and PATH entries, and phantom DLL imports - each graded by whether it is exploitable on *this* machine |
 
 Beyond the macOS originals: **write attribution** names the program behind a persistence or
 ransomware alert when running elevated (`written by setup.exe (pid 4242)`) and says why it cannot when
 it is not, rather than staying silent. **Per-process drill-down** (`winsight process <pid>`) and
-**physical-access detection** (`winsight presence`) have no Objective-See counterpart. And because
+**physical-access evidence** (`winsight presence`) are Windows counterparts to TaskExplorer and
+DoNotDisturb, with narrower live UI and physical-access coverage respectively. And because
 WinSight's decoys *detect* ransomware but cannot *block* it without a driver, the overview also
 **reports its configured and observed operational posture** - read-only, including explicit
 unavailability when Defender cannot be queried. It points to the Windows control; WinSight never
@@ -81,7 +83,7 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
 
 - **Dashboard** - a WPF desktop and tray application, in **English, French and Spanish**. Every check
   explains what it observes and what an alert means.
-- **Command line** - 27 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
+- **Command line** - 28 verbs, with `--flagged` and `--json`. Exits non-zero when anything is
   notable, so it drops straight into a scheduled task. `--json` emits a versioned envelope -
   `{ "schemaVersion": 1, "generatedAt": ..., "reports": [...] }` - so a stored report says when it
   was true and a consumer can tell which contract produced it:
@@ -93,6 +95,7 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   winsight process <pid>                  one process: lineage, modules, connections
   winsight sign <path>                    one file: Authenticode standing + identification hashes
   winsight holders <path>                 which processes hold this file open
+  winsight alerts                         alert journal: Guardian, ransomware, camera/mic
   winsight actions                        response-action history (read-only), newest first
   winsight [suspend|resume|terminate] <pid>  act on a process (needs --confirm)
   winsight rules                          allow rules in force (read-only)
@@ -101,14 +104,19 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   winsight av --watch | dns --watch | attribution --watch | input --watch
   ```
 
-  The commands that change anything are the process actions and the two undo verbs. Each does
-  nothing without `--confirm`, and every change is recorded in an append-only journal readable with
-  `winsight actions`. A process action revalidates that the target is still the same process and
+  The response commands - the process actions and the two undo verbs - do nothing without
+  `--confirm`, and every change they make is recorded in an append-only journal readable with
+  `winsight actions`. Three maintenance verbs that setup and uninstall run also change the current
+  user's state without `--confirm`: `register-signature-verb` and `unregister-signature-verb` add and
+  remove the File Explorer entry, and `remove-decoys` deletes ransomware decoys whose content is
+  still unchanged. A process action revalidates that the target is still the same process and
   refuses protected and WinSight processes; a restore refuses if something else now occupies the
   item's original location.
 
   `--unsigned` and `--nonmicrosoft` narrow any scan to unsigned/untrusted items, or to items not
-  signed by Microsoft; they stack with each other and with `--flagged`.
+  proven to carry Microsoft's own signature (an exact Microsoft signing identity on a chain the
+  machine trusts, not a signer name that merely reads "Microsoft"); they stack with each other and
+  with `--flagged`.
 - **MCP server** - `winsight mcp`, local stdio only, read-only, for MCP-compatible AI clients. Six
   tools, three resources and two guided prompts; no network listener. See
   [`docs/MCP.md`](docs/MCP.md).
@@ -170,6 +178,10 @@ service and mutates WFP, which should be an explicit decision. See
   prove against the live filtering engine. If it cannot verify enforcement exactly, it reports
   `Degraded` rather than claiming `Active` - a security tool that overstates its own protection is
   worse than one that admits a gap.
+- **Unknown outbound applications cannot permanently poison the pending view by arriving first.**
+  The service keeps a bounded 128-app least-recently-used window, admits later arrivals, and reports
+  evicted identities and their aggregated observations as incomplete coverage. Capacity-pressure
+  logging is exponentially sampled so a distinct-path flood cannot create unbounded event-log spam.
 - **Enforcement survives reboots** through service boot persistence, and the state is re-verified on
   every status read rather than assumed from what was persisted.
 - **The service refuses to install from any path an unprivileged principal can write**, and re-checks
@@ -249,6 +261,7 @@ The authoritative statement, with every limitation named:
 | Contributing code | [CODING_STANDARDS.md](docs/CODING_STANDARDS.md) |
 | Releasing and verifying | [RELEASE.md](docs/RELEASE.md) |
 | Evidence | [validation/](docs/validation/README.md) |
+| Security and architecture audit (September 2026, in French) | [AUDIT.md](docs/AUDIT.md) |
 | Where it is going | [ROADMAP.md](docs/ROADMAP.md), [OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md](docs/OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md) |
 
 ## Build from source

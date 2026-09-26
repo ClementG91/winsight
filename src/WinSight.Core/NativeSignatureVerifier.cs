@@ -1,6 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
 
 namespace WinSight.Core;
 
@@ -49,8 +47,14 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
             CancellationToken = cancellationToken,
             MaxDegreeOfParallelism = Math.Min(Environment.ProcessorCount, 8),
         };
+        // One verification per file, not per mention. A persistence report names the same image
+        // many times over - measured on a real desktop, 4 533 entries resolved to 438 distinct files,
+        // 3 842 of them to one COM server DLL - and the batch verified every mention, so a cold scan
+        // paid for the same WinVerifyTrust call thousands of times. Results are keyed
+        // case-insensitively, so every mention still finds its verdict.
+        var distinct = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var verified = new System.Collections.Concurrent.ConcurrentBag<(string Path, SignatureVerdict? Verdict)>();
-        Parallel.ForEach(paths, options, path => verified.Add((path, VerifyEmbedded(path, roots))));
+        Parallel.ForEach(distinct, options, path => verified.Add((path, VerifyEmbedded(path, roots))));
 
         // Reassembled in the caller's order so a scan's output does not vary run to run.
         var byPath = new Dictionary<string, SignatureVerdict?>(StringComparer.OrdinalIgnoreCase);
@@ -58,7 +62,7 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         {
             byPath[path] = verdict;
         }
-        foreach (var path in paths)
+        foreach (var path in distinct)
         {
             if (byPath.TryGetValue(path, out var verdict) && verdict is { } v)
             {
@@ -102,29 +106,45 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         {
             return SignatureVerdict.Missing;
         }
-        if (!AutomaticFileAccess.IsLocal(path))
+        using var lease = AutomaticFileAccess.TryAcquire(path);
+        if (lease is null)
+        {
+            return AutomaticFileAccess.IsLocal(path)
+                ? SignatureVerdict.Missing
+                : SignatureVerdict.Unknown;
+        }
+        if (lease.IsDirectory)
         {
             return SignatureVerdict.Unknown;
         }
-        if (!File.Exists(path))
-        {
-            return SignatureVerdict.Missing;
-        }
         try
         {
-            var result = (uint)WinVerifyTrustFile(path);
+            // Resolve the path exactly once and deny writes, renames and deletion for the whole
+            // decision. WINTRUST_FILE_INFO explicitly accepts an open file handle; using it binds
+            // the PE digest to this object, while the share lock keeps the path-based certificate
+            // APIs below on that same object.
+            using var stream = lease.OpenRead(FileOptions.RandomAccess);
+            var result = (uint)WinVerifyTrustFile(
+                lease.FullPath, stream.SafeFileHandle.DangerousGetHandle());
+            using var signer = AuthenticodeCertificateReader.ReadSigner(stream);
+            if (!lease.IsCurrent())
+            {
+                return SignatureVerdict.Unknown;
+            }
             var state = MapResult(result);
             var revocation = MapRevocation(result);
             return state switch
             {
                 SignatureState.SignedTrusted => new SignatureVerdict(
                     SignatureState.SignedTrusted,
-                    SignerOf(path),
-                    UserInstalledRoots.TrustAnchorFor(path, roots),
+                    signer?.Subject,
+                    signer is null
+                        ? SignatureTrustAnchor.Unspecified
+                        : UserInstalledRoots.TrustAnchorFor(signer, roots),
                     revocation),
                 SignatureState.SignedUntrusted => new SignatureVerdict(
                     SignatureState.SignedUntrusted,
-                    SignerOf(path),
+                    signer?.Subject,
                     SignatureTrustAnchor.Unspecified,
                     revocation),
                 // Package sidecars are not evidence of this file's signature or integrity. Only
@@ -133,7 +153,12 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
                 _ => null,
             };
         }
-        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or MarshalDirectiveException)
+        catch (Exception ex) when (ex is IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException
+                                     or DllNotFoundException
+                                     or EntryPointNotFoundException
+                                     or MarshalDirectiveException)
         {
             return null;
         }
@@ -193,25 +218,6 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
         _ => RevocationStanding.Unspecified,
     };
 
-    private static string? SignerOf(string path)
-    {
-        try
-        {
-            // X509CertificateLoader cannot extract an Authenticode signer from a
-            // signed PE image; CreateFromSignedFile remains the dedicated API.
-#pragma warning disable SYSLIB0057
-            using var cert = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
-#pragma warning restore SYSLIB0057
-            return cert.Subject;
-        }
-        catch (Exception ex) when (ex is CryptographicException or IOException or UnauthorizedAccessException)
-        {
-            // No extractable signer, or the file vanished between the trust check and
-            // here (TOCTOU), the verdict stands, only the signer name is absent.
-            return null;
-        }
-    }
-
     // ---- WinVerifyTrust interop (stable structs only) ----
 
     private const uint WtdUiNone = 2;
@@ -253,13 +259,13 @@ public sealed class NativeSignatureVerifier : ISignatureVerifier
     [DllImport("wintrust.dll", ExactSpelling = true)]
     private static extern int WinVerifyTrust(IntPtr hwnd, ref Guid pgActionID, IntPtr pWVTData);
 
-    private static int WinVerifyTrustFile(string path)
+    private static int WinVerifyTrustFile(string path, IntPtr fileHandle)
     {
         var fileInfo = new WinTrustFileInfo
         {
             cbStruct = (uint)Marshal.SizeOf<WinTrustFileInfo>(),
             pcwszFilePath = path,
-            hFile = IntPtr.Zero,
+            hFile = fileHandle,
             pgKnownSubject = IntPtr.Zero,
         };
         var pFile = Marshal.AllocHGlobal(Marshal.SizeOf<WinTrustFileInfo>());

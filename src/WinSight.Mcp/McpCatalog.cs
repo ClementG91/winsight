@@ -74,7 +74,7 @@ public static class McpCatalog
         Describe(McpScanner.Dns, "Records currently visible in the Windows DNS cache.", true),
         Describe(McpScanner.Firewall, "Enabled Microsoft Defender Firewall rule inventory.", false),
         Describe(McpScanner.Processes, "Running processes, image identities and signature verdicts.", false),
-        Describe(McpScanner.Modules, "Unsigned or untrusted modules loaded into accessible processes.", false),
+        Describe(McpScanner.Modules, "Unsigned or untrusted modules, and modules trusted only through a user-installed root, loaded into accessible processes.", false),
         Describe(McpScanner.Extensions, "Browser extensions and broad permission signals.", true),
         Describe(McpScanner.Certs, "Trusted root certificates and risky trust-store properties.", true),
         Describe(McpScanner.Hosts, "Hosts-file redirects and security-service blocking signals.", true),

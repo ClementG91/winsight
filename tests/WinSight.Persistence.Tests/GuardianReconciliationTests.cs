@@ -157,6 +157,62 @@ public sealed class FilePersistenceBaselineStoreTests
             File.Delete(path);
         }
     }
+
+    [Fact]
+    public void Save_WaitsForTheCrossProcessWriterLock()
+    {
+        var path = TempPath();
+        using var lockHeld = new ManualResetEventSlim();
+        using var releaseLock = new ManualResetEventSlim();
+        using var saveFinished = new ManualResetEventSlim();
+        Exception? saveFailure = null;
+        var holder = new Thread(() =>
+        {
+            using var mutex = new Mutex(false, FilePersistenceBaselineStore.LockNameFor(path));
+            Assert.True(mutex.WaitOne(TimeSpan.FromSeconds(5)));
+            lockHeld.Set();
+            releaseLock.Wait(CancellationToken.None);
+            mutex.ReleaseMutex();
+        });
+        holder.Start();
+        try
+        {
+            Assert.True(lockHeld.Wait(TimeSpan.FromSeconds(5)));
+            var store = new FilePersistenceBaselineStore(path);
+            var identity = Id(AutostartVector.RunKey, "Serialized", @"C:\serialized.exe");
+            var saver = new Thread(() =>
+            {
+                try
+                {
+                    store.Save([identity]);
+                }
+                catch (Exception ex)
+                {
+                    saveFailure = ex;
+                }
+                finally
+                {
+                    saveFinished.Set();
+                }
+            });
+            saver.Start();
+
+            Assert.False(saveFinished.Wait(TimeSpan.FromMilliseconds(200)),
+                "a second writer bypassed the named baseline mutex");
+
+            releaseLock.Set();
+            Assert.True(saveFinished.Wait(TimeSpan.FromSeconds(5)));
+            saver.Join();
+            Assert.Null(saveFailure);
+            Assert.Equal(identity, Assert.Single(store.Load()!));
+        }
+        finally
+        {
+            releaseLock.Set();
+            holder.Join(TimeSpan.FromSeconds(5));
+            File.Delete(path);
+        }
+    }
 }
 
 public sealed class PersistenceMonitorStartWithStoreTests

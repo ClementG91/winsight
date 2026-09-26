@@ -11,13 +11,24 @@ namespace WinSight.Processes;
 /// </summary>
 public sealed class ProcessLister(ISignatureVerifier? verifier = null)
 {
-    /// <summary>
-    /// Ceiling on one WMI enumeration. Matches ControlledFolderAccessReader, which is the only
-    /// caller in the product that bounded its query before this.
-    /// </summary>
+    /// <summary>Longest wait for any one result of the WMI enumeration, as ControlledFolderAccessReader.</summary>
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ISignatureVerifier _verifier = verifier ?? new NativeSignatureVerifier();
+
+    /// <summary>
+    /// Bounded per result. With ReturnImmediately = false WMI builds the whole result set inside
+    /// Get() and the Timeout applies only to walking it afterwards, so a stuck provider hung this
+    /// command - and the dashboard's Cancel - for ever. Semisynchronous retrieval applies the Timeout
+    /// to each result; a provider that stops answering ends the walk with a ManagementException,
+    /// counted as an unreadable source.
+    /// </summary>
+    internal static System.Management.EnumerationOptions QueryOptions() => new()
+    {
+        Timeout = QueryTimeout,
+        ReturnImmediately = true,
+        Rewindable = false,
+    };
 
     public IReadOnlyList<ProcessInfo> Snapshot(CancellationToken cancellationToken = default) =>
         SnapshotWithCoverage(cancellationToken).Items;
@@ -25,26 +36,23 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
     public AcquisitionSnapshot<ProcessInfo> SnapshotWithCoverage(
         CancellationToken cancellationToken = default)
     {
-        var raw = new List<(int Pid, string Name, string? Path, int ParentPid, string? Command)>();
+        var raw = new List<(
+            int Pid,
+            string Name,
+            string? Path,
+            int ParentPid,
+            string? Command,
+            long? StartTimestampUtcTicks)>();
         var unreadableSources = 0;
         var unreadableItems = 0;
         try
         {
             var scope = new ManagementScope(@"\\.\root\cimv2");
-            // Bounded like the Controlled Folder Access reader already bounds its own queries. A
-            // stuck WMI provider otherwise hangs this command for ever, and the cancellation check
-            // inside the loop below cannot help: the block happens inside the enumeration itself,
-            // before a single object is yielded.
             using var searcher = new ManagementObjectSearcher(
                 scope,
                 new ObjectQuery(
-                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine FROM Win32_Process"),
-                new System.Management.EnumerationOptions
-                {
-                    Timeout = QueryTimeout,
-                    ReturnImmediately = false,
-                    Rewindable = false,
-                });
+                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine, CreationDate FROM Win32_Process"),
+                QueryOptions());
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results = searcher.Get();
@@ -61,8 +69,9 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                             continue;
                         }
                         var parentReadable = TryToUint(o["ParentProcessId"], out var parentId);
+                        var startReadable = TryToUtcTicks(o["CreationDate"], out var startTimestampUtcTicks);
                         var name = o["Name"] as string;
-                        if (!parentReadable || string.IsNullOrWhiteSpace(name))
+                        if (!parentReadable || !startReadable || string.IsNullOrWhiteSpace(name))
                         {
                             unreadableItems++;
                         }
@@ -71,7 +80,8 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                             string.IsNullOrWhiteSpace(name) ? $"(pid {processId})" : name,
                             o["ExecutablePath"] as string,
                             parentReadable ? checked((int)parentId) : 0,
-                            o["CommandLine"] as string));
+                            o["CommandLine"] as string,
+                            startReadable ? startTimestampUtcTicks : null));
                     }
                     catch (Exception ex) when (ex is ManagementException or OverflowException)
                     {
@@ -89,7 +99,13 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
     }
 
     private List<ProcessInfo> Build(
-        List<(int Pid, string Name, string? Path, int ParentPid, string? Command)> raw,
+        List<(
+            int Pid,
+            string Name,
+            string? Path,
+            int ParentPid,
+            string? Command,
+            long? StartTimestampUtcTicks)> raw,
         CancellationToken cancellationToken)
     {
         var verdicts = _verifier.VerifyMany(
@@ -97,11 +113,14 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
             cancellationToken);
 
         return raw.Select(r => new ProcessInfo(
-            r.Pid, r.Name, r.Path, r.ParentPid, r.Command,
-            r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
-                ? v
-                // WMI withheld the image path; no on-disk file was observed to be missing.
-                : SignatureVerdict.Unknown)).ToList();
+                r.Pid, r.Name, r.Path, r.ParentPid, r.Command,
+                r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
+                    ? v
+                    // WMI withheld the image path; no on-disk file was observed to be missing.
+                    : SignatureVerdict.Unknown)
+        {
+            StartTimestampUtcTicks = r.StartTimestampUtcTicks,
+        }).ToList();
     }
 
     /// <summary>
@@ -132,5 +151,24 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
                 result = 0;
                 return false;
         }
+    }
+
+    internal static bool TryToUtcTicks(object? value, out long result)
+    {
+        if (value is string dmtf && !string.IsNullOrWhiteSpace(dmtf))
+        {
+            try
+            {
+                result = ManagementDateTimeConverter.ToDateTime(dmtf).ToUniversalTime().Ticks;
+                return true;
+            }
+            catch (Exception ex) when (ex is ArgumentOutOfRangeException or FormatException)
+            {
+                // Partial or malformed CIM datetime: identity is unavailable, never fabricated.
+            }
+        }
+
+        result = 0;
+        return false;
     }
 }

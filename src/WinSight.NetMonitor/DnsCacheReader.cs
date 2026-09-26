@@ -12,11 +12,22 @@ namespace WinSight.NetMonitor;
 /// </summary>
 public sealed class DnsCacheReader
 {
-    /// <summary>
-    /// Ceiling on one WMI enumeration. Matches ControlledFolderAccessReader, which is the only
-    /// caller in the product that bounded its query before this.
-    /// </summary>
+    /// <summary>Longest wait for any one result of the WMI enumeration, as ControlledFolderAccessReader.</summary>
     private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Bounded per result. With ReturnImmediately = false WMI builds the whole result set inside
+    /// Get() and the Timeout applies only to walking it afterwards, so a stuck provider hung this
+    /// command - and the dashboard's Cancel - for ever. Semisynchronous retrieval applies the Timeout
+    /// to each result; a provider that stops answering ends the walk with a ManagementException,
+    /// counted as an unreadable source.
+    /// </summary>
+    internal static System.Management.EnumerationOptions QueryOptions() => new()
+    {
+        Timeout = QueryTimeout,
+        ReturnImmediately = true,
+        Rewindable = false,
+    };
 
     public IReadOnlyList<DnsRecord> Read() => ReadWithCoverage().Items;
 
@@ -28,19 +39,10 @@ public sealed class DnsCacheReader
         try
         {
             var scope = new ManagementScope(@"\\.\root\StandardCimv2");
-            // Bounded like the Controlled Folder Access reader already bounds its own queries. A
-            // stuck WMI provider otherwise hangs this command for ever, and the cancellation check
-            // inside the loop below cannot help: the block happens inside the enumeration itself,
-            // before a single object is yielded.
             using var searcher = new ManagementObjectSearcher(
                 scope,
                 new ObjectQuery("SELECT Name, Type, Data, TimeToLive FROM MSFT_DNSClientCache"),
-                new System.Management.EnumerationOptions
-                {
-                    Timeout = QueryTimeout,
-                    ReturnImmediately = false,
-                    Rewindable = false,
-                });
+                QueryOptions());
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results = searcher.Get();

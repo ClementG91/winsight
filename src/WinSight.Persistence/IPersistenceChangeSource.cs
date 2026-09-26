@@ -1,3 +1,5 @@
+using WinSight.Core;
+
 namespace WinSight.Persistence;
 
 /// <summary>
@@ -33,6 +35,34 @@ public interface IPersistenceWatchCoverage
 
     /// <summary>Locations it actually opened. Zero before Start.</summary>
     int ArmedLocations { get; }
+}
+
+/// <summary>
+/// Cumulative evidence that a live source lost OS observations or could not deliver a change
+/// notification. Optional, so sources that cannot measure either do not invent healthy zeroes.
+/// </summary>
+public interface IPersistenceWatchDiagnostics : ISensorHealthSource
+{
+    /// <summary>OS loss/error signals after which one or more changes may have been missed.</summary>
+    int LostObservationCount { get; }
+
+    /// <summary>Change notifications rejected by a subscriber.</summary>
+    int NotificationFailures { get; }
+
+    /// <summary>
+    /// Compatibility fallback for external/simple sources that expose the legacy counters only.
+    /// First-party watchers override it with their complete lifecycle and recovery snapshot.
+    /// </summary>
+    SensorHealthSnapshot ISensorHealthSource.SensorHealth => new(
+        "Persistence source",
+        SensorLifecycle.NotStarted,
+        RequestedSources: 0,
+        ActiveSources: 0,
+        ObservedEvents: 0,
+        LostEvents: LostObservationCount,
+        RecoveryAttempts: 0,
+        SuccessfulRecoveries: 0,
+        DeliveryFailures: NotificationFailures);
 }
 
 public interface IPersistenceChangeSource : IDisposable

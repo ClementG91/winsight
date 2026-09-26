@@ -1,3 +1,5 @@
+using WinSight.Core;
+
 using Xunit;
 
 namespace WinSight.Application.Tests;
@@ -96,6 +98,36 @@ public sealed class EtwWatchAdapterTests
 
         Assert.Equal(0, exitCode);
         Assert.Equal(string.Empty, error.ToString());
+    }
+
+    [Fact]
+    public void ACancelledWatchWithNativeEventLossReturnsIncompleteAndPrintsStableCounters()
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var error = new StringWriter();
+        cancellation.Cancel();
+
+        var exitCode = Adapters.RunEtwWatch(
+            static () => { },
+            error,
+            cancellation.Token,
+            () => new SensorHealthSnapshot(
+                "DNS ETW",
+                SensorLifecycle.Stopped,
+                1,
+                0,
+                42,
+                3,
+                0,
+                0,
+                1));
+
+        Assert.Equal(CliContract.ObservationIncomplete, exitCode);
+        Assert.Equal(
+            "[SENSOR_COVERAGE_INCOMPLETE] observed=42 lost=3 deliveryFailures=1"
+            + Environment.NewLine,
+            error.ToString());
+        Assert.DoesNotContain("DNS", error.ToString(), StringComparison.Ordinal);
     }
 
     private static System.Runtime.InteropServices.COMException EtwComFailure(int hresult)

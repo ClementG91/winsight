@@ -96,8 +96,8 @@ if (command == "input" && CliContract.HasOption(args, "--watch"))
     return Adapters.WatchInputFilters();
 }
 
-// Lifecycle commands the installer and uninstaller call to add/remove the per-user Explorer
-// "Check signature with WinSight" verb. Not scanners, so deliberately absent from --help.
+// Manual per-user lifecycle commands for portable installs and repair. The installer uses scoped
+// declarative registry entries instead; these commands remain listed under Maintenance in --help.
 if (command is "register-signature-verb" or "unregister-signature-verb")
 {
     return Adapters.SetSignatureVerb(register: command == "register-signature-verb");
@@ -110,8 +110,8 @@ if (command is "register-signature-verb" or "unregister-signature-verb")
 // identify afterwards. Because the folders follow the OneDrive redirection, they had also
 // synchronised to the cloud.
 //
-// It is the sweep the product already performs at startup, exposed so uninstall can run it. Absent
-// from the help catalogue: it is a lifecycle command, not a scanner.
+// It is the sweep the product already performs at startup, exposed for uninstall/repair and listed
+// under Maintenance rather than among the scanners.
 if (command == "remove-decoys")
 {
     var removed = WinSight.Ransomware.CanaryManager.RemoveOrphans(

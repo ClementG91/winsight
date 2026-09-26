@@ -32,7 +32,7 @@ public sealed class RestartManagerRealTests
     }
 
     [Fact]
-    public void TheIdentifierProducesAnActionableCandidateForTheHolder()
+    public void TheIdentifierNeverOffersItsOwnHostingProcessAsACandidate()
     {
         var path = Path.Combine(Path.GetTempPath(), $"winsight-rm-{Guid.NewGuid():N}.dat");
         using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.ReadWrite);
@@ -42,10 +42,9 @@ public sealed class RestartManagerRealTests
 
             var identification = identifier.Identify([path]);
 
-            var mine = Assert.Single(identification.Candidates, c => c.Identity.Pid == Environment.ProcessId);
-            Assert.False(string.IsNullOrEmpty(mine.Identity.ImagePath));
-            // The test host is not a protected process, so it must be offered, never refused.
-            Assert.NotEqual(IdentificationConfidence.None, identification.Confidence);
+            Assert.DoesNotContain(identification.Candidates, c => c.Identity.Pid == Environment.ProcessId);
+            Assert.Equal(IdentificationConfidence.None, identification.Confidence);
+            Assert.Contains("protected", identification.Reason, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

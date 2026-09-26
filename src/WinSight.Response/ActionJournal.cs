@@ -6,6 +6,13 @@ using WinSight.Core;
 
 namespace WinSight.Response;
 
+/// <summary>Whether a journal entry records durable intent or the final result.</summary>
+public enum ActionJournalPhase
+{
+    Completed,
+    Prepared,
+}
+
 /// <summary>One recorded response attempt: what was tried, on what, and how it ended.</summary>
 /// <param name="ActionId">Correlates the request, this record and any undo.</param>
 /// <param name="Kind">The action attempted.</param>
@@ -14,6 +21,7 @@ namespace WinSight.Response;
 /// <param name="AtUtc">When it completed.</param>
 /// <param name="Reversible">Whether an undo exists.</param>
 /// <param name="UndoneByActionId">The action id that reversed this one, when it was undone.</param>
+/// <param name="Phase">Prepared before mutation, completed after the result is known.</param>
 public sealed record ActionJournalEntry(
     Guid ActionId,
     ResponseActionKind Kind,
@@ -21,7 +29,16 @@ public sealed record ActionJournalEntry(
     string Target,
     DateTimeOffset AtUtc,
     bool Reversible,
-    Guid? UndoneByActionId = null);
+    Guid? UndoneByActionId = null,
+    ActionJournalPhase Phase = ActionJournalPhase.Completed);
+
+/// <summary>The journal operations required by response coordinators.</summary>
+public interface IActionJournal
+{
+    bool TryAppend(ActionJournalEntry entry);
+    void MarkUndone(Guid actionId, Guid undoActionId);
+    IReadOnlyList<ActionJournalEntry> Read(int max = 200);
+}
 
 /// <summary>
 /// An append-only record of every response attempt, kept so an operator (and, read-only, an MCP
@@ -33,7 +50,7 @@ public sealed record ActionJournalEntry(
 /// caller can surface, not a silent gap — the caller decides whether an action whose journal write
 /// failed should be treated as done.
 /// </remarks>
-public sealed class ActionJournal
+public sealed class ActionJournal : IActionJournal
 {
     private const int MaxEntries = 10_000;
     private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(30);
@@ -58,16 +75,10 @@ public sealed class ActionJournal
             {
                 return false;
             }
-            var directory = Path.GetDirectoryName(_path);
-            if (!string.IsNullOrEmpty(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
             var line = JsonSerializer.Serialize(entry) + "\n";
-            using (var stream = new FileStream(_path, FileMode.Append, FileAccess.Write, FileShare.Read))
+            if (!AutomaticFileAccess.TryAppendFile(_path, Encoding.UTF8.GetBytes(line)))
             {
-                stream.Write(Encoding.UTF8.GetBytes(line));
-                stream.Flush(flushToDisk: true);
+                return false;
             }
             TrimLocked();
             return true;
@@ -90,7 +101,8 @@ public sealed class ActionJournal
         {
             using var gate = JournalLock.Acquire(_path);
             var entries = ReadLocked();
-            var index = entries.FindIndex(e => e.ActionId == actionId);
+            var index = entries.FindLastIndex(e =>
+                e.ActionId == actionId && e.Phase == ActionJournalPhase.Completed);
             if (index < 0)
             {
                 return;
@@ -112,8 +124,13 @@ public sealed class ActionJournal
         try
         {
             using var gate = JournalLock.Acquire(_path);
-            var entries = ReadLocked();
-            entries.Reverse();
+            var entries = ReadLocked()
+                .Select((entry, index) => (entry, index))
+                .GroupBy(item => item.entry.ActionId)
+                .Select(group => group.Last())
+                .OrderByDescending(item => item.index)
+                .Select(item => item.entry)
+                .ToList();
             return max > 0 && entries.Count > max ? entries.GetRange(0, max) : entries;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -127,11 +144,14 @@ public sealed class ActionJournal
     private List<ActionJournalEntry> ReadLocked()
     {
         var entries = new List<ActionJournalEntry>();
-        if (!AutomaticFileAccess.IsLocal(_path) || !File.Exists(_path))
+        using var lease = AutomaticFileAccess.TryAcquire(_path);
+        if (lease is null || lease.IsDirectory)
         {
             return entries;
         }
-        foreach (var line in File.ReadLines(_path))
+        using var stream = lease.OpenRead();
+        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        while (reader.ReadLine() is { } line)
         {
             if (string.IsNullOrWhiteSpace(line))
             {
@@ -149,7 +169,7 @@ public sealed class ActionJournal
                 // Skip a corrupt line rather than discarding the whole journal.
             }
         }
-        return entries;
+        return lease.IsCurrent() ? entries : [];
     }
 
     private void TrimLocked()
@@ -195,6 +215,11 @@ public sealed class ActionJournal
             catch (AbandonedMutexException)
             {
                 held = true;
+            }
+            if (!held)
+            {
+                mutex.Dispose();
+                throw new IOException("Timed out waiting for the action-journal lock.");
             }
             return new JournalLock(mutex, held);
         }

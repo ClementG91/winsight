@@ -378,8 +378,11 @@ public sealed class ControlledFolderAccessReaderTests
         Assert.False(source.WasRead);
     }
 
+    // Semisynchronous, not synchronous: with ReturnImmediately = false the whole query runs inside
+    // Get(), which no Timeout bounds (measured: Get() blocked 27 s under a 1 s Timeout), so a stuck
+    // Defender provider hung the scan. Semisynchronous retrieval applies the Timeout to each result.
     [Fact]
-    public void WmiDataSource_SearcherUsesFiniteSynchronousNonRewindableSelectEnumeration()
+    public void WmiDataSource_SearcherUsesBoundedSemisynchronousNonRewindableSelectEnumeration()
     {
         var factory = typeof(WmiControlledFolderAccessDataSource).GetMethod(
             "CreateSearcher",
@@ -392,7 +395,7 @@ public sealed class ControlledFolderAccessReaderTests
 
         var timeout = searcher.Options.Timeout;
         Assert.InRange(timeout, TimeSpan.FromMilliseconds(1), TimeSpan.FromSeconds(5));
-        Assert.False(searcher.Options.ReturnImmediately);
+        Assert.True(searcher.Options.ReturnImmediately);
         Assert.False(searcher.Options.Rewindable);
         Assert.StartsWith("SELECT ", searcher.Query.QueryString, StringComparison.Ordinal);
     }

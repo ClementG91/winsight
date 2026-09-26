@@ -276,13 +276,15 @@ internal sealed class WmiControlledFolderAccessDataSource : IControlledFolderAcc
         return null;
     }
 
+    // Semisynchronous so the Timeout bounds each result: synchronous retrieval builds the whole
+    // result set inside Get(), where no timeout applies, and a stuck Defender provider hung the scan.
     private static ManagementObjectSearcher CreateSearcher(ManagementScope scope, string query) => new(
         scope,
         new ObjectQuery(query),
         new System.Management.EnumerationOptions
         {
             Timeout = QueryTimeout,
-            ReturnImmediately = false,
+            ReturnImmediately = true,
             Rewindable = false,
         });
 }

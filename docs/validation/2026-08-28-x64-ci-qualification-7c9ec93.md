@@ -14,7 +14,7 @@
 | PowerShell | `NOT_RUN`; no authenticated/elevated native Windows PowerShell session was available |
 | Target snapshot | `S0-clean-before-winsight`, UUID `de916fad-d636-4271-9a7e-7c44908c4220`, restored and powered off after the attempt |
 | Control snapshot | `control-clean-7c9ec93`, UUID `d66710d7-6d00-4db3-9c2d-7ef762d8bc93`, never started |
-| Evidence root | `D:\WinSight-Host-Evidence\7c9ec93-ci-33179811048`, outside the VM snapshot |
+| Evidence root | `WinSight-Host-Evidence\7c9ec93-ci-33179811048` on the host, outside the VM snapshot and the repository |
 | Evidence manifest | SHA-256 `59866328820438800A8F26D243711186F6D62082AE6729DBC254F0A15E1564E0` |
 | Classification | **STOP / RED before candidate execution** |
 

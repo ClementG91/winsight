@@ -128,36 +128,44 @@ public static class CanaryIdentity
             try
             {
                 var malformed = false;
-                if (File.Exists(path))
+                using (var lease = AutomaticFileAccess.TryAcquire(path))
                 {
-                    var existing = File.ReadAllBytes(path);
-                    if (existing.Length == 32)
+                    if (lease is { IsDirectory: false })
                     {
-                        return existing;
+                        if (lease.Length == 32)
+                        {
+                            using var stream = lease.OpenRead();
+                            var existing = new byte[32];
+                            stream.ReadExactly(existing);
+                            if (!lease.IsCurrent())
+                            {
+                                continue;
+                            }
+                            return existing;
+                        }
+                        // Names derived from a malformed seed are unrecoverable anyway. Replacing it keeps
+                        // naming stable for future runs; a private random seed each launch would make every
+                        // run's decoys unrecognisable to the next run's cleanup.
+                        malformed = true;
                     }
-                    // Names derived from a malformed seed are unrecoverable anyway. Replacing it keeps
-                    // naming stable for future runs; a private random seed each launch would make every
-                    // run's decoys unrecognisable to the next run's cleanup.
-                    malformed = true;
                 }
 
-                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
                 var seed = RandomNumberGenerator.GetBytes(32);
-                var temp = $"{path}.{Guid.NewGuid():N}.tmp";
-                try
+                if (!malformed)
                 {
-                    File.WriteAllBytes(temp, seed);
-                    File.Move(temp, path, overwrite: malformed);
-                    if (!malformed)
+                    if (AutomaticFileAccess.TryCreateNewFile(
+                            path,
+                            seed,
+                            createParentDirectories: true))
                     {
                         return seed;
                     }
-                    // Re-read: a concurrent creator may have replaced it at the same moment.
                     continue;
                 }
-                finally
+                if (AtomicFile.TryWrite(path, seed))
                 {
-                    TryDelete(temp);
+                    // Re-read: a concurrent creator may have replaced it at the same moment.
+                    continue;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -173,24 +181,6 @@ public static class CanaryIdentity
         // Unpersisted is still unguessable for this run.
         return RandomNumberGenerator.GetBytes(32);
     }
-    private static void TryDelete(string path)
-    {
-        try
-        {
-            if (!File.Exists(path))
-            {
-                return;
-            }
-            File.Delete(path);
-        }
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            // A stray temporary file holds only random bytes.
-        }
-    }
-
     /// <summary>Where the decoy seed is kept, beside WinSight's other per-user state.</summary>
     public static string SeedPath => Path.Combine(StateDirectory, "canary-seed.bin");
 

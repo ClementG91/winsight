@@ -31,6 +31,54 @@ public sealed class ManifestShapeTests : IDisposable
         Assert.False(snapshot.IsComplete);
     }
 
+    /// <summary>
+    /// A content script matching every site reads and rewrites every page with no host_permissions
+    /// entry at all, and was graded as if it could touch nothing.
+    /// </summary>
+    [Theory]
+    [InlineData("<all_urls>")]
+    [InlineData("*://*/*")]
+    [InlineData("https://*/*")]
+    public void AContentScriptOnEverySiteIsBroadReach(string match)
+    {
+        WriteManifest("injector", $$"""
+            {"name":"Injector","version":"1","content_scripts":[{"matches":["{{match}}"],"js":["c.js"]}]}
+            """);
+
+        var extension = Assert.Single(Scanner().Snapshot());
+
+        Assert.True(extension.HighRisk);
+        Assert.Contains(match, extension.HostPermissions);
+    }
+
+    [Fact]
+    public void AContentScriptOnOneSiteIsNotBroadReach()
+    {
+        WriteManifest("narrow", """
+            {"name":"Narrow","version":"1","content_scripts":[{"matches":["https://example.com/*"],"js":["c.js"]}]}
+            """);
+
+        var extension = Assert.Single(Scanner().Snapshot());
+
+        Assert.False(extension.HighRisk);
+        Assert.Contains("https://example.com/*", extension.HostPermissions);
+    }
+
+    [Theory]
+    [InlineData("{\"content_scripts\":{}}")]
+    [InlineData("{\"content_scripts\":[\"x\"]}")]
+    [InlineData("{\"content_scripts\":[{\"matches\":\"<all_urls>\"}]}")]
+    public void AMalformedContentScriptSectionIsAMalformedManifest(string manifest)
+    {
+        WriteManifest("broken", manifest);
+        WriteManifest("valid", """{"name":"Valid","version":"1"}""");
+
+        var snapshot = Scanner().SnapshotWithCoverage();
+
+        Assert.Equal("valid", Assert.Single(snapshot.Items).Id);
+        Assert.Equal(1, snapshot.UnreadableItems);
+    }
+
     [Theory]
     [InlineData("\"name\":42")]
     [InlineData("\"name\":{\"message\":\"x\"}")]

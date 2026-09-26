@@ -134,7 +134,9 @@ public sealed class GuardianFailureBoundaryTests
 
         source.Signal(); // no second change signal: the retry alone must rescan
 
-        Assert.True(Eventually(() => arrivals == 1));
+        // The arrival leaves the pending queue only after every subscriber has had it, so the count
+        // alone can be read while the monitor still (truthfully) reports a delivery in progress.
+        Assert.True(Eventually(() => arrivals == 1 && monitor.Diagnostics.PendingNotifications == 0));
         Assert.Equal(1, monitor.Diagnostics.ScanFailures);
         Assert.False(monitor.Diagnostics.IsDegraded);
     }

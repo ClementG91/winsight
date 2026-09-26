@@ -102,6 +102,52 @@ public sealed class KernelDriverTriageTests
         Assert.True(KernelDriverTriage.IsNotable(concern));
     }
 
+    /// <summary>
+    /// A chain that validates only through a root in the scanning account's own store is one that
+    /// kernel code integrity never consults, and any account can install such a root. Whatever name
+    /// the certificate carries, the driver is neither shipped by Windows nor merely third-party.
+    /// </summary>
+    [Fact]
+    public void ADriverTrustedOnlyThroughAUserInstalledRootIsUntrusted()
+    {
+        var signature = new SignatureVerdict(
+            SignatureState.SignedTrusted, WindowsSigner, SignatureTrustAnchor.UserInstalledRoot);
+        const string image = @"C:\Windows\System32\drivers\acpi.sys";
+        var driver = new KernelDriver(
+            "acpi", DriverKind.Kernel, DriverStart.Boot, image, image, signature,
+            KernelDriverTriage.IsWindowsProvided(image, signature, SystemDirectory));
+
+        var concern = KernelDriverTriage.Concern(driver);
+
+        Assert.False(driver.IsWindowsProvided);
+        Assert.Equal(KernelDriverConcern.Untrusted, concern);
+        Assert.True(KernelDriverTriage.IsNotable(concern));
+    }
+
+    /// <summary>
+    /// A registration whose image no local path reaches keeps it out of every check here, which
+    /// no legitimate driver needs to do. It is flagged under its own name rather than being filed
+    /// as a missing file - or, as before, verified as a same-named file in System32\drivers.
+    /// </summary>
+    [Fact]
+    public void ARegistrationWhoseImageCannotBeLocatedIsFlaggedAsSuch()
+    {
+        var driver = new KernelDriver(
+            "kbdclass",
+            DriverKind.Kernel,
+            DriverStart.Manual,
+            ImagePath: null,
+            ExpectedImagePath: @"\Device\HarddiskVolume3\x\kbdclass.sys",
+            SignatureVerdict.Unknown,
+            IsWindowsProvided: false,
+            DriverImageSource.Unresolvable);
+
+        var concern = KernelDriverTriage.Concern(driver);
+
+        Assert.Equal(KernelDriverConcern.Unresolvable, concern);
+        Assert.True(KernelDriverTriage.IsNotable(concern));
+    }
+
     [Fact]
     public void AnUnverifiableDriverIsNotTreatedAsSuspicious()
     {

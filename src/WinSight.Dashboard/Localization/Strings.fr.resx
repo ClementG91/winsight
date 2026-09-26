@@ -95,6 +95,9 @@
   <data name="TrayExit" xml:space="preserve"><value>Quitter</value></data>
   <data name="TrayRetryGuardian" xml:space="preserve"><value>Relancer Guardian</value></data>
   <data name="TrayText" xml:space="preserve"><value>WinSight, sécurité locale</value></data>
+  <data name="RecoveredBalloonTitle" xml:space="preserve"><value>WinSight a surmonté une erreur</value></data>
+  <data name="RecoveredBalloonBody" xml:space="preserve"><value>Une action de la fenêtre a échoué ; la surveillance en temps réel continue. Un rapport a été enregistré dans {0}.</value></data>
+  <data name="RecoveredBalloonBodyNoReport" xml:space="preserve"><value>Une action de la fenêtre a échoué ; la surveillance en temps réel continue. Aucun rapport n’a pu être enregistré.</value></data>
   <data name="TrayHintMessage" xml:space="preserve"><value>WinSight continue dans la zone de notification.</value></data>
   <data name="ProgressComplete" xml:space="preserve"><value>Analyse terminée.</value></data>
   <data name="ScanCancelledSummary" xml:space="preserve"><value>Analyse arrêtée proprement entre deux étapes.</value></data>
@@ -134,6 +137,8 @@
   <data name="PersistenceStatusInvalidSignature" xml:space="preserve"><value>Signature invalide</value></data>
   <data name="PersistenceStatusAccessDenied" xml:space="preserve"><value>Accès refusé, signature non vérifiée</value></data>
   <data name="PersistenceStatusVerificationError" xml:space="preserve"><value>Erreur de vérification</value></data>
+  <data name="PersistencePrivilegedForeignCode" xml:space="preserve"><value>code tiers chargé dans un processus privilégié</value></data>
+  <data name="PersistenceOverridesMachineClass" xml:space="preserve"><value>remplace la classe COM de la machine par un autre programme</value></data>
 
   <data name="PersistenceAbuseRemotePayload" xml:space="preserve"><value>un interpréteur Windows signé pointe vers un emplacement distant : ce qui s'exécute n'est pas sur cette machine</value></data>
   <data name="PersistenceAbusePerUserPayload" xml:space="preserve"><value>un interpréteur Windows signé pointe vers un fichier situé dans un emplacement utilisateur ou temporaire</value></data>
@@ -214,12 +219,25 @@
   <data name="ModuleLoadedByProcess" xml:space="preserve"><value>{0} (PID {1}) ← {2}</value></data>
   <data name="StaticMapping" xml:space="preserve"><value>Mappage statique</value></data>
   <data name="HostExternalRedirect" xml:space="preserve"><value>Redirige un nom d’hôte vers une adresse externe (détournement possible)</value></data>
+  <data name="HostsUnreadableTitle" xml:space="preserve"><value>Fichier hosts illisible</value></data>
+  <data name="HostsUnreadableDetail" xml:space="preserve"><value>{0} existe mais l’accès a été refusé ; son contenu est inconnu.</value></data>
+  <data name="HostsMalformedTitle" xml:space="preserve"><value>Le fichier hosts contient des enregistrements mal formés</value></data>
+  <data name="HostsMalformedDetail" xml:space="preserve"><value>{0} ligne(s) active(s) n’ont pas pu être interprétées comme des correspondances IP-hôte.</value></data>
+  <data name="HostsRelocatedTitle" xml:space="preserve"><value>Base hosts déplacée</value></data>
+  <data name="HostsRelocatedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath dirige Windows vers {0} au lieu de {1} ; les entrées affichées sont lues à cet endroit.</value></data>
+  <data name="HostsRelocatedUnresolvedDetail" xml:space="preserve"><value>Tcpip\Parameters\DataBasePath vaut « {0} », qui n’est pas un chemin local que WinSight peut résoudre ; Windows lit son fichier hosts à cet endroit, pas dans {1}.</value></data>
+  <data name="HostsLocationUnverifiedTitle" xml:space="preserve"><value>Emplacement du fichier hosts non confirmé</value></data>
+  <data name="HostsLocationUnverifiedDetail" xml:space="preserve"><value>Tcpip\Parameters n’a pas pu être lu ; l’emplacement standard {0} a été supposé.</value></data>
   <data name="HostSecurityBlackhole" xml:space="preserve"><value>Bloque un domaine de sécurité ou de mise à jour (contournement de protection possible)</value></data>
   <data name="CertificatePrivateKeyRisk" xml:space="preserve"><value>La racine de confiance contient une clé privée et peut créer des certificats approuvés</value></data>
+  <data name="CertificateUserRootRisk" xml:space="preserve"><value>approuvée pour cet utilisateur seulement : une racine que tout programme peut installer sans élévation</value></data>
+  <data name="CertificateUserTrustedPublisherRisk" xml:space="preserve"><value>éditeur approuvé pour cet utilisateur seulement : tout programme peut en ajouter un sans élévation</value></data>
+  <data name="CertificatePublisherPrivateKeyRisk" xml:space="preserve"><value>la clé privée de cet éditeur approuvé est sur cet ordinateur : elle peut signer du code qui s&apos;exécute sans avertissement</value></data>
   <data name="CertificateWeakSignatureRisk" xml:space="preserve"><value>Algorithme de signature faible ({0}) sur un certificat non auto-signé du magasin racine</value></data>
   <data name="CertificateSmallRsaRisk" xml:space="preserve"><value>Clé RSA trop courte ({0} bits)</value></data>
   <data name="CertificateProperties" xml:space="preserve"><value>{0}, clé de {1} bits</value></data>
   <data name="NoDeclaredPermissions" xml:space="preserve"><value>Aucune autorisation déclarée</value></data>
+  <data name="ExtensionLoadedFromFolderRisk" xml:space="preserve"><value>chargée depuis un dossier, pas installée depuis une boutique : mode développeur ou chargement forcé</value></data>
   <data name="FirewallRuleTitle" xml:space="preserve"><value>{0}/{1}, {2}</value></data>
   <data name="FirewallDirectionInbound" xml:space="preserve"><value>Entrant</value></data>
   <data name="FirewallDirectionOutbound" xml:space="preserve"><value>Sortant</value></data>
@@ -280,7 +298,7 @@
   <data name="AvWebcamActivated" xml:space="preserve"><value>vient d'activer votre caméra</value></data>
   <data name="AvMicrophoneActivated" xml:space="preserve"><value>vient d'activer votre micro</value></data>
   <data name="RansomwareProtectionShort" xml:space="preserve"><value>Protection</value></data>
-  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Place des fichiers leurres cachés dans vos Documents, Bureau et Images, et vous alerte dès que quelque chose les modifie — c'est le comportement d'un rançongiciel. Rien n'est écrit tant que vous n'activez pas l'option, et les leurres sont retirés quand vous la désactivez ou fermez WinSight.</value></data>
+  <data name="RansomwareProtectionTooltip" xml:space="preserve"><value>Place des fichiers leurres visibles dans Documents, Bureau, Images, Téléchargements, Vidéos et Musique lorsque ces dossiers existent, puis vous alerte si l'un change. Rien n'est écrit avant l'activation et les leurres inchangés sont retirés à la désactivation ou à la fermeture de WinSight.</value></data>
   <data name="RansomwareBalloonTitle" xml:space="preserve"><value>Activité possible de rançongiciel</value></data>
   <data name="RansomwareCanaryTouched" xml:space="preserve"><value>Un fichier-appât protégé vient d'être modifié. Rien de légitime n'y touche : c'est le comportement d'un rançongiciel. Déconnectez ce PC du réseau et vérifiez ce qui s'exécute.</value></data>
   <data name="RansomwareBurstDetected" xml:space="preserve"><value>Une rafale inhabituelle de renommages ou de suppressions de fichiers a été détectée. Si vous n'avez pas lancé d'opération en masse, considérez-la comme suspecte.</value></data>
@@ -320,15 +338,21 @@
   <data name="SignatureStateUnsigned" xml:space="preserve"><value>NON SIGNÉ</value></data>
   <data name="SignatureStateMissing" xml:space="preserve"><value>Fichier absent</value></data>
   <data name="SignatureStateUnknown" xml:space="preserve"><value>Signature non vérifiable</value></data>
+  <data name="TrustUserInstalledRoot" xml:space="preserve"><value>valide UNIQUEMENT grâce à une racine installée par l’utilisateur</value></data>
+  <data name="TrustCertificateRevoked" xml:space="preserve"><value>certificat RÉVOQUÉ</value></data>
   <data name="InputConcernExpected" xml:space="preserve"><value>pilote de classe Windows, attendu</value></data>
   <data name="InputConcernThirdParty" xml:space="preserve"><value>pilote tiers sur le chemin des entrées</value></data>
   <data name="InputConcernUntrusted" xml:space="preserve"><value>NON SIGNÉ ou non approuvé, et voit chaque frappe au clavier</value></data>
   <data name="InputConcernMissing" xml:space="preserve"><value>filtre déclaré dont le fichier pilote est absent</value></data>
+  <data name="InputConcernUnresolvable" xml:space="preserve"><value>image déclarée hors de tout chemin local, donc non vérifiable</value></data>
+  <data name="InputConcernUnverified" xml:space="preserve"><value>signature non vérifiable, et voit chaque frappe au clavier</value></data>
+  <data name="InputConcernImpersonating" xml:space="preserve"><value>PORTE LE NOM du pilote de classe Windows, mais son image n'est pas le fichier Windows</value></data>
   <data name="DriverConcernWindowsProvided" xml:space="preserve"><value>fourni par Windows</value></data>
   <data name="DriverConcernThirdParty" xml:space="preserve"><value>signé par un tiers</value></data>
   <data name="DriverConcernUntrusted" xml:space="preserve"><value>code noyau NON SIGNÉ ou non approuvé</value></data>
   <data name="DriverConcernUnverified" xml:space="preserve"><value>signature non vérifiable</value></data>
   <data name="DriverConcernMissing" xml:space="preserve"><value>pilote déclaré dont le fichier image est absent</value></data>
+  <data name="DriverConcernUnresolvable" xml:space="preserve"><value>image déclarée hors de tout chemin local, donc non vérifiable</value></data>
   <data name="HijackKindUnquotedServicePath" xml:space="preserve"><value>Chemin de service non entre guillemets</value></data>
   <data name="HijackKindWritableServiceDirectory" xml:space="preserve"><value>Répertoire de service inscriptible</value></data>
   <data name="HijackKindWritablePathEntry" xml:space="preserve"><value>Entrée PATH inscriptible</value></data>
@@ -343,6 +367,7 @@
   <data name="PresenceCauseDevice" xml:space="preserve"><value>un périphérique nommé par Windows, sans explication</value></data>
   <data name="DnsFromCache" xml:space="preserve"><value>réponse du cache local</value></data>
   <data name="DnsFromNetwork" xml:space="preserve"><value>résolu sur le réseau</value></data>
+  <data name="DnsInResolverCache" xml:space="preserve"><value>dans le cache du résolveur</value></data>
   <data name="AlertKindCanaryTouched" xml:space="preserve"><value>fichier leurre modifié</value></data>
   <data name="AlertKindHighEntropyWrite" xml:space="preserve"><value>écriture à forte entropie</value></data>
   <data name="AlertKindRename" xml:space="preserve"><value>rafale de renommages</value></data>
@@ -362,6 +387,7 @@
   <data name="IntegrityProtectionKernelDebugger" xml:space="preserve"><value>Débogueur noyau</value></data>
   <data name="IntegrityProtectionKernelDebugMode" xml:space="preserve"><value>Mode de débogage noyau</value></data>
   <data name="IntegrityProtectionUserModeCodeIntegrity" xml:space="preserve"><value>Intégrité du code en mode utilisateur</value></data>
+  <data name="IntegrityProtectionFlightSigning" xml:space="preserve"><value>Signature « flight » (versions d’évaluation)</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementUnreadable" xml:space="preserve"><value>Le noyau n’a pas communiqué ses options d’intégrité du code : le contrôle de signature des pilotes est indéterminé — ce n’est pas la même chose que désactivé.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementEnforced" xml:space="preserve"><value>Le contrôle de signature des pilotes est actif : le noyau refuse les pilotes non signés.</value></data>
   <data name="IntegrityStateDriverSignatureEnforcementOff" xml:space="preserve"><value>Le contrôle de signature des pilotes est DÉSACTIVÉ : le noyau chargera des pilotes non signés. Tout pilote non signé signalé ailleurs doit être lu à cette lumière.</value></data>
@@ -370,7 +396,7 @@
   <data name="IntegrityStateTestSigningOff" xml:space="preserve"><value>La signature de test est désactivée : un pilote doit donc porter une signature en laquelle Windows a confiance.</value></data>
   <data name="IntegrityStateMemoryIntegrityUnreadable" xml:space="preserve"><value>Impossible d’établir si l’intégrité de la mémoire fonctionne.</value></data>
   <data name="IntegrityStateMemoryIntegrityOff" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) ne fonctionne pas. Elle est désactivée sur de nombreuses machines saines, mais lorsqu’elle est active, contourner la signature des pilotes ne suffit plus à exécuter du code dans le noyau.</value></data>
-  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) est en mode AUDIT : les violations sont journalisées mais restées autorisées. Elle apparaît activée alors qu’elle n’applique rien.</value></data>
+  <data name="IntegrityStateMemoryIntegrityAudit" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) est uniquement en mode AUDIT : les composants du noyau qui seraient incompatibles sont journalisés, mais rien n’est appliqué.</value></data>
   <data name="IntegrityStateMemoryIntegrityStrict" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) s’applique, en mode strict.</value></data>
   <data name="IntegrityStateMemoryIntegrityEnforcing" xml:space="preserve"><value>L’intégrité de la mémoire (HVCI) s’applique.</value></data>
   <data name="IntegrityStateSecureBootOn" xml:space="preserve"><value>Le démarrage sécurisé est actif : le micrologiciel vérifie la chaîne de démarrage avant le lancement de Windows.</value></data>
@@ -381,6 +407,9 @@
   <data name="IntegrityStateKernelDebuggerUnreadable" xml:space="preserve"><value>Impossible d’établir si un débogueur noyau est attaché.</value></data>
   <data name="IntegrityStateKernelDebugModePermitted" xml:space="preserve"><value>Le mode de débogage noyau est autorisé, ce qui assouplit ce que le noyau accepte de charger et permet à un débogueur de lire et de modifier la mémoire du noyau.</value></data>
   <data name="IntegrityStateUserModeCodeIntegrityEnforced" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est appliquée, en plus de la signature des pilotes.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityAudit" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est en mode AUDIT : les violations de la stratégie sont journalisées, pas bloquées. Elle paraît configurée alors qu’elle ne bloque rien.</value></data>
+  <data name="IntegrityStateUserModeCodeIntegrityExclusions" xml:space="preserve"><value>L’intégrité du code applicatif (WDAC) est appliquée, mais des chemins d’exclusion sont configurés (HKLM\SYSTEM\CurrentControlSet\Control\CI\TRSData, TestPath) : les programmes lancés depuis ces chemins sont autorisés même s’ils violent la stratégie.</value></data>
+  <data name="IntegrityStateFlightSigningOn" xml:space="preserve"><value>La signature « flight » est activée : le noyau accepte aussi le code signé par la racine de développement de Microsoft. Normal sur une version Windows Insider ; sinon, elle devrait être désactivée.</value></data>
   <data name="AlertWindowTitle" xml:space="preserve"><value>WinSight — nouvel élément de démarrage</value></data>
   <data name="AlertHeading" xml:space="preserve"><value>Un nouvel élément de démarrage est apparu</value></data>
   <data name="AlertItemLabel" xml:space="preserve"><value>Élément</value></data>
@@ -395,6 +424,8 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>L'élément a changé depuis l'alerte ; rien n'a été supprimé.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight ne peut pas encore annuler cet élément : il s'applique à toute la machine, ou il est d'un type sans suppression réversible.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>L'action n'a pas pu être effectuée.</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Le système a peut-être été modifié, mais le résultat n'a pas pu être entièrement journalisé. ID d'action : {0}. {1}</value></data>
+  <data name="AlertBlockReasserted" xml:space="preserve"><value>Supprimé et mis en quarantaine, mais l'élément de démarrage est aussitôt réapparu : un programme en cours d'exécution le recrée. Traitez ce programme, puis bloquez à nouveau. ID d'action : {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — signature de fichier</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Qui a signé ce fichier</value></data>
   <data name="SignatureFileLabel" xml:space="preserve"><value>Fichier</value></data>

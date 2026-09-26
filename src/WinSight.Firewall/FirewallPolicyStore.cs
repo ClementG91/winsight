@@ -3,6 +3,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using WinSight.Core;
+
 namespace WinSight.Firewall;
 
 /// <summary>The service operating mode persisted with outbound policies.</summary>
@@ -140,31 +142,23 @@ public sealed class FirewallPolicyStore
         CancellationToken cancellationToken)
     {
         var trustLease = DemandTrustedStorage();
-        FileAttributes attributes;
-        try
+        using var lease = AutomaticFileAccess.TryAcquireReplaceableRead(_path);
+        if (lease is null)
         {
-            attributes = File.GetAttributes(_path);
-        }
-        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
-        {
+            if (!AutomaticFileAccess.IsLocal(_path))
+            {
+                throw new IOException("The firewall policy path is not a stable ordinary local file.");
+            }
             RevalidateTrustedStorage(trustLease);
             return OutboundFirewallConfiguration.Empty;
         }
-
-        RejectReparsePoint(_path, "policy file", attributes);
-        await using var stream = new FileStream(
-            _path,
-            new FileStreamOptions
-            {
-                Mode = FileMode.Open,
-                Access = FileAccess.Read,
-                // Another service/CLI process may atomically replace the path while this
-                // handle keeps reading the complete previous snapshot.
-                Share = FileShare.Read | FileShare.Delete,
-                Options = FileOptions.Asynchronous | FileOptions.SequentialScan,
-            });
+        if (lease.IsDirectory)
+        {
+            throw new InvalidDataException("The firewall policy path names a directory.");
+        }
+        await using var stream = lease.OpenRead(FileOptions.SequentialScan);
         RevalidateOpenedStorage(trustLease);
-        if (stream.Length is <= 0 or > MaxFileBytes)
+        if (lease.Length is <= 0 or > MaxFileBytes)
         {
             throw new InvalidDataException(
                 $"Firewall policy file size must be between 1 and {MaxFileBytes} bytes.");
@@ -176,7 +170,14 @@ public sealed class FirewallPolicyStore
                 stream,
                 SerializerOptions,
                 cancellationToken).ConfigureAwait(false);
-            return Validate(document ?? throw new InvalidDataException("Firewall policy file is empty."));
+            var configuration = Validate(
+                document ?? throw new InvalidDataException("Firewall policy file is empty."));
+            if (!lease.IsCurrent())
+            {
+                throw new OpenedStorageIdentityChangedException(
+                    new FirewallStorageTrustException("IdentityChanged"));
+            }
+            return configuration;
         }
         catch (JsonException ex)
         {
@@ -224,7 +225,7 @@ public sealed class FirewallPolicyStore
         }
     }
 
-    private async Task SaveCoreAsync(
+    private Task SaveCoreAsync(
         OutboundFirewallConfiguration configuration,
         CancellationToken cancellationToken)
     {
@@ -247,55 +248,21 @@ public sealed class FirewallPolicyStore
 
         var directory = Path.GetDirectoryName(_path)
             ?? throw new InvalidOperationException("Firewall policy path has no parent directory.");
-        Directory.CreateDirectory(directory);
-        RejectReparsePoint(directory, "policy directory");
-        if (File.Exists(_path))
+        if (!AutomaticFileAccess.TryEnsureDirectory(directory))
         {
-            RejectReparsePoint(_path, "policy file");
+            throw new IOException("The firewall policy directory could not be acquired safely.");
         }
-
-        var temporaryPath = Path.Combine(
-            directory,
-            $".{Path.GetFileName(_path)}.{Guid.NewGuid():N}.tmp");
-        try
+        cancellationToken.ThrowIfCancellationRequested();
+        RevalidateTrustedStorage(trustLease);
+        if (!AutomaticFileAccess.TryWriteAtomic(
+                _path,
+                payload,
+                createParentDirectories: false))
         {
-            await using (var stream = new FileStream(
-                temporaryPath,
-                new FileStreamOptions
-                {
-                    Mode = FileMode.CreateNew,
-                    Access = FileAccess.Write,
-                    Share = FileShare.None,
-                    Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
-                }))
-            {
-                await stream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
-                await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-                stream.Flush(flushToDisk: true);
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            RevalidateTrustedStorage(trustLease);
-            if (File.Exists(_path))
-            {
-                File.Replace(
-                    temporaryPath,
-                    _path,
-                    destinationBackupFileName: null,
-                    ignoreMetadataErrors: false);
-            }
-            else
-            {
-                File.Move(temporaryPath, _path);
-            }
-            _ = DemandTrustedStorage();
+            throw new IOException("The firewall policy could not be replaced safely.");
         }
-        finally
-        {
-            // Best-effort: the temporary file is inert once the replace has happened, and a scanner
-            // holding it open for a moment must not turn a completed save into a reported failure.
-            WinSight.Core.AtomicFile.TryDelete(temporaryPath);
-        }
+        _ = DemandTrustedStorage();
+        return Task.CompletedTask;
     }
 
     private FirewallStorageTrustLease DemandTrustedStorage()
@@ -412,17 +379,6 @@ public sealed class FirewallPolicyStore
         }
 
         return new OutboundFirewallConfiguration(document.Mode, policies.AsReadOnly());
-    }
-
-    private static void RejectReparsePoint(
-        string path,
-        string description,
-        FileAttributes? knownAttributes = null)
-    {
-        if (((knownAttributes ?? File.GetAttributes(path)) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new IOException($"Refusing a reparse-point {description}: '{path}'.");
-        }
     }
 
     private sealed record PolicyDocument(

@@ -1,5 +1,6 @@
 using WinSight.Application;
 using WinSight.Attribution;
+using WinSight.Core;
 using WinSight.NetMonitor;
 
 using Xunit;
@@ -48,6 +49,31 @@ public sealed class AttributionNoteTests
         => Assert.Equal(
             "attribution stopped",
             AttributionNote.WhyNoAuthor(Health(running: false, refused: false)));
+
+    [Fact]
+    public void LostEtwEventsAreVisibleInTheAlertCaveatAndProtectionHealth()
+    {
+        var health = Health(running: true, refused: false) with
+        {
+            Sensor = new SensorHealthSnapshot(
+                "Write attribution ETW",
+                SensorLifecycle.Running,
+                1,
+                1,
+                100,
+                7,
+                0,
+                0,
+                0),
+        };
+
+        Assert.Equal(
+            "attribution coverage incomplete (7 ETW event(s) lost)",
+            AttributionNote.WhyNoAuthor(health));
+        Assert.Equal(ProtectionState.Partial, AttributionNote.Monitor(health).State);
+        Assert.Contains("7 ETW event(s) lost", AttributionNote.DiagnosticsLine(health),
+            StringComparison.Ordinal);
+    }
 
     [Theory]
     [InlineData((int)EtwFailureCode.AccessDenied, "attribution unavailable (ETW access denied)")]

@@ -100,6 +100,13 @@ public sealed record AutostartEntry(
     /// <summary>The enumerator owning this observation, used to reconcile scoped scan snapshots.</summary>
     public string Source { get; init; } = string.Empty;
 
+    /// <summary>
+    /// A per-user COM registration sending a class the machine also registers to another server
+    /// (MITRE T1546.015). Only meaningful for <see cref="AutostartVector.ComHijack"/>; not part of
+    /// the identity, so an existing entry keeps its identity across an upgrade.
+    /// </summary>
+    public bool OverridesMachineClass { get; init; }
+
     public PersistenceStatus Status => ImageStatus switch
     {
         ImageResolutionStatus.FileMissing => PersistenceStatus.FileMissing,
@@ -182,5 +189,16 @@ public sealed record AutostartEntry(
         // signed beneath a root imported that way read SignatureValid here, which defeated the
         // central claim of the whole scanner for the price of one unprivileged store write.
         || Signature.RestsOnUserInstalledTrust
-        || Abuse != InterpreterAbuse.None;
+        || Abuse != InterpreterAbuse.None
+        // A per-user registration that sends a machine COM class to another binary is the COM
+        // hijack itself. Unsigned targets are already adverse above; a validly signed one is still
+        // somebody else's code in every process that instantiates the class - unless it is
+        // Microsoft's, as with a per-user OneDrive overriding the one Windows installs.
+        || IsNonMicrosoftClassOverride;
+
+    private bool IsNonMicrosoftClassOverride =>
+        Vector == AutostartVector.ComHijack
+        && OverridesMachineClass
+        && Status == PersistenceStatus.SignatureValid
+        && !CertificateSubject.IsMicrosoft(Signature);
 }

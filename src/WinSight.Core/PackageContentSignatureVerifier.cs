@@ -95,11 +95,12 @@ public static class PackageContentSignatureVerifier
         ArgumentNullException.ThrowIfNull(batch);
         try
         {
-            if (string.IsNullOrWhiteSpace(path) || !AutomaticFileAccess.IsLocal(path))
+            using var memberLease = AutomaticFileAccess.TryAcquire(path);
+            if (memberLease is null || memberLease.IsDirectory)
             {
                 return null;
             }
-            var full = Path.GetFullPath(path);
+            var full = memberLease.FullPath;
             if (FindRoot(full) is not { } root)
             {
                 return null;
@@ -136,6 +137,10 @@ public static class PackageContentSignatureVerifier
             {
                 return null;
             }
+            if (!memberLease.IsCurrent())
+            {
+                return null;
+            }
             var signer = $"{evidence.Signer} (MSIX package {evidence.PackageName}, content verified)";
             return intact.Value && evidence.Trusted
                 ? new SignatureVerdict(SignatureState.SignedTrusted, signer, evidence.Anchor)
@@ -158,8 +163,8 @@ public static class PackageContentSignatureVerifier
         var directory = Path.GetDirectoryName(fullPath);
         for (var depth = 0; depth < MaxRootDepth && !string.IsNullOrEmpty(directory); depth++)
         {
-            if (File.Exists(Path.Combine(directory, BlockMapFile))
-                && File.Exists(Path.Combine(directory, SignatureFile)))
+            if (AutomaticFileAccess.FileExists(Path.Combine(directory, BlockMapFile))
+                && AutomaticFileAccess.FileExists(Path.Combine(directory, SignatureFile)))
             {
                 return directory;
             }
@@ -174,8 +179,15 @@ public static class PackageContentSignatureVerifier
         var blockMapPath = Path.Combine(root, BlockMapFile);
         // Held for the whole validation: no writer can change, and no rename can replace, the files
         // the packaging API and the CMS decoder each read.
-        using var signatureHandle = new FileStream(signaturePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        using var blockMapHandle = new FileStream(blockMapPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var signatureLease = AutomaticFileAccess.TryAcquire(signaturePath);
+        using var blockMapLease = AutomaticFileAccess.TryAcquire(blockMapPath);
+        if (signatureLease is null || signatureLease.IsDirectory
+            || blockMapLease is null || blockMapLease.IsDirectory)
+        {
+            return null;
+        }
+        using var signatureHandle = signatureLease.OpenRead();
+        using var blockMapHandle = blockMapLease.OpenRead();
         if (signatureHandle.Length <= SignatureMagic.Length || signatureHandle.Length > MaxSignatureBytes)
         {
             return null;
@@ -188,7 +200,7 @@ public static class PackageContentSignatureVerifier
         }
 
         var factory = (IAppxFactory)new AppxFactory();
-        var blockMapStream = OpenStream(blockMapPath);
+        var blockMapStream = new ManagedReadOnlyIStream(blockMapHandle);
         IAppxBlockMapReader? reader;
         try
         {
@@ -199,8 +211,12 @@ public static class PackageContentSignatureVerifier
         }
         finally
         {
-            Release(blockMapStream);
             Release(factory);
+        }
+        if (!signatureLease.IsCurrent() || !blockMapLease.IsCurrent())
+        {
+            Release(reader);
+            return null;
         }
         try
         {
@@ -316,7 +332,12 @@ public static class PackageContentSignatureVerifier
         {
             Release(manifestEntry);
         }
-        using var manifest = new FileStream(manifestPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        using var manifestLease = AutomaticFileAccess.TryAcquire(manifestPath);
+        if (manifestLease is null || manifestLease.IsDirectory)
+        {
+            return false;
+        }
+        using var manifest = manifestLease.OpenRead();
         if (manifest.Length > MaxManifestBytes)
         {
             return false;
@@ -336,7 +357,9 @@ public static class PackageContentSignatureVerifier
             var version = xml.GetAttribute("Version");
             var publisher = xml.GetAttribute("Publisher");
             packageName = $"{name} {version}".Trim();
-            return publisher is not null && SameDistinguishedName(publisher, signer.SubjectName);
+            return publisher is not null
+                && manifestLease.IsCurrent()
+                && SameDistinguishedName(publisher, signer.SubjectName);
         }
         return false;
     }
@@ -359,17 +382,15 @@ public static class PackageContentSignatureVerifier
     /// <summary>True/false from the packaging API; null when the file could not be read.</summary>
     private static bool? ValidateHash(IAppxBlockMapFile entry, string path)
     {
-        // Deny writers and deletion while the hash is computed over this handle's file.
-        using var guard = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
-        var stream = OpenStream(path);
-        try
+        using var lease = AutomaticFileAccess.TryAcquire(path);
+        if (lease is null || lease.IsDirectory)
         {
-            return entry.ValidateFileHash(stream, out var valid) < 0 ? null : valid != 0;
+            return null;
         }
-        finally
-        {
-            Release(stream);
-        }
+        using var file = lease.OpenRead();
+        var stream = new ManagedReadOnlyIStream(file);
+        bool? result = entry.ValidateFileHash(stream, out var valid) < 0 ? null : valid != 0;
+        return lease.IsCurrent() ? result : null;
     }
 
     /// <summary>Releases a COM reference now, so file handles behind it do not wait for the GC.</summary>
@@ -381,18 +402,86 @@ public static class PackageContentSignatureVerifier
         }
     }
 
-    private static IStream OpenStream(string path)
+    /// <summary>Minimal read-only COM stream over a handle-bound managed stream.</summary>
+    private sealed class ManagedReadOnlyIStream(Stream stream) : IStream
     {
-        const uint ReadShareDenyWrite = 0x00000020; // STGM_READ | STGM_SHARE_DENY_WRITE
-        var hr = SHCreateStreamOnFileEx(path, ReadShareDenyWrite, 0, false, IntPtr.Zero, out var stream);
-        Marshal.ThrowExceptionForHR(hr);
-        return stream;
-    }
+        public void Read(byte[] pv, int cb, IntPtr pcbRead)
+        {
+            var read = stream.Read(pv, 0, Math.Min(cb, pv.Length));
+            if (pcbRead != IntPtr.Zero)
+            {
+                Marshal.WriteInt32(pcbRead, read);
+            }
+        }
 
-    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int SHCreateStreamOnFileEx(
-        string file, uint mode, uint attributes, [MarshalAs(UnmanagedType.Bool)] bool create,
-        IntPtr template, out IStream stream);
+        public void Write(byte[] pv, int cb, IntPtr pcbWritten) =>
+            Marshal.ThrowExceptionForHR(unchecked((int)0x80030005));
+
+        public void Seek(long dlibMove, int dwOrigin, IntPtr plibNewPosition)
+        {
+            var origin = dwOrigin switch
+            {
+                0 => SeekOrigin.Begin,
+                1 => SeekOrigin.Current,
+                2 => SeekOrigin.End,
+                _ => throw new ArgumentOutOfRangeException(nameof(dwOrigin)),
+            };
+            var position = stream.Seek(dlibMove, origin);
+            if (plibNewPosition != IntPtr.Zero)
+            {
+                Marshal.WriteInt64(plibNewPosition, position);
+            }
+        }
+
+        public void SetSize(long libNewSize) =>
+            Marshal.ThrowExceptionForHR(unchecked((int)0x80030005));
+
+        public void CopyTo(IStream pstm, long cb, IntPtr pcbRead, IntPtr pcbWritten)
+        {
+            var buffer = new byte[81920];
+            long total = 0;
+            while (total < cb)
+            {
+                var read = stream.Read(buffer, 0, (int)Math.Min(buffer.Length, cb - total));
+                if (read == 0)
+                {
+                    break;
+                }
+                pstm.Write(buffer, read, IntPtr.Zero);
+                total += read;
+            }
+            if (pcbRead != IntPtr.Zero)
+            {
+                Marshal.WriteInt64(pcbRead, total);
+            }
+            if (pcbWritten != IntPtr.Zero)
+            {
+                Marshal.WriteInt64(pcbWritten, total);
+            }
+        }
+
+        public void Commit(int grfCommitFlags)
+        {
+        }
+
+        public void Revert() =>
+            Marshal.ThrowExceptionForHR(unchecked((int)0x80004001));
+
+        public void LockRegion(long libOffset, long cb, int dwLockType) =>
+            Marshal.ThrowExceptionForHR(unchecked((int)0x80004001));
+
+        public void UnlockRegion(long libOffset, long cb, int dwLockType) =>
+            Marshal.ThrowExceptionForHR(unchecked((int)0x80004001));
+
+        public void Stat(out STATSTG pstatstg, int grfStatFlag) =>
+            pstatstg = new STATSTG { type = 2, cbSize = stream.Length };
+
+        public void Clone(out IStream ppstm)
+        {
+            ppstm = null!;
+            Marshal.ThrowExceptionForHR(unchecked((int)0x80004001));
+        }
+    }
 
     // Declarations from the Windows SDK's AppxPackaging.h (10.0.26100), in vtable order. Only the
     // members used are called; the preceding slots are declared to keep the layout exact.

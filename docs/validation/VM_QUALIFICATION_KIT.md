@@ -8,6 +8,14 @@ inventory, or unexported evidence means **STOP / RED**.
 > Run privileged phases only in an isolated, disposable VM. Never install the service, modify WFP,
 > or stop an ETW session on the development workstation.
 
+The host side can be driven unattended on Hyper-V by the harness in
+[`scripts/validation/hyperv`](../../scripts/validation/hyperv/README.md). Its elevated runner reads
+requests from a user-writable folder but writes only into administrators-only copies of the harness,
+the candidate and the evidence, refuses VM storage anyone else could modify, and seals, with each
+run, the git blob ids of what ran; `Verify-QualificationProvenance.ps1`, run unelevated, checks them
+against the reviewed commit and proves every write is refused (RA-01). A run that has not passed it
+is functional evidence only.
+
 ## 0. Do not confuse version, tag, and candidate
 
 The VM report from 29 July 2026 tested `main` commit
@@ -439,6 +447,9 @@ Create protected manifests for the three EXEs and every script/module that will 
 $ValidationFiles = @(
     $PeScript,
     (Join-Path $ProtectedSourceRoot 'scripts\Test-Installer.ps1'),
+    (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerServiceUninstall.ps1'),
+    (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerUpgrade.ps1'),
+    (Join-Path $ProtectedSourceRoot 'scripts\Measure-CloudFilesAccess.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\Test-McpServer.ps1'),
     (Join-Path $ProtectedSourceRoot 'scripts\WinSightEtwValidation.psm1'),
     (Join-Path $PackageRoot 'Test-WfpValidation.ps1'),
@@ -561,6 +572,71 @@ if ($RequireSigned) {
 }
 & $NativePowerShellExe @installerArguments
 if ($LASTEXITCODE -ne 0) { throw 'Installer lifecycle failed.' }
+```
+
+Then prove the all-users uninstall and the firewall service it may leave behind (WS-63). The script
+installs for all users under `Program Files`, registers the service from that installation, and
+requires the uninstall to remove it with no file or WinSight WFP object left. It then injects a
+failure of that removal (RA-05) by denying `DELETE` on the service object to Administrators and
+SYSTEM, and requires the uninstall to stop with nothing removed - registration, program and service
+intact, a fatal stop in the log - and to complete once the descriptor is restored. With
+`-ForeignServicePath`, it also requires a service registered from another protected location to
+survive the application's uninstall. Every case must print `PASS`, and `sc query WinSightFirewall`
+must end with **1060**:
+
+```powershell
+Assert-CandidateFiles
+& $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerServiceUninstall.ps1') `
+    -InstallerPath $ProtectedInstaller -Version $ProductVersion `
+    -ForeignServicePath $Service
+if ($LASTEXITCODE -ne 0) { throw 'All-users uninstall and service removal failed.' }
+& $ScExe query WinSightFirewall *> $null
+if ($LASTEXITCODE -ne 1060) { throw 'A firewall service is left after the all-users uninstall.' }
+```
+
+Upgrade in place from the previous published release, per user. Download its installer the same way
+as the candidate's (§3) and pin its hash in the evidence. The script requires the new version to
+replace the old one under a single uninstall entry, with no file of the old version that a fresh
+install of the new one would not have, and a clean uninstall afterwards:
+
+```powershell
+Assert-CandidateFiles
+& $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File (Join-Path $ProtectedSourceRoot 'scripts\Test-InstallerUpgrade.ps1') `
+    -PreviousInstallerPath $ProtectedPreviousInstaller -PreviousVersion $PreviousProductVersion `
+    -InstallerPath $ProtectedInstaller -Version $ProductVersion
+if ($LASTEXITCODE -ne 0) { throw 'Upgrade from the previous release failed.' }
+```
+
+Finally, measure the automatic file access against Cloud Files placeholders, the shape of every
+file in a folder OneDrive backs up (WS-40). The script registers a disposable sync root through the
+documented Cloud Files API, with no OneDrive and no account. For each placeholder shape it records
+whether `winsight sign` could hash it, and which process made each download request during the read.
+It then writes a Run value naming the cloud-only file, lets the machine react for 30 seconds, and runs
+the persistence scan over it (RA-02). A hydrated placeholder must be readable, and neither a read nor
+the scan may request a download. A request counts against WinSight when a WinSight process made it,
+or when Windows cannot say which process did. Requests from other programs, such as an antivirus
+reacting to the new Run value, are recorded but do not fail the check:
+
+```powershell
+Assert-CandidateFiles
+$CloudEvidence = Join-Path $EvidenceRoot 'cloud-files.json'
+& $NativePowerShellExe -NoProfile -NonInteractive -ExecutionPolicy Bypass `
+    -File (Join-Path $ProtectedSourceRoot 'scripts\Measure-CloudFilesAccess.ps1') `
+    -CliPath $Cli -EvidencePath $CloudEvidence
+$measured = Get-Content -LiteralPath $CloudEvidence -Raw | ConvertFrom-Json
+$cloud = $measured.cases
+foreach ($case in 'control', 'plain-in-sync-root', 'hydrated-placeholder', 'hydrated-in-directory-placeholder') {
+    if (-not $cloud.$case.sha256Matches) { throw "Cloud Files: $case was not readable." }
+}
+$charged = { $_.fetchRequestsByWinSight -gt 0 -or $_.fetchRequestsUnattributed -gt 0 }
+if (@($cloud.PSObject.Properties.Value | Where-Object $charged).Count -gt 0) {
+    throw 'Cloud Files: a WinSight read requested a download.'
+}
+if (-not $measured.persistence.entryFound -or @($measured.persistence, $measured.runValueSettle | Where-Object $charged).Count -gt 0) {
+    throw 'Cloud Files: the persistence scan of a cloud-only Run image requested a download.'
+}
 ```
 
 ### Signature evidence and operator-confirmed responses
@@ -889,26 +965,41 @@ if ($before.Count -ne 0) { throw 'ETW snapshot is not clean.' }
 
 ### Dashboard attribution
 
-The dashboard has no single-instance mutex. The elevated console passes its token to child
-processes:
+The dashboard is single-instance per user and session (WS-31): a second launch raises the first and
+exits 0 before starting any monitor, so two dashboards of one account never run side by side. Live-
+session preservation is therefore proven against the other Attribution owner, the elevated
+`winsight attribution --watch` watcher. The elevated console passes its token to child processes:
 
 ```powershell
 Assert-CandidateFiles
 $dashboardOne = Start-Process -FilePath $Dashboard -PassThru
-Assert-CandidateFiles
-$dashboardTwo = Start-Process -FilePath $Dashboard -PassThru
 Start-Sleep -Seconds 15
 
 function Get-AttributionSession([Diagnostics.Process]$Process) {
     $Process.Refresh()
-    if ($Process.HasExited) { throw "Dashboard $($Process.Id) stopped." }
+    if ($Process.HasExited) { throw "Process $($Process.Id) stopped." }
     Get-WinSightEtwSessionForProcess -Family Attribution -ProcessId $Process.Id
 }
 $sessionOne = Get-AttributionSession $dashboardOne
-$sessionTwo = Get-AttributionSession $dashboardTwo
+
+# A second launch hands over to the first and leaves without a session of its own.
+Assert-CandidateFiles
+$secondLaunch = Start-Process -FilePath $Dashboard -PassThru
+if (-not $secondLaunch.WaitForExit(120000) -or $secondLaunch.ExitCode -ne 0) {
+    throw 'A second dashboard launch did not hand over and exit 0.'
+}
+$attribution = @(Get-WinSightEtwSessionNames | Where-Object { $_ -cmatch '^WinSight-Attribution' })
+if ($attribution.Count -ne 1 -or $attribution[0] -cne $sessionOne) {
+    throw "Single instance violated: $($attribution -join ', ')"
+}
+
+Assert-CandidateFiles
+$watcher = Start-Process -FilePath $Cli -ArgumentList @('attribution', '--watch') -PassThru
+Start-Sleep -Seconds 10
+$watcherSession = Get-AttributionSession $watcher
 ```
 
-Close the first window with **X**: the captured process and `$sessionOne` must remain. Only then
+Close the dashboard window with **X**: the captured process and `$sessionOne` must remain. Only then
 force-stop **that captured process**:
 
 ```powershell
@@ -922,20 +1013,21 @@ if ((Get-WinSightEtwSessionNames) -notcontains $sessionOne) {
 }
 
 Assert-CandidateFiles
-$dashboardThree = Start-Process -FilePath $Dashboard -PassThru
+$dashboardTwo = Start-Process -FilePath $Dashboard -PassThru
 Start-Sleep -Seconds 15
-$sessionThree = Get-AttributionSession $dashboardThree
-$dashboardTwo.Refresh()
-if ($dashboardTwo.HasExited -or
+$sessionTwo = Get-AttributionSession $dashboardTwo
+$watcher.Refresh()
+if ($watcher.HasExited -or
     (Get-WinSightEtwSessionNames) -contains $sessionOne -or
-    (Get-WinSightEtwSessionNames) -notcontains $sessionTwo) {
+    (Get-WinSightEtwSessionNames) -notcontains $watcherSession) {
     throw 'Orphan recovery or live-session preservation failed.'
 }
 ```
 
-Repeat two kill/relaunch cycles using captured `Process` objects. The session count must never exceed
-the number of live dashboards. Close survivors through the tray **Exit** command, wait for
-`HasExited`, then require zero attribution sessions.
+Repeat two kill/relaunch cycles of the dashboard using captured `Process` objects. The Attribution
+session count must never exceed the live owners, the dashboard and the watcher. Close the dashboard
+through the tray **Exit** command and wait for `HasExited`; send Ctrl+C to the watcher's console as in
+the DNS section below and require exit 0; then require zero attribution sessions.
 
 ### DNS
 
@@ -1031,9 +1123,9 @@ if ($svcKill.ProcessId -ne $serviceProcess.Id -or
 Stop-Process -InputObject $serviceProcess -Force
 ```
 
-Wait for SCM to report Stopped, require the orphan, restart, require a new PID/session and absence of
-the old one, AuditOnly with empty WFP state, available IPC, and HTTP 200 through System32
-`curl.exe`. Then stop and uninstall:
+Wait for SCM to report Stopped, require the orphan, let the SCM recovery action restart the service,
+require a new PID/session and absence of the old one, AuditOnly with empty WFP state, available IPC,
+and HTTP 200 through System32 `curl.exe`. Then stop and uninstall:
 
 ```powershell
 $deadline = (Get-Date).AddSeconds(30)
@@ -1047,10 +1139,12 @@ if ((Get-WinSightEtwSessionNames) -notcontains $oldOutbound) {
     throw 'Expected outbound orphan is missing: run is inconclusive.'
 }
 
-Assert-CandidateFiles
-& $ScExe start WinSightFirewall
-if ($LASTEXITCODE -ne 0) { throw 'Restart service failed.' }
-$deadline = (Get-Date).AddSeconds(30)
+# Do not start it yourself. The service is installed with restart-on-failure recovery (the first
+# restart after 5 seconds), so the SCM brings it back on its own and that restart is part of what
+# this gate proves. An explicit `sc start` here raced it: whenever anything in between took longer
+# than 5 seconds, the SCM had already restarted the service and the start failed with
+# ERROR_SERVICE_ALREADY_RUNNING (1056), a harness failure on a product that had recovered.
+$deadline = (Get-Date).AddSeconds(90)
 do {
     $svcNew = Get-CimInstance Win32_Service -Filter "Name='WinSightFirewall'"
     if ($svcNew.State -eq 'Running' -and
@@ -1059,8 +1153,11 @@ do {
     Start-Sleep -Milliseconds 250
 } while ((Get-Date) -lt $deadline)
 if ($svcNew.State -ne 'Running' -or $svcNew.ProcessId -eq $serviceProcess.Id) {
-    throw 'Service not restarted under a new PID.'
+    throw 'The SCM recovery action did not restart the service under a new PID.'
 }
+Assert-CandidateFiles
+if ((Resolve-Path -LiteralPath (Get-Process -Id ([int]$svcNew.ProcessId) -ErrorAction Stop).Path).Path -cne
+    $canonicalServicePath) { throw 'The restarted service is not the candidate.' }
 Start-Sleep -Seconds 10
 $newOutbound = Get-WinSightEtwSessionForProcess `
     -Family Outbound -ProcessId ([int]$svcNew.ProcessId)

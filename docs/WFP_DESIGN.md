@@ -266,6 +266,15 @@ evidence.
   payload shape, canonical paths, enums and response invariants. v3 policy/pending listing is
   paged at no more than 128 entries per frame and bound to the complete snapshot digest/count;
   v1/v2 serve one complete page or fail explicitly.
+- `PendingOutboundLog` is a bounded 128-identity LRU observation window, not a first-arrival
+  allowlist. A new unresolved application always receives a slot and replaces the least recently
+  observed identity, so pre-filling the service cannot permanently hide every later application.
+  Re-observation refreshes recency in O(1), and evicted identities plus all observations aggregated
+  into them contribute to the status coverage-gap counter. During capacity pressure, service log
+  warnings are emitted only at cumulative power-of-two eviction thresholds (1, 2, 4, 8, ...),
+  preventing distinct-path floods from becoming an unbounded logging primitive. No bounded window
+  can retain every identity during an unbounded flood; the non-zero gap is therefore part of the
+  security result, not hidden bookkeeping.
 - `AuditOnlyFirewallEngine` remains a non-mutating library/test implementation. It is not a
   production service fallback: the coordinator requires `IWinSightWfpReconciler` and constructs
   it lazily only after a fresh trusted load requires exact reconciliation or owned cleanup.
@@ -273,8 +282,13 @@ evidence.
   store and engine. An unauthenticated caller only ever receives `Unauthorized`; store
   or engine faults collapse to `InternalFailure` with no exception text on the wire;
   and only the explicit, capability-gated `EnableEnforcement` command promotes the
-  persisted mode. `EmergencyDisable` always returns the machine to audit-only, even from
-  a corrupt store.
+  persisted mode. `EmergencyDisable` returns the machine to audit-only even from a store whose
+  *content* is corrupt. It does not from a store whose *storage* is no longer trusted (the policy
+  directory re-ACL'd, re-owned or replaced by a reparse point): the coordinator refuses before
+  cleanup, so the filters stay. Stopping the service is then the recovery path - WinSight's WFP
+  objects are dynamic and end with its engine session, and a start from untrusted storage applies
+  nothing (see [`RECOVERY.md`](RECOVERY.md)). Making emergency cleanup independent of storage
+  trust is a roadmap item that needs a dedicated design review and fresh VM qualification.
 - `FirewallConnectionHandler` serves one authenticated request/response exchange over
   any duplex stream, so the logic is tested without a pipe or elevation.
 - `NamedPipeFirewallServer` hosts the endpoint over a hardened local pipe.
@@ -299,6 +313,10 @@ evidence.
   IPC through a catch-all rule.
 - Verify the executable identity again in the privileged service; dashboard input
   is untrusted.
+- State what a block is: a filter on the application identity WFP derives from the executable
+  path. The same bytes at another path, a child process, or an allowed process carrying the
+  traffic are not matched. The operator-facing wording must not promise that a blocked program
+  "cannot reach the network" (see [`THREAT_MODEL.md`](THREAT_MODEL.md)).
 - Apply and remove filters in WFP transactions, under a single provider/sublayer,
   so rollback and uninstall are deterministic.
 - Own all production objects through one dynamic WFP session. Graceful stop disposes that session;

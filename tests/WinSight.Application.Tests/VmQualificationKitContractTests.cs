@@ -32,6 +32,46 @@ public sealed class VmQualificationKitContractTests
         Assert.Contains("protected-candidate.sha256", kit, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The dashboard became single-instance (WS-31) while the kit still launched two of them side by
+    /// side and stated that there was no single-instance mutex, so its attribution gate failed on the
+    /// product doing what it had been changed to do. The protocol now proves the hand-over, and keeps
+    /// live-session preservation against the other Attribution owner, the CLI watcher.
+    /// </summary>
+    [Fact]
+    public void KitDashboardAttributionFollowsTheSingleInstanceDashboard()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.DoesNotContain("no single-instance mutex", kit, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("single-instance per user and session", kit, StringComparison.Ordinal);
+        Assert.Contains("A second dashboard launch did not hand over and exit 0.", kit, StringComparison.Ordinal);
+        Assert.Contains("-ArgumentList @('attribution', '--watch')", kit, StringComparison.Ordinal);
+        Assert.Contains("-notcontains $watcherSession", kit, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The service is installed with restart-on-failure recovery, first restart after 5 seconds. The
+    /// kit killed it and then started it itself after a rehash of the candidate: when the rehash took
+    /// longer than the recovery delay, the SCM had already brought the service back and the explicit
+    /// start failed with ERROR_SERVICE_ALREADY_RUNNING, so a service that recovered was reported as
+    /// one that could not be restarted. The kit now waits for, and so proves, the SCM's own restart.
+    /// </summary>
+    [Fact]
+    public void KitLetsTheScmRecoveryActionRestartTheKilledService()
+    {
+        var kit = File.ReadAllText(Path.Combine(
+            RepositoryRoot, "docs", "validation", "VM_QUALIFICATION_KIT.md"));
+
+        Assert.DoesNotContain("throw 'Restart service failed.'", kit, StringComparison.Ordinal);
+        Assert.Contains(
+            "The SCM recovery action did not restart the service under a new PID.",
+            kit,
+            StringComparison.Ordinal);
+        Assert.Contains("The restarted service is not the candidate.", kit, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void KitUsesTheExactEtwModuleAndProvidesFinalAuditOnlyIpcLifecycle()
     {
@@ -65,12 +105,13 @@ public sealed class VmQualificationKitContractTests
         var script = File.ReadAllText(Path.Combine(
             RepositoryRoot, "scripts", "Test-IpcBoundary.ps1"));
 
+        // Resolved in the body, not as parameter defaults (ScriptParameterDefaultContractTests).
         Assert.Contains(
-            "[string]$CliPath = (Join-Path $PSScriptRoot 'winsight.exe')",
+            "if (-not $CliPath) { $CliPath = (Join-Path $PSScriptRoot 'winsight.exe') }",
             script,
             StringComparison.Ordinal);
         Assert.Contains(
-            "[string]$ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe')",
+            "if (-not $ServicePath) { $ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe') }",
             script,
             StringComparison.Ordinal);
         Assert.DoesNotContain(@"C:\Program Files\WinSight-VM", script, StringComparison.Ordinal);

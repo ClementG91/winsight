@@ -104,6 +104,34 @@ public sealed class CommandLineTests
         Assert.Contains(candidates, c => c.Contains(@"\Windows\", StringComparison.OrdinalIgnoreCase)
                                          || c.Contains(@":\", StringComparison.Ordinal));
     }
+
+    /// <summary>
+    /// No candidate may depend on the directory WinSight runs in. The raw token used to be probed
+    /// first as written, so the 3ware driver (<c>System32\drivers\3ware.sys</c>) read SignatureValid
+    /// from C:\Windows and Unsigned, with an image in a temporary folder, when the scan was started
+    /// from a folder holding a dummy file at that relative path.
+    /// </summary>
+    [Theory]
+    [InlineData(@"System32\drivers\3ware.sys")]
+    [InlineData(@"drivers\3ware.sys")]
+    [InlineData("3ware.sys")]
+    [InlineData(@"\SystemRoot\System32\drivers\3ware.sys")]
+    [InlineData(@"\Device\HarddiskVolume3\Windows\System32\drivers\3ware.sys")]
+    [InlineData(@"\??\GLOBALROOT\Device\HarddiskVolume3\x\3ware.sys")]
+    [InlineData(@"\??\UNC\server\share\3ware.sys")]
+    public void NtPathCandidates_NeverYieldAPathRelativeToTheWorkingDirectory(string input) =>
+        Assert.All(CommandLine.NtPathCandidates(input), candidate => Assert.True(Path.IsPathFullyQualified(candidate), candidate));
+
+    [Fact]
+    public void ARelativeDriverImageResolvesUnderTheWindowsDirectory()
+    {
+        var resolution = CommandLine.ResolveExecutable(@"System32\drivers\null.sys");
+
+        Assert.Equal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), @"System32\drivers\null.sys"),
+            resolution.ImagePath,
+            ignoreCase: true);
+    }
 }
 
 public sealed class WinlogonTests

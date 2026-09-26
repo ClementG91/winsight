@@ -38,6 +38,10 @@ does not request elevation. The installer adds Start-menu shortcuts, offers an
 optional desktop shortcut, and registers a normal Windows uninstaller. It does not
 change `PATH`, install a driver or enable firewall enforcement.
 
+The optional Explorer **Check signature with WinSight** command follows the selected installation
+scope: it is stored under the current user's Classes hive for a per-user install and under the
+machine Classes hive for an all-users install. The uninstaller removes it from that same hive.
+
 If you intend to use the optional outbound-firewall service, install for **all users**
 instead — the default per-user directory is user-writable, and the service refuses to
 register from it.

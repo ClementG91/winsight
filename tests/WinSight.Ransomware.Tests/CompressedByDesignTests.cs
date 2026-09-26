@@ -28,6 +28,10 @@ public sealed class CompressedByDesignTests
     [InlineData("Model.xltx")]
     [InlineData("Letter.dotx")]
     [InlineData("Theme.potx")]
+    [InlineData("Addin.xlam")]
+    [InlineData("Binary.xlsb")]
+    [InlineData("MacroTemplate.dotm")]
+    [InlineData("SlideShow.ppsm")]
     // Other containers that are compressed by design.
     [InlineData("Diagram.vsdx")]
     [InlineData("Stencil.vssx")]
@@ -35,6 +39,11 @@ public sealed class CompressedByDesignTests
     [InlineData("Archive.onepkg")]
     [InlineData("data.zst")]
     [InlineData("photo.avif")]
+    [InlineData("photo.tif")]
+    [InlineData("photo.jfif")]
+    [InlineData("video.m4v")]
+    [InlineData("video.wmv")]
+    [InlineData("package.msix")]
     [InlineData("track.opus")]
     public void ACompressedByDesignFormatIsNotScored(string path) =>
         Assert.False(RansomwareEntropySampler.ShouldSample(path));

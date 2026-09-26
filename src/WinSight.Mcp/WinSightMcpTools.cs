@@ -195,15 +195,26 @@ public sealed class WinSightMcpTools(
         // Goes through the same projector as the scanners, so the journal inherits the identical privacy
         // model — profile paths redacted unless the server was launched with sensitive evidence enabled.
         // "alerts" is dispatched by Adapters.Run but is deliberately absent from SnapshotCommands, which is
-        // why it is its own tool rather than a winsight_scan target: it is history, not a machine snapshot.
-        RunAndProjectAsync(
-            scanner: "alerts",
-            flaggedOnly: true,
+        // why it is its own tool rather than a winsight_scan target: it is history, not a machine snapshot,
+        // and it is read outside the single-scan gate so a running scan cannot refuse it.
+        ReadAlertsAndProjectAsync(includeEvidence, includeSensitive, maxItems, offset, cancellationToken);
+
+    private async Task<McpScanResult> ReadAlertsAndProjectAsync(
+        bool includeEvidence,
+        bool includeSensitive,
+        int maxItems,
+        int offset,
+        CancellationToken cancellationToken)
+    {
+        ValidateDisclosure(includeEvidence, includeSensitive, maxItems, offset);
+
+        return await ProjectAsync(
+            () => scans.ReadAlertsAsync(cancellationToken),
             includeEvidence,
             includeSensitive,
             maxItems,
-            offset,
-            cancellationToken);
+            offset).ConfigureAwait(false);
+    }
 
     [McpServerTool(
         Name = "winsight_outbound_firewall",

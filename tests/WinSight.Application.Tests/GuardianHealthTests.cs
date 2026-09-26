@@ -1,4 +1,5 @@
 using WinSight.Application;
+using WinSight.Core;
 using Xunit;
 
 namespace WinSight.Application.Tests;
@@ -67,10 +68,59 @@ public sealed class GuardianHealthTests
                 new InvalidOperationException("x"), DateTimeOffset.UtcNow),
             IsDegraded = true,
             UnlistedArrivals = 3,
+            RetryableFailurePending = true,
         };
         var line = GuardianHost.DiagnosticsLine(stuck);
         Assert.Equal("Guardian: 2 undelivered alert(s), automatic retries stopped; last fault Notification: InvalidOperationException; 3 arrival(s) reported but not kept in the in-app list", line);
         Assert.True(GuardianHost.CanRetry(stuck));
+    }
+
+    [Fact]
+    public void WatcherLossIsPartialAndVisibleWithoutOfferingAPointlessRetry()
+    {
+        var diagnostics = new WinSight.Persistence.PersistenceMonitorDiagnostics(
+            0, 0, 0, 0, false, false, false, null)
+        {
+            IsDegraded = true,
+            SourceLostObservations = 2,
+            SourceNotificationFailures = 1,
+        };
+
+        var health = GuardianHost.Health(true, false, (20, 20), diagnostics);
+        var line = GuardianHost.DiagnosticsLine(diagnostics);
+
+        Assert.Equal(ProtectionState.Partial, health.State);
+        Assert.Contains("2 watcher loss signal(s)", line);
+        Assert.Contains("1 source notification failure(s)", line);
+        Assert.False(GuardianHost.CanRetry(diagnostics));
+    }
+
+    [Fact]
+    public void GenericSensorCountersExposeArmingLossAndRecoveryInTheTooltip()
+    {
+        var diagnostics = new WinSight.Persistence.PersistenceMonitorDiagnostics(
+            0, 0, 0, 0, false, false, false, null)
+        {
+            IsDegraded = true,
+            SourceHealth = new SensorHealthSnapshot(
+                "Persistence",
+                SensorLifecycle.Running,
+                RequestedSources: 20,
+                ActiveSources: 19,
+                ObservedEvents: 42,
+                LostEvents: 3,
+                RecoveryAttempts: 2,
+                SuccessfulRecoveries: 1,
+                DeliveryFailures: 4),
+        };
+
+        var line = GuardianHost.DiagnosticsLine(diagnostics);
+
+        Assert.Contains("sensors 19/20", line);
+        Assert.Contains("observed 42", line);
+        Assert.Contains("lost 3", line);
+        Assert.Contains("recoveries 1/2", line);
+        Assert.Contains("delivery failures 4", line);
     }
 
     [Theory]

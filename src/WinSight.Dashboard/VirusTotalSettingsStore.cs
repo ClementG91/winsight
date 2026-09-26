@@ -42,18 +42,24 @@ public sealed class VirusTotalSettingsStore
     {
         try
         {
-            if (!File.Exists(_path))
+            using var lease = AutomaticFileAccess.TryAcquire(_path);
+            if (lease is null || lease.IsDirectory || lease.Length > MaximumProtectedKeyBytes)
             {
                 return null;
             }
 
-            if (new FileInfo(_path).Length > MaximumProtectedKeyBytes)
+            var protectedBytes = new byte[checked((int)lease.Length)];
+            using (var stream = lease.OpenRead(FileOptions.SequentialScan))
             {
+                stream.ReadExactly(protectedBytes);
+            }
+            if (!lease.IsCurrent())
+            {
+                CryptographicOperations.ZeroMemory(protectedBytes);
                 return null;
             }
-
-            var protectedBytes = File.ReadAllBytes(_path);
             var clearBytes = ProtectedData.Unprotect(protectedBytes, Entropy, DataProtectionScope.CurrentUser);
+            CryptographicOperations.ZeroMemory(protectedBytes);
             var key = Encoding.UTF8.GetString(clearBytes);
             CryptographicOperations.ZeroMemory(clearBytes);
             return IsPlausibleApiKey(key) ? key : null;
@@ -74,7 +80,6 @@ public sealed class VirusTotalSettingsStore
 
         var clearBytes = Encoding.UTF8.GetBytes(key);
         byte[]? protectedBytes = null;
-        var temporaryPath = _path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             protectedBytes = ProtectedData.Protect(clearBytes, Entropy, DataProtectionScope.CurrentUser);
@@ -82,19 +87,10 @@ public sealed class VirusTotalSettingsStore
             {
                 throw new CryptographicException("The protected VirusTotal key exceeds the safety limit.");
             }
-            Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-            using (var stream = new FileStream(
-                       temporaryPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       bufferSize: 4096,
-                       FileOptions.WriteThrough))
+            if (!AtomicFile.TryWrite(_path, protectedBytes))
             {
-                stream.Write(protectedBytes);
-                stream.Flush(flushToDisk: true);
+                throw new IOException("The protected VirusTotal key could not be written safely.");
             }
-            File.Move(temporaryPath, _path, overwrite: true);
         }
         finally
         {
@@ -103,24 +99,11 @@ public sealed class VirusTotalSettingsStore
             {
                 CryptographicOperations.ZeroMemory(protectedBytes);
             }
-            try
-            {
-                File.Delete(temporaryPath);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                // A stale temporary file contains only DPAPI-protected bytes.
-            }
         }
     }
 
     public void Clear()
-    {
-        if (File.Exists(_path))
-        {
-            File.Delete(_path);
-        }
-    }
+        => _ = AutomaticFileAccess.TryDeleteFile(_path);
 
     public void ApplyToCurrentProcess()
     {

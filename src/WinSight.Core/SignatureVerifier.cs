@@ -34,37 +34,44 @@ public sealed class SignatureVerifier : ISignatureVerifier
         {
             return SignatureVerdict.Missing;
         }
-        if (!AutomaticFileAccess.IsLocal(path))
+        using var lease = AutomaticFileAccess.TryAcquire(path);
+        if (lease is null)
+        {
+            return AutomaticFileAccess.IsLocal(path)
+                ? SignatureVerdict.Missing
+                : SignatureVerdict.Unknown;
+        }
+        if (lease.IsDirectory)
         {
             return SignatureVerdict.Unknown;
         }
-        if (!File.Exists(path))
-        {
-            return SignatureVerdict.Missing;
-        }
 
-        X509Certificate2 signer;
         try
         {
-            // Throws CryptographicException when the file carries no signature.
-            // X509CertificateLoader only accepts PEM/DER/PFX input and cannot
-            // extract a signer from a PE file. Keep the platform API until .NET
-            // exposes an equivalent signed-file loader.
-#pragma warning disable SYSLIB0057
-            using var embedded = new X509Certificate2(X509Certificate.CreateFromSignedFile(path));
-#pragma warning restore SYSLIB0057
-            signer = embedded;
+            using var stream = lease.OpenRead(FileOptions.RandomAccess);
+            using var signer = AuthenticodeCertificateReader.ReadSigner(stream);
+            if (signer is null)
+            {
+                return SignatureVerdict.Unknown;
+            }
 
             using var chain = new X509Chain();
             chain.ChainPolicy.RevocationMode =
                 _checkRevocation ? X509RevocationMode.Online : X509RevocationMode.NoCheck;
             var trusted = chain.Build(signer);
+            if (!lease.IsCurrent())
+            {
+                return SignatureVerdict.Unknown;
+            }
 
             return new SignatureVerdict(
                 trusted ? SignatureState.SignedTrusted : SignatureState.SignedUntrusted,
                 signer.Subject);
         }
-        catch (CryptographicException)
+        catch (Exception ex) when (ex is CryptographicException
+                                     or IOException
+                                     or UnauthorizedAccessException
+                                     or System.Security.SecurityException)
         {
             // No EMBEDDED signature, but this managed path cannot see catalog
             // signatures, so it genuinely cannot tell "unsigned" from "catalog-signed".

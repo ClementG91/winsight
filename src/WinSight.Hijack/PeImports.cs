@@ -1,6 +1,8 @@
 using System.Buffers.Binary;
 using System.Text;
 
+using WinSight.Core;
+
 namespace WinSight.Hijack;
 
 /// <summary>The modules a binary declares it needs, split by how the loader fetches them.</summary>
@@ -34,6 +36,17 @@ public sealed record PeImportSet(IReadOnlyList<string> Imports, IReadOnlyList<st
     /// parser already had in hand.
     /// </remarks>
     public bool? Is64Bit { get; init; }
+
+    /// <summary>
+    /// The side-by-side assemblies the image's manifest depends on: empty when it has no manifest or
+    /// declares none, null when that could not be established.
+    /// </summary>
+    /// <remarks>
+    /// Null is the default on purpose. Only a read that actually looked at the manifest may say
+    /// "binds nothing", because that answer turns a same-named file elsewhere in WinSxS into a
+    /// phantom import (RA-04).
+    /// </remarks>
+    public IReadOnlyList<SideBySideAssembly>? BoundAssemblies { get; init; }
 
     public bool IsEmpty => Imports.Count == 0 && DelayImports.Count == 0;
 }
@@ -87,12 +100,22 @@ public static class PeImports
     {
         try
         {
-            var file = new FileInfo(path);
-            if (!file.Exists || file.Length is 0 or > MaxImageBytes)
+            using var lease = AutomaticFileAccess.TryAcquire(path);
+            if (lease is null || lease.IsDirectory || lease.Length is 0 or > MaxImageBytes)
             {
                 return PeImportSet.Unreadable;
             }
-            return Read(File.ReadAllBytes(path));
+            var image = new byte[checked((int)lease.Length)];
+            using (var stream = lease.OpenRead(FileOptions.SequentialScan))
+            {
+                stream.ReadExactly(image);
+            }
+            if (!lease.IsCurrent())
+            {
+                return PeImportSet.Unreadable;
+            }
+            var imports = Read(image);
+            return imports.IsReadable ? imports with { BoundAssemblies = ManifestDependencies(image) } : imports;
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -102,6 +125,32 @@ public static class PeImports
             return PeImportSet.Unreadable;
         }
     }
+
+    /// <summary>
+    /// The dependencies declared by the image's embedded manifest, read from the bytes already in
+    /// hand: empty when it has none, null when it could not be read.
+    /// </summary>
+    /// <remarks>
+    /// Resource 1 is the manifest an executable's process runs with; resource 2 is a DLL's own. The
+    /// first one present decides.
+    /// </remarks>
+    internal static IReadOnlyList<SideBySideAssembly>? ManifestDependencies(byte[] image)
+    {
+        using var stream = new MemoryStream(image, writable: false);
+        foreach (var id in ManifestIds)
+        {
+            switch (PeResources.TryRead(stream, PeResources.ManifestType, id, SideBySideManifest.MaximumBytes, out var manifest))
+            {
+                case PeResourceStatus.Found:
+                    return SideBySideManifest.ReadDependencies(manifest);
+                case PeResourceStatus.Unreadable:
+                    return null;
+            }
+        }
+        return [];
+    }
+
+    private static readonly ushort[] ManifestIds = [1, 2];
 
     public static PeImportSet Read(ReadOnlySpan<byte> image)
     {

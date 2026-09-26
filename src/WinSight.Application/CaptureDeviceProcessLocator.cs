@@ -82,9 +82,13 @@ public sealed class CaptureDeviceProcessLocator
                 continue;
             }
             var identity = _inspector.Capture(candidate.Pid, hashImage: true);
-            if (identity is not null)
+            if (identity is not null
+                && string.Equals(
+                    identity.ImagePath,
+                    candidate.ImagePath,
+                    StringComparison.OrdinalIgnoreCase))
             {
-                matched.Add(new CaptureDeviceProcess(identity, candidate.ImagePath));
+                matched.Add(new CaptureDeviceProcess(identity, identity.ImagePath));
             }
         }
 

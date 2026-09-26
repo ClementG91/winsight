@@ -25,6 +25,25 @@ public sealed class PersistenceMonitorPresenterTests
 
 
 
+    /// <summary>
+    /// An arrival whose image cannot be resolved is named by its executable, never by its whole
+    /// command. The detail is journalled and served to MCP clients as prose, outside the gate that
+    /// withholds command lines, and the arguments are where a payload or a secret sits.
+    /// </summary>
+    [Fact]
+    public void AnUnresolvedArrivalIsNamedWithoutItsArguments()
+    {
+        const string command = "updater.exe --token=s3cr3t-value -enc SQBFAFgA";
+        var entry = new AutostartEntry(AutostartVector.RunKey, "Updater", "loc:Updater", command,
+            ImagePath: null, ExpectedImagePath: null, ImageResolutionStatus.Unresolved, SignatureVerdict.Unknown);
+
+        var detail = PersistenceMonitorPresenter.AlertDetail(Event(entry));
+
+        Assert.Contains("updater.exe", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("s3cr3t", detail, StringComparison.Ordinal);
+        Assert.DoesNotContain("SQBFAFgA", detail, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ASilencedArrivalIsStillRecordedNamingTheRuleAndItsRevoke()
     {

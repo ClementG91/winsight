@@ -20,6 +20,13 @@ public enum KernelDriverConcern
 
     /// <summary>A driver registration whose image file is not on disk.</summary>
     Missing,
+
+    /// <summary>
+    /// A registration whose image is named by something no local path reaches (a share, a device
+    /// or volume name), so it could not be verified. In-box and vendor drivers do not register
+    /// their images this way.
+    /// </summary>
+    Unresolvable,
 }
 
 /// <summary>
@@ -64,14 +71,15 @@ public enum KernelDriverConcern
 /// scan flags every driver Windows did not install, because that list is two lines long.
 /// This one is several hundred: every disk, display and network component registers a
 /// driver. A flagged view that answers with eighty rows teaches the operator to stop
-/// opening it, so only the two conditions that cannot be explained away survive it — an
-/// image whose signature does not stand up, and a registration whose image is gone.
+/// opening it, so only the conditions that cannot be explained away survive it — an
+/// image whose signature does not stand up, a registration whose image is gone, and one
+/// whose image is registered where nothing here can reach it.
 /// Signed third-party drivers stay in the full listing, where they are context.
 /// </remarks>
 public static class KernelDriverTriage
 {
     /// <summary>The certificate common name Windows signs its own in-box drivers with.</summary>
-    public const string WindowsSigningIdentity = "Microsoft Windows";
+    public const string WindowsSigningIdentity = WindowsImage.SigningIdentity;
 
     /// <summary>
     /// Whether Windows itself provides <paramref name="imagePath"/>: signed by the
@@ -79,24 +87,22 @@ public static class KernelDriverTriage
     /// <paramref name="systemDirectory"/>.
     /// </summary>
     /// <remarks>
-    /// The system directory is passed in rather than read from the environment so the
-    /// whole judgement stays pure and the near-miss cases can be tested. Callers supply
-    /// a fully-qualified path; no normalisation happens here.
+    /// The rule moved to <see cref="WindowsImage"/> when the input-filter scan needed to ask the
+    /// same question about the class drivers, which it had been answering from their names alone.
+    /// This forwards, so every caller and every test here is unchanged.
     /// </remarks>
-    public static bool IsWindowsProvided(string? imagePath, SignatureVerdict signature, string systemDirectory)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(systemDirectory);
-
-        return signature.State == SignatureState.SignedTrusted
-            && string.Equals(SignerCommonName(signature.Signer), WindowsSigningIdentity, StringComparison.OrdinalIgnoreCase)
-            && IsInside(imagePath, systemDirectory);
-    }
+    public static bool IsWindowsProvided(string? imagePath, SignatureVerdict signature, string systemDirectory) =>
+        WindowsImage.IsWindowsProvided(imagePath, signature, systemDirectory);
 
     /// <summary>What the driver means for the operator.</summary>
     public static KernelDriverConcern Concern(KernelDriver driver)
     {
         ArgumentNullException.ThrowIfNull(driver);
 
+        if (driver.ImageSource == DriverImageSource.Unresolvable)
+        {
+            return KernelDriverConcern.Unresolvable;
+        }
         if (driver.IsWindowsProvided)
         {
             return KernelDriverConcern.WindowsProvided;
@@ -108,13 +114,22 @@ public static class KernelDriverTriage
             // Unknown means verification could not run, which is not evidence against this driver.
             // The adapter separately raises the aggregate verification-coverage gap.
             SignatureState.Unknown => KernelDriverConcern.Unverified,
+            // Kernel code integrity never consults a user's root store: this chain validates only for
+            // the account running the scan, which could have installed its root without privilege.
+            _ when driver.Signature.RestsOnUserInstalledTrust => KernelDriverConcern.Untrusted,
             _ => KernelDriverConcern.ThirdParty,
         };
     }
 
     /// <summary>Whether a finding should survive the flagged-only filter.</summary>
+    /// <remarks>
+    /// An unresolvable image is notable although nothing was proven against it: it is the one way
+    /// a registration can keep its image out of reach of every check here, and legitimate drivers
+    /// have no reason to use it. Before it had its own answer it surfaced as a missing image - or,
+    /// when a same-named file existed in System32\drivers, as that file.
+    /// </remarks>
     public static bool IsNotable(KernelDriverConcern concern) =>
-        concern is KernelDriverConcern.Untrusted or KernelDriverConcern.Missing;
+        concern is KernelDriverConcern.Untrusted or KernelDriverConcern.Missing or KernelDriverConcern.Unresolvable;
 
     /// <summary>
     /// The common name from an X.500 certificate subject, or null when there is none.
@@ -126,50 +141,4 @@ public static class KernelDriverTriage
     /// </remarks>
     public static string? SignerCommonName(string? subject) =>
         CertificateSubject.CommonName(subject);
-
-    /// <summary>
-    /// Whether <paramref name="path"/> sits inside <paramref name="directory"/>. The
-    /// separator is part of the comparison, so <c>System32Extra</c> is not System32.
-    /// </summary>
-    /// <remarks>
-    /// <b>Both sides are resolved before they are compared.</b> A raw prefix test fails in both
-    /// directions, and one of them fails open: <c>C:\Windows\System32\..\..\Users\Public\evil.sys</c>
-    /// starts with the System32 prefix while demonstrably living in a user-writable folder, so a
-    /// Microsoft-signed driver loaded from there would be filed as one Windows ships and vanish from
-    /// the operator's view — which is precisely the bring-your-own-vulnerable-driver case this check
-    /// exists to keep visible. The other direction is quieter: <c>C:/Windows/System32/...</c> and
-    /// <c>C:\Windows\.\System32\...</c> name the same place and a literal comparison rejects both,
-    /// adding an in-box driver to a list several hundred rows long.
-    ///
-    /// <see cref="KernelDriverScanner"/> already calls <see cref="Path.GetFullPath(string)"/> before
-    /// reaching here, so nothing was exploitable through it. That made the rule safe by a caller's
-    /// habit rather than by its own construction, and this method is public.
-    ///
-    /// An unresolvable path answers <c>false</c>. Failing closed is right: a driver whose location
-    /// cannot be established must not be presented as shipped by Windows. It then falls through to
-    /// the signature-based verdict, where it is reported as context instead of hidden.
-    /// </remarks>
-    private static bool IsInside(string? path, string directory)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
-        string resolvedPath;
-        string root;
-        try
-        {
-            resolvedPath = Path.GetFullPath(path);
-            root = Path.GetFullPath(directory)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-                + Path.DirectorySeparatorChar;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return false;
-        }
-
-        return resolvedPath.StartsWith(root, StringComparison.OrdinalIgnoreCase);
-    }
 }

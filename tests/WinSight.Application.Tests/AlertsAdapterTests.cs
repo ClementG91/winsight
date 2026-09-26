@@ -31,11 +31,18 @@ public sealed class AlertsAdapterTests
     }
 
     [Fact]
-    public void Alerts_EveryEntryIsNotable_BecauseTheJournalOnlyHoldsThingsWorthInterrupting()
+    public void Alerts_EveryDetectionIsNotable_AndOnlyACoverageNoticeIsNot()
     {
+        // Everything in the journal is something WinSight considered worth interrupting for, except
+        // Guardian's coverage notice (RA-03), which records entries it cannot date.
         var report = Adapters.Alerts(max: 50);
 
-        Assert.All(report.Items, item => Assert.Equal(Severity.Notable, item.Severity));
+        Assert.All(report.Items, item => Assert.Equal(
+            item.Fields.GetValueOrDefault("kind") == GuardianHost.CoverageGainKind
+                && item.Fields.GetValueOrDefault("source") == "Guardian"
+                ? Severity.Unverified
+                : Severity.Notable,
+            item.Severity));
     }
 
     [Fact]

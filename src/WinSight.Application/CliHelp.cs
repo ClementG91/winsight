@@ -41,7 +41,7 @@ public static partial class CliHelp
           winsight [persistence|av|net|dns|all]   run checks (default: all)
           winsight firewall                       list Windows Firewall rules
           winsight processes                      running processes + signatures
-          winsight modules                        unsigned DLLs loaded into processes
+          winsight modules                        unsigned or user-root-signed DLLs in processes
           winsight extensions                     browser extensions + risky permissions
           winsight certs                          trusted root CAs + rogue-root signals
           winsight hosts                          hosts-file hijack / AV-block detection
@@ -52,6 +52,7 @@ public static partial class CliHelp
           winsight process <pid>                  one process: lineage, modules, connections
           winsight sign <path>                    one file: Authenticode standing + identification hashes
           winsight holders <path>                 which processes hold this file open
+          winsight alerts                         alert journal: Guardian, ransomware, camera/mic, newest first
           winsight actions                        response-action history (read-only), newest first
           winsight [suspend|resume|terminate] <pid>  act on a process (needs --confirm)
           winsight rules                          allow rules in force (read-only)
@@ -66,12 +67,17 @@ public static partial class CliHelp
         Options:
           --flagged     only noteworthy items
           --unsigned    only items whose file is unsigned or untrusted
-          --nonmicrosoft only items not signed by Microsoft
+          --nonmicrosoft only items not proven signed by Microsoft itself
           --json        machine-readable output (versioned envelope, schemaVersion 1)
           --no-network  never contact VirusTotal, whatever WINSIGHT_VT_KEY is set to
-          --confirm     required by every command that changes something
+          --confirm     required by every response command (process actions, restore, revoke)
           --version     print version
           --help, -h    show this help
+
+        Maintenance (run by setup and uninstall; act on this user only, without --confirm):
+          register-signature-verb     add "Check signature with WinSight" to File Explorer
+          unregister-signature-verb   remove that Explorer entry
+          remove-decoys               delete ransomware decoys whose content is still unchanged
 
         <<exit-codes>>
         """;

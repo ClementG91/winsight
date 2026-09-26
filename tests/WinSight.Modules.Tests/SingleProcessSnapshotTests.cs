@@ -35,7 +35,11 @@ public sealed class SingleProcessSnapshotTests
         var modules = new ModuleLister(new StubVerifier()).SnapshotFor(Environment.ProcessId);
 
         Assert.NotEmpty(modules);
-        Assert.All(modules, module => Assert.Equal(Environment.ProcessId, module.Pid));
+        Assert.All(modules, module =>
+        {
+            Assert.Equal(Environment.ProcessId, module.Pid);
+            Assert.NotNull(module.ProcessStartTimestampUtcTicks);
+        });
     }
 
     [Fact]

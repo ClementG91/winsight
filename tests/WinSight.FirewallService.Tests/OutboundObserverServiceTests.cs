@@ -2,9 +2,11 @@ using System.Collections.Concurrent;
 
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using WinSight.Core;
 using WinSight.Firewall;
 using WinSight.FirewallService;
 using WinSight.NetMonitor;
+
 using Xunit;
 
 namespace WinSight.FirewallService.Tests;
@@ -115,6 +117,18 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
         Assert.Equal(2, log.UnrecordedObservations);
     }
 
+    [Fact]
+    public void NativeEtwLossContributesToTheStatusCoverageCounter()
+    {
+        var log = new PendingOutboundLog();
+        var observer = Observer(log, watcher: new HealthWatcher(eventsLost: 7));
+
+        observer.OnConnection(Connection(@"C:\apps\unknown.exe", "1.2.3.4", 443));
+
+        Assert.Equal(7, log.LostEvents);
+        Assert.Equal(7, log.UnrecordedObservations);
+    }
+
     // The snapshot is reused for a few seconds so file IO stays off the trace callback path; a
     // decision taken meanwhile must still be picked up once it goes stale.
     [Fact]
@@ -190,6 +204,32 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
 
         var app = Assert.Single(log.Snapshot());
         Assert.Equal(5, app.Observations);
+    }
+
+    [Fact]
+    public void OnConnection_AggregatesCapacityPressureInsteadOfLoggingEveryFloodIdentity()
+    {
+        var log = new PendingOutboundLog();
+        for (var i = 0; i < PendingOutboundLog.MaxPendingApps; i++)
+        {
+            log.Observe($@"C:\poison\p{i}.exe", "1.2.3.4:443", DateTimeOffset.UtcNow);
+        }
+        var logger = new CapturingLogger<OutboundObserverService>();
+        var observer = Observer(log, logger: logger);
+
+        for (var i = 0; i < 10; i++)
+        {
+            observer.OnConnection(Connection($@"C:\flood\f{i}.exe", "5.6.7.8", 443));
+        }
+
+        var pressure = logger.Entries.Where(entry =>
+            entry.Message.Contains("[FW_OBSERVER_CAPACITY_PRESSURE]", StringComparison.Ordinal)).ToArray();
+        Assert.Equal(4, pressure.Length);
+        Assert.All(pressure, entry => Assert.Equal(LogLevel.Warning, entry.Level));
+        Assert.Contains("8 identities and 8 aggregated observations", pressure[^1].Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(logger.Entries, entry =>
+            entry.Message.Contains("[FW_OBSERVER_FIRST_SEEN]", StringComparison.Ordinal));
+        Assert.Equal(10, log.DroppedApps);
     }
 
     [Fact]
@@ -298,6 +338,25 @@ public sealed class OutboundObserverServiceTests : IAsyncLifetime
 
             Returned.Set();
         }
+    }
+
+    private sealed class HealthWatcher(long eventsLost) : IOutboundConnectionWatcher, ISensorHealthSource
+    {
+        public SensorHealthSnapshot SensorHealth => new(
+            "Outbound ETW",
+            SensorLifecycle.Running,
+            1,
+            1,
+            0,
+            eventsLost,
+            0,
+            0,
+            0);
+
+        public void Watch(
+            Action<OutboundConnectionEvent> onEvent,
+            Action<int, string?>? onUnattributed,
+            CancellationToken token) => token.WaitHandle.WaitOne();
     }
 
     private sealed class CapturingLogger<T> : ILogger<T>

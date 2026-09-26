@@ -74,11 +74,38 @@ public sealed class RansomwareEntropySamplerTests
     }
 
     [Fact]
-    public void LooksEncrypted_HighEntropyButCompressedByDesign_IsFalse()
+    public void LooksEncrypted_HighEntropyWithAValidContainerSignature_IsFalse()
     {
-        // Identical bytes to the .locked case, but named .zip: the extension gate must win, because
-        // a real .zip looks exactly like this and is entirely legitimate.
+        // A real compressed file is high entropy. Its signature is therefore the gate that keeps an
+        // ordinary archive save out of the ransomware burst counter.
         var path = Path.Combine(Path.GetTempPath(), $"wsg-ent-{Guid.NewGuid():N}.zip");
+        try
+        {
+            var data = new byte[2048];
+            for (var i = 0; i < data.Length; i++)
+            {
+                data[i] = (byte)(i % 256);
+            }
+            data[0] = 0x50;
+            data[1] = 0x4B;
+            data[2] = 0x03;
+            data[3] = 0x04;
+            File.WriteAllBytes(path, data);
+
+            Assert.False(RansomwareEntropySampler.LooksEncrypted(path));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void LooksEncrypted_HighEntropyWithDestroyedOfficeContainerSignature_IsTrue()
+    {
+        // The extension is unchanged, which was the old blind spot. The bytes are no longer an
+        // OOXML ZIP and are independently high entropy, so both gates agree before it is counted.
+        var path = Path.Combine(Path.GetTempPath(), $"wsg-ent-{Guid.NewGuid():N}.docx");
         try
         {
             var data = new byte[2048];
@@ -88,7 +115,7 @@ public sealed class RansomwareEntropySamplerTests
             }
             File.WriteAllBytes(path, data);
 
-            Assert.False(RansomwareEntropySampler.LooksEncrypted(path));
+            Assert.True(RansomwareEntropySampler.LooksEncrypted(path));
         }
         finally
         {

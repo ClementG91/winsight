@@ -12,10 +12,23 @@ remote clients or install a background MCP service.
 
 The MCP server never exposes a response action. Suspending a process, removing or disabling
 persistence, quarantining a file, or adding a firewall or trust rule are reachable only from the
-dashboard and CLI, never from a model: the MCP assembly does not even reference the response layer,
-and a contract test (`ResponseIsNotReachableFromMcpTests`) fails the build if that changes. All
-exposed tools are declared read-only, idempotent, non-destructive and
-closed-world. MCP never exposes process termination, file deletion, quarantine,
+dashboard and CLI, never from a model: the MCP assembly does not even reference the response layer.
+Two contract tests guard the rest. `ResponseIsNotReachableFromMcpTests` walks the IL of WinSight's
+own assemblies from every MCP method and fails if a known response mutator, or anything in the
+firewall service, is reachable. `McpSideEffectBoundaryTests` covers what a list of known mutators
+cannot - one added later, or a write made straight through the framework or a P/Invoke: it fails if
+MCP reaches a mutating framework API, one of WinSight's own file-writing primitives, or a native
+function nobody has reviewed; the framework writes it knows include file and directory changes,
+files and pipes opened by path, registry, services, processes, event logs, HTTP and sockets, and a
+canary proves each of those detectors fires. Four reviewed exceptions remain. The `process` tool may
+start `netstat.exe`, which only reads, when the native connection tables fail, and kills only that
+child on timeout. `winsight_outbound_firewall` writes its status and list requests to the firewall
+service's pipe, described below. The VirusTotal lookup and its quota file are present in the code
+MCP reaches but switched off at runtime by `allowNetworkLookups: false`, which the test pins at
+every MCP call site. These are targeted guards, not a proof: reflection with
+a computed name, native callbacks and the framework's own internals are outside what the walk sees.
+All exposed tools are declared read-only, idempotent, non-destructive and
+closed-world, and the test pins that list of six. MCP never exposes process termination, file deletion, quarantine,
 registry editing, firewall mutation or WFP policy changes. VirusTotal and every
 other network lookup are disabled inside MCP scans even when `WINSIGHT_VT_KEY` is
 present in the parent environment.
@@ -135,9 +148,20 @@ are advisory context a model may compress or lose behind a long conversation, wh
 selected by the user at the moment they ask and puts the rule in the same turn as the request.
 
 `includeEvidence=true` is required for item-level results. Evidence is capped at
-200 items per report, user-profile paths are replaced with environment placeholders,
-and command/command-line fields are omitted. Only one scan runs at a time and a scan
-has a 90-second safety limit.
+200 items per report, user-profile paths are replaced with environment placeholders -
+as whole paths only, so another account's `C:\Users\name2` is never turned into this
+user's placeholder plus a fragment of that name - and command/command-line fields are
+omitted. Only one scan runs at a time and a scan has a 90-second safety limit.
+`winsight_alerts` reads WinSight's own journal rather than scanning, so it is not queued
+behind a running scan; it has a bound of its own.
+
+That limit is a cooperative cancellation boundary, not a way for managed code to terminate an
+arbitrary Windows provider safely. WinSight cancels the actual scan and keeps the single-scan gate
+until its worker returns. If a WMI or native provider ignores cancellation, later requests fail fast
+with a specific stalled-scan error instead of waiting repeatedly or starting overlapping scans; the
+MCP child process may need to be restarted. A hard timeout with safe continuation requires moving
+scan execution into a disposable child process and is intentionally not claimed by the current
+in-process architecture.
 
 The gate withholds fields by name, so a finding's human-readable *detail* has to be built so it
 never carries a command line. Persistence details previously fell back to the raw command whenever

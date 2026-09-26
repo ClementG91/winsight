@@ -3,6 +3,7 @@ using WinSight.Core;
 using WinSight.Modules;
 using WinSight.NetMonitor;
 using WinSight.Processes;
+using WinSight.Reporting;
 
 using Xunit;
 
@@ -21,20 +22,41 @@ namespace WinSight.Application.Tests;
 /// </remarks>
 public sealed class ProcessInsightTests
 {
+    private const long StartBase = 638_900_000_000_000_000;
     private static readonly SignatureVerdict Trusted = new(SignatureState.SignedTrusted, "CN=Contoso");
     private static readonly SignatureVerdict Unsigned = SignatureVerdict.Unsigned;
 
     private static ProcessInfo Process(
-        int pid, string name = "app.exe", int parentPid = 100, SignatureVerdict? signature = null) =>
-        new(pid, name, $@"C:\Program Files\App\{name}", parentPid, $"{name} --run", signature ?? Trusted);
+        int pid,
+        string name = "app.exe",
+        int parentPid = 100,
+        SignatureVerdict? signature = null,
+        long? startTimestampUtcTicks = null) =>
+        new(pid, name, $@"C:\Program Files\App\{name}", parentPid, $"{name} --run", signature ?? Trusted)
+        {
+            StartTimestampUtcTicks = startTimestampUtcTicks ?? StartBase + pid,
+        };
 
     private static LoadedModule Module(
-        int pid, string name, SignatureVerdict? signature = null, string? path = null) =>
-        new(pid, "app.exe", name, path ?? $@"C:\Windows\System32\{name}", signature ?? Trusted);
+        int pid,
+        string name,
+        SignatureVerdict? signature = null,
+        string? path = null,
+        long? processStartTimestampUtcTicks = null) =>
+        new(pid, "app.exe", name, path ?? $@"C:\Windows\System32\{name}", signature ?? Trusted)
+        {
+            ProcessStartTimestampUtcTicks = processStartTimestampUtcTicks ?? StartBase + pid,
+        };
 
     private static Connection Conn(
-        int pid, string remote = "93.184.216.34:443", string state = "ESTABLISHED") =>
-        new("TCP", "10.0.0.5:51000", remote, state, pid, "app.exe", @"C:\Program Files\App\app.exe", Trusted);
+        int pid,
+        string remote = "93.184.216.34:443",
+        string state = "ESTABLISHED",
+        long? processStartTimestampUtcTicks = null) =>
+        new("TCP", "10.0.0.5:51000", remote, state, pid, "app.exe", @"C:\Program Files\App\app.exe", Trusted)
+        {
+            ProcessStartTimestampUtcTicks = processStartTimestampUtcTicks ?? StartBase + pid,
+        };
 
     // ---- Identity: a missing process is not an empty one -------------------------------------
 
@@ -221,6 +243,30 @@ public sealed class ProcessInsightTests
         Assert.True(insight!.IsNotable);
     }
 
+    /// <summary>
+    /// A signature valid only through a root the user could have installed is flagged in the
+    /// process and module scans, so the drill-down opened from them must agree and name it.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TrustThatRestsOnAUserInstalledRootMakesTheProcessNotable(bool onTheImage)
+    {
+        var userRoot = new SignatureVerdict(
+            SignatureState.SignedTrusted, "CN=Microsoft Windows", SignatureTrustAnchor.UserInstalledRoot);
+        var insight = ProcessInsightBuilder.Build(
+            4242,
+            [Process(4242, signature: onTheImage ? userRoot : Trusted)],
+            onTheImage ? [] : [Module(4242, "implant.dll", userRoot, @"C:\Users\me\AppData\Local\implant.dll")],
+            []);
+
+        Assert.True(insight!.IsNotable);
+        Assert.Equal(onTheImage ? 0 : 1, insight.UserRootModuleCount);
+        var report = ProcessInsightReport.Render(4242, insight);
+        Assert.Contains(report.Items, item =>
+            item.Severity == Severity.Notable && item.Detail.Contains("user-installed root", StringComparison.Ordinal));
+    }
+
     // ---- Robustness: the snapshots are taken at different moments ------------------------------
 
     /// <summary>
@@ -239,6 +285,57 @@ public sealed class ProcessInsightTests
             4242, [], [Module(4242, "orphan.dll")], [Conn(4242)]);
 
         Assert.Null(insight);
+    }
+
+    [Fact]
+    public void ReusedPidRowsFromOlderSnapshotsAreNotAttributedToTheCurrentProcess()
+    {
+        var currentStart = StartBase + 10_000;
+        var oldStart = currentStart - 1;
+        var insight = ProcessInsightBuilder.Build(
+            4242,
+            [Process(4242, startTimestampUtcTicks: currentStart)],
+            [Module(4242, "old.dll", processStartTimestampUtcTicks: oldStart)],
+            [Conn(4242, processStartTimestampUtcTicks: oldStart)]);
+
+        Assert.NotNull(insight);
+        Assert.Empty(insight.Modules);
+        Assert.Empty(insight.Connections);
+    }
+
+    [Fact]
+    public void RowsWithoutCreationTimeEvidenceAreNotJoinedByPidAlone()
+    {
+        var process = Process(4242) with { StartTimestampUtcTicks = null };
+        var module = Module(4242, "unknown.dll") with { ProcessStartTimestampUtcTicks = null };
+        var connection = Conn(4242) with { ProcessStartTimestampUtcTicks = null };
+
+        var insight = ProcessInsightBuilder.Build(4242, [process], [module], [connection]);
+
+        Assert.NotNull(insight);
+        Assert.Empty(insight.Modules);
+        Assert.Empty(insight.Connections);
+    }
+
+    [Fact]
+    public void RecycledParentAndImpossibleOlderChildAreNotJoinedByPidAlone()
+    {
+        var targetStart = StartBase + 10_000;
+        var insight = ProcessInsightBuilder.Build(
+            4242,
+            [
+                Process(4242, parentPid: 100, startTimestampUtcTicks: targetStart),
+                Process(100, "recycled-parent.exe", parentPid: 4,
+                    startTimestampUtcTicks: targetStart + 1),
+                Process(5001, "impossible-child.exe", parentPid: 4242,
+                    startTimestampUtcTicks: targetStart - 1),
+            ],
+            [],
+            []);
+
+        Assert.NotNull(insight);
+        Assert.Null(insight.Parent);
+        Assert.Empty(insight.Children);
     }
 
     [Fact]

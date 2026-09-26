@@ -1,5 +1,3 @@
-using System.Security.Principal;
-
 using WinSight.Core;
 
 namespace WinSight.Hijack;
@@ -13,43 +11,47 @@ public interface IWritabilityProbe
     /// accusation.
     /// </summary>
     bool CanCreate(string path);
+
+    /// <summary>
+    /// True when the directory <paramref name="path"/>, which does not exist, could be created by an
+    /// unprivileged principal in its (existing) parent. False when it could not or when that cannot
+    /// be determined.
+    /// </summary>
+    /// <remarks>
+    /// Not the same question as <see cref="CanCreate"/> asked about a file in the same parent:
+    /// Windows grants creating a subdirectory and creating a file separately, and the system drive
+    /// root grants a standard user the first without the second. The default answer defers to
+    /// <see cref="CanCreate"/> for probes that cannot tell the two apart.
+    /// </remarks>
+    bool CanCreateDirectory(string path) => CanCreate(path);
 }
 
 /// <summary>Optional coverage exposed by probes that can distinguish denial from I/O failure.</summary>
 public interface IWritabilityProbeCoverage
 {
     int UnreadableAttempts { get; }
+
+    /// <summary>
+    /// True when at least one answer came from the well-known-group DACL model rather than from
+    /// <c>AccessCheck</c> with a non-elevated token (see <see cref="WriteAccessEvaluation"/>).
+    /// </summary>
+    bool UsedWellKnownPrincipals => false;
 }
 
 /// <summary>
-/// Answers the writability question by asking the filesystem when the answer would be about an
-/// unprivileged principal anyway, and by reading the directory's ACL when it would not.
+/// Answers the writability question by asking Windows, through <see cref="UnprivilegedWriteAccess"/>,
+/// whether the current user without elevation could create the object - without creating anything.
 /// </summary>
 /// <remarks>
-/// <b>Why a real attempt, in a normal session.</b> Effective access on Windows is the sum of
-/// inherited allow and deny entries across every group the account belongs to, plus privileges that
-/// override both. Reconstructing that from the security descriptor is where this kind of check
-/// quietly gets it wrong, and a wrong answer here is a false accusation against an installed
-/// program — or worse, a missed hijack reported as safe. Creating the file and immediately deleting
-/// it answers the exact question being asked.
+/// <b>It writes nothing.</b> It used to answer by creating and deleting a probe file in every
+/// directory it graded - <c>C:\</c>, <c>Program Files</c>, each auto-start service's directory and
+/// each machine PATH entry - and answered for the current token, so an elevated run needed a second,
+/// different method. <c>AccessCheck</c> over the directory's security descriptor with the
+/// non-elevated token asks the same question of the same evaluator Windows uses, from both sessions,
+/// and leaves no trace for endpoint protection to notice.
 ///
-/// <b>Why not when elevated.</b> That method answers for <i>the current token</i>, and the interface
-/// asks about an unprivileged one. Run as administrator — the mode WinSight itself recommends for
-/// attribution and for scheduled tasks — the attempt succeeds in <c>C:\</c>, in
-/// <c>C:\Program Files</c>, in <c>System32</c> and in every machine PATH entry. Every unquoted
-/// service path graded Exploitable, every service directory writable, every PATH entry reported: a
-/// tool that declares the whole machine vulnerable the moment you give it more privilege loses its
-/// credibility in one run, and the measurement the design rests on ("18 PATH entries and 88
-/// services, none writable") was only ever taken unelevated.
-///
-/// So elevation is detected, and an elevated session evaluates the DACL against the well-known
-/// unprivileged principals instead — see <see cref="UnprivilegedWriteAccess"/>. Both paths refuse
-/// to claim a grant they cannot prove.
-///
-/// <b>It never overwrites anything.</b> <see cref="FileMode.CreateNew"/> fails when the path
-/// already exists, so an existing candidate is reported as not-creatable rather than being touched.
-/// That is the honest answer too: if <c>C:\Program.exe</c> already exists, the interesting finding
-/// is that it exists at all, which the caller reports separately.
+/// <b>It never reports an existing object as plantable.</b> If <c>C:\Program.exe</c> already exists,
+/// the interesting finding is that it exists at all, which the caller reports separately.
 /// </remarks>
 public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCoverage
 {
@@ -61,7 +63,8 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
     /// Whether the attempt failed for a reason that is not proof either way, so the caller's
     /// coverage count still rises on every question asked about this directory.
     /// </param>
-    private readonly record struct DirectoryVerdict(bool CanCreate, bool Unreadable);
+    private readonly record struct DirectoryVerdict(
+        bool CanCreate, bool Unreadable, WriteAccessEvaluation Evaluation);
 
     /// <summary>
     /// Answers already established, keyed by directory.
@@ -69,12 +72,10 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
     /// <remarks>
     /// <b>Why this is safe and why it matters.</b> The question is a property of the directory, not
     /// of the file name: the caller has already established that the candidate itself does not
-    /// exist, and after that only the directory decides. Without the memo, one hijack scan created
-    /// and deleted a real file in <c>System32</c>, in every machine PATH entry, and in each of ~88
-    /// service directories - repeatedly, because a service with an unquoted path asks about several
-    /// candidates in the same folder, and the PATH sweep asks about every entry again. A security
-    /// tool that writes to Program Files a few hundred times per scan is doing more I/O than the
-    /// scan it is performing, and every one of those writes is a chance to leave litter behind.
+    /// exist, and after that only the directory decides. A service with an unquoted path asks about
+    /// several candidates in the same folder, the PATH sweep asks about every entry again, and the
+    /// phantom-import check asks about each directory of ~90 search orders; without the memo each of
+    /// those questions reread the descriptor and reran the access check.
     ///
     /// The memo lives on the instance, which is one scan. Caching across scans would answer today's
     /// question with yesterday's ACL, which is the kind of staleness this tool exists to catch.
@@ -82,21 +83,28 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
     private readonly Dictionary<string, DirectoryVerdict> _byDirectory =
         new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>The same memo for "could a subdirectory be created here", a separate right.</summary>
+    private readonly Dictionary<string, DirectoryVerdict> _subdirectoryByDirectory =
+        new(StringComparer.OrdinalIgnoreCase);
+
     private readonly Lock _gate = new();
-    private readonly bool _elevated;
     private int _unreadableAttempts;
+    private int _wellKnownPrincipalAnswers;
 
     /// <param name="elevated">
-    /// Overrides the elevation detection. Tests use it to exercise both paths on one machine;
-    /// production leaves it null and the current process token decides.
+    /// Kept for source compatibility and ignored: both sessions now ask Windows the same question
+    /// with the non-elevated token, so there is no longer a per-elevation method to select.
     /// </param>
-    public WritabilityProbe(bool? elevated = null) => _elevated = elevated ?? IsProcessElevated();
+    public WritabilityProbe(bool? elevated = null) => _ = elevated;
 
     public int UnreadableAttempts => Volatile.Read(ref _unreadableAttempts);
 
-    /// <summary>True when this probe is reading ACLs because a real attempt would answer for a
-    /// privileged token. Reported so the operator knows which method produced the grading.</summary>
-    public bool UsesEffectiveAccessEvaluation => _elevated;
+    /// <inheritdoc />
+    public bool UsedWellKnownPrincipals => Volatile.Read(ref _wellKnownPrincipalAnswers) > 0;
+
+    /// <summary>True while every answer so far came from <c>AccessCheck</c> with a non-elevated
+    /// token. Reported so the operator knows which method produced the grading.</summary>
+    public bool UsesEffectiveAccessEvaluation => !UsedWellKnownPrincipals;
 
     public bool CanCreate(string path)
     {
@@ -107,8 +115,7 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
 
         var directory = Path.GetDirectoryName(path);
         if (string.IsNullOrEmpty(directory)
-            || !AutomaticFileAccess.IsLocal(directory)
-            || !Directory.Exists(directory))
+            || !AutomaticFileAccess.DirectoryExists(directory))
         {
             // No directory to plant into means nothing to plant. A missing parent is not a finding:
             // creating it would itself require write access further up, which is a different path
@@ -118,12 +125,40 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
 
         // An existing candidate is never touched, whichever method answers: the caller reports its
         // existence separately and planting over it would destroy a real file.
-        if (File.Exists(path))
+        if (AutomaticFileAccess.FileExists(path)
+            || AutomaticFileAccess.DirectoryExists(path)
+            || !AutomaticFileAccess.IsLocal(path))
         {
             return false;
         }
 
-        return Ask(directory);
+        return Ask(directory, PlantedObject.File);
+    }
+
+    public bool CanCreateDirectory(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        var parent = Path.GetDirectoryName(path.TrimEnd('\\', '/'));
+        if (string.IsNullOrEmpty(parent)
+            || !AutomaticFileAccess.DirectoryExists(parent))
+        {
+            return false;
+        }
+
+        // Something already there - a directory or a file of that name - is never touched, and is
+        // not something anybody can create.
+        if (AutomaticFileAccess.DirectoryExists(path)
+            || AutomaticFileAccess.FileExists(path)
+            || !AutomaticFileAccess.IsLocal(path))
+        {
+            return false;
+        }
+
+        return Ask(parent, PlantedObject.Directory);
     }
 
     /// <summary>
@@ -131,17 +166,21 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
     /// question rather than per directory, so the coverage figure the caller reports keeps meaning
     /// "questions I could not answer" and not "directories I could not read".
     /// </summary>
-    private bool Ask(string directory)
+    private bool Ask(string directory, PlantedObject planted)
     {
+        var memo = planted == PlantedObject.Directory ? _subdirectoryByDirectory : _byDirectory;
         DirectoryVerdict verdict;
         lock (_gate)
         {
-            if (!_byDirectory.TryGetValue(directory, out verdict))
+            if (!memo.TryGetValue(directory, out verdict))
             {
-                verdict = _elevated
-                    ? new DirectoryVerdict(UnprivilegedWriteAccess.IsGrantedIn(directory), false)
-                    : TryCreate(directory);
-                _byDirectory[directory] = verdict;
+                var readable = UnprivilegedWriteAccess.TryIsGrantedIn(
+                    directory,
+                    planted,
+                    out var granted,
+                    out var evaluation);
+                verdict = new DirectoryVerdict(granted, Unreadable: !readable, evaluation);
+                memo[directory] = verdict;
                 return Report(verdict);
             }
         }
@@ -154,63 +193,11 @@ public sealed class WritabilityProbe : IWritabilityProbe, IWritabilityProbeCover
         {
             Interlocked.Increment(ref _unreadableAttempts);
         }
+        else if (verdict.Evaluation == WriteAccessEvaluation.WellKnownPrincipals)
+        {
+            Interlocked.Increment(ref _wellKnownPrincipalAnswers);
+        }
         return verdict.CanCreate;
     }
 
-    private static DirectoryVerdict TryCreate(string directory)
-    {
-        // A distinct name, so a real candidate is never created and never deleted by this check.
-        var probe = Path.Combine(directory, $".winsight-writability-{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1,
-                       FileOptions.DeleteOnClose))
-            {
-            }
-            return new DirectoryVerdict(CanCreate: true, Unreadable: false);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            return new DirectoryVerdict(CanCreate: false, Unreadable: false);
-        }
-        catch (Exception ex) when (ex is IOException or NotSupportedException)
-        {
-            // This is not proof of non-writability (the volume may be unavailable or the path
-            // syntax unsupported). Keep the conservative false answer, but expose the blind spot.
-            return new DirectoryVerdict(CanCreate: false, Unreadable: true);
-        }
-        finally
-        {
-            // DeleteOnClose normally handles this; the sweep is for the case where the handle was
-            // closed abnormally. A security tool must not leave litter in Program Files.
-            try
-            {
-                if (File.Exists(probe))
-                {
-                    File.Delete(probe);
-                }
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-            }
-        }
-    }
-
-    private static bool IsProcessElevated()
-    {
-        try
-        {
-            using var identity = WindowsIdentity.GetCurrent();
-            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or PlatformNotSupportedException)
-        {
-            // Unknown elevation is treated as elevated: the ACL path never claims a grant it cannot
-            // prove, whereas a real attempt under an unknown token might claim one it should not.
-            return true;
-        }
-    }
 }

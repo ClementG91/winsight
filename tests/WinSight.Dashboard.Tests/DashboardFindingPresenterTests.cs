@@ -127,8 +127,185 @@ public sealed class DashboardFindingPresenterTests
     {
         WithCulture(culture, text =>
         {
-            var item = Item(Severity.Notable, new() { ["isSink"] = "False" });
+            var item = Item(Severity.Notable, new()
+            {
+                ["hostname"] = "login.mybank.example",
+                ["ip"] = "203.0.113.66",
+                ["isSink"] = "False",
+            });
             Assert.StartsWith(expected, DashboardFindingPresenter.Present("hosts", item, text).Detail);
+        });
+    }
+
+    /// <summary>
+    /// A row flagged beside a valid signature must say why in every presenter. The dashboard
+    /// rebuilds lines from fields, and the reason - a chain valid only through a user-installed root -
+    /// used to vanish, leaving "Signature valid" next to a [!] mark, or a bare path.
+    /// </summary>
+    [Theory]
+    [InlineData("en", "valid ONLY through a user-installed root")]
+    [InlineData("fr", "valide UNIQUEMENT grâce à une racine installée")]
+    [InlineData("es", "válida SOLO gracias a una raíz instalada")]
+    public void AFlaggedValidSignatureSaysWhyInEveryPresenter(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var trust = new Dictionary<string, string?>
+            {
+                ["signature"] = "SignedTrusted",
+                ["signer"] = "CN=Microsoft Windows",
+                ["userInstalledTrust"] = "true",
+            };
+            var rows = new (string Tool, Dictionary<string, string?> Fields)[]
+            {
+                ("persistence", new(trust) { ["status"] = "SignatureValid", ["image"] = @"C:\x.dll", ["vector"] = "RunKey", ["name"] = "x" }),
+                ("processes", new(trust) { ["name"] = "x.exe", ["pid"] = "7", ["path"] = @"C:\x.exe" }),
+                ("modules", new(trust) { ["process"] = "app", ["pid"] = "7", ["module"] = "x.dll", ["path"] = @"C:\x.dll" }),
+                ("connections", new(trust) { ["process"] = "x.exe", ["pid"] = "7", ["state"] = "ESTABLISHED" }),
+                ("drivers", new(trust) { ["name"] = "x", ["concern"] = "Untrusted", ["image"] = @"C:\x.sys" }),
+                ("input", new(trust) { ["name"] = "x", ["concern"] = "Untrusted", ["image"] = @"C:\x.sys" }),
+            };
+
+            foreach (var (tool, fields) in rows)
+            {
+                var detail = DashboardFindingPresenter.Present(tool, Item(Severity.Notable, fields), text).Detail;
+                Assert.Contains(expected, detail, StringComparison.Ordinal);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "third-party code loaded into a privileged process")]
+    [InlineData("fr", "code tiers chargé dans un processus privilégié")]
+    [InlineData("es", "código de terceros cargado en un proceso con privilegios")]
+    public void ForeignCodeInAPrivilegedHostSaysSoBesideAValidSignature(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["status"] = "SignatureValid",
+                ["image"] = @"C:\Program Files\Vendor\auth.dll",
+                ["vector"] = "LsaPackage",
+                ["name"] = "auth",
+                ["privilegedHost"] = "LsaPackage",
+            });
+
+            var detail = DashboardFindingPresenter.Present("persistence", item, text).Detail;
+
+            Assert.Contains(text["PersistenceStatusSignatureValid"], detail, StringComparison.Ordinal);
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// The user-only fact had no field, so a flagged user-installed root fell back to the English
+    /// report text; a user-only trusted publisher is new (WS-55).
+    /// </summary>
+    [Theory]
+    [InlineData("en", "Root", "trusted for this user only: a root any program can install without elevation")]
+    [InlineData("fr", "Root", "approuvée pour cet utilisateur seulement : une racine que tout programme peut installer sans élévation")]
+    [InlineData("es", "TrustedPublisher", "editor de confianza solo para este usuario: cualquier programa puede añadir uno sin elevación")]
+    [InlineData("fr", "TrustedPublisher", "éditeur approuvé pour cet utilisateur seulement : tout programme peut en ajouter un sans élévation")]
+    public void AUserOnlyCertificateSaysSoInTheOperatorsLanguage(string culture, string role, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["role"] = role,
+                ["userInstalled"] = "true",
+                ["hasPrivateKey"] = "False",
+                ["isSelfSigned"] = "True",
+                ["signatureAlgorithm"] = "sha256RSA",
+                ["keyBits"] = "4096",
+                ["isRsa"] = "True",
+            });
+
+            Assert.Equal(expected, DashboardFindingPresenter.Present("certificates", item, text).Detail);
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "replaces the machine's COM class with another program")]
+    [InlineData("fr", "remplace la classe COM de la machine par un autre programme")]
+    [InlineData("es", "sustituye la clase COM del equipo por otro programa")]
+    public void AComClassOverrideSaysSoBesideAValidSignature(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["status"] = "SignatureValid",
+                ["image"] = @"C:\Users\me\AppData\Roaming\helper.dll",
+                ["vector"] = "ComHijack",
+                ["name"] = "{11111111-1111-1111-1111-111111111111} [InprocServer32]",
+                ["overridesMachineClass"] = "true",
+            });
+
+            var detail = DashboardFindingPresenter.Present("persistence", item, text).Detail;
+
+            Assert.Contains(text["PersistenceStatusSignatureValid"], detail, StringComparison.Ordinal);
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// The cache snapshot says nothing about where an answer came from, and every record used to
+    /// read "resolved over the network".
+    /// </summary>
+    [Theory]
+    [InlineData("en", "in the resolver cache")]
+    [InlineData("fr", "dans le cache du résolveur")]
+    [InlineData("es", "en la caché del resolvedor")]
+    public void ACacheRecordIsNotClaimedToHaveComeFromTheNetwork(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Info, new()
+            {
+                ["name"] = "example.invalid",
+                ["type"] = "A",
+                ["data"] = "203.0.113.7",
+                ["ttl"] = "300",
+            });
+
+            var detail = DashboardFindingPresenter.Present("dns", item, text).Detail;
+
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+            Assert.DoesNotContain(text["DnsFromNetwork"], detail, StringComparison.Ordinal);
+        });
+    }
+
+    /// <summary>
+    /// A row about the hosts file itself is not a mapping. It used to fall into the redirect branch
+    /// and read "redirects a hostname to an external address" - for an unreadable file, malformed
+    /// records, or a relocated database.
+    /// </summary>
+    [Theory]
+    [InlineData("en", "hostsUnreadable", "exists but access was denied")]
+    [InlineData("fr", "hostsUnreadable", "l’accès a été refusé")]
+    [InlineData("en", "acquisitionCoverage", "could not be interpreted")]
+    [InlineData("es", "acquisitionCoverage", "no se pudieron interpretar")]
+    [InlineData("en", "hostsLocation", "DataBasePath points Windows at")]
+    [InlineData("fr", "hostsLocation", "DataBasePath dirige Windows vers")]
+    [InlineData("en", "hostsLocationUnverified", "the standard location")]
+    public void AHostsFileRowIsNeverPresentedAsARedirect(string culture, string kind, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var item = Item(Severity.Notable, new()
+            {
+                ["kind"] = kind,
+                ["path"] = @"D:\relocated\hosts",
+                ["standardPath"] = @"C:\Windows\System32\drivers\etc\hosts",
+                ["malformedLines"] = "3",
+            });
+
+            var detail = DashboardFindingPresenter.Present("hosts", item, text).Detail;
+
+            Assert.Contains(expected, detail, StringComparison.Ordinal);
+            Assert.DoesNotContain(text["HostExternalRedirect"], detail, StringComparison.Ordinal);
         });
     }
 
@@ -596,6 +773,31 @@ public sealed class DashboardFindingPresenterTests
                 Assert.False(string.IsNullOrWhiteSpace(result.Detail));
                 Assert.DoesNotContain("[UnknownValue]", result.Detail, StringComparison.Ordinal);
             }
+        });
+    }
+
+    [Theory]
+    [InlineData("en", "loaded from a folder")]
+    [InlineData("fr", "chargée depuis un dossier")]
+    [InlineData("es", "cargada desde una carpeta")]
+    public void AnExtensionLoadedFromAFolderSaysSoInTheOperatorsLanguage(string culture, string expected)
+    {
+        WithCulture(culture, text =>
+        {
+            var unpacked = DashboardFindingPresenter.Present("extensions", Item(Severity.Notable, new()
+            {
+                ["permissions"] = "storage",
+                ["location"] = "Unpacked",
+            }), text);
+            var installed = DashboardFindingPresenter.Present("extensions", Item(Severity.Info, new()
+            {
+                ["permissions"] = "storage",
+                ["location"] = "Profile",
+            }), text);
+
+            Assert.StartsWith(expected, unpacked.Detail, StringComparison.Ordinal);
+            Assert.EndsWith("storage", unpacked.Detail, StringComparison.Ordinal);
+            Assert.Equal("storage", installed.Detail);
         });
     }
 

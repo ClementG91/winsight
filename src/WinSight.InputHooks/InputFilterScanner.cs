@@ -55,40 +55,47 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
             }
         }
 
-        var resolved = new List<(InputStack Stack, FilterPosition Position, string Name, string? Path)>();
+        var resolved = new List<(InputStack Stack, FilterPosition Position, string Name, ResolvedDriver Driver)>();
         var unreadableItems = 0;
         foreach (var (stack, position, name) in found)
         {
-            var (path, unreadable) = ResolveDriverPath(name);
-            if (unreadable)
+            var driver = ResolveDriverPath(name);
+            if (driver.Unreadable)
             {
                 unreadableItems++;
             }
-            resolved.Add((stack, position, name, path));
+            resolved.Add((stack, position, name, driver));
         }
 
         var paths = resolved
-            .Where(entry => entry.Path is not null)
-            .Select(entry => entry.Path!)
+            .Where(entry => entry.Driver.Path is not null)
+            .Select(entry => entry.Driver.Path!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var verdicts = paths.Length == 0
             ? new Dictionary<string, SignatureVerdict>(StringComparer.OrdinalIgnoreCase)
             : _verifier.VerifyMany(paths, cancellationToken);
 
+        var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
         var results = new List<InputFilter>(resolved.Count);
-        foreach (var (stack, position, name, path) in resolved)
+        foreach (var (stack, position, name, driver) in resolved)
         {
-            var verdict = path is not null && verdicts.TryGetValue(path, out var known)
+            var verdict = driver.Path is not null && verdicts.TryGetValue(driver.Path, out var known)
                 ? known
-                : new SignatureVerdict(SignatureState.Missing, null);
+                // A registration that could not be read, or an image that could not be located, was
+                // never looked at: that is not a missing file.
+                : driver.Unreadable || driver.Source == DriverImageSource.Unresolvable
+                    ? SignatureVerdict.Unknown
+                    : SignatureVerdict.Missing;
             results.Add(new InputFilter(
                 stack,
                 position,
                 name,
-                path,
+                driver.Path,
                 verdict,
-                InputFilterTriage.IsWindowsClassDriver(stack, name)));
+                InputFilterTriage.IsWindowsClassDriver(stack, name, driver.Path, verdict, systemDirectory),
+                driver.Source,
+                driver.Registered));
         }
         return new AcquisitionSnapshot<InputFilter>(
             results, unreadableSurfaces, unreadableItems);
@@ -113,129 +120,81 @@ public sealed class InputFilterScanner(ISignatureVerifier? verifier = null)
         }
     }
 
+    /// <summary>What a filter name resolved to.</summary>
+    /// <param name="Path">The driver file on disk, or null when it is not there or was not located.</param>
+    /// <param name="Source">Where the image location came from.</param>
+    /// <param name="Registered">The service's <c>ImagePath</c> as registered, or null when absent.</param>
+    /// <param name="Unreadable">True when the registration itself could not be read.</param>
+    internal readonly record struct ResolvedDriver(
+        string? Path, DriverImageSource Source, string? Registered, bool Unreadable);
+
     /// <summary>
-    /// The driver file a filter name refers to, or null when it is not where drivers live.
+    /// The driver file a filter name refers to: the image its service registers, or - only when the
+    /// service registers none - <c>%SystemRoot%\System32\drivers\{name}.sys</c>, where Windows then
+    /// loads it from.
     /// </summary>
     /// <remarks>
-    /// A filter is named by its service, whose image is conventionally
-    /// <c>%SystemRoot%\System32\drivers\{name}.sys</c>. Resolving through the service's own
-    /// ImagePath would be more thorough; this covers the overwhelming majority and a filter whose
-    /// file cannot be found is itself reported rather than quietly dropped.
+    /// A filter whose file cannot be found is itself reported rather than quietly dropped. It is
+    /// never replaced by the same-named file in the drivers folder: a filter registered elsewhere,
+    /// or somewhere no local path reaches, would otherwise be verified as the in-box driver.
     /// </remarks>
-    internal static (string? Path, bool Unreadable) ResolveDriverPath(string name)
+    internal static ResolvedDriver ResolveDriverPath(string name)
     {
         try
         {
             if (name.IndexOfAny(['\\', '/']) >= 0 || name is "." or "..")
             {
-                return (null, true);
+                return new ResolvedDriver(null, DriverImageSource.Unresolvable, null, true);
             }
 
-            string? registered = null;
+            string? registered;
             using (var service = Registry.LocalMachine.OpenSubKey(
                        $@"SYSTEM\CurrentControlSet\Services\{name}"))
             {
                 registered = service?.GetValue("ImagePath") as string;
             }
 
-            var candidates = new List<string>();
-            if (NormalizeDriverPath(registered) is { } configured)
+            var location = DriverImagePath.Locate(
+                name, registered, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+            if (location.Path is null)
             {
-                candidates.Add(configured);
+                return new ResolvedDriver(null, DriverImageSource.Unresolvable, registered, false);
             }
-            candidates.Add(Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", $"{name}.sys"));
 
-            foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            string full;
+            try
             {
-                string full;
-                try
-                {
-                    full = Path.GetFullPath(candidate);
-                }
-                catch (Exception ex) when (ex is ArgumentException
-                                             or NotSupportedException
-                                             or PathTooLongException)
-                {
-                    continue;
-                }
-                if (File.Exists(full))
-                {
-                    return (full, false);
-                }
+                full = Path.GetFullPath(location.Path);
             }
-            return (null, false);
+            catch (Exception ex) when (ex is ArgumentException
+                                         or NotSupportedException
+                                         or PathTooLongException)
+            {
+                return new ResolvedDriver(null, DriverImageSource.Unresolvable, registered, false);
+            }
+            return new ResolvedDriver(
+                AutomaticFileAccess.FileExists(full) ? full : null, location.Source, registered, false);
         }
         catch (Exception ex) when (ex is ArgumentException
                                      or IOException
                                      or UnauthorizedAccessException
                                      or System.Security.SecurityException)
         {
-            return (null, true);
+            return new ResolvedDriver(null, DriverImageSource.Registered, null, true);
         }
     }
 
     /// <summary>
-    /// The absolute image path a service's <c>ImagePath</c> value refers to.
+    /// The absolute image path a service's <c>ImagePath</c> value refers to, or null when it names
+    /// nothing a local Win32 path reaches.
     /// </summary>
     /// <remarks>
-    /// Internal rather than private so the four prefix forms can be tested directly. They are the
-    /// whole of this method's risk and none of them were reachable from a test: the registry is
-    /// read-only here, so exercising them through <see cref="ResolveDriverPath"/> would have meant
-    /// writing to HKLM\SYSTEM\CurrentControlSet\Services on the machine running the suite.
+    /// Internal rather than private so the prefix forms can be tested directly from this assembly's
+    /// suite: the registry is read-only here, so exercising them through
+    /// <see cref="ResolveDriverPath"/> would have meant writing to
+    /// HKLM\SYSTEM\CurrentControlSet\Services on the machine running the suite. The mapping itself
+    /// is <see cref="DriverImagePath.Normalize"/>, shared with the kernel-driver scan.
     /// </remarks>
-    internal static string? NormalizeDriverPath(string? registered)
-    {
-        if (string.IsNullOrWhiteSpace(registered))
-        {
-            return null;
-        }
-
-        string value;
-        try
-        {
-            value = Environment.ExpandEnvironmentVariables(registered.Trim()).Trim('"').Trim();
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-        if (value.Length == 0)
-        {
-            return null;
-        }
-
-        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-        const string systemRootPrefix = @"\SystemRoot\";
-        const string bareSystemRootPrefix = @"SystemRoot\";
-        const string devicePrefix = @"\??\";
-
-        if (value.StartsWith(systemRootPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.Combine(windows, value[systemRootPrefix.Length..]);
-        }
-        if (value.StartsWith(bareSystemRootPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.Combine(windows, value[bareSystemRootPrefix.Length..]);
-        }
-        if (value.StartsWith(devicePrefix, StringComparison.Ordinal))
-        {
-            var devicePath = value[devicePrefix.Length..];
-            // UNC would make this read-only scanner authenticate to a registry-chosen server.
-            // Other object-manager names (Volume{...}, GLOBALROOT, Device) are not Win32 paths;
-            // treating them as relative would verify a same-named file under the working directory.
-            return IsLocalFullyQualifiedPath(devicePath) ? devicePath : null;
-        }
-        if (value.StartsWith(@"\\", StringComparison.Ordinal)
-            || value.StartsWith("//", StringComparison.Ordinal))
-        {
-            return null;
-        }
-        return Path.IsPathFullyQualified(value) ? value : Path.Combine(windows, value);
-    }
-
-    private static bool IsLocalFullyQualifiedPath(string path) =>
-        Path.IsPathFullyQualified(path)
-        && !path.StartsWith(@"\\", StringComparison.Ordinal)
-        && !path.StartsWith("//", StringComparison.Ordinal);
+    internal static string? NormalizeDriverPath(string? registered) =>
+        DriverImagePath.Normalize(registered, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
 }

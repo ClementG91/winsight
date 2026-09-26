@@ -39,6 +39,12 @@ Windows Defender Firewall, a VPN client, or a proxy.
 
 2. If it is WinSight and you need it back now: **dashboard → Emergency disable**. That lifts every
    WinSight filter and returns to audit-only.
+
+   If emergency disable itself fails - it refuses when the policy directory under
+   `%ProgramData%\WinSight` is no longer trusted (changed owner or ACL, or a reparse point) - stop
+   the service from an elevated prompt: `Stop-Service WinSightFirewall`. Its filters are dynamic
+   WFP objects and are removed when the service's engine session ends, and a service started from
+   untrusted storage applies no filter. Then repair or remove the directory before re-arming.
 3. If you only want that one application unblocked, change its policy in the dashboard instead -
    emergency disable is a blunt instrument and turns off all protection.
 

@@ -40,11 +40,19 @@ public sealed class CanaryManager
     private readonly Lock _gate = new();
     private readonly byte[] _seed;
     private readonly string _manifestPath;
+    private readonly TimeSpan _manifestLockWait;
 
     public CanaryManager(byte[]? seed = null, string? manifestPath = null)
+        : this(seed, manifestPath, TimeSpan.FromSeconds(30))
     {
+    }
+
+    internal CanaryManager(byte[]? seed, string? manifestPath, TimeSpan manifestLockWait)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(manifestLockWait, TimeSpan.Zero);
         _seed = seed ?? CanaryIdentity.LoadOrCreateSeed();
         _manifestPath = manifestPath ?? CanaryIdentity.ManifestPath;
+        _manifestLockWait = manifestLockWait;
     }
 
     /// <summary>
@@ -81,8 +89,7 @@ public sealed class CanaryManager
         // directories, so it is worth resolving by convention rather than being skipped.
         var downloads = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
-        if (AutomaticFileAccess.IsLocal(downloads)
-            && Directory.Exists(downloads)
+        if (AutomaticFileAccess.DirectoryExists(downloads)
             && seen.Add(downloads))
         {
             directories.Add(downloads);
@@ -122,20 +129,20 @@ public sealed class CanaryManager
         }
         try
         {
-            if (!AutomaticFileAccess.IsLocal(path!))
+            using var lease = AutomaticFileAccess.TryAcquire(path!);
+            if (lease is null || lease.IsDirectory)
             {
                 return false;
             }
             var expected = CanaryDocument.For(Path.GetExtension(path!));
-            using var stream = new FileStream(
-                path!, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
-            if (stream.Length != expected.Length)
+            using var stream = lease.OpenRead();
+            if (lease.Length != expected.Length)
             {
                 return false;
             }
             var actual = new byte[expected.Length];
             stream.ReadExactly(actual);
-            return actual.AsSpan().SequenceEqual(expected);
+            return actual.AsSpan().SequenceEqual(expected) && lease.IsCurrent();
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -170,7 +177,7 @@ public sealed class CanaryManager
                     var path = Path.GetFullPath(
                         Path.Combine(directory, CanaryIdentity.FileName(_seed, directory, index)));
                     // Still present: a decoy deleted or renamed after planting trips nothing more.
-                    if (_canarySet.Contains(path) && File.Exists(path))
+                    if (_canarySet.Contains(path) && AutomaticFileAccess.FileExists(path))
                     {
                         count++;
                     }
@@ -218,17 +225,17 @@ public sealed class CanaryManager
         ArgumentNullException.ThrowIfNull(directories);
         lock (_gate)
         {
-            // Held while the session lives: another sweep sees these decoys as owned, not orphaned.
+            using var manifest = ManifestLock.Acquire(_manifestPath, _manifestLockWait);
+            // Created only after serialization succeeds. Another sweep sees these decoys as owned,
+            // not orphaned, for exactly the lifetime of the successfully started session.
             _ownership ??= new Mutex(initiallyOwned: false, SessionMutexName(_sessionId));
-            using var manifest = ManifestLock.Acquire(_manifestPath);
             _managedPaths.UnionWith(ExpectedCanaryPaths(directories, _seed));
             var disk = ReadRecords(_manifestPath);
             RestoreRecords(disk);
             foreach (var directory in directories)
             {
                 if (string.IsNullOrWhiteSpace(directory)
-                    || !AutomaticFileAccess.IsLocal(directory)
-                    || !Directory.Exists(directory))
+                    || !AutomaticFileAccess.DirectoryExists(directory))
                 {
                     continue;
                 }
@@ -250,17 +257,15 @@ public sealed class CanaryManager
         {
             // CreateNew, so a real file that happens to collide is never overwritten. A security
             // tool that destroys one of the documents it is protecting has failed completely.
-            CanaryFileIdentity? identity;
-            using (var stream = new FileStream(
-                       path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            // Matched to the name. Every decoy used to get a workbook, including the ones named
+            // .docx: both are OOXML ZIPs so the magic number matched, but the package declared a
+            // spreadsheet - the same tell one level in.
+            var content = CanaryDocument.For(Path.GetExtension(name));
+            using var lease = AutomaticFileAccess.TryCreateNewFileLease(path, content);
+            var identity = lease is null ? null : CanaryFile.Identity(lease);
+            if (lease is null)
             {
-                // Matched to the name. Every decoy used to get a workbook, including the ones
-                // named .docx: both are OOXML ZIPs so the magic number matched, but the package
-                // declared a spreadsheet - the same tell one level in.
-                var content = CanaryDocument.For(Path.GetExtension(name));
-                stream.Write(content, 0, content.Length);
-                stream.Flush();
-                identity = CanaryFile.Identity(stream.SafeFileHandle);
+                return;
             }
             var full = Path.GetFullPath(path);
             if (identity is not null)
@@ -291,7 +296,7 @@ public sealed class CanaryManager
                 // as an earlier version did, delete) a manifest holding other sessions' records.
                 return;
             }
-            using (ManifestLock.Acquire(_manifestPath))
+            using (ManifestLock.Acquire(_manifestPath, _manifestLockWait))
             {
                 var disk = ReadRecords(_manifestPath);
                 // Only paths this session is responsible for; records kept for other directories wait
@@ -377,17 +382,18 @@ public sealed class CanaryManager
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(manifest))
+            using var lease = AutomaticFileAccess.TryAcquire(manifest);
+            if (lease is null || lease.IsDirectory || lease.Length > MaximumManifestBytes)
             {
                 return null;
             }
-            using var stream = new FileStream(manifest, FileMode.Open, FileAccess.Read, FileShare.Read);
-            if (stream.Length > MaximumManifestBytes)
-            {
-                return null;
-            }
-            var bytes = new byte[(int)stream.Length];
+            using var stream = lease.OpenRead();
+            var bytes = new byte[(int)lease.Length];
             stream.ReadExactly(bytes);
+            if (!lease.IsCurrent())
+            {
+                return null;
+            }
             var saved = JsonSerializer.Deserialize<CanaryManifest>(bytes);
             return saved is { Version: 2, Files: not null } && saved.Files.Count <= MaximumManifestEntries
                 ? saved : null;
@@ -410,23 +416,12 @@ public sealed class CanaryManager
             TryDelete(manifestPath);
             return;
         }
-        var temp = $"{manifestPath}.{Guid.NewGuid():N}.tmp";
         try
         {
-            if (!AutomaticFileAccess.IsLocal(manifestPath))
-            {
-                return;
-            }
-            Directory.CreateDirectory(Path.GetDirectoryName(manifestPath)!);
             var json = JsonSerializer.SerializeToUtf8Bytes(new CanaryManifest(2, records));
             if (records.Count <= MaximumManifestEntries && json.Length <= MaximumManifestBytes)
             {
-                using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                {
-                    stream.Write(json);
-                    stream.Flush(flushToDisk: true);
-                }
-                File.Move(temp, manifestPath, overwrite: true);
+                _ = AtomicFile.TryWrite(manifestPath, json);
             }
         }
         catch (Exception ex) when (ex is IOException
@@ -434,30 +429,11 @@ public sealed class CanaryManager
                                      or System.Security.SecurityException)
         {
             // Without the manifest only cross-run orphan recovery is lost; detection is unaffected.
-            TryDelete(temp);
         }
     }
 
     private static bool TryDelete(string path)
-    {
-        try
-        {
-            if (!AutomaticFileAccess.IsLocal(path) || !File.Exists(path))
-            {
-                return false;
-            }
-            File.SetAttributes(path, FileAttributes.Normal);
-            File.Delete(path);
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException)
-        {
-            // A decoy we cannot delete (already gone, locked) is not fatal.
-            return false;
-        }
-    }
+        => AutomaticFileAccess.TryDeleteFile(path);
 
     /// <summary>
     /// Deletes decoys left behind by a run that ended without disposing (a crash, a kill, a reboot).
@@ -481,7 +457,7 @@ public sealed class CanaryManager
         var removed = 0;
         var manifest = manifestPath ?? CanaryIdentity.ManifestPath;
         var expected = ExpectedCanaryPaths(directories, seed ?? CanaryIdentity.LoadOrCreateSeed());
-        using var gate = ManifestLock.Acquire(manifest);
+        using var gate = ManifestLock.Acquire(manifest, TimeSpan.FromSeconds(30));
         if (ReadManifest(manifest) is not { } saved)
         {
             return 0;
@@ -530,41 +506,42 @@ public sealed class CanaryManager
     /// <summary>Serializes read-modify-write of one manifest across threads and processes.</summary>
     private sealed class ManifestLock : IDisposable
     {
-        private static readonly TimeSpan Wait = TimeSpan.FromSeconds(30);
         private readonly Mutex _mutex;
-        private readonly bool _held;
 
-        private ManifestLock(Mutex mutex, bool held)
-        {
-            _mutex = mutex;
-            _held = held;
-        }
+        private ManifestLock(Mutex mutex) => _mutex = mutex;
 
-        public static ManifestLock Acquire(string manifestPath)
+        public static ManifestLock Acquire(string manifestPath, TimeSpan wait)
         {
-            var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
-                System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(manifestPath).ToUpperInvariant())))[..32];
-            var mutex = new Mutex(initiallyOwned: false, $@"Local\WinSight.CanaryManifest.{key}");
+            var mutex = new Mutex(initiallyOwned: false, ManifestLockNameFor(manifestPath));
             bool held;
             try
             {
-                held = mutex.WaitOne(Wait);
+                held = mutex.WaitOne(wait);
             }
             catch (AbandonedMutexException)
             {
                 held = true; // The previous holder died; the atomic write means the file is whole.
             }
-            return new ManifestLock(mutex, held);
+            if (!held)
+            {
+                mutex.Dispose();
+                throw new IOException("Timed out waiting for the canary-manifest lock.");
+            }
+            return new ManifestLock(mutex);
         }
 
         public void Dispose()
         {
-            if (_held)
-            {
-                _mutex.ReleaseMutex();
-            }
+            _mutex.ReleaseMutex();
             _mutex.Dispose();
         }
+    }
+
+    internal static string ManifestLockNameFor(string manifestPath)
+    {
+        var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(Path.GetFullPath(manifestPath).ToUpperInvariant())))[..32];
+        return $@"Local\WinSight.CanaryManifest.{key}";
     }
     private static HashSet<string> ExpectedCanaryPaths(
         IReadOnlyList<string> directories, byte[] seed)

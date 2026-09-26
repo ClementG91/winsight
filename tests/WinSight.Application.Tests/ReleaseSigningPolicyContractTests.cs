@@ -67,6 +67,23 @@ public sealed class ReleaseSigningPolicyContractTests
         Assert.Contains("persist-credentials: false", workflow, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A tag build can restore cache entries any default-branch run wrote, and a restored NuGet
+    /// global-packages folder is used as is - so a cache would let one poisoned entry into a signed,
+    /// attested release. The release restores from the feed every time.
+    /// </summary>
+    [Fact]
+    public void ReleaseNeverRestoresAPackageCache()
+    {
+        var workflow = File.ReadAllText(Path.Combine(
+            RepositoryRoot, ".github", "workflows", "release.yml"));
+
+        Assert.Contains("cache: false", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("cache: true", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("actions/cache", workflow, StringComparison.Ordinal);
+        Assert.DoesNotContain("cache-dependency-path", workflow, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void PublisherAcceptsOnlyTheExactChecksummedReleaseSet()
     {

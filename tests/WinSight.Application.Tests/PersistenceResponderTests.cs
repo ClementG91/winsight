@@ -96,6 +96,74 @@ public sealed class PersistenceResponderTests
     }
 
     [Fact]
+    public void AReplacementBetweenCaptureAndRemovalIsRefusedAndNeverDeleted()
+    {
+        var target = PersistenceActionResolver.Resolve(RunEntry())!;
+        var mutator = new FakeMutator
+        {
+            Token = @"C:\u.exe",
+            Payload = [1],
+            ForcedRemovalOutcome = PersistenceMutationOutcome.TargetChanged,
+        };
+        var responder = Responder(mutator, out var quarantine);
+
+        var result = responder.Block(target);
+
+        Assert.Equal(ResponseOutcome.TargetChanged, result.Outcome);
+        Assert.False(mutator.Removed);
+        Assert.Empty(quarantine.List());
+    }
+
+    [Fact]
+    public void MissingAtomicRegistrySupportIsReportedAndLeavesNoQuarantineCopy()
+    {
+        var target = PersistenceActionResolver.Resolve(RunEntry())!;
+        var mutator = new FakeMutator
+        {
+            Token = @"C:\u.exe",
+            Payload = [1],
+            ForcedRemovalOutcome = PersistenceMutationOutcome.AtomicityUnavailable,
+        };
+        var responder = Responder(mutator, out var quarantine);
+
+        var result = responder.Block(target);
+
+        Assert.Equal(ResponseOutcome.NotSupported, result.Outcome);
+        Assert.False(result.Reversible);
+        Assert.False(mutator.Removed);
+        Assert.Empty(quarantine.List());
+    }
+
+    /// <summary>
+    /// An entry re-created the moment it was removed is not reported as blocked.
+    /// </summary>
+    /// <remarks>
+    /// A program that watches its own Run value and writes it back defeats a plain removal. Reporting
+    /// Succeeded would tell the operator the item is gone while it is live again. The quarantine copy
+    /// is kept - it is exactly what was removed - and a restore refuses while the origin is occupied,
+    /// so keeping it cannot create a duplicate.
+    /// </remarks>
+    [Fact]
+    public void AnEntryReassertedAfterRemovalIsPartiallyAppliedAndExplained()
+    {
+        var target = PersistenceActionResolver.Resolve(RunEntry())!;
+        var mutator = new FakeMutator
+        {
+            Token = @"C:\u.exe",
+            Payload = [1],
+            ForcedRemovalOutcome = PersistenceMutationOutcome.Reasserted,
+        };
+        var responder = Responder(mutator, out var quarantine);
+
+        var result = responder.Block(target);
+
+        Assert.Equal(ResponseOutcome.PartiallyApplied, result.Outcome);
+        Assert.Equal(PersistenceResponder.ReassertedDetail, result.Detail);
+        Assert.True(result.Reversible);
+        Assert.Single(quarantine.List());
+    }
+
+    [Fact]
     public void RestorePutsTheEntryBackWhenTheOriginIsFree()
     {
         var target = PersistenceActionResolver.Resolve(RunEntry())!;
@@ -122,6 +190,38 @@ public sealed class PersistenceResponderTests
         Assert.Equal(ResponseOutcome.TargetChanged, responder.Restore(block.ActionId).Outcome);
     }
 
+    [Fact]
+    public void AnUnavailableAuditIntentPreventsPersistenceMutation()
+    {
+        var target = PersistenceActionResolver.Resolve(RunEntry())!;
+        var mutator = new FakeMutator { Token = @"C:\u.exe", Payload = [1] };
+        var journal = new SequencedJournal(false);
+        var responder = new PersistenceResponder(mutator, journal: journal);
+
+        var result = responder.Block(target);
+
+        Assert.Equal(ResponseOutcome.Failed, result.Outcome);
+        Assert.Contains("not attempted", result.Detail, StringComparison.Ordinal);
+        Assert.Equal(0, mutator.CaptureCalls);
+        Assert.False(mutator.Removed);
+    }
+
+    [Fact]
+    public void ABlockWhoseCompletionCannotBeJournalledIsPartiallyApplied()
+    {
+        var target = PersistenceActionResolver.Resolve(RunEntry())!;
+        var mutator = new FakeMutator { Token = @"C:\u.exe", Payload = [1] };
+        var journal = new SequencedJournal(true, false);
+        var responder = new PersistenceResponder(mutator, journal: journal);
+
+        var result = responder.Block(target);
+
+        Assert.Equal(ResponseOutcome.PartiallyApplied, result.Outcome);
+        Assert.Contains("could not be journalled", result.Detail, StringComparison.Ordinal);
+        Assert.True(mutator.Removed);
+        Assert.Equal(ActionJournalPhase.Prepared, Assert.Single(journal.Written).Phase);
+    }
+
     private static PersistenceResponder Responder(IPersistenceMutator mutator, out Quarantine quarantine)
     {
         var root = Path.Combine(Path.GetTempPath(), $"winsight-presp-{Guid.NewGuid():N}");
@@ -136,29 +236,63 @@ public sealed class PersistenceResponderTests
         public string? Token { get; set; }
         public byte[] Payload { get; set; } = [];
         public bool RemoveSucceeds { get; set; } = true;
+        public PersistenceMutationOutcome? ForcedRemovalOutcome { get; set; }
         public bool OriginFree { get; set; }
         public bool Removed { get; private set; }
+        public int CaptureCalls { get; private set; }
         public byte[]? Restored { get; private set; }
 
-        public PersistenceSnapshot? Capture(PersistenceActionTarget target) =>
-            Token is null ? null : new PersistenceSnapshot(Payload, Token);
-
-        public bool Remove(PersistenceActionTarget target)
+        public PersistenceSnapshot? Capture(PersistenceActionTarget target)
         {
+            CaptureCalls++;
+            return Token is null ? null : new PersistenceSnapshot(Payload, Token);
+        }
+
+        public PersistenceMutationOutcome RemoveIfUnchanged(
+            PersistenceActionTarget target, PersistenceSnapshot expected)
+        {
+            if (ForcedRemovalOutcome is { } forced)
+            {
+                return forced;
+            }
             if (!RemoveSucceeds)
             {
-                return false;
+                return PersistenceMutationOutcome.Failed;
             }
             Removed = true;
-            return true;
+            return PersistenceMutationOutcome.Succeeded;
         }
 
-        public bool OriginIsFree(PersistenceActionTarget target) => OriginFree;
-
-        public bool Restore(PersistenceActionTarget target, byte[] payload)
+        public PersistenceMutationOutcome RestoreIfFree(PersistenceActionTarget target, byte[] payload)
         {
+            if (!OriginFree)
+            {
+                return PersistenceMutationOutcome.TargetChanged;
+            }
             Restored = payload;
-            return true;
+            return PersistenceMutationOutcome.Succeeded;
         }
+    }
+
+    private sealed class SequencedJournal(params bool[] outcomes) : IActionJournal
+    {
+        private readonly Queue<bool> _outcomes = new(outcomes);
+        public List<ActionJournalEntry> Written { get; } = [];
+
+        public bool TryAppend(ActionJournalEntry entry)
+        {
+            var succeeds = _outcomes.Count == 0 || _outcomes.Dequeue();
+            if (succeeds)
+            {
+                Written.Add(entry);
+            }
+            return succeeds;
+        }
+
+        public void MarkUndone(Guid actionId, Guid undoActionId)
+        {
+        }
+
+        public IReadOnlyList<ActionJournalEntry> Read(int max = 200) => Written;
     }
 }

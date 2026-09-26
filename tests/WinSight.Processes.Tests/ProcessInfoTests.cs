@@ -32,7 +32,39 @@ public sealed class ProcessInfoTests
     [InlineData(SignatureState.Unknown)]
     [InlineData(SignatureState.Missing)]
     public void AResolvableImageThatIsTrustedOrUndeterminedIsNotFlagged(SignatureState state)
-        => Assert.False(Process(@"C:\Windows\System32\thing.exe", state).Unsigned);
+    {
+        var process = Process(@"C:\Windows\System32\thing.exe", state);
+
+        Assert.False(process.Unsigned);
+        Assert.False(process.Flagged);
+    }
+
+    /// <summary>
+    /// A signature that validates only through a root the user could have installed reads as valid
+    /// everywhere, and minting one takes no privilege. Only the persistence scan used to say so.
+    /// </summary>
+    [Fact]
+    public void AnImageTrustedOnlyThroughAUserInstalledRootIsFlaggedWithoutBeingCalledUnsigned()
+    {
+        var process = new ProcessInfo(
+            1234, "thing.exe", @"C:\Users\me\AppData\Local\thing.exe", 4, null,
+            new SignatureVerdict(SignatureState.SignedTrusted, "CN=Microsoft Windows", SignatureTrustAnchor.UserInstalledRoot));
+
+        Assert.False(process.Unsigned);
+        Assert.True(process.TrustedOnlyThroughUserRoot);
+        Assert.True(process.Flagged);
+    }
+
+    [Fact]
+    public void AnImageTrustedThroughAMachineRootIsNotFlagged()
+    {
+        var process = new ProcessInfo(
+            1234, "thing.exe", @"C:\Program Files\Vendor\thing.exe", 4, null,
+            new SignatureVerdict(SignatureState.SignedTrusted, "CN=Vendor", SignatureTrustAnchor.MachineRoot));
+
+        Assert.False(process.TrustedOnlyThroughUserRoot);
+        Assert.False(process.Flagged);
+    }
 
     /// <summary>
     /// A process whose image cannot be resolved is never flagged, whatever verdict came back.

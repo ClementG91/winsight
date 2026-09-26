@@ -203,7 +203,9 @@ public sealed class EnforcementCoordinatorStartModeTests : IDisposable
         };
         await using var coordinator = TestEnforcementCoordinator.Create(store, engine, startMode);
 
-        await Assert.ThrowsAsync<Win32Exception>(() => coordinator.EmergencyDisableAsync());
+        var failure = await Assert.ThrowsAsync<FirewallTransitionException>(
+            () => coordinator.EmergencyDisableAsync());
+        Assert.Equal("EmergencyStartModeFailed", failure.Code);
 
         Assert.Equal(["cleanup"], engine.Events);
         Assert.Equal(["demand"], startMode.Events);

@@ -134,6 +134,17 @@ public static class UnquotedPath
     public static bool IsHijackable(string? commandLine) => HijackCandidates(commandLine).Count > 0;
 
     /// <summary>
+    /// The executable part of an unquoted command line, without its arguments; null when no
+    /// executable can be identified.
+    /// </summary>
+    /// <remarks>
+    /// Arguments are where a service keeps secrets (<c>--token=…</c>, connection strings), and a
+    /// report names the program without needing them.
+    /// </remarks>
+    public static string? ExecutablePart(string? commandLine) =>
+        string.IsNullOrWhiteSpace(commandLine) ? null : ExecutableSpan(commandLine.Trim());
+
+    /// <summary>
     /// The part of an unquoted command line that names the executable.
     /// </summary>
     /// <remarks>

@@ -4,7 +4,7 @@ namespace WinSight.Application;
 
 /// <summary>
 /// Assembles a ready-to-run ransomware monitor over the user's own protected directories
-/// (Documents, Desktop, Pictures). User-mode: planting decoys and watching those folders needs no
+/// (Documents, Desktop, Pictures, Downloads, Videos and Music when available). User-mode: planting decoys and watching those folders needs no
 /// elevation. One call the dashboard hosts while it is running.
 /// </summary>
 public static class RansomwareHost

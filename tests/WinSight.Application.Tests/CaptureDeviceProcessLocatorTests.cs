@@ -50,6 +50,19 @@ public sealed class CaptureDeviceProcessLocatorTests
     }
 
     [Fact]
+    public void APidRecycledToAnotherImageIsNotOfferedAsTheDeviceUser()
+    {
+        var source = new FakeSource((10, @"C:\apps\spy.exe"));
+        var inspector = new FakeInspector();
+        inspector.Add(10, new ProcessIdentity(10, 99, @"C:\apps\innocent.exe", "H"));
+
+        var match = new CaptureDeviceProcessLocator(source, inspector).Locate(Desktop(@"C:\apps\spy.exe"));
+
+        Assert.Equal(DeviceProcessResolution.NotRunning, match.Resolution);
+        Assert.Empty(match.Processes);
+    }
+
+    [Fact]
     public void APackagedAppIsReportedUnsupportedNotGuessed()
     {
         var usage = new DeviceUsage(DeviceKind.Microphone, "Microsoft.WindowsCamera_8wekyb3d8bbwe",

@@ -1,7 +1,24 @@
 using System.Net;
+using System.Text.RegularExpressions;
+using Microsoft.Win32;
 using WinSight.Core;
 
 namespace WinSight.Hosts;
+
+/// <summary>Where Windows reads the hosts file from, and whether that is the standard place.</summary>
+/// <param name="Path">
+/// The hosts file to read, or null when the configured directory names nothing a local path reaches
+/// (a relative path, or a variable with no trustworthy value).
+/// </param>
+/// <param name="Relocated">
+/// True when <c>Tcpip\Parameters\DataBasePath</c> points somewhere other than the standard
+/// <c>System32\drivers\etc</c>.
+/// </param>
+/// <param name="Registered">The <c>DataBasePath</c> value as registered, when there is one.</param>
+/// <param name="Unverified">
+/// True when the registry value could not be read, so the standard location was assumed.
+/// </param>
+public sealed record HostsLocation(string? Path, bool Relocated, string? Registered, bool Unverified);
 
 /// <summary>The hosts file's active entries, and what reading it actually did.</summary>
 /// <param name="Entries">The active mappings. Empty when the file could not be read.</param>
@@ -25,11 +42,89 @@ public sealed class HostsReader(string? path = null)
 {
     private readonly string _path = path ?? DefaultPath();
 
+    private const string TcpipParameters = @"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters";
+
     /// <summary><c>%SystemRoot%\System32\drivers\etc\hosts</c>.</summary>
     public static string DefaultPath()
     {
         var systemDirectory = Environment.GetFolderPath(Environment.SpecialFolder.System);
         return Path.Combine(systemDirectory, "drivers", "etc", "hosts");
+    }
+
+    /// <summary>
+    /// The hosts file Windows actually uses: the one in the directory named by
+    /// <c>HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters\DataBasePath</c>.
+    /// </summary>
+    /// <remarks>
+    /// <b>Why the standard path is not enough.</b> The resolver reads its database files - hosts
+    /// among them - from that directory. Pointing the value at a folder of one's own moves every
+    /// override out of the file a scan looks at, which then reports a clean, unmodified hosts file.
+    /// </remarks>
+    public static HostsLocation ResolveLocation()
+    {
+        string? registered;
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(TcpipParameters);
+            registered = key?.GetValue(
+                "DataBasePath", null, RegistryValueOptions.DoNotExpandEnvironmentNames) as string;
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException
+                                     or UnauthorizedAccessException
+                                     or IOException)
+        {
+            return new HostsLocation(DefaultPath(), Relocated: false, Registered: null, Unverified: true);
+        }
+        return ResolveLocation(
+            registered,
+            Environment.GetFolderPath(Environment.SpecialFolder.Windows),
+            Environment.GetFolderPath(Environment.SpecialFolder.System));
+    }
+
+    /// <summary>The hosts file a registered <c>DataBasePath</c> value names. Pure, for tests.</summary>
+    /// <remarks>
+    /// <c>%SystemRoot%</c> and <c>%windir%</c> are expanded from the Windows directory the system
+    /// reports, never from this process's environment, which whoever launched the scan could have
+    /// set (see <see cref="DefaultPath"/>). Any other variable has no trustworthy value here, so a
+    /// value using one is reported as relocated to somewhere unresolvable rather than guessed at.
+    /// </remarks>
+    internal static HostsLocation ResolveLocation(string? registered, string windowsDirectory, string systemDirectory)
+    {
+        var standardDirectory = Path.Combine(systemDirectory, "drivers", "etc");
+        var standard = Path.Combine(standardDirectory, "hosts");
+        if (string.IsNullOrWhiteSpace(registered))
+        {
+            return new HostsLocation(standard, Relocated: false, Registered: null, Unverified: false);
+        }
+
+        var expanded = Regex.Replace(
+            registered.Trim().Trim('"').Trim(),
+            "%(?:SystemRoot|windir)%",
+            _ => windowsDirectory,
+            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
+            TimeSpan.FromSeconds(1));
+        string directory;
+        try
+        {
+            if (expanded.Contains('%') || !Path.IsPathFullyQualified(expanded))
+            {
+                return new HostsLocation(null, Relocated: true, registered, Unverified: false);
+            }
+            directory = Path.GetFullPath(expanded)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return new HostsLocation(null, Relocated: true, registered, Unverified: false);
+        }
+
+        var isStandard = string.Equals(
+            directory,
+            Path.GetFullPath(standardDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            StringComparison.OrdinalIgnoreCase);
+        return isStandard
+            ? new HostsLocation(standard, Relocated: false, registered, Unverified: false)
+            : new HostsLocation(Path.Combine(directory, "hosts"), Relocated: true, registered, Unverified: false);
     }
 
     /// <summary>The active entries, or an empty list when the file could not be read.</summary>
@@ -52,11 +147,24 @@ public sealed class HostsReader(string? path = null)
     {
         try
         {
-            if (!AutomaticFileAccess.IsLocal(_path))
+            using var lease = AutomaticFileAccess.TryAcquire(_path);
+            if (lease is null)
+            {
+                return AutomaticFileAccess.IsLocal(_path)
+                    ? new HostsSnapshot([], Unreadable: false, Missing: true, MalformedLines: 0)
+                    : new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
+            }
+            if (lease.IsDirectory)
             {
                 return new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
             }
-            var parsed = ParseWithCoverage(File.ReadLines(_path));
+            using var stream = lease.OpenRead();
+            using var reader = new StreamReader(stream, detectEncodingFromByteOrderMarks: true);
+            var parsed = ParseWithCoverage(ReadLines(reader));
+            if (!lease.IsCurrent())
+            {
+                return new HostsSnapshot([], Unreadable: true, Missing: false, MalformedLines: 0);
+            }
             return new HostsSnapshot(parsed.Entries, Unreadable: false, Missing: false, parsed.MalformedLines);
         }
         catch (FileNotFoundException)
@@ -81,6 +189,14 @@ public sealed class HostsReader(string? path = null)
     /// </summary>
     public static IReadOnlyList<HostEntry> Parse(IEnumerable<string> lines) =>
         ParseWithCoverage(lines).Entries;
+
+    private static IEnumerable<string> ReadLines(StreamReader reader)
+    {
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
+        }
+    }
 
     internal static (IReadOnlyList<HostEntry> Entries, int MalformedLines) ParseWithCoverage(
         IEnumerable<string> lines)

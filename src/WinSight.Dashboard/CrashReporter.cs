@@ -31,13 +31,31 @@ public static class CrashReporter
         "WinSight",
         "crashes");
 
+    /// <summary>Whether a UI-thread exception may be absorbed. See <see cref="DispatcherRecoveryPolicy"/>.</summary>
+    internal static DispatcherRecoveryPolicy Recovery { get; } = new();
+
+    /// <summary>
+    /// Raised on the UI thread after an exception was absorbed, with the path of its report (null
+    /// when the report could not be written), so the dashboard can say that it recovered.
+    /// </summary>
+    public static event Action<string?>? Recovered;
+
+    /// <summary>
+    /// Allows UI-thread exceptions to be absorbed from now on. The dashboard calls this once it has
+    /// finished starting and its monitors are running; before that, and in the signature window and
+    /// smoke test, an exception still terminates the process.
+    /// </summary>
+    public static void EnableRecovery() => Recovery.Arm();
+
     /// <summary>Hooks every channel an unhandled exception can arrive on.</summary>
     public static void Install(System.Windows.Application application)
     {
         ArgumentNullException.ThrowIfNull(application);
 
-        // UI thread. The dashboard may be inconsistent after an exception, so capture evidence and
-        // let WPF terminate it. The independently installed firewall service keeps enforcement.
+        // UI thread. Evidence is always captured. Once the dashboard is running, an exception that
+        // does not compromise the process is absorbed so Guardian, ransomware protection and the
+        // camera/microphone monitor keep running; otherwise WPF terminates it as before. The
+        // independently installed firewall service keeps enforcement either way.
         application.DispatcherUnhandledException += OnDispatcherUnhandledException;
 
         // Background thread: the runtime is already tearing the process down, so this is the last
@@ -50,8 +68,22 @@ public static class CrashReporter
 
     private static void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
-        TryCapture(e.Exception, "Dispatcher");
-        e.Handled = false;
+        var recover = Recovery.ShouldRecover(e.Exception);
+        var report = TryCapture(e.Exception, recover ? "Dispatcher (recovered)" : "Dispatcher");
+        e.Handled = recover;
+        if (!recover)
+        {
+            return;
+        }
+        try
+        {
+            Recovered?.Invoke(report);
+        }
+        catch (Exception ex) when (!DispatcherRecoveryPolicy.IsUnrecoverable(ex))
+        {
+            // Telling the operator is secondary to staying up; a failing notice must not undo the
+            // recovery it announces.
+        }
     }
 
     private static void OnAppDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
@@ -68,32 +100,49 @@ public static class CrashReporter
         e.SetObserved();
     }
 
-    /// <summary>Writes a report, swallowing any failure — reporting must never itself crash.</summary>
-    internal static void TryCapture(Exception exception, string source) =>
+    /// <summary>
+    /// Writes a report and returns its path, swallowing any failure (null) — reporting must never
+    /// itself crash.
+    /// </summary>
+    internal static string? TryCapture(Exception exception, string source) =>
         TryCapture(exception, source, LogDirectory);
 
     /// <summary>
     /// Overload taking the target directory so tests never write into the real
     /// <see cref="LogDirectory"/> — a test must not leave files in the user's own application data.
     /// </summary>
-    internal static void TryCapture(Exception exception, string source, string directory)
+    internal static string? TryCapture(Exception exception, string source, string directory)
     {
         try
         {
-            Write(directory, Format(exception, source, DateTimeOffset.Now));
-            Prune(directory);
+            var path = Write(directory, Format(exception, source, DateTimeOffset.Now));
+            try
+            {
+                Prune(directory);
+            }
+            catch (Exception ex) when (IsReportingFailure(ex))
+            {
+                // The report is written; failing to tidy older ones must not lose its path.
+            }
+            return path;
         }
-        // Deliberately broad: this runs while the app is already failing, so an invalid path or an
-        // unsupported target must not turn a recoverable crash into a second one. ArgumentException
-        // and NotSupportedException matter — a malformed directory raises those, not IOException.
-        catch (Exception ex) when (ex is IOException
-                                     or UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or ArgumentException
-                                     or NotSupportedException)
+        catch (Exception ex) when (IsReportingFailure(ex))
         {
+            return null;
         }
     }
+
+    /// <summary>
+    /// Deliberately broad: reporting runs while the app is already failing, so an invalid path or an
+    /// unsupported target must not turn a recoverable crash into a second one. ArgumentException and
+    /// NotSupportedException matter — a malformed directory raises those, not IOException.
+    /// </summary>
+    private static bool IsReportingFailure(Exception exception) =>
+        exception is IOException
+            or UnauthorizedAccessException
+            or System.Security.SecurityException
+            or ArgumentException
+            or NotSupportedException;
 
     /// <summary>The report body. Pure, so its shape is unit-tested.</summary>
     internal static string Format(Exception exception, string source, DateTimeOffset when)
@@ -125,11 +174,16 @@ public static class CrashReporter
     /// <summary>Writes one report and returns its path.</summary>
     internal static string Write(string directory, string content)
     {
-        Directory.CreateDirectory(directory);
         var path = Path.Combine(
             directory,
             $"crash-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}.log");
-        File.WriteAllText(path, content, Encoding.UTF8);
+        if (!AutomaticFileAccess.TryCreateNewFile(
+                path,
+                Encoding.UTF8.GetBytes(content),
+                createParentDirectories: true))
+        {
+            throw new IOException("The crash report could not be written safely.");
+        }
         return path;
     }
 
@@ -147,7 +201,7 @@ public static class CrashReporter
         {
             try
             {
-                File.Delete(file);
+                _ = AutomaticFileAccess.TryDeleteFile(file);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

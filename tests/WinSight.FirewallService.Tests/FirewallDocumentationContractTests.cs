@@ -100,7 +100,7 @@ public sealed class FirewallDocumentationContractTests
         // on NOT-equal, i.e. one blocking every program except the named one. WfpExactShapeTests
         // now falsifies every clause behaviourally; the list below is kept as a second, cheaper net
         // over the native call names this cannot otherwise reach.
-        var source = Read("src", "WinSight.FirewallService", "WfpProvisioning.cs");
+        var source = ReadClass("src", "WinSight.FirewallService", "WfpProvisioning");
 
         Assert.Contains("FwpmProviderGetByKey0", source, StringComparison.Ordinal);
         Assert.Contains("FwpmSubLayerGetByKey0", source, StringComparison.Ordinal);
@@ -162,4 +162,13 @@ public sealed class FirewallDocumentationContractTests
 
     private static string Read(params string[] segments) =>
         File.ReadAllText(Path.Combine([RepositoryRoot, .. segments]));
+
+    /// <summary>A partial class's whole source: <c>Name.cs</c> and every <c>Name.*.cs</c> beside it.</summary>
+    private static string ReadClass(string root, string project, string className)
+    {
+        var directory = Path.Combine(RepositoryRoot, root, project);
+        return string.Join("\n", Directory.GetFiles(directory, className + ".*.cs")
+            .Prepend(Path.Combine(directory, className + ".cs"))
+            .Select(File.ReadAllText));
+    }
 }

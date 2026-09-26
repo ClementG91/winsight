@@ -50,7 +50,8 @@ public sealed class BrowserHelperObjectEnumerator : IAutostartEnumerator
                 else if (dll is not null)
                 {
                     yield return new RawAutostart(
-                        AutostartVector.BrowserHelperObject, clsid, $"HKLM\\{Path}\\{clsid} [{view}]", dll);
+                        AutostartVector.BrowserHelperObject, clsid, $"HKLM\\{Path}\\{clsid} [{view}]", dll,
+                        Loader: RawAutostart.LoaderFor(view));
                 }
             }
         }

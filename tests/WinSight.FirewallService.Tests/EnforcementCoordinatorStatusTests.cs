@@ -123,7 +123,8 @@ public sealed class EnforcementCoordinatorStatusTests : IDisposable
         Assert.False(status.IsCompleted);
 
         startMode.ReleaseDemand.TrySetResult();
-        await Assert.ThrowsAsync<IOException>(() => emergency);
+        var failure = await Assert.ThrowsAsync<FirewallTransitionException>(() => emergency);
+        Assert.Equal("EmergencyStartModeFailed", failure.Code);
         var snapshot = await status.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(OutboundFirewallMode.AuditOnly, snapshot.Mode);

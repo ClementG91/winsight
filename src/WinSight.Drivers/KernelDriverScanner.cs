@@ -60,7 +60,10 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
         {
             var verdict = registration.ImagePath is not null && verdicts.TryGetValue(registration.ImagePath, out var known)
                 ? known
-                : SignatureVerdict.Missing;
+                // An image that could not be located was never looked at: not a missing file.
+                : registration.ImageSource == DriverImageSource.Unresolvable
+                    ? SignatureVerdict.Unknown
+                    : SignatureVerdict.Missing;
             results.Add(new KernelDriver(
                 registration.Name,
                 registration.Kind,
@@ -68,7 +71,8 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
                 registration.ImagePath,
                 registration.ExpectedImagePath,
                 verdict,
-                KernelDriverTriage.IsWindowsProvided(registration.ImagePath, verdict, systemDirectory)));
+                KernelDriverTriage.IsWindowsProvided(registration.ImagePath, verdict, systemDirectory),
+                registration.ImageSource));
         }
         return new AcquisitionSnapshot<KernelDriver>(
             results, registrationScan.UnreadableSources, registrationScan.UnreadableItems);
@@ -132,9 +136,9 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
                 return (null, false);
             }
 
-            var (image, expected) = ResolveImage(name, key.GetValue("ImagePath") as string);
+            var (image, expected, source) = ResolveImage(name, key.GetValue("ImagePath") as string);
             return (new Registration(
-                name, kind.Value, StartOf(key.GetValue("Start")), image, expected), false);
+                name, kind.Value, StartOf(key.GetValue("Start")), image, expected, source), false);
         }
         catch (Exception ex) when (ex is System.Security.SecurityException
                                      or UnauthorizedAccessException
@@ -161,101 +165,36 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
     /// half is why this does not just return a path: a registration naming an image that
     /// is gone is itself a finding, and reporting it needs the name of the absent file.
     /// </summary>
-    private static (string? ImagePath, string? ExpectedImagePath) ResolveImage(string name, string? registered)
-    {
-        string? expected = null;
-        foreach (var candidate in Candidates(name, registered))
-        {
-            string full;
-            try
-            {
-                full = Path.GetFullPath(candidate);
-            }
-            catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-            {
-                continue;
-            }
-            expected ??= full;
-            if (!AutomaticFileAccess.IsLocal(full))
-            {
-                continue;
-            }
-            if (File.Exists(full))
-            {
-                return (full, full);
-            }
-        }
-        return (null, expected);
-    }
-
-    /// <summary>
-    /// The places a driver image may be, best guess first, so the first candidate is
-    /// also the honest "expected" path when none of them exist.
-    /// </summary>
-    private static IEnumerable<string> Candidates(string name, string? registered)
-    {
-        if (Normalize(registered) is { } fromRegistry)
-        {
-            yield return fromRegistry;
-        }
-
-        // A driver registration may omit ImagePath entirely, in which case the service
-        // control manager loads System32\drivers\{service}.sys. Twelve registrations on
-        // this machine rely on that default, and dropping them would hide exactly the
-        // sort of minimal entry a rootkit would write.
-        yield return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", $"{name}.sys");
-    }
-
-    /// <summary>
-    /// Maps a registered image path into a form the Win32 file APIs can open.
-    /// </summary>
     /// <remarks>
-    /// Driver ImagePath values are NT paths, not command lines: <c>\SystemRoot\...</c>,
-    /// <c>\??\C:\...</c>, or a bare <c>System32\drivers\x.sys</c> taken as relative to
-    /// the Windows directory. Unlike a service's executable there are never arguments to
-    /// strip. Without this mapping every Windows driver resolves to "no image" and the
-    /// scan reports several hundred phantom orphans.
+    /// Exactly one place is looked at: the registered image, or - only when the registration has
+    /// no <c>ImagePath</c>, which twelve registrations on the development machine rely on -
+    /// <c>System32\drivers\{service}.sys</c>. Falling back to that default when the registered
+    /// image was set but not found let a Microsoft file of the same name stand in for it; see
+    /// <see cref="DriverImagePath"/>. A registered value that maps to no local path keeps its raw
+    /// text as the expected image, so the report can show what was registered.
     /// </remarks>
-    private static string? Normalize(string? registered)
+    private static (string? ImagePath, string? ExpectedImagePath, DriverImageSource Source) ResolveImage(
+        string name, string? registered)
     {
-        if (string.IsNullOrWhiteSpace(registered))
+        var location = DriverImagePath.Locate(
+            name, registered, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+        if (location.Path is null)
         {
-            return null;
+            return (null, location.Registered, DriverImageSource.Unresolvable);
         }
 
-        string value;
+        string full;
         try
         {
-            value = Environment.ExpandEnvironmentVariables(registered.Trim()).Trim('"').Trim();
+            full = Path.GetFullPath(location.Path);
         }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return null;
+            return (null, location.Registered ?? location.Path, DriverImageSource.Unresolvable);
         }
-        if (value.Length == 0)
-        {
-            return null;
-        }
-
-        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-        const string systemRootPrefix = @"\SystemRoot\";
-        const string bareSystemRootPrefix = @"SystemRoot\";
-        const string devicePrefix = @"\??\";
-
-        if (value.StartsWith(systemRootPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.Combine(windows, value[systemRootPrefix.Length..]);
-        }
-        if (value.StartsWith(bareSystemRootPrefix, StringComparison.OrdinalIgnoreCase))
-        {
-            return Path.Combine(windows, value[bareSystemRootPrefix.Length..]);
-        }
-        if (value.StartsWith(devicePrefix, StringComparison.Ordinal))
-        {
-            return value[devicePrefix.Length..];
-        }
-        return Path.IsPathRooted(value) ? value : Path.Combine(windows, value);
+        return AutomaticFileAccess.FileExists(full)
+            ? (full, full, location.Source)
+            : (null, full, location.Source);
     }
 
     private sealed record Registration(
@@ -263,5 +202,6 @@ public sealed class KernelDriverScanner(ISignatureVerifier? verifier = null)
         DriverKind Kind,
         DriverStart Start,
         string? ImagePath,
-        string? ExpectedImagePath);
+        string? ExpectedImagePath,
+        DriverImageSource ImageSource);
 }

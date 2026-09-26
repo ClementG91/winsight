@@ -15,17 +15,27 @@ public sealed record DeviceEvent(AvEventKind Kind, DeviceUsage Usage);
 /// <summary>
 /// OverSight-class real-time monitor: watches the CapabilityAccessManager and raises
 /// an event the moment an app turns the webcam/mic on or off. The transition detection
-/// is a pure, unit-tested diff of two snapshots; the loop polls
-/// <see cref="CapabilityAccessReader"/> on an interval (a driver-free approach).
-/// RegNotifyChangeKeyValue is the future event-driven optimization.
+/// is a pure, unit-tested diff of two snapshots; the loop re-reads
+/// <see cref="CapabilityAccessReader"/> when the consent store signals a change, and on an
+/// interval as the fallback (a driver-free approach).
 /// </summary>
+/// <remarks>
+/// <b>Why the fallback interval depends on the signal.</b> Every poll reads the whole consent store,
+/// and at one poll a second an idle watch cost about 1.7% of a core - on a monitor meant to run all
+/// day on a laptop. While the change signal confirms that every hive it watches is armed, a missed
+/// change is not expected and the poll drops to <c>observedInterval</c>; the moment it cannot
+/// confirm that, the loop is back on <c>interval</c>, so latency never depends on a watch that has
+/// silently stopped.
+/// </remarks>
 public sealed class CameraMicMonitor(
     ICapabilityAccessReader? reader = null,
     TimeSpan? interval = null,
-    Func<IChangeSignal?>? changeSignalFactory = null)
+    Func<IChangeSignal?>? changeSignalFactory = null,
+    TimeSpan? observedInterval = null)
 {
     private readonly ICapabilityAccessReader _reader = reader ?? new CapabilityAccessReader();
     private readonly TimeSpan _interval = interval ?? TimeSpan.FromSeconds(1);
+    private readonly TimeSpan _observedInterval = observedInterval ?? TimeSpan.FromSeconds(30);
 
     // When supplied, a fresh change signal is created for each Watch run and disposed with it. Its wake
     // handle lets the loop react to a consent-store change immediately; the interval becomes the
@@ -114,11 +124,29 @@ public sealed class CameraMicMonitor(
             }
             // Wake on cancellation (index 0 -> stop), on a consent-store change (re-read at once), or on
             // the interval timing out (the polling fallback). Only cancellation ends the loop.
-            if (WaitHandle.WaitAny(waitHandles, _interval) == 0)
+            if (WaitHandle.WaitAny(waitHandles, NextWait(ownedSignal)) == 0)
             {
                 break; // cancelled
             }
         }
+    }
+
+    /// <summary>
+    /// How long to wait before the next fallback read: the slow interval only while the signal
+    /// vouches for every hive it watches, re-checked before each wait.
+    /// </summary>
+    private TimeSpan NextWait(IChangeSignal? signal)
+    {
+        bool observing;
+        try
+        {
+            observing = signal?.IsObserving == true;
+        }
+        catch (Exception ex) when (ex is not (OutOfMemoryException or StackOverflowException))
+        {
+            observing = false; // a signal that cannot answer is not vouching for anything
+        }
+        return observing && _observedInterval > _interval ? _observedInterval : _interval;
     }
 
     /// <summary>

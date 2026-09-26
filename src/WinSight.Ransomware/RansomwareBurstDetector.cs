@@ -103,6 +103,7 @@ public sealed class RansomwareBurstDetector
     private readonly Dictionary<string, int> _byPath = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly Lock _gate = new();
+    private DateTimeOffset _latestObservedAt;
     private int _unnamed;
     private bool _fired;
 
@@ -170,11 +171,21 @@ public sealed class RansomwareBurstDetector
             {
                 return false; // already alerted this burst; wait for the operator to acknowledge
             }
+            // FileSystemWatcher callbacks from different watched directories can run concurrently.
+            // Their queue order is therefore not guaranteed to match the timestamps captured in
+            // those callbacks. Keep a high-water mark for expiry/cooldown and insert observations
+            // by timestamp; otherwise one late-enqueued older event breaks the ascending-order
+            // invariant and can leave stale entries at the head indefinitely.
+            if (atUtc > _latestObservedAt)
+            {
+                _latestObservedAt = atUtc;
+            }
+            var watermark = _latestObservedAt;
             // Inside the cooldown the detector still counts, still latches, and stays quiet. The
             // caller resets the latch as soon as it has notified, so without this a mass encryption
             // - which keeps producing bursts for as long as it runs - produced a stream of alerts
             // indistinguishable from a false positive repeating.
-            var cooling = _firedAt != default && atUtc - _firedAt < _cooldown;
+            var cooling = _firedAt != default && watermark - _firedAt < _cooldown;
 
             if (kind == RansomwareSignalKind.CanaryTouched)
             {
@@ -184,14 +195,14 @@ public sealed class RansomwareBurstDetector
                     _suppressed++;
                     return false;
                 }
-                _firedAt = atUtc;
+                _firedAt = watermark;
                 return true;
             }
 
-            Admit(new Observation(atUtc, path));
-            // The window is in ascending time order, so expiry stops at the first entry still
-            // inside it. TrimDuplicates is what keeps that ordering true.
-            while (_recent.First is { } oldest && atUtc - oldest.Value.At > _window)
+            AdmitOrdered(new Observation(atUtc, path));
+            // Expire against the newest timestamp seen, not the current callback's timestamp: the
+            // current item may be an older callback that lost an enqueue race.
+            while (_recent.First is { } oldest && watermark - oldest.Value.At > _window)
             {
                 _recent.RemoveFirst();
                 Retire(oldest.Value);
@@ -206,7 +217,7 @@ public sealed class RansomwareBurstDetector
                     _suppressed++;
                     return false;
                 }
-                _firedAt = atUtc;
+                _firedAt = watermark;
                 return true;
             }
             return false;
@@ -218,10 +229,24 @@ public sealed class RansomwareBurstDetector
     /// </summary>
     private int DistinctFilesInWindow() => _byPath.Count + _unnamed;
 
-    /// <summary>Adds an observation to the window and to the running distinct count.</summary>
-    private void Admit(Observation observation)
+    /// <summary>Adds an observation in timestamp order and updates the running distinct count.</summary>
+    private void AdmitOrdered(Observation observation)
     {
-        _recent.AddLast(observation);
+        // The overwhelmingly common path is already ordered and stays O(1). Only callbacks that
+        // raced across watcher threads walk backwards to their correct position.
+        var cursor = _recent.Last;
+        while (cursor is not null && cursor.Value.At > observation.At)
+        {
+            cursor = cursor.Previous;
+        }
+        if (cursor is null)
+        {
+            _recent.AddFirst(observation);
+        }
+        else
+        {
+            _recent.AddAfter(cursor, observation);
+        }
         if (observation.Path is { Length: > 0 } path)
         {
             _byPath[path] = _byPath.TryGetValue(path, out var seen) ? seen + 1 : 1;
@@ -313,6 +338,7 @@ public sealed class RansomwareBurstDetector
             _recent.Clear();
             _byPath.Clear();
             _unnamed = 0;
+            _latestObservedAt = default;
         }
     }
 

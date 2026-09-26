@@ -57,20 +57,58 @@ public sealed class Win32ProcessActionsTests
         // input only if its thread actually runs.
         using var child = StartChild();
         var controller = new Win32ProcessController();
+        var identity = new Win32ProcessInspector().Capture(child.Id)!;
         try
         {
-            Assert.True(controller.SuspendThreads(child.Id));
+            Assert.Equal(ProcessControlOutcome.Succeeded, controller.SuspendThreads(identity));
             child.StandardInput.WriteLine();
             Assert.False(child.WaitForExit(1000), "a suspended process consumed its input");
 
-            Assert.True(controller.ResumeThreads(child.Id));
+            Assert.Equal(ProcessControlOutcome.Succeeded, controller.ResumeThreads(identity));
             Assert.True(child.WaitForExit(10_000), "the process is still frozen after resume");
         }
         finally
         {
             if (!child.HasExited)
             {
-                controller.ResumeThreads(child.Id);
+                controller.ResumeThreads(identity);
+                child.Kill();
+            }
+        }
+    }
+
+    /// <summary>
+    /// The controller itself refuses a process whose start time is not the captured one.
+    /// </summary>
+    /// <remarks>
+    /// The responder revalidates before acting, but the action used to reopen the process by its bare
+    /// pid, so a process that exited after the revalidation could hand its pid to an unrelated one
+    /// that was then acted on. A different start time stands in for that successor here: the same pid,
+    /// a different process. Nothing may be suspended or terminated, and the real process must keep
+    /// running.
+    /// </remarks>
+    [Fact]
+    public void AnIdentityWithAnotherStartTimeIsNeverActedOn()
+    {
+        using var child = StartChild();
+        var controller = new Win32ProcessController();
+        var captured = new Win32ProcessInspector().Capture(child.Id)!;
+        var successor = captured with { StartTimestampUtcTicks = captured.StartTimestampUtcTicks + 1 };
+        try
+        {
+            Assert.Equal(ProcessControlOutcome.TargetChanged, controller.SuspendThreads(successor));
+            Assert.Equal(ProcessControlOutcome.TargetChanged, controller.TerminateProcess(successor));
+
+            // Still running and not frozen: `pause` consumes the input and exits.
+            child.StandardInput.WriteLine();
+            Assert.True(child.WaitForExit(10_000), "a refused action still froze or killed the process");
+            Assert.Equal(0, child.ExitCode);
+        }
+        finally
+        {
+            if (!child.HasExited)
+            {
+                controller.ResumeThreads(captured);
                 child.Kill();
             }
         }

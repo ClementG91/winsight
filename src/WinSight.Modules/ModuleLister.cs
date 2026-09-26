@@ -69,7 +69,7 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
     private AcquisitionSnapshot<LoadedModule> Collect(
         Process[] processes, CancellationToken cancellationToken)
     {
-        var raw = new List<(int Pid, string Proc, string Mod, string? Path)>();
+        var raw = new List<(int Pid, string Proc, string Mod, string? Path, long? StartTimestampUtcTicks)>();
         var unreadableProcesses = 0;
         // Every Process in the list holds an OS handle, and the loop below can leave early: a
         // cancelled scan used to abandon the remainder to the finaliser, which on a 220-process
@@ -84,10 +84,24 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
                 var p = processes[index];
                 try
                 {
+                    var startedBefore = SafeStartTimestampUtcTicks(p);
                     var name = p.ProcessName;
+                    var processModules = new List<(string Name, string? Path)>();
                     foreach (ProcessModule m in p.Modules)
                     {
-                        raw.Add((p.Id, name, m.ModuleName, SafePath(m)));
+                        processModules.Add((m.ModuleName, SafePath(m)));
+                    }
+                    var startedAfter = SafeStartTimestampUtcTicks(p);
+                    var stableStart = startedBefore is not null && startedBefore == startedAfter
+                        ? startedBefore
+                        : null;
+                    if (stableStart is null)
+                    {
+                        unreadableProcesses++;
+                    }
+                    foreach (var module in processModules)
+                    {
+                        raw.Add((p.Id, name, module.Name, module.Path, stableStart));
                     }
                 }
                 catch (Exception ex) when (
@@ -121,12 +135,15 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
 
         return new AcquisitionSnapshot<LoadedModule>(
             raw.Select(r => new LoadedModule(
-                r.Pid, r.Proc, r.Mod, r.Path,
-                r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
-                    ? v
-                    // No path means Windows did not expose the module identity. It does not mean
-                    // a file known to exist has disappeared.
-                    : SignatureVerdict.Unknown)).ToList(),
+                    r.Pid, r.Proc, r.Mod, r.Path,
+                    r.Path is not null && verdicts.TryGetValue(r.Path, out var v)
+                        ? v
+                        // No path means Windows did not expose the module identity. It does not mean
+                        // a file known to exist has disappeared.
+                        : SignatureVerdict.Unknown)
+            {
+                ProcessStartTimestampUtcTicks = r.StartTimestampUtcTicks,
+            }).ToList(),
             unreadableItems: unreadableProcesses);
     }
 
@@ -137,6 +154,19 @@ public sealed class ModuleLister(ISignatureVerifier? verifier = null)
             return module.FileName;
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static long? SafeStartTimestampUtcTicks(Process process)
+    {
+        try
+        {
+            return process.StartTime.ToUniversalTime().Ticks;
+        }
+        catch (Exception ex) when (
+            ex is Win32Exception or InvalidOperationException or NotSupportedException)
         {
             return null;
         }

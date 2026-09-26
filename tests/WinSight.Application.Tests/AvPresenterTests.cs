@@ -18,7 +18,7 @@ public sealed class AvPresenterTests
     public void ADesktopAppIsShownByItsFileNameNotItsPath()
     {
         Assert.Equal("Discord.exe", AvPresenter.DisplayName(
-            Usage(@"C:\Users\chome\AppData\Local\Discord\app-1.0.9248\Discord.exe")));
+            Usage(@"C:\Users\alex\AppData\Local\Discord\app-1.0.9248\Discord.exe")));
     }
 
     [Fact]
@@ -26,7 +26,7 @@ public sealed class AvPresenterTests
     {
         // A balloon can be shoulder-surfed or land in a screenshot. The journal keeps the full
         // path; the alert only needs to answer "what is using my microphone".
-        var shown = AvPresenter.DisplayName(Usage(@"C:\Users\chome\Secret Project\tool.exe"));
+        var shown = AvPresenter.DisplayName(Usage(@"C:\Users\alex\Secret Project\tool.exe"));
 
         Assert.DoesNotContain(@"\", shown, StringComparison.Ordinal);
         Assert.DoesNotContain("Secret", shown, StringComparison.Ordinal);

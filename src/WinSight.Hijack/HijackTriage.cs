@@ -100,7 +100,7 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
         // is no longer whether someone could plant it.
         foreach (var candidate in candidates)
         {
-            if (AutomaticFileAccess.IsLocal(candidate) && File.Exists(candidate))
+            if (AutomaticFileAccess.FileExists(candidate))
             {
                 return new HijackFinding(
                     HijackKind.UnquotedServicePath, service, commandLine!,
@@ -135,8 +135,7 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
     public HijackFinding? AssessServiceDirectory(string service, string? directory)
     {
         if (string.IsNullOrWhiteSpace(directory)
-            || !AutomaticFileAccess.IsLocal(directory)
-            || !Directory.Exists(directory))
+            || !AutomaticFileAccess.DirectoryExists(directory))
         {
             return null;
         }
@@ -167,7 +166,7 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
             return null;
         }
 
-        if (AutomaticFileAccess.IsLocal(directory) && Directory.Exists(directory))
+        if (AutomaticFileAccess.DirectoryExists(directory))
         {
             return _probe.CanCreate(Path.Combine(directory, "winsight-probe.dll"))
                 ? new HijackFinding(
@@ -176,16 +175,44 @@ public sealed class HijackTriage(IWritabilityProbe? probe = null)
                 : null;
         }
 
-        // Absent: could this user create the directory itself? CanCreate answers about a file, and
-        // a directory needs the same write access in the same parent, so the parent is what to ask.
-        var parent = Path.GetDirectoryName(directory.TrimEnd('\\'));
-        return !string.IsNullOrEmpty(parent)
-               && AutomaticFileAccess.IsLocal(parent)
-               && Directory.Exists(parent)
-               && _probe.CanCreate(Path.Combine(parent, "winsight-probe.tmp"))
+        // Absent: could this user create the directory itself? That is a subdirectory question, not
+        // a file one - Windows grants the two separately, and the system drive root grants a
+        // standard user the first and not the second. Asking whether a *file* could be created in
+        // the parent therefore missed the classic case outright: a machine PATH entry such as
+        // C:\Python27 left behind by an uninstaller, which any user can recreate and fill.
+        //
+        // The question is asked where creation would actually start: at the nearest ancestor that
+        // exists, for the first missing component. An entry two levels below a writable root
+        // (C:\tools\bin, with no C:\tools) is exactly as plantable as one directly under it.
+        return FirstMissingComponent(directory) is { } firstMissing
+               && _probe.CanCreateDirectory(firstMissing)
             ? new HijackFinding(
                 HijackKind.WritablePathEntry, directory, "machine PATH (directory does not exist)",
                 HijackExposure.Exploitable, [], directory)
             : null;
+    }
+
+    /// <summary>
+    /// The first component of <paramref name="directory"/> that does not exist, below its nearest
+    /// existing, local ancestor; null when there is no such ancestor to create it in.
+    /// </summary>
+    private static string? FirstMissingComponent(string directory)
+    {
+        const int MaxDepth = 32;
+        var missing = directory.TrimEnd('\\', '/');
+        for (var depth = 0; depth < MaxDepth; depth++)
+        {
+            var parent = Path.GetDirectoryName(missing);
+            if (string.IsNullOrEmpty(parent) || !AutomaticFileAccess.IsLocal(parent))
+            {
+                return null;
+            }
+            if (AutomaticFileAccess.DirectoryExists(parent))
+            {
+                return missing;
+            }
+            missing = parent;
+        }
+        return null;
     }
 }

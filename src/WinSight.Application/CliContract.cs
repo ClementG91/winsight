@@ -38,6 +38,9 @@ public static class CliContract
     /// <summary>The scan failed for a reason WinSight did not anticipate.</summary>
     public const int UnexpectedFailure = 12;
 
+    /// <summary>A live observation ran, but the OS reported that events were lost.</summary>
+    public const int ObservationIncomplete = 13;
+
     /// <summary>Options every command accepts.</summary>
     private static readonly HashSet<string> GlobalOptions = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -169,6 +172,7 @@ public static class CliContract
           {ServiceUnavailable}  the firewall service could not be reached
               (firewall-ipc-selftest only; no scanner returns this)
           {UnexpectedFailure}  the scan failed unexpectedly
+          {ObservationIncomplete}  live observation completed with lost events
 
         Findings are 0 and 1; failures are 10 and above, so `if ($LASTEXITCODE -ge 10)`
         distinguishes "could not look" from "looked and found something".

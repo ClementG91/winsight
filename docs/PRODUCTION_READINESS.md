@@ -1,13 +1,46 @@
 # Production readiness
 
-This is the authoritative status as of 2026-09-14. Evidence is candidate-bound: a successful result
-for one commit or package does not qualify different executable bytes.
+Status as of 2026-09-24. Evidence is candidate-bound: a successful result for one commit or package
+does not qualify different executable bytes, and a local rehearsal does not qualify a published
+release.
 
 | Target | Verdict |
 |---|---|
-| **x64** | **Current production readiness is not established.** The September audit identified signature-trust, canary-cleanup and monitoring defects beyond the historical qualification scenarios. The corrected candidate needs fresh CI and isolated VM qualification. |
+| **x64, published v0.13.0** | **Not re-qualified since the September audit.** The audit branch corrects defects present in it (`docs/AUDIT.md`), among them WS-74: since v0.12.0 the interpreter triage never classified the genuine Windows interpreters. |
+| **x64, audit branch** | **Qualified as a local rehearsal (2026-09-25/26).** The rebuilt harness (RA-01) qualified the head's product code, with verified provenance for each run (`docs/AUDIT.md` §17.4): the full run `head-fe953fe` (32 gates, 0 failures), gate 17 again with the corrected Cloud Files measurement (`gate17-711ded0`), and gate 36 from the control VM (`net-711ded0b`, 10/10). The product code (`src`, `installer`) is that of those candidates but for one severity: the hijack scan's notice that writability was graded for the well-known groups is now Unverified (WS-86), a row emitted only without a non-elevated token, which the VM runs always have. Later commits otherwise changed only the harness, tests and documentation. Local, unsigned builds: not CI-attested, not signed. Commit hashes cited before 2026-09-24 predate a history rewrite that removed local paths; `docs/AUDIT.md` §17.3 maps them to the published ones. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
+
+## Local x64 candidate `259056b` (2026-09-23)
+
+Built with `Build-Release.ps1 -DisableSignature -Architectures x64` from branch
+`audit/security-hardening-2026-09` at `259056b19317429615d6cb9414a019827777530d` (product-equivalent
+to `631c4dc`), and qualified on Hyper-V by autonomous passes: 30 automatic gates in pass
+`hv-run4-all-259056b` and the network-logon IPC gate from a second VM in `hv-network1` (10/10).
+Method and per-gate results: [`AUDIT.md` §17.2](AUDIT.md).
+
+| Artifact | SHA-256 |
+|---|---|
+| `winsight-v0.13.0-win-x64-setup.exe` | `C9684A4566B2F7FCE17C90455BC70197F46F925BBB43DBF8FEEE5D25955F3F31` |
+| `winsight-v0.13.0-win-x64.zip` | `54805DF17FBF1EBE72F0C35EE3CA94782F6FDC308B430EB3A4DBE73585835082` |
+| `winsight-v0.13.0-win-x64.spdx.json` | `62DDA9474568CB467689EE06F7F7C074A2A3D21628137EB3C4F51DF9A5A0BF78` |
+
+What this is: functional evidence that those exact bytes behave as the gates require. What it is
+not:
+
+- **Provenance-attested.** The host harness that staged the candidate, ran the passes and sealed the
+  evidence kept its scripts, the staged candidate and the evidence in folders any authenticated user
+  could modify (RA-01). The hashes prove the evidence is internally consistent, not that no one
+  altered a script before a run or a result after it. The passes are rerun once the harness is
+  administrators-only and bound to a reviewed commit.
+- **A release.** Not built by CI, not attested, not signed; the published v0.13.0 is a different
+  build and is not qualified by it.
+- **The current branch.** RA-02 (compiled-in name read through the acquired handle), RA-03
+  (coverage-gain notices), RA-04 (side-by-side resolution bound to the manifest), RA-05 (uninstall
+  stops when the firewall service cannot be removed), WS-74, WS-75 (a directory a standard user
+  owns, or may re-permission, now counts as writable by them) and WS-76 (a mandatory label above
+  Medium now counts as refusing that user) changed product code after it.
+- **Arm64, soak, multi-user.** Separate gates, not run (see the table above).
 
 Authenticode is an accepted distribution limitation and is not counted as a blocker here. Public
 binaries remain deliberately unsigned and Windows therefore cannot establish a publisher identity.

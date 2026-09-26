@@ -1,3 +1,4 @@
+using WinSight.Core;
 using WinSight.Persistence;
 
 using Xunit;
@@ -55,6 +56,41 @@ public sealed class FileSystemPersistenceWatcherTests
         watcher.Start();
 
         Assert.Equal(0, watcher.WatchedDirectoryCount);
+        Assert.Equal(SensorLifecycle.Failed, watcher.SensorHealth.Lifecycle);
+        Assert.True(watcher.SensorHealth.CoverageIncomplete);
+    }
+
+    [Fact]
+    public void ADirectoryThatAppearsAfterStartIsRetriedAndReconciled()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"winsight-late-startup-{Guid.NewGuid():N}");
+        var fired = 0;
+        var watcher = new FileSystemPersistenceWatcher(
+            [PersistenceWatchTarget.FileSystem(directory)],
+            recoveryInterval: TimeSpan.FromHours(1));
+        watcher.SurfaceChanged += (_, _) => Interlocked.Increment(ref fired);
+        try
+        {
+            watcher.Start();
+            Assert.Equal(0, watcher.ArmedLocations);
+
+            Directory.CreateDirectory(directory);
+            watcher.RetryUnavailable();
+
+            Assert.Equal(1, watcher.ArmedLocations);
+            Assert.Equal(1, Volatile.Read(ref fired)); // mandatory recovery reconciliation
+            Assert.Equal(1, watcher.SensorHealth.RecoveryAttempts);
+            Assert.Equal(1, watcher.SensorHealth.SuccessfulRecoveries);
+
+            File.WriteAllText(Path.Combine(directory, "arrival.lnk"), "stub");
+            Assert.True(SpinWait.SpinUntil(() => Volatile.Read(ref fired) > 1, TimeSpan.FromSeconds(30)));
+            Assert.True(watcher.SensorHealth.ObservedEvents > 0);
+        }
+        finally
+        {
+            watcher.Dispose();
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -87,6 +123,8 @@ public sealed class FileSystemPersistenceWatcherTests
             Assert.Equal(1, watcher.WatchedDirectoryCount);
             Assert.Equal(1, watcher.ArmedLocations);
             Assert.Equal(2, watcher.RequestedLocations);
+            Assert.Equal(SensorLifecycle.Running, watcher.SensorHealth.Lifecycle);
+            Assert.True(watcher.SensorHealth.CoverageIncomplete);
             File.WriteAllText(Path.Combine(open.FullName, "evil.lnk"), "stub");
             Assert.True(fired.Wait(TimeSpan.FromSeconds(30)), "the watchable folder was not armed");
         }
@@ -131,10 +169,12 @@ public sealed class FileSystemPersistenceWatcherTests
 
 public sealed class CompositePersistenceChangeSourceTests
 {
-    private sealed class FakeSource : IPersistenceChangeSource
+    private sealed class FakeSource : IPersistenceChangeSource, IPersistenceWatchDiagnostics
     {
         public bool Started { get; private set; }
         public bool Disposed { get; private set; }
+        public int LostObservationCount { get; set; }
+        public int NotificationFailures { get; set; }
         public event EventHandler<PersistenceSurfaceChangedEventArgs>? SurfaceChanged;
 
         public void Raise() =>
@@ -165,5 +205,24 @@ public sealed class CompositePersistenceChangeSourceTests
         composite.Dispose();
         Assert.True(a.Disposed);
         Assert.True(b.Disposed);
+    }
+
+    [Fact]
+    public void AggregatesSourceLossesIntoMonitorDiagnostics()
+    {
+        var a = new FakeSource { LostObservationCount = 2, NotificationFailures = 1 };
+        var b = new FakeSource { LostObservationCount = 3, NotificationFailures = 4 };
+        var composite = new CompositePersistenceChangeSource(a, b);
+        using var monitor = new PersistenceMonitor([], composite,
+            (_, _) => new PersistenceScanResult([], PersistenceCoverage.Complete));
+
+        monitor.Start();
+
+        Assert.Equal(5, composite.LostObservationCount);
+        Assert.Equal(5, composite.NotificationFailures);
+        Assert.Equal(5, monitor.Diagnostics.SourceLostObservations);
+        Assert.Equal(5, monitor.Diagnostics.SourceNotificationFailures);
+        Assert.True(monitor.Diagnostics.IsDegraded);
+        Assert.False(monitor.Diagnostics.RetryableFailurePending);
     }
 }

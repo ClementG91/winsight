@@ -15,7 +15,23 @@ public sealed class FirewallRuleReader
 {
     private const string Namespace = @"\\.\root\StandardCimv2";
 
+    /// <summary>Longest wait for any one result of a WMI enumeration.</summary>
+    private static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(10);
+
     public IReadOnlyList<FirewallRule> Read() => ReadWithCoverage().Items;
+
+    /// <summary>
+    /// Semisynchronous with a per-result timeout. The searchers had no options at all, so the
+    /// timeout was infinite: a stuck firewall provider hung the scan and its Cancel for ever. A
+    /// provider that stops answering now ends the walk with a ManagementException, which the
+    /// callers count as an unreadable source.
+    /// </summary>
+    internal static System.Management.EnumerationOptions QueryOptions() => new()
+    {
+        Timeout = QueryTimeout,
+        ReturnImmediately = true,
+        Rewindable = false,
+    };
 
     public AcquisitionSnapshot<FirewallRule> ReadWithCoverage()
     {
@@ -32,7 +48,8 @@ public sealed class FirewallRuleReader
         {
             var scope = new ManagementScope(Namespace);
             using var searcher = new ManagementObjectSearcher(scope,
-                new ObjectQuery("SELECT InstanceID, DisplayName, Direction, Action, Enabled FROM MSFT_NetFirewallRule"));
+                new ObjectQuery("SELECT InstanceID, DisplayName, Direction, Action, Enabled FROM MSFT_NetFirewallRule"),
+                QueryOptions());
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results = searcher.Get();
@@ -74,7 +91,8 @@ public sealed class FirewallRuleReader
         try
         {
             var scope = new ManagementScope(Namespace);
-            using var searcher = new ManagementObjectSearcher(scope, new ObjectQuery($"SELECT * FROM {className}"));
+            using var searcher = new ManagementObjectSearcher(
+                scope, new ObjectQuery($"SELECT * FROM {className}"), QueryOptions());
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
             using var results2 = searcher.Get();

@@ -24,17 +24,22 @@ public sealed record Connection(
     string? ImagePath,
     SignatureVerdict Signature)
 {
+    /// <summary>UTC creation time of the process observed while enriching this connection row.</summary>
+    public long? ProcessStartTimestampUtcTicks { get; init; }
+
     /// <summary>True when the remote is an off-box, routable destination.</summary>
     public bool External => NetstatParser.IsExternal(NetstatParser.RemoteAddress(Remote));
 
     /// <summary>
     /// A triage hint: an ESTABLISHED connection to the outside world owned by a
-    /// process whose executable is unsigned, untrusted, or unresolved.
+    /// process whose executable is unsigned, untrusted, unresolved, or trusted only through a
+    /// root an unprivileged account can install.
     /// </summary>
     public bool Noteworthy =>
         External &&
         State.Equals("ESTABLISHED", StringComparison.OrdinalIgnoreCase) &&
         (ImagePath is null ||
+         Signature.RestsOnUserInstalledTrust ||
          Signature.State is SignatureState.Unsigned
              or SignatureState.SignedUntrusted
              or SignatureState.Missing);

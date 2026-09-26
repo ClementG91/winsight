@@ -39,12 +39,15 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      # No package cache here, deliberately. A tag build can restore cache entries written by any
+      # workflow run on the default branch, and a restored NuGet global-packages folder is used as
+      # is: whoever managed to write one entry would put their package bytes into a signed, attested
+      # release. A release restores from nuget.org every time; CI keeps the cache for speed.
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: "10.0.303"
           architecture: ${{ matrix.architecture }}
-          cache: true
-          cache-dependency-path: Directory.Packages.props
+          cache: false
 
       # Pinning the label is not the same as pinning the image. GitHub migrated both `windows-latest`
       # and `windows-2025` to a Visual Studio 2026 image in June 2026, and hosted images are re-cut

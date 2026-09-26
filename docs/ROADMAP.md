@@ -25,11 +25,11 @@ Deliberate constraints, chosen to avoid building an EDR nobody asked for:
   act on their own. A response layer (see [`OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md`](OBJECTIVE_SEE_IMPLEMENTATION_PLAN.md))
   lets the operator act from an alert - allow, block, remove, disable, suspend - with every action
   revalidated against the live target, recorded in an append-only journal and reversible where the
-  platform allows (quarantine and restore rather than delete). The one bounded exception is opt-in
-  automatic *suspension* (never termination) of a process that touches a ransomware decoy. The
-  firewall blocks only what the user chose. Ransomware protection plants visible decoys and the
-  hijack scan creates then removes a uniquely named writability probe; both writes are documented,
-  bounded, and neither modifies an existing file.
+  platform allows (quarantine and restore rather than delete). There is currently no automatic
+  process suspension: ransomware detections alert and journal, and process response requires a
+  separately confirmed CLI action. The firewall blocks only what the user chose. Ransomware
+  protection plants visible decoys - documented, bounded, and never modifying an existing file. The
+  hijack scan asks Windows about access rights and writes nothing.
 - **One report shape.** Every scanner emits the same `ToolReport`, so the CLI, dashboard and MCP
   server render the same semantics without duplicating detection logic.
 - **No account, no telemetry, no paywall.** Non-negotiable. A security tool that phones home is
@@ -63,8 +63,9 @@ what changed while WinSight was not running.
 
 ### Phase 4 - ransomware canary *(shipped, opt-in)*
 
-Visible, machine-varied decoy files, rename/delete-burst detection, and entropy-on-write scoring
-gated so that saving a `.docx` or a `.jpg` never trips it. Loud alert on detection. The decoys are
+Visible, machine-varied decoy files, rename/delete-burst detection, entropy-on-write scoring for
+plain files, and signature-loss-plus-entropy checks for common containers encrypted in place. A
+healthy `.docx` or `.jpg` takes a cheap non-suspicious path. Loud alert on detection. The decoys are
 deliberately not hidden because many ransomware families skip hidden files.
 
 *Interception* needs a minifilter. See [`RANSOMWARE_DESIGN.md`](RANSOMWARE_DESIGN.md).

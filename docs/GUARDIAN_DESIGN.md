@@ -191,9 +191,13 @@ source and a fake/real scanner:
 8. **Visible start failure** - the dashboard reports a Guardian start that failed as `Failed`, not
    `Off`, and polls monitor health so later coverage loss is not frozen behind an earlier state.
 13. **Watcher threads** - the registry watcher's wait loop and the file-system watcher's callbacks
-   contain subscriber faults (counted) instead of ending the process; a key that cannot be armed is
-   dropped like one that cannot be opened. The dashboard's handler writes the alert journal first and
-   fails the notification when that write fails, so the arrival stays unacknowledged and is retried.
+   contain subscriber faults (counted) instead of ending the process. Registry keys and filesystem
+   directories that cannot currently be armed remain explicit unarmed targets and are retried every
+   30 seconds; a successful recovery forces a scoped reconciliation because the blind interval cannot
+   be replayed. Overflow/re-arm failures, OS observations, recovery attempts/successes and delivery
+   failures flow through the shared `SensorHealthSnapshot` into the dashboard tooltip. Historical
+   loss remains a partial state after recovery. The dashboard's handler writes the alert journal first
+   and fails the notification when that write fails, so the arrival stays unacknowledged and is retried.
 
 ### Response (operator-confirmed, reversible)
 
@@ -279,6 +283,31 @@ The vectors Block covers:
    source, location and lossless encoded arguments. Older baselines cannot recover that information
    and are reseeded silently once on upgrade, so that first launch cannot reconstruct offline
    changes against the older baseline. Wired by default through `GuardianHost`.
+
+   **Coverage (WS-70).** The baseline is saved with what it could read in full
+   (`PersistenceCoverageMap`: per source, complete or complete except unread scopes). An entry at
+   a location that the current scan read in full and the saved baseline never did was there
+   before and simply invisible, typically on the first elevated launch after unelevated ones,
+   which read scheduled tasks and services a standard user cannot: it is baselined, not announced,
+   like everything on a first launch (about sixty false arrivals on the qualification VM before the
+   fix). Coverage only grows: a later unelevated run that cannot read a source keeps the source
+   covered, so something planted meanwhile is still reported by the next elevated launch. The
+   coverage lines follow the identities in the same file and have no identity's six fields, so a
+   v0.13 dashboard still reads the file after a downgrade; a v0.13 baseline has no coverage and
+   keeps the previous rule for its first read. Accepted limit: whoever can make a source
+   unreadable while the baseline is taken, and readable again later, gets that source's content
+   baselined without an alert; that requires changing the ACL of an autostart location, which is
+   already game over.
+
+   **Uncertain, not silent (RA-03).** An entry planted while its location was unreadable looks
+   exactly like one that was always there, so what a widened view baselines is handed on as one
+   `PersistenceCoverageGain` (count, surfaces, entries) through `PersistenceMonitor.CoverageGained`.
+   The dashboard journals it as `Guardian/CoverageGain`, with no balloon; `winsight alerts` and the
+   MCP `alerts` tool show it as *Unverified*, worded as entries WinSight cannot date, never as a
+   detection; the protection tooltip counts it. It is delivered at least once, like an arrival:
+   until every subscriber has accepted it, its entries stay out of the saved baseline, so a notice
+   lost to a crash or an unwritable journal becomes arrivals on the next launch - louder than
+   needed, never silent.
 6. **Scoped re-scan.** ✅ Done. A change re-scans only the surface that fired - the change source
    carries the fired `PersistenceWatchTarget`, and the monitor maps it to the owning enumerator(s)
    via `WatchTargets` and scans just those (full scan when the origin is unknown). Real-machine

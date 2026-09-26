@@ -1,6 +1,7 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 
+using WinSight.Core;
 using WinSight.Hijack;
 using Xunit;
 
@@ -125,20 +126,251 @@ public sealed class UnprivilegedWriteAccessTests
     }
 
     /// <summary>
-    /// The unelevated path is unchanged and still answers by really trying, which remains the best
-    /// method when the current token already is the unprivileged one.
+    /// A grant to the user's own SID is seen when Windows can evaluate the non-elevated token, and
+    /// is the documented blind spot of the well-known-group model used when it cannot.
+    /// </summary>
+    /// <remarks>
+    /// Which method runs depends on the account running the tests: a split (UAC) token is evaluated
+    /// by <c>AccessCheck</c>; SYSTEM or an administrator with UAC disabled - a common CI runner shape -
+    /// has no non-elevated token and falls back to the well-known groups. Both outcomes are asserted,
+    /// each against the method that actually answered.
+    /// </remarks>
+    [Fact]
+    public void AGrantToTheActualUserSidIsSeenExactlyWhenTheEffectiveTokenIsAvailable()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"winsight-user-acl-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var user = WindowsIdentity.GetCurrent().User;
+            Assert.NotNull(user);
+            ReplaceDacl(directory, user, Allow(user, FileSystemRights.FullControl));
+
+            Assert.True(UnprivilegedWriteAccess.TryIsGrantedIn(
+                directory, PlantedObject.File, out var granted, out var evaluation));
+            Assert.Equal(evaluation == WriteAccessEvaluation.EffectiveAccess, granted);
+            Assert.Equal(granted, new WritabilityProbe().CanCreate(Path.Combine(directory, "winsight-probe.dll")));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A directory the user owns is one they can plant in, whatever its DACL grants them today.
+    /// </summary>
+    /// <remarks>
+    /// <b>The hole.</b> The owner of an object holds WRITE_DAC without any entry granting it, and an
+    /// explicit Deny does not take that away - only an OWNER RIGHTS entry does (both measured on
+    /// Windows 11 26200). A user who owns a directory can therefore give themselves the right to
+    /// create a file in it. The check asked Windows about the create right alone, so a folder a
+    /// standard user created and an administrator later locked down with <c>icacls</c>, keeping its
+    /// owner - a PATH entry, a service's directory - read as not plantable by the very user who can
+    /// reopen it. The cleanup below is that step.
+    /// </remarks>
+    [Fact]
+    public void OwningTheDirectoryIsAPlantingRight()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), $"winsight-owned-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        var user = WindowsIdentity.GetCurrent().User;
+        Assert.NotNull(user);
+        try
+        {
+            ReplaceDacl(
+                directory,
+                user,
+                Allow(new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), FileSystemRights.FullControl),
+                Allow(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null), FileSystemRights.FullControl),
+                Allow(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null), FileSystemRights.ReadAndExecute));
+
+            Assert.True(UnprivilegedWriteAccess.TryIsGrantedIn(
+                directory, PlantedObject.File, out var granted, out var evaluation));
+            // The well-known-group model does not see one named user, owner or not.
+            Assert.Equal(evaluation == WriteAccessEvaluation.EffectiveAccess, granted);
+            Assert.Equal(granted, new WritabilityProbe().CanCreate(Path.Combine(directory, "winsight-probe.dll")));
+        }
+        finally
+        {
+            ReplaceDacl(directory, user, Allow(user, FileSystemRights.FullControl));
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A right to take ownership is a right to plant: the new owner holds WRITE_DAC.
+    /// </summary>
+    /// <remarks>
+    /// Built as a descriptor because a standard user cannot give a directory to SYSTEM, and a
+    /// directory the user already owns would answer through ownership instead. Windows is asked
+    /// about the descriptor as it would read after the user took it.
+    /// </remarks>
+    [Fact]
+    public void ARightToTakeOwnershipIsSeenWithTheEffectiveToken()
+    {
+        var user = WindowsIdentity.GetCurrent().User;
+        Assert.NotNull(user);
+
+        Assert.True(UnprivilegedWriteAccess.TryIsGrantedByDescriptor(
+            Binary($"O:SYG:SYD:(A;;FA;;;SY)(A;;0x1200a9;;;BU)(A;;WO;;;{user.Value})"),
+            PlantedObject.File,
+            out var granted,
+            out var evaluation));
+        Assert.Equal(evaluation == WriteAccessEvaluation.EffectiveAccess, granted);
+    }
+
+    /// <summary>
+    /// Taking ownership gives nothing more when an OWNER RIGHTS entry says what the owner holds.
     /// </summary>
     [Fact]
-    public void TheUnelevatedPathStillAnswersByAttempt()
+    public void AnOwnerRightsEntryLimitsWhatTakingOwnershipGives()
+    {
+        var user = WindowsIdentity.GetCurrent().User;
+        Assert.NotNull(user);
+
+        Assert.True(UnprivilegedWriteAccess.TryIsGrantedByDescriptor(
+            Binary($"O:SYG:SYD:(A;;FA;;;SY)(A;;0x1200a9;;;OW)(A;;0x1200a9;;;BU)(A;;WO;;;{user.Value})"),
+            PlantedObject.File,
+            out var granted,
+            out _));
+        Assert.False(granted);
+    }
+
+    /// <summary>
+    /// The well-known-group model: a group allowed to rewrite the DACL, or to take the directory and
+    /// then rewrite it, can plant.
+    /// </summary>
+    [Theory]
+    [InlineData("WD")]
+    [InlineData("WO")]
+    public void ARightToRewriteTheDaclIsAPlantingRight(string right) =>
+        Assert.True(UnprivilegedWriteAccess.IsGrantedBy(FromSddl(right)));
+
+    /// <summary>A group denied the create right but allowed to rewrite the DACL removes the Deny.</summary>
+    [Fact]
+    public void ADeniedCreateRightDoesNotStopAGroupThatCanRewriteTheDacl() =>
+        Assert.True(UnprivilegedWriteAccess.IsGrantedBy(Sddl("O:SYG:SYD:(D;;0x2;;;BU)(A;;WD;;;BU)")));
+
+    /// <summary>
+    /// Every member of a group that owns the directory holds WRITE_DAC on it, and a Deny does not
+    /// take that away.
+    /// </summary>
+    [Theory]
+    [InlineData("O:BUG:SYD:(A;;0x1200a9;;;BU)")]
+    [InlineData("O:AUG:SYD:(D;;WD;;;AU)(A;;0x1200a9;;;BU)")]
+    public void OwnershipByAnUnprivilegedGroupIsAPlantingRight(string sddl)
+    {
+        Assert.True(UnprivilegedWriteAccess.IsGrantedBy(Sddl(sddl)));
+        Assert.True(UnprivilegedWriteAccess.IsGrantedByDescriptor(Binary(sddl), PlantedObject.File));
+    }
+
+    /// <summary>
+    /// An OWNER RIGHTS entry replaces the owner's implicit rights, so ownership then gives exactly
+    /// what that entry grants - the create right, or nothing that plants.
+    /// </summary>
+    [Theory]
+    [InlineData("O:BUG:SYD:(A;;0x1200a9;;;OW)(A;;0x1200a9;;;BU)", false)]
+    [InlineData("O:SYG:SYD:(A;;0x1200a9;;;OW)(A;;WO;;;BU)", false)]
+    [InlineData("O:BUG:SYD:(A;;0x1200ab;;;OW)", true)]
+    public void AnOwnerRightsEntryDecidesWhatOwnershipGives(string sddl, bool plantable) =>
+        Assert.Equal(plantable, UnprivilegedWriteAccess.IsGrantedBy(Sddl(sddl)));
+
+    /// <summary>
+    /// The mandatory label is read with the rest of the descriptor.
+    /// </summary>
+    /// <remarks>
+    /// Every profile's LocalLow carries a Low label, which is what lets Low-integrity processes
+    /// write there. The descriptor used to be read without it, so a label that forbids a standard
+    /// user's writes could never be seen.
+    /// </remarks>
+    [Fact]
+    public void TheMandatoryLabelIsReadWithTheDescriptor()
+    {
+        var localLow = Path.Combine(
+            Path.GetDirectoryName(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData))!,
+            "LocalLow");
+        if (!Directory.Exists(localLow))
+        {
+            // An account without an interactive profile has no LocalLow to read.
+            return;
+        }
+
+        var descriptor = AutomaticFileAccess.TryReadDirectorySecurityDescriptor(localLow);
+
+        Assert.NotNull(descriptor);
+        var sacl = new RawSecurityDescriptor(descriptor, 0).SystemAcl;
+        Assert.NotNull(sacl);
+        Assert.Contains(sacl.Cast<GenericAce>(), ace => (int)ace.AceType == SystemMandatoryLabelAceType);
+    }
+
+    /// <summary>
+    /// A label above Medium refuses a standard user's writes whatever the DACL grants; one at or
+    /// below Medium, or one that only describes children, changes nothing.
+    /// </summary>
+    /// <remarks>
+    /// <b>The false accusation.</b> Both methods judged the DACL alone: a directory granting Users
+    /// Full Control but labelled High was reported plantable, though Windows refuses every write to
+    /// it from the Medium-integrity token of a standard user. The label's own flags do not matter
+    /// here: a label that only forbids reading up blocks the write too (measured with
+    /// <c>AccessCheck</c>), because every standard token carries its own no-write-up policy.
+    /// </remarks>
+    [Theory]
+    [InlineData("S:(ML;;NW;;;HI)", false)]
+    [InlineData("S:(ML;;NW;;;SI)", false)]
+    [InlineData("S:(ML;;NR;;;HI)", false)]
+    [InlineData("S:(ML;;NX;;;HI)", false)]
+    [InlineData("S:(ML;;NW;;;ME)", true)]
+    [InlineData("S:(ML;;NW;;;LW)", true)]
+    [InlineData("S:(ML;OICIIO;NW;;;HI)", true)]
+    public void TheMandatoryLabelDecidesWhetherAStandardUserMayWrite(string label, bool plantable)
+    {
+        var descriptor = Binary("O:SYG:SYD:(A;;FA;;;BU)" + label);
+
+        Assert.True(UnprivilegedWriteAccess.TryIsGrantedByDescriptor(
+            descriptor, PlantedObject.File, out var granted, out _));
+        Assert.Equal(plantable, granted);
+        Assert.Equal(plantable, UnprivilegedWriteAccess.IsGrantedByDescriptor(descriptor, PlantedObject.File));
+    }
+
+    /// <summary>Owning a directory labelled above the user gives no way to write in it either.</summary>
+    [Fact]
+    public void OwnershipDoesNotOutrankALabelAboveTheUser()
+    {
+        var descriptor = Binary("O:BUG:SYD:(A;;0x1200a9;;;BU)S:(ML;;NW;;;HI)");
+
+        Assert.True(UnprivilegedWriteAccess.TryIsGrantedByDescriptor(
+            descriptor, PlantedObject.File, out var granted, out _));
+        Assert.False(granted);
+        Assert.False(UnprivilegedWriteAccess.IsGrantedByDescriptor(descriptor, PlantedObject.File));
+    }
+
+    /// <summary>
+    /// The probe answers without creating anything, and its answer is the evaluator's.
+    /// </summary>
+    /// <remarks>
+    /// It used to answer unelevated by creating and deleting a real file. The directory here is the
+    /// test user's own, so with the effective token the answer must be yes; the well-known-group
+    /// fallback (no split token, e.g. a CI runner with UAC off) does not see a grant to one named
+    /// user and must say so consistently rather than guess.
+    /// </remarks>
+    [Fact]
+    public void TheProbeAnswersWithoutWritingAnything()
     {
         var directory = Path.Combine(Path.GetTempPath(), $"winsight-probe-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
         {
-            var probe = new WritabilityProbe(elevated: false);
+            var answer = new WritabilityProbe().CanCreate(Path.Combine(directory, "anything.dll"));
 
-            Assert.True(probe.CanCreate(Path.Combine(directory, "anything.dll")));
-            Assert.Empty(Directory.GetFiles(directory)); // and it leaves no litter behind
+            Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
+            Assert.True(UnprivilegedWriteAccess.TryIsGrantedIn(
+                directory, PlantedObject.File, out var granted, out var evaluation));
+            Assert.Equal(granted, answer);
+            if (evaluation == WriteAccessEvaluation.EffectiveAccess)
+            {
+                Assert.True(answer);
+            }
         }
         finally
         {
@@ -204,10 +436,55 @@ public sealed class UnprivilegedWriteAccessTests
         Assert.False(UnprivilegedWriteAccess.IsGrantedBy(FromSddl(right)));
 
     /// <summary>An allow ACE granting BUILTIN\Users the named right and nothing else.</summary>
-    private static DirectorySecurity FromSddl(string right)
+    private static DirectorySecurity FromSddl(string right) => Sddl($"O:SYG:SYD:(A;;{right};;;BU)");
+
+    private static DirectorySecurity Sddl(string sddl)
     {
         var security = new DirectorySecurity();
-        security.SetSecurityDescriptorSddlForm($"O:SYG:SYD:(A;;{right};;;BU)");
+        security.SetSecurityDescriptorSddlForm(sddl);
         return security;
+    }
+
+    /// <summary>SYSTEM_MANDATORY_LABEL_ACE_TYPE, which .NET reads back as a custom entry.</summary>
+    private const int SystemMandatoryLabelAceType = 0x11;
+
+    /// <summary>The self-relative form Windows returns for a directory handle.</summary>
+    private static byte[] Binary(string sddl)
+    {
+        var descriptor = new RawSecurityDescriptor(sddl);
+        var bytes = new byte[descriptor.BinaryLength];
+        descriptor.GetBinaryForm(bytes, 0);
+        return bytes;
+    }
+
+    private static FileSystemAccessRule Allow(SecurityIdentifier sid, FileSystemRights rights) =>
+        new(sid, rights, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit,
+            PropagationFlags.None, AccessControlType.Allow);
+
+    /// <summary>
+    /// Replaces the DACL of a directory this test created with <paramref name="rules"/> alone, and
+    /// makes <paramref name="user"/> its owner.
+    /// </summary>
+    /// <remarks>
+    /// The owner is written only when it is not already the user. Writing it needs WRITE_OWNER even
+    /// when the value does not change, and the creator of a directory holds that right only where an
+    /// inherited entry grants it: under the user profile (Full Control), not under a data volume's
+    /// default root ACL (Authenticated Users: Modify), where this failed with TEMP on D:. An elevated
+    /// run creates the directory owned by Administrators, and does hold the right.
+    /// </remarks>
+    private static void ReplaceDacl(string directory, SecurityIdentifier user, params FileSystemAccessRule[] rules)
+    {
+        var info = new DirectoryInfo(directory);
+        var security = new DirectorySecurity();
+        if (!user.Equals(info.GetAccessControl(AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier))))
+        {
+            security.SetOwner(user);
+        }
+        security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+        foreach (var rule in rules)
+        {
+            security.AddAccessRule(rule);
+        }
+        info.SetAccessControl(security);
     }
 }

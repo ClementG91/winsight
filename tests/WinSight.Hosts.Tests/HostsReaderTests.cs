@@ -69,6 +69,44 @@ public sealed class HostsReaderTests
         Assert.False(e.Notable);
     }
 
+    /// <summary>
+    /// Every spelling of "nowhere" is a sink. The four literal strings the check used to compare
+    /// against reported each of these as a redirect to an external address.
+    /// </summary>
+    [Theory]
+    [InlineData("127.1")]
+    [InlineData("0")]
+    [InlineData("127.0.0.2")]
+    [InlineData("0.0.0.1")]
+    [InlineData("::ffff:127.0.0.1")]
+    [InlineData("0:0:0:0:0:0:0:1")]
+    [InlineData("0.0.0.0")]
+    [InlineData("::")]
+    public void EverySpellingOfASinkAddressIsASink(string address)
+    {
+        var ads = new HostEntry(address, "ads.tracker.example");
+        var update = new HostEntry(address, "update.microsoft.com");
+
+        Assert.True(ads.IsSink);
+        Assert.False(ads.Notable);
+        Assert.True(update.Notable);
+        Assert.Contains("AV/Update", update.Reason);
+    }
+
+    [Theory]
+    [InlineData("203.0.113.66")]
+    [InlineData("10.0.0.5")]
+    [InlineData("192.168.1.1")]
+    [InlineData("::ffff:203.0.113.66")]
+    [InlineData("2001:db8::1")]
+    public void AnyOtherAddressIsARedirect(string address)
+    {
+        var e = new HostEntry(address, "login.mybank.example");
+
+        Assert.False(e.IsSink);
+        Assert.True(e.Notable);
+    }
+
     [Fact]
     public void Snapshot_OnRealHostsFile_DoesNotThrow()
     {

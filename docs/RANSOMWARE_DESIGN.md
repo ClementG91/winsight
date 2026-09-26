@@ -9,8 +9,7 @@ build. What remains is elevation-gated: naming the *process* responsible, and *s
 
 **Protection is opt-in, deliberately.** This is the only WinSight feature that plants persistent
 files in the operator's personal folders, so nothing is planted until they tick "Ransomware
-protection". (Separately, the hijack scanner creates and immediately removes a uniquely named
-writability probe in each directory it assesses.) Decoys are visible, swept on start if an earlier
+protection". Decoys are visible, swept on start if an earlier
 run died without cleaning up, and removed when the toggle is cleared or WinSight closes.
 
 ## Goal
@@ -27,8 +26,9 @@ separately-validated shell.**
    (Documents, Desktop, Pictures, …). A decoy has *no legitimate reason to change*, so a single
    touch is a high-confidence signal that fires immediately.
 2. **Behavioral burst.** Ransomware's tell is volume and speed. Count recent suspicious file
-   events - a freshly written file whose content **looks encrypted** (high Shannon entropy), a
-   rename, a delete - in a short sliding window, and fire once when they cross a threshold.
+   events - a freshly written plain file with high Shannon entropy, a supported container whose
+   expected signature disappeared **and** whose content has high entropy, a rename, or a delete -
+   in a short sliding window, and fire once when they cross a threshold.
 
 Neither is a verdict on its own; together, and tuned conservatively, they catch the behavior
 while a security tool that cries wolf on ordinary activity would be worse than nothing.
@@ -64,22 +64,42 @@ pinned by `Monitor_ReArmsAfterAnAlert_SoASecondWaveStillFires`.
    protected directories and answers `IsCanary`; `RansomwareSignalClassifier` (pure) maps a change to
    a signal; `RansomwareFileWatcher` runs a `FileSystemWatcher` over the dirs, classifies each change,
    and feeds the burst detector; `RansomwareMonitor` wires them and cleans up verified decoys on dispose. A
-   touched canary fires immediately; a rename/delete burst fires once. User-mode, real-machine
-   validated by functional tests. Entropy-on-write is intentionally NOT wired here (legitimately
-   compressed files - .docx/.jpg/.zip - are high-entropy and would false-positive).
+   touched canary fires immediately; a suspicious-content/rename/delete burst fires once. User-mode,
+   real-machine validated by functional tests. Content inspection runs on the dedicated drain thread,
+   never in the filesystem callback.
 3. **Entropy sampling on write.** ✅ Done. `RansomwareEntropySampler` reads a bounded 4 KB prefix
    (sharing flags that never fight the writer; any I/O trouble yields false, never an exception) and
-   scores it with `ShannonEntropy`. It is gated twice: formats **compressed by design** are skipped
-   outright - .zip/.jpg/.mp4 and, critically, .docx/.xlsx/.pptx, which are ZIP containers and would
-   otherwise flag someone saving a Word file - and the score still needs a minimum sample and a
-   conservative threshold. Ransomware's own extensions (.locked, .encrypted, …) are exactly what
-   still gets scored; in-place encryption that keeps the original extension is covered by the canary.
+   scores it with `ShannonEntropy`. Plain formats still require a minimum sample and a conservative
+   threshold. Common compressed/container formats add an independent integrity gate: a healthy ZIP,
+   image, media container, PDF, PE, MSI, VHDX, WebAssembly or OneNote signature returns immediately;
+   only a missing expected signature **plus** high entropy counts. Password-protected Office OOXML is
+   accepted in both its normal ZIP and legitimate encrypted OLE Compound File envelope. Formats that
+   have no reliable leading signature remain excluded rather than guessed. Ransomware's own extensions
+   (.locked, .encrypted, …) are still scored, and in-place encryption that destroys the original
+   container header is now covered without treating an ordinary Office/photo/archive save as suspicious.
 4. **Dashboard alert.** ✅ Done. An opt-in "Ransomware protection" toggle in the dashboard starts and
    stops the monitor (planting runs off the UI thread; clearing the toggle cleans up verified decoys).
    `RansomwarePresenter` maps a detection to a localization key and a detail line that shows only the
    file NAME - never the directory tree, so an alert cannot leak a folder layout into a screenshot.
    A touched canary is presented as critical, a burst as a warning, on the proven `ShowBalloonTip`
    path, localized en/fr/es.
+
+### Container-integrity limits and hot-path cost
+
+The integrity gate is a bounded heuristic, not a container parser. It cannot distinguish ransomware
+that deliberately preserves a valid header while encrypting only later ranges, and it deliberately
+does not infer damage for formats without a stable prefix (for example Brotli, generic `.bak` files,
+and ISO images whose descriptor is beyond the 4 KB sample). Canary, rename/delete burst and process
+attribution signals remain independent coverage for those cases. A mislabeled high-entropy file can
+also look like a destroyed container, but it still needs twelve distinct suspicious paths in the
+three-second burst window; one damaged or partially written file does not alert by itself.
+
+The permanent Release probe at
+`tests/validation/WinSight.RansomwareHotPathProbe` measures both the pure decision and the complete
+open/read/classify path. On the 2026-09-20 development machine, the pure healthy-OOXML fast path was
+186 ns/op with 0 B/op, destroyed high-entropy OOXML was 5.1 µs/op with 0 B/op, and the warm cached
+file path was 89–95 µs/op with 336 B/op. These are observations, not cross-machine budgets. The
+sampler uses a 4 KB stack buffer; the previous per-event 4 KB managed allocation is gone.
 
 ## Cleanup ownership and upgrades
 

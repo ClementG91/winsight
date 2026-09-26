@@ -199,12 +199,12 @@ public sealed class PowerShellProfileEnumerator : IAutostartEnumerator
             bool exists;
             try
             {
-                if (!AutomaticFileAccess.IsLocal(path))
+                exists = AutomaticFileAccess.FileExists(path);
+                if (!exists && !AutomaticFileAccess.IsLocal(path))
                 {
                     _unreadable++;
                     continue;
                 }
-                exists = (File.GetAttributes(path) & FileAttributes.Directory) == 0;
             }
             catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
             {

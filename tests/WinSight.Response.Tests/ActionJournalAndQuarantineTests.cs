@@ -44,6 +44,37 @@ public sealed class ActionJournalAndQuarantineTests : IDisposable
     }
 
     [Fact]
+    public void PreparedAndCompletedRecordsReadAsOneCompletedAction()
+    {
+        var journal = Journal();
+        var actionId = Guid.NewGuid();
+        Assert.True(journal.TryAppend(new ActionJournalEntry(
+            actionId, ResponseActionKind.TerminateProcess, ResponseOutcome.AuditPrepared,
+            "target", T0, Reversible: false, Phase: ActionJournalPhase.Prepared)));
+        Assert.True(journal.TryAppend(Entry(actionId, ResponseActionKind.TerminateProcess)));
+
+        var action = Assert.Single(journal.Read());
+
+        Assert.Equal(ActionJournalPhase.Completed, action.Phase);
+        Assert.Equal(ResponseOutcome.Succeeded, action.Outcome);
+    }
+
+    [Fact]
+    public void APreparedRecordWithoutCompletionRemainsVisible()
+    {
+        var journal = Journal();
+        var actionId = Guid.NewGuid();
+        Assert.True(journal.TryAppend(new ActionJournalEntry(
+            actionId, ResponseActionKind.TerminateProcess, ResponseOutcome.AuditPrepared,
+            "target", T0, Reversible: false, Phase: ActionJournalPhase.Prepared)));
+
+        var action = Assert.Single(journal.Read());
+
+        Assert.Equal(ActionJournalPhase.Prepared, action.Phase);
+        Assert.Equal(ResponseOutcome.AuditPrepared, action.Outcome);
+    }
+
+    [Fact]
     public void ACorruptLineIsSkippedNotFatal()
     {
         var path = Path.Combine(_directory, "journal.jsonl");

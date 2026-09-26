@@ -10,7 +10,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe'),
+    [string]$ServicePath,
 
     [Parameter(Mandatory)]
     [string]$ReadyPath,
@@ -24,6 +24,10 @@ param(
     [ValidateRange(10, 1800)]
     [int]$TimeoutSeconds = 300
 )
+
+# Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
+# empty in the defaults of an advanced script started with -File.
+if (-not $ServicePath) { $ServicePath = (Join-Path $PSScriptRoot 'winsight-firewall-service.exe') }
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest

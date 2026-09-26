@@ -212,6 +212,47 @@ public sealed class EnforcementCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task EmergencyDisable_UntrustedStorageStillCleansWfpWithoutTouchingItAndIsAudited()
+    {
+        Directory.CreateDirectory(_directory);
+        var path = Path.Combine(_directory, "policies.json");
+        const string attackerContent = "attacker-controlled-content";
+        await File.WriteAllTextAsync(path, attackerContent);
+        var store = new FirewallPolicyStore(
+            path,
+            allowEnforcement: true,
+            storageTrust: () => (false, "StorageAclUntrusted"));
+        var reconciler = new CountingReconciler();
+        var startMode = new RecordingStartModeController();
+        await using var coordinator = new EnforcementCoordinator(store, reconciler, startMode);
+        var failures = new List<FirewallDispatchFailure>();
+        var dispatcher = new FirewallRequestDispatcher(
+            store,
+            coordinator,
+            failureObserver: failures.Add);
+        var request = new FirewallCommandRequest(
+            FirewallProtocolCodec.CurrentVersion,
+            Guid.NewGuid(),
+            FirewallCommand.EmergencyDisable);
+
+        var response = await dispatcher.DispatchAsync(
+            request,
+            FirewallCallerCapability.MutateMachinePolicy);
+
+        Assert.False(response.Success);
+        Assert.Equal(FirewallProtocolError.InternalFailure, response.Error);
+        Assert.Equal(1, reconciler.CleanupCalls);
+        Assert.Equal(0, reconciler.ReconcileCalls);
+        Assert.Equal(attackerContent, await File.ReadAllTextAsync(path));
+        Assert.Equal(["demand"], startMode.Events);
+        Assert.Equal(FirewallEnforcementState.Degraded, coordinator.EffectiveState);
+        var failure = Assert.Single(failures);
+        Assert.Equal(FirewallCommand.EmergencyDisable, failure.Command);
+        Assert.Equal(FirewallDispatchFailureKind.Coded, failure.Kind);
+        Assert.Equal("EmergencyStorageUntrusted", failure.Code);
+    }
+
+    [Fact]
     public async Task EmergencyDisable_UsesOwnedCleanupCapabilityOnly()
     {
         var store = Store();

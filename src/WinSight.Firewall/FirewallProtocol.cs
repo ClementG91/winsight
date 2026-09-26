@@ -53,7 +53,8 @@ public sealed record FirewallCommandRequest(
 
 /// <param name="UnrecordedApps">
 /// Conservative lower bound on outbound observations not represented by the pending-app list:
-/// capacity drops, connections without a safe executable identity, and a terminal observer failure.
+/// capacity drops, connections without a safe executable identity, native ETW loss, and a terminal
+/// observer failure.
 /// The legacy wire name is retained for protocol compatibility.
 /// </param>
 public sealed record FirewallServiceStatus(
