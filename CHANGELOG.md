@@ -1,3 +1,105 @@
+## 0.14.0 - 2026-09-26
+
+This release carries the fixes of the September 2026 security audit. The full report, with each
+finding's cause, impact and verification, is [`docs/AUDIT.md`](docs/AUDIT.md) (in French): 80
+findings, 75 fixed with tests, 4 documented as limits, 1 open (WS-53, a shared-runtime package). All
+11 High findings are fixed. The identifiers below point into that report.
+
+### Security
+
+- Hijack scan (WS-01, WS-02, WS-29, WS-30, WS-75, WS-76, WS-86): writability is now answered by
+  Windows itself, with `AccessCheck` and the non-elevated token, instead of a hand-written DACL
+  reading. It counts what lets a standard user grant themselves access - the owner's implicit
+  `WRITE_DAC`, `WRITE_OWNER` (take ownership) - and the mandatory integrity label. `C:\` is no longer
+  reported writable from an elevated session, and an absent PATH entry is graded by the right to
+  create that directory. The scan no longer creates and deletes probe files in `C:\`, Program Files,
+  service directories and PATH entries. Where no non-elevated token exists (SYSTEM, a service, UAC
+  off), it grades the well-known unprivileged groups and says so in an `Unverified` notice.
+- MCP server (WS-08, WS-09, WS-10, WS-61, RA-06): command lines, whose arguments are where services
+  keep their secrets, no longer reach the model through the hijack context or alert details; the
+  full line travels only in the gated `command` field. Model-facing text escapes invisible, Tag and
+  line-separator characters on every Unicode plane. The 90-second timeout now cancels the scan and
+  releases its lock. Path redaction stops at path boundaries. A test walks the IL call graph from
+  every MCP method and finds no path to a mutating API, named pipes and path-based file writes
+  included.
+- Response actions (WS-04, WS-05, WS-17, WS-18, WS-19, WS-20, WS-33): process actions go through the
+  verified process handle, never a bare PID that may have been reused. Suspend succeeds only when
+  every live thread is suspended, and is rolled back otherwise. Removing or restoring a persistence
+  item binds capture, verification and action to one file handle, or to one verified registry key
+  handle (transactional registry is unavailable on Windows 11). A destructive action whose journal
+  entry cannot be written is reported `PartiallyApplied`, not as a success. Protected processes are
+  recognised by their canonical path under System32, not by file name.
+- Automatic file access (WS-22, WS-40, RA-02): automatic reads never follow a reparse point to
+  another location, a UNC share included, and never download a cloud-only OneDrive (Cloud Files)
+  file: such a file is reported unverifiable at once. An image's compiled-in name is read through
+  the handle already acquired, never by a second open.
+- Firewall (WS-15): the emergency stop removes WinSight's WFP filters even when the policy store is
+  no longer trusted, and leaves the store untouched (`Degraded`).
+
+### Detection accuracy
+
+- Persistence triage (WS-74): the genuine Windows interpreters (`powershell.exe`, `cmd.exe`,
+  `mshta.exe`, `rundll32.exe`, `regsvr32.exe`) are recognised again. Since v0.12.0 their compiled-in
+  name was read from the language (`.MUI`) file, so `powershell -enc <payload>` in a Run key passed as
+  an ordinary Microsoft-signed entry.
+- Persistence resolution (WS-07, WS-45, WS-46, WS-54, WS-66): a DLL registered under `WOW6432Node`
+  resolves as a 32-bit process would load it; other accounts' entries expand variables with their own
+  profile; relative names are no longer searched in WinSight's working directory; other users' hives
+  are read once; a per-user COM class is reported only when it overrides the machine's server
+  (T1546.015) - 4,541 rows became 698 on the audit machine.
+- Guardian (WS-03, WS-70, RA-03): an autostart key absent at start, or deleted and recreated, is
+  watched. Items of a source that becomes readable are reported once as an `Unverified` coverage-gain
+  notice, instead of a burst of false arrivals or silence.
+- Write attribution (WS-73): only an open that can create or replace a file counts as a write, so
+  Explorer or Defender opening a new Startup shortcut is no longer named as its author.
+- Signatures (WS-06, WS-21, WS-42, WS-57): verdict, certificate and hashes come from one handle;
+  trust that rests on a root the user installed is flagged in every scan; batch verification is
+  deduplicated (4,533 entries, 438 files); `--nonmicrosoft` uses the verdict, not a substring of the
+  signer's name.
+- Other scanners: drivers with an unresolvable `ImagePath` (WS-41); keyboard and mouse class filters
+  checked by signed image, not name (WS-43); the hosts file Windows actually uses, and sinkhole
+  addresses parsed (WS-47, WS-59); browser extensions' content scripts, more Chromium channels and
+  extensions loaded from a folder (WS-48); certificate stores deduplicated, with `TrustedPublisher`
+  and `Disallowed` audited (WS-55); code-integrity audit and HVCI bits read as documented (WS-56);
+  presence durations beyond 24 hours (WS-58); side-by-side imports resolved through the image's own
+  manifest (WS-51, RA-04); in-place rewrites of container formats (WS-24) and burst timestamps (WS-11)
+  in the ransomware detector.
+
+### Reliability and performance
+
+- Sensor health (WS-25): ETW event losses, file-watcher overflows and re-arms are counted and shown
+  in the dashboard and the CLI, which exits with code 13 when events were lost.
+- DNS monitoring (WS-27), the firewall's pending-application journal (WS-26), cross-snapshot joins by
+  PID and start time (WS-28), named-mutex waits (WS-23) and Guardian's baseline writes (WS-12) no
+  longer lose, confuse or race.
+- Dashboard (WS-31, WS-49, WS-50, WS-68): one instance per user and session; an unexpected exception
+  in a handler no longer ends real-time protection; the reason for a flag and the signature state
+  are shown.
+- WinSxS indexing opens one directory at a time (peak handles 45,910 to 553) and stays within its
+  budget (WS-32, WS-51); idle camera/microphone watching dropped from 1.7% to 0.09% of a core
+  (WS-52).
+
+### Installer and command line
+
+- The Explorer "Check signature with WinSight" verb is registered by setup and removed on uninstall
+  (WS-13).
+- An all-users uninstall removes the firewall service it installed, and stops with exit code 1
+  rather than leave a service pointing at deleted files (WS-63, RA-05).
+- The help lists `alerts` and the maintenance verbs, and the README the 28 verbs and which commands
+  change the machine (WS-14).
+
+### Supply chain and validation
+
+- Release builds no longer restore the `setup-dotnet` cache (WS-62).
+- `microsoft.sbom.dotnettool` 4.1.13 (#160).
+- The Hyper-V qualification harness now lives in the repository (`scripts/validation/hyperv`):
+  administrators-only storage, protected copies of harness and candidate, and a provenance check
+  that runs as an ordinary user. Its first campaigns found and fixed eleven harness defects
+  (WS-77 to WS-85). The product code of this release was qualified on x64 in VMs as local unsigned
+  builds: see
+  [`docs/validation/2026-09-26-x64-qualification-fe953fe.md`](docs/validation/2026-09-26-x64-qualification-fe953fe.md).
+- Tests: 3,617 (2,976 before the audit).
+
 ## 0.13.0 - 2026-09-15
 
 - Fixed: saving a firewall policy could report failure after it had already succeeded. The temporary

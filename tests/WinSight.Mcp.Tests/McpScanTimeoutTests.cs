@@ -17,10 +17,16 @@ namespace WinSight.Mcp.Tests;
 /// </remarks>
 public sealed class McpScanTimeoutTests
 {
+    /// <remarks>
+    /// The budget applies to both scans, and the second one must have room to run: at 200 ms a CI
+    /// runner starting many test collections at once scheduled the trivial second scan too late, and
+    /// the test failed with a timeout the product never had. The first scan blocks until cancelled,
+    /// so a larger budget changes only how long it waits.
+    /// </remarks>
     [Fact]
     public async Task ATimedOutScanIsCancelledAndTheNextScanCanRun()
     {
-        using var service = new McpScanService(TimeSpan.FromMilliseconds(200));
+        using var service = new McpScanService(TimeSpan.FromSeconds(3));
         var observedCancellation = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         await Assert.ThrowsAnyAsync<Exception>(() => service.ExecuteAsync(
@@ -74,7 +80,8 @@ public sealed class McpScanTimeoutTests
         var error = await Assert.ThrowsAsync<McpException>(() =>
             service.ExecuteAsync(_ => [], CancellationToken.None));
         Assert.Contains("still running", error.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(1),
+        // Below the 5-second queue timeout, which is what a wait on the queue would take.
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(4),
             "a known stalled provider made the next request wait on the queue timeout");
 
         release.Set();
@@ -86,8 +93,9 @@ public sealed class McpScanTimeoutTests
             {
                 recovered = await service.ExecuteAsync(_ => [report], CancellationToken.None);
             }
-            catch (McpException)
+            catch (Exception ex) when (ex is McpException or TimeoutException)
             {
+                // Still stalled, or scheduled after the 100 ms budget on a loaded runner: ask again.
                 await Task.Delay(10);
             }
         }
