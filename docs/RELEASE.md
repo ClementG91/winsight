@@ -16,7 +16,7 @@ Per architecture (`x64`, `arm64`):
 
 Plus GitHub **build provenance** and **SBOM attestations**, signed by GitHub's OIDC identity.
 
-From v0.14.1, also `winsight-v<version>-qualification.ps1` and its `.sha256`: a standalone
+From v0.14.2 (v0.14.1 publication was blocked by a test), also `winsight-v<version>-qualification.ps1` and its `.sha256`: a standalone
 qualification-harness launcher assembled from the tagged commit's exact Git blobs. This script
 has a **build-provenance attestation**, not a binary-package SBOM attestation. It is not an ordinary
 double-click installer: follow the independent digest authentication and protected-installation
