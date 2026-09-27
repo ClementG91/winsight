@@ -4,8 +4,10 @@ namespace WinSight.Ransomware.Tests;
 
 public sealed class CanarySeedConcurrencyTests
 {
-    [Fact]
-    public async Task ConcurrentFirstUseAgreesOnOneSeed()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentFirstUseAgreesOnOneSeed(bool malformed)
     {
         // Two components (the launch sweep and restored protection, or two dashboards) can create the
         // seed at the same moment. Different seeds give different decoy names, and decoys named from
@@ -16,6 +18,10 @@ public sealed class CanarySeedConcurrencyTests
             try
             {
                 var path = Path.Combine(directory, "canary-seed.bin");
+                if (malformed)
+                {
+                    File.WriteAllBytes(path, [1, 2, 3]);
+                }
                 using var go = new ManualResetEventSlim();
                 var tasks = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
                 {
@@ -32,6 +38,40 @@ public sealed class CanarySeedConcurrencyTests
             {
                 Directory.Delete(directory, recursive: true);
             }
+        }
+    }
+
+    [Fact]
+    public async Task ACreatorHoldingTheNewSeedDoesNotMakeAReaderInventADifferentOne()
+    {
+        var directory = Directory.CreateTempSubdirectory("winsight-seed-held-").FullName;
+        try
+        {
+            var path = Path.Combine(directory, "canary-seed.bin");
+            var expected = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+            Task<byte[]> reading;
+            using (var creator = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                reading = Task.Factory.StartNew(() =>
+                {
+                    started.SetResult();
+                    return CanaryIdentity.LoadOrCreateSeed(path);
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                // The previous loop exhausted twenty null/false returns immediately: neither safe
+                // file helper throws on sharing violations, so its catch-only delay never ran.
+                await Task.WhenAny(reading, Task.Delay(TimeSpan.FromMilliseconds(500)));
+                creator.Write(expected);
+                creator.Flush(flushToDisk: true);
+            }
+
+            Assert.Equal(expected, await reading.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.Equal(expected, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
         }
     }
 

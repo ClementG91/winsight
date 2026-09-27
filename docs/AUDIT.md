@@ -350,6 +350,7 @@ du comportement privilégié ni de la provenance des octets publiés.
 | RB-04 | Moyenne, preuves | Le vérificateur acceptait un sous-ensemble du harnais ou des scripts, une carte d'artefacts vide/incomplète et une porte d'identité absente ou en échec. | Source `v0.14.0` : `scripts/validation/hyperv/Verify-QualificationProvenance.ps1:67` ; remplacement : `QualificationProvenance.psm1:14` | Des preuves cohérentes entre elles mais incomplètes sont annoncées vérifiées. | Ensembles exacts sans doublons, formats d'empreinte, triplet archive/installeur/SBOM de même version/architecture, commit et porte 01 PASS requis ; reçu de bootstrap lié à l'empreinte externe. Tests PowerShell : 12 échecs sur 19 avant correction, 25/25 après ajout des cas de reçu. | **Corrigé et testé sans élévation** ; qualification complète du harnais liée à RB-01. |
 | RB-05 | Basse, release | Une erreur native de restore/build/format pouvait être masquée par la commande suivante dans la même étape PowerShell. | `.github/workflows/release.yml`, étapes `Restore, build and test tagged source` et `Verify formatting and dependencies` | Format en échec, audit des dépendances réussi, étape néanmoins verte. | Contrôle immédiat de `$LASTEXITCODE` après chaque commande concernée ; trois cas de contrat rouges avant, verts après. | **Corrigé**, exécution du pipeline requise à la livraison. |
 | RB-06 | Basse, chemin signé latent | Le SBOM était calculé avant signature des exécutables qu'il décrit. | `scripts/Build-Release.ps1`, ordre signature / `dotnet sbom-tool generate` / compression | Une activation future de la signature produit un inventaire dont les empreintes ne correspondent plus au paquet final. La politique courante non signée n'exerce pas le défaut. | Signature des exécutables avant génération du SBOM ; contrat d'ordre rouge avant, vert après. | **Corrigé**, chaîne Authenticode réelle toujours non qualifiée. |
+| RB-07 | Moyenne, identité des leurres | Le réessai de création de graine n'attendait que sur exception, alors que les primitives renvoient aussi null/false lors d'un partage refusé. La réparation d'une graine malformée remplaçait le chemin après une observation périmée. | `src/WinSight.Ransomware/CanaryIdentity.cs:112` ; `tests/WinSight.Ransomware.Tests/CanarySeedConcurrencyTests.cs:8` ; job ARM64 `108502174637` de la PR #164 | Le créateur possède encore le fichier vide : un autre appel épuise vingt essais et retourne une graine privée. Deux réparateurs peuvent aussi remplacer un gagnant valide. Les noms divergent entre composants et les anciens leurres ne sont plus reconnus par leur graine. | Attente bornée à chaque réessai, pas seulement sur exception ; réacquisition pour suppression et validation de longueur sous le même handle, puis création sans écrasement. Trois scénarios rouges sur l'ancien code (premier usage, réparation concurrente, créateur tenant un fichier vide), quatre cas verts après correction. | **Corrigé avec régression** après échec réel de la première CI ARM64 ; nouvelle CI obligatoire, aucun contournement ni simple relance du test défaillant. |
 
 Premier correctif RB-02 : `1e9f370`. Sous PowerShell avec
 `TEMP`/`TMP=D:\WinSight-Build\tmp` et `DOTNET_CLI_HOME=D:\WinSight-Build\dotnet-home`, commande
@@ -369,13 +370,22 @@ PowerShell 5.1 et refus d'écrasement. Ces scripts sont exécutés par les tests
 sans démarrer le bootstrap privilégié. Les cinq nouveaux contrats de release (trois codes de
 sortie, ordre SBOM et couverture du lanceur) ont échoué avant les changements puis passé.
 
-Validation finale locale du patch : `dotnet test winsight.sln -c Release --no-restore --nologo
+Validation locale RB-01 à RB-06, avant le constat CI RB-07 : `dotnet test winsight.sln -c Release --no-restore --nologo
 --logger "trx;LogFilePrefix=post-audit-0141"` : **23 rapports, 3 635 tests PASS, aucun échec ni
 ignoré**. `dotnet format winsight.sln --verify-no-changes --no-restore` et `git diff --check` :
 sortie 0. Les 21 scripts du harnais passent l'analyse syntaxique Windows PowerShell 5.1 et les
 27 autocontrôles `Test-HarnessHelpers.ps1` passent sans élévation. Le contrat d'isolation des
 modules a été rouge avant les gardes puis vert dans la suite complète. Ces contrôles ne ferment
 pas les portes opérateur/VM ni la vérification ultérieure des artefacts CI publiés.
+
+La première CI de la [PR #164](https://github.com/ClementG91/winsight/pull/164),
+[run 36277212258](https://github.com/ClementG91/winsight/actions/runs/36277212258), a validé
+les paquets et cycles d'installation x64/ARM64, les suites x64 2022/2025 et CodeQL, mais le test
+`CanarySeedConcurrencyTests.ConcurrentFirstUseAgreesOnOneSeed` a échoué sur ARM64 natif.
+Ce résultat n'a pas été masqué par une relance : il a conduit à RB-07, reproduit localement
+(3 échecs / 4 cas avant correction, 4/4 après). Le budget de réessai reste borné (vingt essais,
+950 ms de pauses cumulées au maximum, hors temps d'I/O) ; une indisponibilité persistante garde
+le repli aléatoire documenté, sans garantie de noms stables entre instances.
 
 Relecture adversariale additionnelle : MCP (projection du texte non fiable, garde du champ
 `command`, frontière des effets de bord, annulation), Hijack (droits effectifs/étiquettes, fichier

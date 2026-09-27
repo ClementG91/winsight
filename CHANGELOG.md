@@ -2,6 +2,11 @@
 
 ### Fixed
 
+- Ransomware canary identity (RB-07): concurrent first use or repair of a malformed seed can no
+  longer replace a valid winner after a stale read. Sharing-violation retries now back off even
+  when the safe file helpers return null/false instead of throwing. A native Arm64 CI failure
+  exposed this defect; it was reproduced with concurrent creators and a held, initially empty
+  seed file before fixing it. Persistent storage failure still uses the documented random fallback.
 - Guardian (RB-02): when an undelivered coverage-gain notice contains more than 4,096 entries,
   retain the entire durable baseline until every subscriber has accepted the notice. Overflow
   entries must not silently become known after an unsuccessful delivery. Regressions cover live
