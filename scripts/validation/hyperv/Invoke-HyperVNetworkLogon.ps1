@@ -15,6 +15,7 @@ param(
     [Parameter(Mandatory)][string]$CandidateDir,
     [Parameter(Mandatory)][string]$HarnessDir,
     [Parameter(Mandatory)][string]$EvidenceRoot,
+    [Parameter(Mandatory)][string]$BootstrapReceipt,
     [string]$Name = 'WinSight-Qualification-HV',
     [string]$ControlName = 'WinSight-Control-HV',
     # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
@@ -22,7 +23,7 @@ param(
     [string]$Checkpoint = 'S0-hyperv-autorun',
     [string]$ControlCheckpoint = 'C0-control',
     [string]$Switch = 'WinSight-Qual-Private',
-    [string]$RunName = ('hv-network-' + (Get-Date -Format 'yyyyMMdd-HHmm')),
+    [string]$RunName = ('hv-network-' + [DateTime]::Now.ToString('yyyyMMdd-HHmm', [Globalization.CultureInfo]::InvariantCulture)),
     [int64]$TargetMemoryBytes = 4GB,
     # The control only logs on over the network. It runs with less memory than it was built with
     # (3 GB), so that both VMs fit in the host's memory together.
@@ -33,6 +34,9 @@ param(
     [switch]$Resume
 )
 
+# Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::GetFolderPath('System'), 'WindowsPowerShell\v1.0\Modules')
+
 # Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
 # empty in the defaults of an advanced script started with -File.
 if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }
@@ -42,6 +46,7 @@ Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
 Set-AdministratorsDefaultOwner
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
+Assert-ProtectedPath -Path $BootstrapReceipt
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $controlData = Join-Path $Root 'control-data.vhdx'
@@ -192,6 +197,7 @@ try {
 finally { Dismount-WinSightData $controlData }
 if ($refused.Count -gt 0) { $refused | Set-Content -LiteralPath (Join-Path $runDir 'collection-refused.txt') }
 @("# harness $HarnessDir") + @(Get-FileManifest $HarnessDir) | Set-Content -LiteralPath (Join-Path $runDir 'provenance-harness.txt')
+Copy-Item -LiteralPath $BootstrapReceipt -Destination (Join-Path $runDir 'provenance-bootstrap.json')
 @("# candidate $CandidateDir, claimed commit $($candidate.commit)") + @(Get-FileManifest $CandidateDir) |
     Set-Content -LiteralPath (Join-Path $runDir 'provenance-candidate.txt')
 Get-ChildItem -LiteralPath $runDir -Recurse -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object FullName |

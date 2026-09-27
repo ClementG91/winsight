@@ -105,17 +105,16 @@ public static class CanaryIdentity
     }
 
     /// <summary>
-    /// The machine-local seed, created on first use. Returns a process-lifetime random seed when it
-    /// cannot be persisted, so decoys are still unguessable even if the state directory is
-    /// unwritable — only cross-run orphan recovery is lost, and the manifest covers that.
+    /// The machine-local seed, created on first use. Returns a fresh random seed when it cannot be
+    /// persisted, so decoys remain unguessable even if the state directory is unwritable. That
+    /// fallback cannot provide stable names across independently created managers or later runs.
     /// </summary>
     public static byte[] LoadOrCreateSeed(string? statePath = null)
     {
         var path = statePath ?? SeedPath;
-        if (!AutomaticFileAccess.IsLocal(path))
-        {
-            return RandomNumberGenerator.GetBytes(32);
-        }
+        // Each acquisition/create below enforces local, non-reparse I/O itself. Do not short-circuit
+        // through IsLocal: its conservative false also covers a local file pending deletion by a
+        // repairer, and that transient state must participate in the bounded retry loop.
 
         // Read, else create atomically (first writer wins), else read the winner. Concurrent first
         // use (the launch sweep beside restored protection, or two dashboards) used to produce
@@ -125,6 +124,13 @@ public static class CanaryIdentity
         const int Attempts = 20;
         for (var attempt = 0; attempt < Attempts; attempt++)
         {
+            // The handle-based helpers return null/false for sharing violations; they do not
+            // necessarily throw. Delay every retry, including a lost create/repair race, so twenty
+            // tight iterations cannot exhaust the budget before the first writer flushes/closes.
+            if (attempt > 0)
+            {
+                Thread.Sleep(5 * attempt);
+            }
             try
             {
                 var malformed = false;
@@ -150,28 +156,30 @@ public static class CanaryIdentity
                     }
                 }
 
-                var seed = RandomNumberGenerator.GetBytes(32);
-                if (!malformed)
+                if (malformed)
                 {
-                    if (AutomaticFileAccess.TryCreateNewFile(
-                            path,
-                            seed,
-                            createParentDirectories: true))
+                    // Do not replace from the earlier length observation: another repairer may
+                    // already have installed a valid seed and handed it to its caller. Acquire the
+                    // exact file for deletion, denying writers and other deleters, and revalidate
+                    // its length under that lease. After deleting only malformed bytes, ordinary
+                    // first-writer-wins creation below establishes a single replacement seed.
+                    using var invalid = AutomaticFileAccess.TryAcquireForDelete(path);
+                    if (invalid is { IsDirectory: false } && invalid.Length != 32)
                     {
-                        return seed;
+                        _ = invalid.TryDelete();
                     }
                     continue;
                 }
-                if (AtomicFile.TryWrite(path, seed))
+
+                var seed = RandomNumberGenerator.GetBytes(32);
+                if (AutomaticFileAccess.TryCreateNewFile(path, seed, createParentDirectories: true))
                 {
-                    // Re-read: a concurrent creator may have replaced it at the same moment.
-                    continue;
+                    return seed;
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                // Another creator won, or held the file for a moment: read again.
-                Thread.Sleep(5 * (attempt + 1));
+                // Another creator won, or held the file for a moment: the next iteration backs off.
             }
             catch (System.Security.SecurityException)
             {

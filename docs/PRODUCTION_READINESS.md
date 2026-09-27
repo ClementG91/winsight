@@ -1,21 +1,24 @@
 # Production readiness
 
-Status as of 2026-09-26. Evidence is candidate-bound: a successful result for one commit or package
+Status as of 2026-09-27. Evidence is candidate-bound: a successful result for one commit or package
 does not qualify different executable bytes, and a local rehearsal does not qualify a published
 release.
 
 | Target | Verdict |
 |---|---|
-| **x64, v0.14.0** | **Product code qualified as a local rehearsal; the release binaries were not run in the VM.** The rebuilt harness (RA-01) qualified this release's product code on x64 VMs, as local unsigned candidates, with verified provenance for each run ([record](validation/2026-09-26-x64-qualification-fe953fe.md)): 32 gates without a failure, gate 17 with every download request attributed to its process, gate 36 10/10. The published binaries are the CI build of that code but for one notice's severity (WS-86), a notice never emitted in those runs. They are attested and, as an accepted distribution limitation, unsigned. Commit hashes cited before 2026-09-24 predate a history rewrite that removed local paths; `docs/AUDIT.md` §17.3 maps them to the published ones. |
+| **x64, v0.14.1** | **Patch with regression coverage, not a new privileged VM qualification.** Guardian overflow durability is corrected (RB-02); the replacement trusted harness and stricter provenance verifier have unelevated tests (RB-01/RB-04). An operator must independently authenticate the new launcher, validate its elevated installation and substitution resistance in a disposable VM, then rerun the campaign against the exact candidate. Old rehearsals below do not qualify these new bytes. Distribution remains unsigned; no Authenticode acceptance is implied. |
+| **x64, v0.14.0** | **Product code exercised in local x64 VM rehearsals; neither the release binaries nor the elevated harness startup were independently provenance-qualified.** The rebuilt harness (RA-01) ran local unsigned candidates ([record](validation/2026-09-26-x64-qualification-fe953fe.md)): 32 gates without a failure, gate 17 with every download request attributed to its process, gate 36 10/10. Its post-run verifier passed, but RB-01 in `AUDIT.md` §4.4 shows that it does not authenticate the user-writable entry point before elevation. The published binaries are the CI build of that code but for one notice's severity (WS-86), a notice never emitted in those runs. They are attested and, as an accepted distribution limitation, unsigned. Commit hashes cited before 2026-09-24 predate a history rewrite that removed local paths; `docs/AUDIT.md` §17.3 maps them to the published ones. |
 | **x64, v0.13.0 and older** | **Superseded.** They carry defects fixed in v0.14.0 (`docs/AUDIT.md`), among them WS-74: from v0.12.0 the interpreter triage never classified the genuine Windows interpreters. |
 | **Arm64 (native)** | **Not fully qualified** - native build, tests, packaging and installer run only in GitHub's native Arm64 CI; privileged WFP/SCM/trust/IPC/session behavior still needs an isolated Arm64 VM |
 | **x64 on Arm64** | **Not qualified** - emulated application identity and privileged runtime behavior need Arm64 hardware |
 
 ## Local x64 candidates `fe953fe` and `711ded0` (2026-09-25/26)
 
-Built with `Build-Release.ps1 -DisableSignature -Architectures x64` before the version bump (so the artifacts are named and versioned 0.13.0), staged and run by the rebuilt harness, whose provenance was verified after each run (11/11). `head-fe953fe` passed every gate but 36 (32 gates, 0 failures); `gate17-711ded0` passed gate 17 with the corrected Cloud Files measurement; `net-711ded0b` passed gate 36 from the control VM (10/10). Exact artifact hashes, method and limits: [`validation/2026-09-26-x64-qualification-fe953fe.md`](validation/2026-09-26-x64-qualification-fe953fe.md); every run, including the lost ones: [`AUDIT.md` §17.4](AUDIT.md).
+Built with `Build-Release.ps1 -DisableSignature -Architectures x64` before the version bump (so the artifacts are named and versioned 0.13.0), staged and run by the rebuilt harness, whose post-run manifests passed 11/11 checks. `head-fe953fe` passed every gate but 36 (32 gates, 0 failures); `gate17-711ded0` passed gate 17 with the corrected Cloud Files measurement; `net-711ded0b` passed gate 36 from the control VM (10/10). Exact artifact hashes, method and limits: [`validation/2026-09-26-x64-qualification-fe953fe.md`](validation/2026-09-26-x64-qualification-fe953fe.md); every run, including the lost ones: [`AUDIT.md` §17.4](AUDIT.md).
 
 What it is not: a CI build, signed, the release's own bytes, or Arm64, soak and multi-user coverage.
+The 11/11 post-run checks do not establish provenance of the elevated entry point (RB-01); this is
+functional rehearsal evidence pending a trusted launcher and an operator-led rerun.
 
 ## Local x64 candidate `259056b` (2026-09-23)
 

@@ -1,7 +1,13 @@
 # x64 VM qualification with the rebuilt harness - 2026-09-25/26
 
-**Result: PASS for the product code released as v0.14.0, qualified as local unsigned candidates
+**Recorded result: PASS for the product code released as v0.14.0, exercised as local unsigned candidates
 `fe953fe` (every gate but 36) and `711ded0` (gates 17 and 36).**
+
+Post-publication caveat (2026-09-26, RB-01): the 11/11 verifier result below checks protected
+copies and sealed artifacts *after* the elevated runner started. The runner and verifier were
+launched from a worktree writable by ordinary local users; no trusted pre-launch authentication
+of their entry points was established. This record is functional local rehearsal evidence, not
+independent proof of host-startup provenance. See [`AUDIT.md` §4.4](../AUDIT.md).
 
 This record is bound to commits `fe953fee5ad71d586e946d7a90b47467da8754d7` and
 `711ded09434ce4f776bde9081d9b90fc132b5543` and to the exact artifacts below. Both were built locally

@@ -18,6 +18,9 @@ param(
     [switch]$AllowAncestorChange
 )
 
+# Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::GetFolderPath('System'), 'WindowsPowerShell\v1.0\Modules')
+
 # Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
 # empty in the defaults of an advanced script started with -File.
 if (-not $VmRoot) { $VmRoot = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hyper-V\WinSight-Qualification') }

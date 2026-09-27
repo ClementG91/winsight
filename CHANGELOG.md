@@ -1,3 +1,43 @@
+## 0.14.1 - 2026-09-27
+
+### Fixed
+
+- Ransomware canary identity (RB-07): concurrent first use or repair of a malformed seed can no
+  longer replace a valid winner after a stale read. Sharing-violation retries now back off even
+  when the safe file helpers return null/false instead of throwing. A native Arm64 CI failure
+  exposed this defect; it was reproduced with concurrent creators and a held, initially empty
+  seed file before fixing it. Persistent storage failure still uses the documented random fallback.
+  A seed pending deletion by another repairer also participates in these retries; it is not mistaken
+  for a permanent path refusal. Every actual file operation still enforces local, non-reparse access.
+- Guardian (RB-02): when an undelivered coverage-gain notice contains more than 4,096 entries,
+  retain the entire durable baseline until every subscriber has accepted the notice. Overflow
+  entries must not silently become known after an unsuccessful delivery. Regressions cover live
+  retries, multiple subscribers, the real baseline file, shutdown and restart; they fail without
+  the guard. Other notices may replay while the baseline is retained.
+- Qualification harness (RB-01, RB-04): publish a self-contained, checksummed and provenance-attested
+  launcher built from exact committed blobs. The operator must independently authenticate its digest
+  and execute the same verified memory buffer before installing the protected runner and verifier.
+  Each run carries the bootstrap receipt; verification requires an external launcher pin, the full
+  harness and candidate-script inventories, a complete artifact triplet and a successful identity
+  gate. Never elevate scripts from a writable checkout. See the
+  [operator procedure](scripts/validation/hyperv/README.md).
+- Release gates (RB-05): a failing restore, build or formatting command now stops the release step
+  immediately, even if a later command would succeed.
+- Signed-package SBOM ordering (RB-06): generate the SBOM after signing package executables, so its
+  file hashes describe the bytes archived and installed. The published distribution policy remains
+  explicitly unsigned; the real Authenticode chain is still unqualified.
+- MCP documentation (RB-03): the 90-second deadline requests cancellation. A provider that ignores
+  it retains the scan gate until it returns; the deadline does not force-release the gate.
+
+### Validation limits
+
+The new harness has unelevated Windows PowerShell 5.1 behavioral and contract tests, including
+tamper rejection and deterministic generation despite a dirty checkout. Its elevated installation
+and pre-launch substitution trial still require a disposable VM and an operator-led campaign.
+Historical x64 rehearsals did not authenticate the old elevated entry point before execution;
+they do not qualify these new binaries. Native Arm64 privileged runtime, x64-on-Arm64, multi-user,
+soak and signed Authenticode acceptance remain open. See [`docs/AUDIT.md` §4.4](docs/AUDIT.md).
+
 ## 0.14.0 - 2026-09-26
 
 This release carries the fixes of the September 2026 security audit. The full report, with each
@@ -18,8 +58,9 @@ findings, 75 fixed with tests, 4 documented as limits, 1 open (WS-53, a shared-r
 - MCP server (WS-08, WS-09, WS-10, WS-61, RA-06): command lines, whose arguments are where services
   keep their secrets, no longer reach the model through the hijack context or alert details; the
   full line travels only in the gated `command` field. Model-facing text escapes invisible, Tag and
-  line-separator characters on every Unicode plane. The 90-second timeout now cancels the scan and
-  releases its lock. Path redaction stops at path boundaries. A test walks the IL call graph from
+  line-separator characters on every Unicode plane. The 90-second timeout requests cancellation;
+  the scan lock remains held until a provider that ignores cancellation actually returns. Path
+  redaction stops at path boundaries. A test walks the IL call graph from
   every MCP method and finds no path to a mutating API, named pipes and path-based file writes
   included.
 - Response actions (WS-04, WS-05, WS-17, WS-18, WS-19, WS-20, WS-33): process actions go through the

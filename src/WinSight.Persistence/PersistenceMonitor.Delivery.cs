@@ -40,6 +40,15 @@ public sealed partial class PersistenceMonitor
             PersistenceCoverageMap? coverage;
             lock (_gate)
             {
+                // A gain lists only its first MaxListed entries. If delivery fails, the remaining
+                // identities cannot be subtracted from a new persisted baseline. Keep the previous
+                // baseline intact until the notice is delivered; otherwise an overflow entry becomes
+                // silently known after a restart. Repeating other arrivals is safer than losing one.
+                if (_undeliveredGains.Any(pending => pending.Gain.Unlisted > 0))
+                {
+                    _saveRetryNeeded = true;
+                    return;
+                }
                 var undelivered = _undelivered.Select(pending => pending.Event.Identity)
                     .Concat(_undeliveredGains.SelectMany(pending => pending.Gain.Entries.Select(PersistenceIdentity.FromEntry)))
                     .ToHashSet();

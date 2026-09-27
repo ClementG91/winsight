@@ -219,6 +219,41 @@ public sealed class GuardianUncertainArrivalMonitorTests
         Assert.Equal("Defrag", Assert.Single(arrivals).Entry.Name);
     }
 
+    [Fact]
+    public void AnUndeliveredGainBeyondTheListingLimitDoesNotSilentlySaveOverflowEntries()
+    {
+        var store = UnelevatedSave();
+        var hidden = Enumerable.Range(0, PersistenceCoverageGain.MaxListed + 1)
+            .Select(index => Hidden with
+            {
+                Name = $"Hidden{index}",
+                Location = $@"C:\Windows\System32\Tasks\Hidden{index}",
+            })
+            .ToArray();
+        PersistenceScanResult Scan(IReadOnlyList<IAutostartEnumerator> _, CancellationToken __) =>
+            new([Readable, .. hidden], PersistenceCoverage.Complete, new HashSet<string> { Tasks });
+        var overflowIdentity = PersistenceIdentity.FromEntry(hidden[^1]);
+
+        using (var first = new PersistenceMonitor([], new QuietSource(), Scan, baselineStore: store))
+        {
+            first.CoverageGained += (_, _) => throw new IOException("journal unwritable");
+            first.Start();
+
+            Assert.Equal(1, first.Diagnostics.PendingCoverageGains);
+            Assert.DoesNotContain(overflowIdentity, store.Identities);
+        }
+
+        var gains = new List<PersistenceCoverageGain>();
+        using var next = new PersistenceMonitor([], new QuietSource(), Scan, baselineStore: store);
+        next.CoverageGained += (_, e) => gains.Add(e.Gain);
+        next.Start();
+
+        var repeated = Assert.Single(gains);
+        Assert.Equal(hidden.Length, repeated.Count);
+        Assert.Equal(1, repeated.Unlisted);
+        Assert.Contains(overflowIdentity, store.Identities);
+    }
+
     private sealed class MemoryCoverageStore(IReadOnlySet<PersistenceIdentity> identities, PersistenceCoverageMap coverage)
         : IPersistenceBaselineStore
     {

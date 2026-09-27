@@ -14,11 +14,12 @@ param(
     [Parameter(Mandatory)][string]$CandidateDir,
     [Parameter(Mandatory)][string]$HarnessDir,
     [Parameter(Mandatory)][string]$EvidenceRoot,
+    [Parameter(Mandatory)][string]$BootstrapReceipt,
     # Default locations, resolved below, are at the root of the volume this script runs from; pass a path to use another.
     [string]$Root,
     [string]$Name = 'WinSight-Qualification-HV',
     [string]$Checkpoint = 'S0-hyperv-autorun',
-    [string]$RunName = ('hv-run-' + (Get-Date -Format 'yyyyMMdd-HHmm')),
+    [string]$RunName = ('hv-run-' + [DateTime]::Now.ToString('yyyyMMdd-HHmm', [Globalization.CultureInfo]::InvariantCulture)),
     # Gates to run (01 always runs). Empty = every gate.
     [string[]]$Gates = @(),
     [int]$TimeoutMinutes = 480,
@@ -27,6 +28,9 @@ param(
     # Collect a run whose driver was closed while the VM kept going: wait for it to power off, then seal and restore.
     [switch]$Resume
 )
+
+# Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
+$env:PSModulePath = [IO.Path]::Combine([Environment]::GetFolderPath('System'), 'WindowsPowerShell\v1.0\Modules')
 
 # Resolved here rather than as parameter defaults: Windows PowerShell 5.1 leaves $PSScriptRoot
 # empty in the defaults of an advanced script started with -File.
@@ -39,6 +43,7 @@ Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
 Set-AdministratorsDefaultOwner
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
+Assert-ProtectedPath -Path $BootstrapReceipt
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
@@ -113,6 +118,7 @@ try {
 finally { Dismount-WinSightData $data }
 # What ran: the protected harness and candidate, by SHA-256 and git blob id, for the verifier.
 @("# harness $HarnessDir") + @(Get-FileManifest $HarnessDir) | Set-Content -LiteralPath (Join-Path $runDir 'provenance-harness.txt')
+Copy-Item -LiteralPath $BootstrapReceipt -Destination (Join-Path $runDir 'provenance-bootstrap.json')
 @("# candidate $CandidateDir, claimed commit $($candidate.commit)") + @(Get-FileManifest $CandidateDir) |
     Set-Content -LiteralPath (Join-Path $runDir 'provenance-candidate.txt')
 Get-ChildItem -LiteralPath $runDir -Recurse -File | Where-Object Name -ne 'SHA256SUMS.txt' | Sort-Object FullName |

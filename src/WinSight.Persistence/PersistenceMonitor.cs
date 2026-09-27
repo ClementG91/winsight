@@ -80,8 +80,9 @@ public sealed partial class PersistenceMonitor : IDisposable
     /// <remarks>
     /// Delivered like <see cref="Detected"/>: on a background thread, retried when a handler throws,
     /// and the entries are left out of the saved baseline until every handler has accepted the
-    /// notice. A notice still undelivered at shutdown therefore becomes arrivals on the next launch
-    /// (its locations are covered by then): louder than needed, never silent.
+    /// notice. An undelivered notice becomes arrivals on the next launch once its coverage is saved.
+    /// If the notice exceeds its listing limit, the whole previous baseline is retained instead, so
+    /// the next launch repeats the uncertain notice without acknowledging any unlisted entry.
     /// </remarks>
     public event EventHandler<PersistenceCoverageGainEventArgs>? CoverageGained;
 
