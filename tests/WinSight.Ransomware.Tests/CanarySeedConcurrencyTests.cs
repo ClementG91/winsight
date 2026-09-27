@@ -1,6 +1,6 @@
-using Xunit;
-
 using WinSight.Core;
+
+using Xunit;
 
 namespace WinSight.Ransomware.Tests;
 
