@@ -403,6 +403,26 @@ automatique aux fichiers, désinstallation Inno et portes CI/release. Les consta
 confirmés sont RB-04 à RB-06 ci-dessus ; cela n'est ni une preuve d'absence de défaut ni une validation
 dynamique des scénarios privilégiés. Le site `winsight-web` optionnel n'a pas été contre-vérifié ici.
 
+Suivi de livraison du 27 septembre : PR #164 fusionnée en `9ae5972`, CI de PR
+`36320076788`, CI main `36325842154` et CodeQL `36325841686` verts. La suite locale finale
+comptait 3 638 tests verts dans 23 projets. Le tag signé `v0.14.1` a ensuite rencontré un
+échec ARM64 dans le workflow de release `36326513206` (job `108640208899`) : le test
+`ASeedPendingDeletionIsRetriedUntilAReplacementCanBePersisted` ne trouvait pas le fichier attendu.
+Aucun artefact de release v0.14.1 publié ; le tag reste inchangé.
+
+Le test conservait le handle jusqu'à une continuation asynchrone après 500 ms, sans garantir
+que cette continuation s'exécute avant les 950 ms de pauses cumulées des réessais. Le planning
+exact du runner n'a pas été capturé ; la dépendance temporelle du test est en revanche visible
+dans le code. Le suivi v0.14.2 substitue uniquement l'attente par une fonction interne dans les
+tests : les handles réels sont libérés au premier réessai, sans course avec le scheduler.
+L'API publique garde les mêmes attentes et primitives I/O protégées. Un cas supplémentaire
+vérifie les 19 attentes et l'absence de modification de la graine sous contention persistante.
+Contrôles négatifs locaux : remettre le préfiltre IsLocal fait échouer le cas DeletePending ;
+omettre les attentes fait échouer trois cas. Les six cas ciblés passent après restauration.
+Vingt répétitions passent (120 cas, 6 400 appels concurrents). Suite Release locale finale :
+23 rapports TRX `seed-retry-final`, 3 639/3 639 PASS, aucun échec ni ignoré ; formatage et
+`git diff --check` verts, 21 scripts analysés sous PowerShell 5.1 sans erreur de syntaxe.
+
 Contrôle ciblé des 11 High de l'audit antérieur (code actuel + régressions existantes, toutes
 incluses dans la suite Release verte). « Sensible à l'ancien code » désigne une assertion dont la
 condition contredit l'ancien comportement décrit par le diff ; **les 11 versions antérieures

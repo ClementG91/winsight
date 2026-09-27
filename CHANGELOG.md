@@ -1,4 +1,18 @@
-## 0.14.1 - 2026-09-27
+## 0.14.2 - 2026-09-27
+
+### Fixed
+
+- Canary seed regression tests release held file handles at an injected retry boundary instead of
+  depending on a 500 ms asynchronous timer completing before the production retry budget expires.
+  The tagged v0.14.1 release was blocked by this timing-dependent test on native Arm64; no v0.14.1
+  release assets were published. Its tag is preserved unchanged. The public seed operation still
+  uses the same bounded real waits and guarded file I/O. A new test verifies all 19 waits on
+  persistent contention without modifying the existing seed; negative controls confirm the
+  regressions still catch skipped retries and the DeletePending preflight bypass.
+
+This patch includes all v0.14.1 changes below. Their privileged qualification limits still apply.
+
+## 0.14.1 - 2026-09-27 (tagged candidate; publication blocked)
 
 ### Fixed
 

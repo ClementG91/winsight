@@ -44,31 +44,27 @@ public sealed class CanarySeedConcurrencyTests
     }
 
     [Fact]
-    public async Task ACreatorHoldingTheNewSeedDoesNotMakeAReaderInventADifferentOne()
+    public void ACreatorHoldingTheNewSeedDoesNotMakeAReaderInventADifferentOne()
     {
         var directory = Directory.CreateTempSubdirectory("winsight-seed-held-").FullName;
         try
         {
             var path = Path.Combine(directory, "canary-seed.bin");
             var expected = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
-            Task<byte[]> reading;
-            using (var creator = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using var creator = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+            var delays = new List<int>();
+            var seed = CanaryIdentity.LoadOrCreateSeed(path, delay =>
             {
-                var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                reading = Task.Factory.StartNew(() =>
-                {
-                    started.SetResult();
-                    return CanaryIdentity.LoadOrCreateSeed(path);
-                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-                await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
-                // The previous loop exhausted twenty null/false returns immediately: neither safe
-                // file helper throws on sharing violations, so its catch-only delay never ran.
-                await Task.WhenAny(reading, Task.Delay(TimeSpan.FromMilliseconds(500)));
+                delays.Add(delay);
+                // The first attempt must encounter the real exclusive, empty file. Complete the
+                // creator at the retry boundary, not on a timer whose continuation may be starved.
                 creator.Write(expected);
                 creator.Flush(flushToDisk: true);
-            }
+                creator.Dispose();
+            });
 
-            Assert.Equal(expected, await reading.WaitAsync(TimeSpan.FromSeconds(30)));
+            Assert.Equal([5], delays);
+            Assert.Equal(expected, seed);
             Assert.Equal(expected, File.ReadAllBytes(path));
         }
         finally
@@ -78,33 +74,53 @@ public sealed class CanarySeedConcurrencyTests
     }
 
     [Fact]
-    public async Task ASeedPendingDeletionIsRetriedUntilAReplacementCanBePersisted()
+    public void ASeedPendingDeletionIsRetriedUntilAReplacementCanBePersisted()
     {
         var directory = Directory.CreateTempSubdirectory("winsight-seed-repair-held-").FullName;
         try
         {
             var path = Path.Combine(directory, "canary-seed.bin");
             File.WriteAllBytes(path, [1, 2, 3]);
-            Task<byte[]> reading;
-            using (var repairer = AutomaticFileAccess.TryAcquireForDelete(path))
+            using var repairer = AutomaticFileAccess.TryAcquireForDelete(path);
+            Assert.NotNull(repairer);
+            Assert.True(repairer.TryDelete());
+            // A sharing refusal is deliberately reported as non-local by this conservative
+            // preflight. It must not bypass the seed operation's bounded contention retries.
+            Assert.False(AutomaticFileAccess.IsLocal(path));
+            var delays = new List<int>();
+            var seed = CanaryIdentity.LoadOrCreateSeed(path, delay =>
             {
-                Assert.NotNull(repairer);
-                Assert.True(repairer.TryDelete());
-                // A sharing refusal is deliberately reported as non-local by this conservative
-                // preflight. It must not bypass the seed operation's bounded contention retries.
-                Assert.False(AutomaticFileAccess.IsLocal(path));
-                var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-                reading = Task.Factory.StartNew(() =>
-                {
-                    started.SetResult();
-                    return CanaryIdentity.LoadOrCreateSeed(path);
-                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
-                await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
-                await Task.WhenAny(reading, Task.Delay(TimeSpan.FromMilliseconds(500)));
-            }
-            var seed = await reading.WaitAsync(TimeSpan.FromSeconds(30));
+                delays.Add(delay);
+                repairer.Dispose();
+            });
+            Assert.Equal([5], delays);
             Assert.Equal(32, seed.Length);
             Assert.Equal(seed, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void PersistentContentionExhaustsTheExactBoundedRetryScheduleWithoutChangingTheSeed()
+    {
+        var directory = Directory.CreateTempSubdirectory("winsight-seed-budget-").FullName;
+        try
+        {
+            var path = Path.Combine(directory, "canary-seed.bin");
+            var expected = Enumerable.Range(0, 32).Select(value => (byte)value).ToArray();
+            var delays = new List<int>();
+            using (var creator = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                creator.Write(expected);
+                creator.Flush(flushToDisk: true);
+                var fallback = CanaryIdentity.LoadOrCreateSeed(path, delays.Add);
+                Assert.Equal(32, fallback.Length);
+                Assert.Equal(Enumerable.Range(1, 19).Select(attempt => 5 * attempt), delays);
+            }
+            Assert.Equal(expected, File.ReadAllBytes(path));
         }
         finally
         {

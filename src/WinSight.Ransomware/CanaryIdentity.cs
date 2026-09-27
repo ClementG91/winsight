@@ -109,8 +109,14 @@ public static class CanaryIdentity
     /// persisted, so decoys remain unguessable even if the state directory is unwritable. That
     /// fallback cannot provide stable names across independently created managers or later runs.
     /// </summary>
-    public static byte[] LoadOrCreateSeed(string? statePath = null)
+    public static byte[] LoadOrCreateSeed(string? statePath = null) =>
+        LoadOrCreateSeed(statePath, Thread.Sleep);
+
+    // Keep the retry policy testable without coupling held-handle release to timer/thread-pool
+    // scheduling. Only the wait is substituted; tests still exercise the real guarded file I/O.
+    internal static byte[] LoadOrCreateSeed(string? statePath, Action<int> delay)
     {
+        ArgumentNullException.ThrowIfNull(delay);
         var path = statePath ?? SeedPath;
         // Each acquisition/create below enforces local, non-reparse I/O itself. Do not short-circuit
         // through IsLocal: its conservative false also covers a local file pending deletion by a
@@ -129,7 +135,7 @@ public static class CanaryIdentity
             // tight iterations cannot exhaust the budget before the first writer flushes/closes.
             if (attempt > 0)
             {
-                Thread.Sleep(5 * attempt);
+                delay(5 * attempt);
             }
             try
             {
