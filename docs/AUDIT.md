@@ -387,6 +387,15 @@ Ce résultat n'a pas été masqué par une relance : il a conduit à RB-07, repr
 950 ms de pauses cumulées au maximum, hors temps d'I/O) ; une indisponibilité persistante garde
 le repli aléatoire documenté, sans garantie de noms stables entre instances.
 
+Le stress supplémentaire a ensuite fait échouer la réparation au troisième lot sur dix : le
+précontrôle `IsLocal` renvoyait aussi false pendant `DeletePending`, avant même la boucle.
+Le cas `ASeedPendingDeletionIsRetriedUntilAReplacementCanBePersisted` reproduit cet échec
+(graine retournée sans fichier persistant) puis passe après suppression du précontrôle redondant.
+Toutes les acquisitions et mutations conservent leur propre refus des chemins distants/reparse ;
+la contention locale suit désormais la même boucle bornée. La classe couvre cinq cas après cet ajout.
+Les dix répétitions de cette classe passent ensuite (50 cas, dont 3 200 appels de création/réparation
+concurrente et les fenêtres d'écriture/suppression tenues ouvertes).
+
 Relecture adversariale additionnelle : MCP (projection du texte non fiable, garde du champ
 `command`, frontière des effets de bord, annulation), Hijack (droits effectifs/étiquettes, fichier
 planté, liaison SxS), réponse (identité PID/handle, journal d'intention et issue partielle), accès

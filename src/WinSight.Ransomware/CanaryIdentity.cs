@@ -112,10 +112,9 @@ public static class CanaryIdentity
     public static byte[] LoadOrCreateSeed(string? statePath = null)
     {
         var path = statePath ?? SeedPath;
-        if (!AutomaticFileAccess.IsLocal(path))
-        {
-            return RandomNumberGenerator.GetBytes(32);
-        }
+        // Each acquisition/create below enforces local, non-reparse I/O itself. Do not short-circuit
+        // through IsLocal: its conservative false also covers a local file pending deletion by a
+        // repairer, and that transient state must participate in the bounded retry loop.
 
         // Read, else create atomically (first writer wins), else read the winner. Concurrent first
         // use (the launch sweep beside restored protection, or two dashboards) used to produce

@@ -7,6 +7,8 @@
   when the safe file helpers return null/false instead of throwing. A native Arm64 CI failure
   exposed this defect; it was reproduced with concurrent creators and a held, initially empty
   seed file before fixing it. Persistent storage failure still uses the documented random fallback.
+  A seed pending deletion by another repairer also participates in these retries; it is not mistaken
+  for a permanent path refusal. Every actual file operation still enforces local, non-reparse access.
 - Guardian (RB-02): when an undelivered coverage-gain notice contains more than 4,096 entries,
   retain the entire durable baseline until every subscriber has accepted the notice. Overflow
   entries must not silently become known after an unsuccessful delivery. Regressions cover live

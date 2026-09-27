@@ -1,5 +1,7 @@
 using Xunit;
 
+using WinSight.Core;
+
 namespace WinSight.Ransomware.Tests;
 
 public sealed class CanarySeedConcurrencyTests
@@ -68,6 +70,41 @@ public sealed class CanarySeedConcurrencyTests
 
             Assert.Equal(expected, await reading.WaitAsync(TimeSpan.FromSeconds(30)));
             Assert.Equal(expected, File.ReadAllBytes(path));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ASeedPendingDeletionIsRetriedUntilAReplacementCanBePersisted()
+    {
+        var directory = Directory.CreateTempSubdirectory("winsight-seed-repair-held-").FullName;
+        try
+        {
+            var path = Path.Combine(directory, "canary-seed.bin");
+            File.WriteAllBytes(path, [1, 2, 3]);
+            Task<byte[]> reading;
+            using (var repairer = AutomaticFileAccess.TryAcquireForDelete(path))
+            {
+                Assert.NotNull(repairer);
+                Assert.True(repairer.TryDelete());
+                // A sharing refusal is deliberately reported as non-local by this conservative
+                // preflight. It must not bypass the seed operation's bounded contention retries.
+                Assert.False(AutomaticFileAccess.IsLocal(path));
+                var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                reading = Task.Factory.StartNew(() =>
+                {
+                    started.SetResult();
+                    return CanaryIdentity.LoadOrCreateSeed(path);
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+                await started.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                await Task.WhenAny(reading, Task.Delay(TimeSpan.FromMilliseconds(500)));
+            }
+            var seed = await reading.WaitAsync(TimeSpan.FromSeconds(30));
+            Assert.Equal(32, seed.Length);
+            Assert.Equal(seed, File.ReadAllBytes(path));
         }
         finally
         {
