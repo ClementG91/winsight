@@ -21,6 +21,13 @@ internal static class ActionJournalReader
     internal const int MaxLineBytes = 16 * 1024;
     internal const int MaxLines = 10_000;
 
+    // Missing required fields must not synthesize a successful action. The optional phase/undo
+    // parameters retain their defaults for historical records.
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        RespectRequiredConstructorParameters = true,
+    };
+
     internal static ActionJournalSnapshot Read(Stream stream, int max)
     {
         max = max <= 0 ? MaxLines : Math.Min(max, MaxLines);
@@ -98,7 +105,7 @@ internal static class ActionJournalReader
                 {
                     try
                     {
-                        var entry = JsonSerializer.Deserialize<ActionJournalEntry>(content);
+                        var entry = JsonSerializer.Deserialize<ActionJournalEntry>(content, ReadOptions);
                         if (entry is null || entry.ActionId == Guid.Empty || entry.Target is null
                             || !Enum.IsDefined(entry.Kind) || !Enum.IsDefined(entry.Outcome)
                             || !Enum.IsDefined(entry.Phase))
