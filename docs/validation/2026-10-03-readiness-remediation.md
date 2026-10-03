@@ -55,7 +55,15 @@ Harness trail (local evidence; no merge authorization):
 - A3: `5164a54b-a806-409b-968a-db1fc8d67f4d`, red then 178 Core and 11 parser tests,
   Release build and format pass; human review required.
 - Final reconciliation/full checks: `4569316f-1170-49a5-9354-1bc68d489d81`.
-  Actual results and fingerprints are retained locally in the router evidence directories and
+  Initial full suite: 3,674 pass and four MCP symbolic positive-control failures, no skips; nine
+  other checks pass. Its broad document review also exceeded the Jev context limit, so finish
+  remains blocked. The document and A2 integration both require independent human review.
+- MCP guard refresh: `be0a5b68-2532-407d-87f4-1546123afc69`; all 127 MCP tests, build and format
+  pass. Negative authority assertions/owner exceptions are unchanged; typed mutation signatures
+  were added, read/revoke/HTTP overload anchors refreshed, and a direct RuleStore write-root
+  control avoids shared-sink predecessor ambiguity. Security-related test review remains required.
+- Superseding full validation is retained with its session ID, actual results and fingerprints in
+  the router evidence directories and
   `out/readiness-final/validation.json`. This record alone does not assert those gates passed.
 
 ## Support and qualification contract
