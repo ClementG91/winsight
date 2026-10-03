@@ -55,26 +55,45 @@ public sealed class VirusTotalStreamingBoundaryTests
         Assert.Equal(1, handler.Calls);
     }
 
-    [Fact]
-    public void BodyDeadlineEndsAStalledRead()
+    [Theory]
+    [InlineData(100, 20_000)]
+    [InlineData(20_000, 100)]
+    public async Task BodyDeadlineEndsAStalledRead(int lookupMilliseconds, int httpMilliseconds)
     {
         using var body = new StalledBody();
         using var handler = new VirusTotalStreamingTests.ReplyHandler(body);
-        using var http = new HttpClient(handler);
-        Assert.Null(new VirusTotalClient(Key, http, TimeSpan.FromMilliseconds(100)).Lookup(Hash));
-        Assert.True(body.Cancelled);
+        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(httpMilliseconds) };
+        var client = new VirusTotalClient(Key, http, TimeSpan.FromMilliseconds(lookupMilliseconds));
+        var lookup = Task.Run(() => client.Lookup(Hash));
+        try
+        {
+            Assert.Null(await lookup.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(body.Cancelled);
+        }
+        finally
+        {
+            await FinishLookup(lookup, body);
+        }
     }
 
     [Fact]
-    public void CallerCancellationIsPreserved()
+    public async Task CallerCancellationIsPreserved()
     {
         using var cancellation = new CancellationTokenSource();
         using var body = new StalledBody(cancellation);
         using var handler = new VirusTotalStreamingTests.ReplyHandler(body);
         using var http = new HttpClient(handler);
-        Assert.ThrowsAny<OperationCanceledException>(() =>
-            new VirusTotalClient(Key, http).Lookup(Hash, cancellation.Token));
-        Assert.True(body.Cancelled);
+        var client = new VirusTotalClient(Key, http);
+        var lookup = Task.Run(() => client.Lookup(Hash, cancellation.Token));
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => lookup.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(body.Cancelled);
+        }
+        finally
+        {
+            await FinishLookup(lookup, body);
+        }
     }
 
     [Fact]
@@ -86,9 +105,25 @@ public sealed class VirusTotalStreamingBoundaryTests
         Assert.Null(new VirusTotalClient(Key, http).Lookup(Hash));
     }
 
+    private static async Task FinishLookup(Task lookup, StalledBody body)
+    {
+        // Release only after the assertions or a failing watchdog, never as their cancellation oracle.
+        body.Release();
+        try
+        {
+            await lookup.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (OperationCanceledException)
+        {
+            // Cancellation is already observed/asserted in the test; this is only worker cleanup.
+        }
+    }
+
     private sealed class StalledBody(CancellationTokenSource? caller = null) : Stream
     {
+        private readonly TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool Cancelled { get; private set; }
+        internal void Release() => _release.TrySetResult();
         public override bool CanRead => true;
         public override bool CanSeek => false;
         public override bool CanWrite => false;
@@ -99,7 +134,7 @@ public sealed class VirusTotalStreamingBoundaryTests
             caller?.Cancel();
             try
             {
-                await Task.Delay(Timeout.Infinite, cancellationToken).ConfigureAwait(false);
+                await _release.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
                 return 0;
             }
             catch (OperationCanceledException)
