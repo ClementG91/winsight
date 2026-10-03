@@ -9,7 +9,10 @@ public sealed record ActionJournalSnapshot(
     int MalformedEntries = 0,
     bool LimitReached = false,
     long BytesRead = 0,
-    int LinesScanned = 0);
+    int LinesScanned = 0,
+    long SourceBytes = 0,
+    bool EndsWithNewline = true,
+    bool EvidencePreserved = false);
 
 /// <summary>Reads JSONL backwards with fixed buffers, including corrupt bytes in every budget.</summary>
 internal static class ActionJournalReader
@@ -32,12 +35,17 @@ internal static class ActionJournalReader
         var bytes = 0L;
         var remaining = stream.Length;
         var end = remaining;
+        var terminated = end == 0;
         while (remaining > 0 && bytes < MaxBytes && lines < MaxLines && entries.Count < max)
         {
             var count = (int)Math.Min(block.Length, Math.Min(remaining, MaxBytes - bytes));
             var start = remaining - count;
             stream.Position = start;
             stream.ReadExactly(block.AsSpan(0, count));
+            if (bytes == 0)
+            {
+                terminated = block[count - 1] == (byte)'\n';
+            }
             bytes += count;
             for (var i = count - 1; i >= 0; i--)
             {
@@ -69,7 +77,7 @@ internal static class ActionJournalReader
         }
         return new ActionJournalSnapshot(entries, MalformedEntries: malformed,
             LimitReached: remaining > 0 && (lines >= MaxLines || bytes >= MaxBytes),
-            BytesRead: bytes, LinesScanned: lines);
+            BytesRead: bytes, LinesScanned: lines, SourceBytes: end, EndsWithNewline: terminated);
 
         void FinishLine()
         {

@@ -28,18 +28,20 @@ public static partial class Adapters
         var snapshot = new ActionJournal(journalPath).ReadWithCoverage(max);
         var entries = snapshot.Entries;
         var b = new ToolReport.Builder("actions");
-        var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached;
+        var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached
+            || snapshot.EvidencePreserved;
         if (incomplete)
         {
             b.Add(Severity.Notable, "Action journal coverage incomplete",
                 snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
-                    : "The inspected history contains malformed records or reached a read limit.",
+                    : "History contains malformed records, reached a read limit, or has preserved recovery evidence.",
                 new Dictionary<string, string?>
                 {
                     ["kind"] = "actionJournalCoverage",
                     ["unreadable"] = snapshot.Unreadable ? "true" : "false",
                     ["malformedEntries"] = snapshot.MalformedEntries.ToString(CultureInfo.InvariantCulture),
                     ["limitReached"] = snapshot.LimitReached ? "true" : "false",
+                    ["evidencePreserved"] = snapshot.EvidencePreserved ? "true" : "false",
                 });
         }
         foreach (var entry in entries)

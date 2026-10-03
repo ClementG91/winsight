@@ -52,12 +52,22 @@ public interface IActionJournal
 /// </remarks>
 public sealed class ActionJournal : IActionJournal
 {
-    private const int MaxEntries = 10_000;
     private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(30);
 
     private readonly string _path;
+    private readonly TimeSpan _lockWait;
 
-    public ActionJournal(string? path = null) => _path = path ?? DefaultPath();
+    public ActionJournal(string? path = null) : this(path, LockWait) { }
+
+    internal ActionJournal(string? path, TimeSpan lockWait)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lockWait, TimeSpan.Zero);
+        _path = path ?? DefaultPath();
+        _lockWait = lockWait;
+    }
+
+    /// <summary>One bounded, create-new recovery copy; never overwritten by automatic maintenance.</summary>
+    public string RecoveryEvidencePath => _path + ".corrupt.jsonl";
 
     /// <summary>Where the action journal lives, beside WinSight's other per-user state.</summary>
     public static string DefaultPath() => Path.Combine(
@@ -65,38 +75,55 @@ public sealed class ActionJournal : IActionJournal
         "WinSight", "action-journal.jsonl");
 
     /// <summary>Appends an entry. Returns false when it could not be written durably.</summary>
-    public bool TryAppend(ActionJournalEntry entry)
+    public bool TryAppend(ActionJournalEntry entry) => TryAppendWithStatus(entry).Durable;
+
+    /// <summary>Preflights retention before append; failed rotation never masquerades as a durable write.</summary>
+    public ActionJournalWriteResult TryAppendWithStatus(ActionJournalEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
-        // Bound caller-controlled strings before serialization and the actual UTF-8 record after it.
-        if (entry.Target is null || entry.Target.Length > ActionJournalReader.MaxLineBytes)
+        if (entry.Target is null || entry.ActionId == Guid.Empty || !Enum.IsDefined(entry.Kind)
+            || !Enum.IsDefined(entry.Outcome) || !Enum.IsDefined(entry.Phase))
         {
-            return false;
+            return new(ActionJournalWriteStatus.InvalidRecord);
+        }
+        var bytes = ActionJournalStorage.Encode(entry);
+        if (bytes is null)
+        {
+            return new(ActionJournalWriteStatus.RecordTooLarge);
         }
         try
         {
-            using var gate = JournalLock.Acquire(_path);
-            if (!AutomaticFileAccess.IsLocal(_path))
+            using var gate = JournalLock.Acquire(_path, _lockWait);
+            var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines);
+            if (snapshot.Unreadable)
             {
-                return false;
+                return new(ActionJournalWriteStatus.Unavailable);
             }
-            var line = JsonSerializer.Serialize(entry) + "\n";
-            if (Encoding.UTF8.GetByteCount(line) > ActionJournalReader.MaxLineBytes)
+            if (snapshot.SourceBytes > ActionJournalReader.MaxBytes)
             {
-                return false;
+                return new(ActionJournalWriteStatus.RecoveryRequired);
             }
-            if (!AutomaticFileAccess.TryAppendFile(_path, Encoding.UTF8.GetBytes(line)))
+            var damaged = snapshot.MalformedEntries > 0 || snapshot.LimitReached;
+            var rotate = damaged || snapshot.LinesScanned >= ActionJournalReader.MaxLines
+                || snapshot.SourceBytes + bytes.Length + 1 > ActionJournalReader.MaxBytes;
+            if (rotate)
             {
-                return false;
+                if (damaged && !PreserveEvidenceLocked())
+                {
+                    return new(ActionJournalWriteStatus.EvidencePreservationFailed);
+                }
+                var entries = new[] { entry }.Concat(snapshot.Entries).ToArray();
+                return ReplaceLocked(entries, ActionJournalReader.MaxBytes / 2,
+                    ActionJournalReader.MaxLines / 2, ActionJournalWriteStatus.Rotated);
             }
-            TrimLocked();
-            return true;
+            // A valid last record without a final newline must not merge with this record.
+            var payload = snapshot.EndsWithNewline ? bytes : new byte[] { (byte)'\n' }.Concat(bytes).ToArray();
+            return new(AutomaticFileAccess.TryAppendFile(_path, payload)
+                ? ActionJournalWriteStatus.Appended : ActionJournalWriteStatus.Unavailable);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (IsUnavailable(ex))
         {
-            return false;
+            return new(ActionJournalWriteStatus.Unavailable);
         }
     }
 
@@ -104,26 +131,45 @@ public sealed class ActionJournal : IActionJournal
     /// Marks the entry with <paramref name="actionId"/> as undone by <paramref name="undoActionId"/>.
     /// Best-effort: a failure only means the history shows the original and the undo as two entries.
     /// </summary>
-    public void MarkUndone(Guid actionId, Guid undoActionId)
+    public void MarkUndone(Guid actionId, Guid undoActionId) => _ = TryMarkUndone(actionId, undoActionId);
+
+    /// <summary>Updates history atomically, or reports why the annotation could not be persisted.</summary>
+    public ActionJournalWriteResult TryMarkUndone(Guid actionId, Guid undoActionId)
     {
+        if (actionId == Guid.Empty || undoActionId == Guid.Empty)
+        {
+            return new(ActionJournalWriteStatus.InvalidRecord);
+        }
         try
         {
-            using var gate = JournalLock.Acquire(_path);
-            var entries = ReadLocked();
-            var index = entries.FindLastIndex(e =>
+            using var gate = JournalLock.Acquire(_path, _lockWait);
+            var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines);
+            if (snapshot.Unreadable)
+            {
+                return new(ActionJournalWriteStatus.Unavailable);
+            }
+            if (snapshot.SourceBytes > ActionJournalReader.MaxBytes)
+            {
+                return new(ActionJournalWriteStatus.RecoveryRequired);
+            }
+            var entries = snapshot.Entries.ToList();
+            var index = entries.FindIndex(e =>
                 e.ActionId == actionId && e.Phase == ActionJournalPhase.Completed);
             if (index < 0)
             {
-                return;
+                return new(ActionJournalWriteStatus.TargetNotFound);
+            }
+            if ((snapshot.MalformedEntries > 0 || snapshot.LimitReached) && !PreserveEvidenceLocked())
+            {
+                return new(ActionJournalWriteStatus.EvidencePreservationFailed);
             }
             entries[index] = entries[index] with { UndoneByActionId = undoActionId };
-            WriteAllLocked(entries);
+            return ReplaceLocked(entries, ActionJournalReader.MaxBytes,
+                ActionJournalReader.MaxLines, ActionJournalWriteStatus.Updated);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or ArgumentException or NotSupportedException)
+        catch (Exception ex) when (IsUnavailable(ex))
         {
-            // History stays as two independent entries.
+            return new(ActionJournalWriteStatus.Unavailable);
         }
     }
 
@@ -135,12 +181,13 @@ public sealed class ActionJournal : IActionJournal
     {
         try
         {
-            using var gate = JournalLock.Acquire(_path);
-            return ReadSnapshotLocked(max);
+            using var gate = JournalLock.Acquire(_path, _lockWait);
+            return ReadSnapshotLocked(max) with
+            {
+                EvidencePreserved = AutomaticFileAccess.FileExists(RecoveryEvidencePath),
+            };
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                                     or System.Security.SecurityException
-                                     or ArgumentException or NotSupportedException or WaitHandleCannotBeOpenedException)
+        catch (Exception ex) when (IsUnavailable(ex))
         {
             return new ActionJournalSnapshot([], Unreadable: true);
         }
@@ -162,50 +209,21 @@ public sealed class ActionJournal : IActionJournal
         return lease.IsCurrent() ? snapshot : new ActionJournalSnapshot([], Unreadable: true);
     }
 
-    private void TrimLocked()
-    {
-        var entries = ReadLocked();
-        if (entries.Count > MaxEntries)
-        {
-            WriteAllLocked(entries.GetRange(entries.Count - MaxEntries, MaxEntries));
-        }
-    }
+    private bool PreserveEvidenceLocked() => ActionJournalStorage.Preserve(_path, RecoveryEvidencePath);
 
-    private List<ActionJournalEntry> ReadLocked()
-    {
-        var entries = new List<ActionJournalEntry>();
-        using var lease = AutomaticFileAccess.TryAcquire(_path);
-        if (lease is null || lease.IsDirectory)
-        {
-            return entries;
-        }
-        using var stream = lease.OpenRead();
-        using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        while (reader.ReadLine() is { } line)
-        {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                continue;
-            }
-            try
-            {
-                if (JsonSerializer.Deserialize<ActionJournalEntry>(line) is { } entry)
-                {
-                    entries.Add(entry);
-                }
-            }
-            catch (JsonException)
-            {
-                // Skip a corrupt line rather than discarding the whole journal.
-            }
-        }
-        return lease.IsCurrent() ? entries : [];
-    }
+    private ActionJournalWriteResult ReplaceLocked(IEnumerable<ActionJournalEntry> newestFirst,
+        int byteBudget, int entryBudget, ActionJournalWriteStatus success) =>
+        ActionJournalStorage.Replace(_path, newestFirst, byteBudget, entryBudget, success);
 
-    private void WriteAllLocked(List<ActionJournalEntry> entries)
+    private static bool IsUnavailable(Exception ex) => ex is IOException or UnauthorizedAccessException
+        or System.Security.SecurityException or ArgumentException or NotSupportedException
+        or WaitHandleCannotBeOpenedException;
+
+    internal static string LockNameFor(string path)
     {
-        _ = ActionJournalStorage.Replace(_path, entries.AsEnumerable().Reverse(),
-            ActionJournalReader.MaxBytes, MaxEntries, ActionJournalWriteStatus.Updated);
+        var key = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
+        return $@"Local\WinSight.ActionJournal.{key}";
     }
 
     private sealed class JournalLock : IDisposable
@@ -219,15 +237,13 @@ public sealed class ActionJournal : IActionJournal
             _held = held;
         }
 
-        public static JournalLock Acquire(string path)
+        public static JournalLock Acquire(string path, TimeSpan wait)
         {
-            var key = Convert.ToHexString(SHA256.HashData(
-                Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
-            var mutex = new Mutex(initiallyOwned: false, $@"Local\WinSight.ActionJournal.{key}");
+            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
             bool held;
             try
             {
-                held = mutex.WaitOne(LockWait);
+                held = mutex.WaitOne(wait);
             }
             catch (AbandonedMutexException)
             {
