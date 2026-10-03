@@ -137,6 +137,58 @@ public sealed class GuardianAlertPresenterTests : IDisposable
         Assert.Equal(ResponseOutcome.TargetNotFound, Presenter(new FakeMutator()).Revoke(Guid.NewGuid()));
 
     [Fact]
+    public void LockedRevokeIsFailedInTheResponseAndJournalAndLeavesTheAllowActive()
+    {
+        var presenter = Presenter(new FakeMutator());
+        var rule = presenter.Allow(RunEntry())!;
+        using (var locked = new FileStream(Path.Combine(_root, "rules.json"), FileMode.Open,
+                   FileAccess.Read, FileShare.ReadWrite))
+        {
+            Assert.Equal(ResponseOutcome.Failed, presenter.Revoke(rule.Id));
+        }
+        Assert.Equal(rule.Id, Assert.Single(new RuleStore(Path.Combine(_root, "rules.json"))
+            .ActiveRules(RuleScopeKind.Persistence)).Id);
+        var history = new ActionJournal(JournalPath).Read();
+        Assert.Equal(ResponseOutcome.Failed,
+            Assert.Single(history, e => e.Kind == ResponseActionKind.RemoveRule).Outcome);
+        Assert.Null(Assert.Single(history, e => e.ActionId == rule.Id).UndoneByActionId);
+    }
+
+    [Theory]
+    [InlineData("{ not json")]
+    [InlineData("{\"Version\":99,\"Rules\":[]}")]
+    public void UnreadableRuleStoreIsFailedRatherThanTargetNotFound(string content)
+    {
+        File.WriteAllText(Path.Combine(_root, "rules.json"), content);
+        Assert.Equal(ResponseOutcome.Failed, Presenter(new FakeMutator()).Revoke(Guid.NewGuid()));
+        Assert.Equal(ResponseOutcome.Failed, Assert.Single(new ActionJournal(JournalPath).Read()).Outcome);
+        Assert.Equal(content, File.ReadAllText(Path.Combine(_root, "rules.json")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AllowCompletionFailureReturnsTheActualPersistedState(bool blockRollback)
+    {
+        var path = Path.Combine(_root, "rollback-rules.json");
+        using var journal = new CompletionFailingJournal(path, blockRollback);
+        var presenter = new GuardianAlertPresenter(new FakeMutator(), rules: new RuleStore(path),
+            journal: journal, clock: () => Now);
+        var returned = presenter.Allow(RunEntry());
+        journal.ReleaseLock();
+        var reloaded = new RuleStore(path).ActiveRules(RuleScopeKind.Persistence);
+        Assert.Equal(blockRollback, returned is not null);
+        Assert.Equal(blockRollback ? 1 : 0, reloaded.Count);
+        if (returned is not null)
+        {
+            Assert.Equal(returned.Id, Assert.Single(reloaded).Id);
+        }
+        var intent = Assert.Single(journal.Read());
+        Assert.Equal(ActionJournalPhase.Prepared, intent.Phase);
+        Assert.Equal(ResponseOutcome.AuditPrepared, intent.Outcome);
+    }
+
+    [Fact]
     public void RevokeIsNotAttemptedWhenItsAuditIntentCannotBeWritten()
     {
         var store = new RuleStore(Path.Combine(_root, "rules-intent.json"), () => Now);
@@ -212,6 +264,31 @@ public sealed class GuardianAlertPresenterTests : IDisposable
             Restored = payload;
             return PersistenceMutationOutcome.Succeeded;
         }
+    }
+
+    private sealed class CompletionFailingJournal(string path, bool blockRollback) : IActionJournal, IDisposable
+    {
+        private readonly List<ActionJournalEntry> _entries = [];
+        private FileStream? _locked;
+
+        public bool TryAppend(ActionJournalEntry entry)
+        {
+            if (entry.Phase == ActionJournalPhase.Prepared)
+            {
+                _entries.Add(entry);
+                return true;
+            }
+            if (blockRollback)
+            {
+                _locked = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            }
+            return false;
+        }
+
+        public void MarkUndone(Guid actionId, Guid undoActionId) => throw new InvalidOperationException();
+        public IReadOnlyList<ActionJournalEntry> Read(int max = 200) => _entries;
+        public void ReleaseLock() => _locked?.Dispose();
+        public void Dispose() => ReleaseLock();
     }
 
     private sealed class SequencedJournal(params bool[] outcomes) : IActionJournal

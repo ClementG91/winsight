@@ -97,7 +97,11 @@ public sealed class RuleStore
         try
         {
             using var gate = StoreLock.Acquire(_path, _lockWait);
-            var rules = LoadLocked().ToList();
+            if (!TryLoadLocked(out var loaded))
+            {
+                return null;
+            }
+            var rules = loaded.ToList();
             if (rules.Count >= MaxRules)
             {
                 return null;
@@ -113,17 +117,31 @@ public sealed class RuleStore
     }
 
     /// <summary>Removes the rule with this id. True when one was removed and the store was written.</summary>
-    public bool Remove(Guid id)
+    public bool Remove(Guid id) => RemoveWithOutcome(id) == ResponseOutcome.Succeeded;
+
+    /// <summary>
+    /// Removes a rule durably, distinguishing an absent id from unreadable or unwritable storage.
+    /// An unavailable store is never evidence that the rule was absent or revoked.
+    /// </summary>
+    public ResponseOutcome RemoveWithOutcome(Guid id)
     {
         try
         {
             using var gate = StoreLock.Acquire(_path, _lockWait);
-            var rules = LoadLocked().ToList();
-            return rules.RemoveAll(rule => rule.Id == id) > 0 && Save(rules);
+            if (!TryLoadLocked(out var loaded))
+            {
+                return ResponseOutcome.Failed;
+            }
+            var rules = loaded.ToList();
+            if (rules.RemoveAll(rule => rule.Id == id) == 0)
+            {
+                return ResponseOutcome.TargetNotFound;
+            }
+            return Save(rules) ? ResponseOutcome.Succeeded : ResponseOutcome.Failed;
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
-            return false;
+            return ResponseOutcome.Failed;
         }
     }
 
@@ -137,7 +155,7 @@ public sealed class RuleStore
         try
         {
             using var gate = StoreLock.Acquire(_path, _lockWait);
-            return LoadLocked();
+            return TryLoadLocked(out var rules) ? rules : [];
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
@@ -153,35 +171,42 @@ public sealed class RuleStore
         ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
             or ArgumentException or NotSupportedException or WaitHandleCannotBeOpenedException;
 
-    private ResponseRule[] LoadLocked()
+    private bool TryLoadLocked(out ResponseRule[] rules)
     {
+        rules = [];
         try
         {
             using var lease = AutomaticFileAccess.TryAcquire(_path);
-            if (lease is null || lease.IsDirectory)
+            if (lease is null)
             {
-                return [];
+                // The local preflight distinguishes a missing file from inaccessible/reparse
+                // storage without resolving a network path. Only absence is a valid empty store.
+                return AutomaticFileAccess.IsLocal(_path);
             }
-            if (lease.Length > MaxBytes)
+            if (lease.IsDirectory || lease.Length > MaxBytes)
             {
-                return [];
+                return false;
             }
             using var stream = lease.OpenRead();
             var bytes = new byte[(int)lease.Length];
             stream.ReadExactly(bytes);
             if (!lease.IsCurrent())
             {
-                return [];
+                return false;
             }
             var file = JsonSerializer.Deserialize<RuleFile>(bytes);
-            return file is { Version: CurrentVersion, Rules: not null } && file.Rules.Count <= MaxRules
-                ? file.Rules.Where(rule => rule is { HasKey: true }).ToArray()
-                : [];
+            if (file is not { Version: CurrentVersion, Rules: not null } || file.Rules.Count > MaxRules
+                || file.Rules.Any(rule => rule is not { HasKey: true }))
+            {
+                return false;
+            }
+            rules = file.Rules.ToArray();
+            return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or System.Security.SecurityException or JsonException)
         {
-            return [];
+            return false;
         }
     }
 
@@ -191,11 +216,8 @@ public sealed class RuleStore
         {
             return false;
         }
-        if (rules.Count == 0)
-        {
-            AtomicFile.TryDelete(_path);
-            return true;
-        }
+        // Empty stores use the same flushed atomic replacement as non-empty stores. Best-effort
+        // deletion cannot prove revocation when another Windows handle denies deletion.
         var json = JsonSerializer.SerializeToUtf8Bytes(new RuleFile(CurrentVersion, rules));
         return json.Length <= MaxBytes && AtomicFile.TryWrite(_path, json);
     }

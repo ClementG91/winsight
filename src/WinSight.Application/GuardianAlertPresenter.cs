@@ -143,7 +143,7 @@ public sealed class GuardianAlertPresenter
         {
             return ResponseOutcome.Failed;
         }
-        var outcome = _rules.Remove(ruleId) ? ResponseOutcome.Succeeded : ResponseOutcome.TargetNotFound;
+        var outcome = _rules.RemoveWithOutcome(ruleId);
         var completed = Journal(
             ResponseActionKind.RemoveRule, outcome, revokeId, target, reversible: false);
         if (!completed)
