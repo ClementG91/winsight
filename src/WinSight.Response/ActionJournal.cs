@@ -204,12 +204,8 @@ public sealed class ActionJournal : IActionJournal
 
     private void WriteAllLocked(List<ActionJournalEntry> entries)
     {
-        var builder = new StringBuilder();
-        foreach (var entry in entries)
-        {
-            builder.Append(JsonSerializer.Serialize(entry)).Append('\n');
-        }
-        AtomicFile.TryWrite(_path, Encoding.UTF8.GetBytes(builder.ToString()));
+        _ = ActionJournalStorage.Replace(_path, entries.AsEnumerable().Reverse(),
+            ActionJournalReader.MaxBytes, MaxEntries, ActionJournalWriteStatus.Updated);
     }
 
     private sealed class JournalLock : IDisposable
