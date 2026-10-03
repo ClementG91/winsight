@@ -68,6 +68,11 @@ public sealed class ActionJournal : IActionJournal
     public bool TryAppend(ActionJournalEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        // Bound caller-controlled strings before serialization and the actual UTF-8 record after it.
+        if (entry.Target is null || entry.Target.Length > ActionJournalReader.MaxLineBytes)
+        {
+            return false;
+        }
         try
         {
             using var gate = JournalLock.Acquire(_path);
@@ -76,6 +81,10 @@ public sealed class ActionJournal : IActionJournal
                 return false;
             }
             var line = JsonSerializer.Serialize(entry) + "\n";
+            if (Encoding.UTF8.GetByteCount(line) > ActionJournalReader.MaxLineBytes)
+            {
+                return false;
+            }
             if (!AutomaticFileAccess.TryAppendFile(_path, Encoding.UTF8.GetBytes(line)))
             {
                 return false;
@@ -119,25 +128,46 @@ public sealed class ActionJournal : IActionJournal
     }
 
     /// <summary>The most recent entries, newest first. Empty when there is no readable journal.</summary>
-    public IReadOnlyList<ActionJournalEntry> Read(int max = 200)
+    public IReadOnlyList<ActionJournalEntry> Read(int max = 200) => ReadWithCoverage(max).Entries;
+
+    /// <summary>Most recent actions plus availability/corruption/budget information for the read tail.</summary>
+    public ActionJournalSnapshot ReadWithCoverage(int max = 200)
     {
         try
         {
             using var gate = JournalLock.Acquire(_path);
-            var entries = ReadLocked()
-                .Select((entry, index) => (entry, index))
-                .GroupBy(item => item.entry.ActionId)
-                .Select(group => group.Last())
-                .OrderByDescending(item => item.index)
-                .Select(item => item.entry)
-                .ToList();
-            return max > 0 && entries.Count > max ? entries.GetRange(0, max) : entries;
+            return ReadSnapshotLocked(max);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or System.Security.SecurityException
-                                     or ArgumentException or NotSupportedException)
+                                     or ArgumentException or NotSupportedException or WaitHandleCannotBeOpenedException)
         {
-            return [];
+            return new ActionJournalSnapshot([], Unreadable: true);
+        }
+    }
+
+    private ActionJournalSnapshot ReadSnapshotLocked(int max)
+    {
+        using var lease = AutomaticFileAccess.TryAcquire(_path);
+        if (lease is null)
+        {
+            return new ActionJournalSnapshot([], Unreadable: !AutomaticFileAccess.IsLocal(_path));
+        }
+        if (lease.IsDirectory)
+        {
+            return new ActionJournalSnapshot([], Unreadable: true);
+        }
+        using var stream = lease.OpenRead(FileOptions.RandomAccess);
+        var snapshot = ActionJournalReader.Read(stream, max);
+        return lease.IsCurrent() ? snapshot : new ActionJournalSnapshot([], Unreadable: true);
+    }
+
+    private void TrimLocked()
+    {
+        var entries = ReadLocked();
+        if (entries.Count > MaxEntries)
+        {
+            WriteAllLocked(entries.GetRange(entries.Count - MaxEntries, MaxEntries));
         }
     }
 
@@ -170,15 +200,6 @@ public sealed class ActionJournal : IActionJournal
             }
         }
         return lease.IsCurrent() ? entries : [];
-    }
-
-    private void TrimLocked()
-    {
-        var entries = ReadLocked();
-        if (entries.Count > MaxEntries)
-        {
-            WriteAllLocked(entries.GetRange(entries.Count - MaxEntries, MaxEntries));
-        }
     }
 
     private void WriteAllLocked(List<ActionJournalEntry> entries)

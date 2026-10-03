@@ -25,8 +25,23 @@ public static partial class Adapters
     /// </summary>
     internal static ToolReport Actions(string journalPath, int max)
     {
-        var entries = new ActionJournal(journalPath).Read(max);
+        var snapshot = new ActionJournal(journalPath).ReadWithCoverage(max);
+        var entries = snapshot.Entries;
         var b = new ToolReport.Builder("actions");
+        var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached;
+        if (incomplete)
+        {
+            b.Add(Severity.Notable, "Action journal coverage incomplete",
+                snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
+                    : "The inspected history contains malformed records or reached a read limit.",
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "actionJournalCoverage",
+                    ["unreadable"] = snapshot.Unreadable ? "true" : "false",
+                    ["malformedEntries"] = snapshot.MalformedEntries.ToString(CultureInfo.InvariantCulture),
+                    ["limitReached"] = snapshot.LimitReached ? "true" : "false",
+                });
+        }
         foreach (var entry in entries)
         {
             var undone = entry.UndoneByActionId is not null;
@@ -49,7 +64,9 @@ public static partial class Adapters
                     ["undoneBy"] = entry.UndoneByActionId?.ToString(),
                 });
         }
-        return b.Build(entries.Count == 0
+        return b.Build(snapshot.Unreadable ? "response action history unavailable"
+            : incomplete ? $"{entries.Count} recorded response action(s); history incomplete"
+            : entries.Count == 0
             ? "no response actions recorded"
             : $"{entries.Count} recorded response action(s), newest first");
     }
