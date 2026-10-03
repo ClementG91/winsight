@@ -1,6 +1,8 @@
 # Production readiness
 
-Status as of 2026-09-28. Evidence is candidate-bound: a successful result for one commit or package
+Current support, corrections and remaining gates are tracked in the
+[2026-10-03 matrix](validation/2026-10-03-readiness-remediation.md). The records below retain their
+historical scope. Evidence is candidate-bound: a successful result for one commit or package
 does not qualify different executable bytes, and a local rehearsal does not qualify a published
 release.
 

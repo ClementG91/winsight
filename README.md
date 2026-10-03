@@ -17,7 +17,7 @@
   <a href="https://github.com/ClementG91/winsight/actions/workflows/ci.yml"><img src="https://github.com/ClementG91/winsight/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
   <a href="https://www.bestpractices.dev/projects/14751"><img src="https://www.bestpractices.dev/projects/14751/badge" alt="OpenSSF Best Practices" /></a>
-  <img src="https://img.shields.io/badge/platform-Windows%2010%2022H2%2B%20%2F%2011-informational" alt="Platform: Windows 10 22H2 or later" />
+  <img src="https://img.shields.io/badge/qualification-Windows%2011%20x64-informational" alt="Qualification scope: Windows 11 x64" />
   <img src="https://img.shields.io/badge/.NET-10.0_LTS-512bd4" alt=".NET 10 LTS" />
   <img src="https://img.shields.io/badge/production%20readiness-not%20established-critical" alt="Production readiness not established" />
 </p>
@@ -136,6 +136,11 @@ Download the installer for your machine from the
 The default install is **per-user** and needs no administrator rights and no .NET runtime. Portable
 ZIPs are published for both architectures.
 
+The primary qualification scope is **Windows 11 x64**, within Microsoft's supported .NET 10 OS
+lifecycle. The API target `windows10.0.19041.0` is a build contract, not Windows 10 qualification.
+Windows 10 compatibility and privileged Arm64 runtime remain unqualified; see the
+[dated support and validation matrix](docs/validation/2026-10-03-readiness-remediation.md).
+
 Two consequences of that default, stated here rather than left to be discovered:
 
 - **The outbound firewall is unavailable.** A per-user install lands under
@@ -216,7 +221,7 @@ yourself: [`docs/CODE_SIGNING.md`](docs/CODE_SIGNING.md).
 
 | Target | Status |
 |---|---|
-| **x64** | **v0.14.2 includes the Guardian overflow durability and qualification entry fixes**, with regression tests; the v0.14.1 candidate was not published because a timing-dependent test blocked release. The new trusted harness still needs an operator-led elevated installation/substitution trial and a fresh VM campaign. v0.14.0's local rehearsals did not independently authenticate the elevated entry point (RB-01), and do not qualify the new release or its exact CI binaries. Distribution remains unsigned; see [production readiness](docs/PRODUCTION_READINESS.md) |
+| **Windows 11 x64** | **Published v0.14.2 passed 32 distinct VM gates on 2026-09-28**, including the two-VM network gate, with the authenticated launcher and protected verifier. Current revocation, journal and VirusTotal corrections need qualification on their own bytes. Disk-full/UI recovery, load/endurance and adverse/session trials remain open. See the [current matrix](docs/validation/2026-10-03-readiness-remediation.md) and [published-byte record](docs/validation/2026-09-28-v0.14.2-x64-qualification.md). Distribution remains unsigned. |
 | **Arm64 (native)** | Build, tests, packaging and installer are delegated to native Arm64 CI; privileged runtime remains a VM gate; **product readiness not established** |
 
 > **CodeQL runs through GitHub's default setup, not a workflow in this repository.** The run IDs
@@ -228,6 +233,7 @@ v0.14.0 rehearsals are bound to their commits and local artifact hashes, not CI-
 
 | Gate | Result | Record |
 |---|---|---|
+| Published v0.14.2 x64, authenticated launcher and protected verifier | 32 distinct gates PASS; network 10/10; four proof sets 12/12 | [record](docs/validation/2026-09-28-v0.14.2-x64-qualification.md) |
 | v0.14.0 product code, full x64 campaign with the rebuilt harness (local unsigned candidates) | 32 gates PASS, gate 36 10/10, post-run checks 11/11; host-startup provenance unverified (RB-01) | [record](docs/validation/2026-09-26-x64-qualification-fe953fe.md) |
 | Published v0.12.0 downloads, supply chain, x64 install/MCP/EN-FR-ES smoke and cleanup | PASS | [record](docs/validation/2026-09-01-v0.12.0-published-release.md) |
 | Historical v0.12.0 x64 installer, ETW, WFP/SCM, trust, local/Network IPC and cleanup | PASS | [record](docs/validation/2026-09-01-x64-qualification-dbaded1.md) |
