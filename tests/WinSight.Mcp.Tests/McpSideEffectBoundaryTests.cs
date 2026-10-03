@@ -246,7 +246,8 @@ public sealed class McpSideEffectBoundaryTests
         // walk passes because of the review, not because the detectors are blind.
         var unexempted = Violations(full);
         Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Diagnostics.Process.Start", StringComparison.Ordinal));
-        Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Net.Http.HttpMessageInvoker.Send", StringComparison.Ordinal));
+        Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Net.Http.HttpClient.Send", StringComparison.Ordinal)
+            && violation.Contains("VirusTotalClient.Lookup", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
             && violation.Contains("VirusTotalQuotaLimiter.Save", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.IO.Pipes.NamedPipeClientStream", StringComparison.Ordinal)
@@ -343,7 +344,12 @@ public sealed class McpSideEffectBoundaryTests
 
         var violations = Violations(StrictWalk([cli.EntryPoint!]));
 
-        Assert.Contains(violations, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
+        // A shared write gateway has one predecessor in the graph, which can be another CLI writer.
+        Assert.Contains(violations, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
+        var rules = typeof(WinSight.Response.RuleStore).GetMethod(nameof(WinSight.Response.RuleStore.Add))!;
+        var ruleWrites = Violations(StrictWalk([rules]));
+        Assert.Empty(StrictWalk([rules]).Unresolved);
+        Assert.Contains(ruleWrites, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
             && violation.Contains("WinSight.Response.RuleStore", StringComparison.Ordinal));
     }
 

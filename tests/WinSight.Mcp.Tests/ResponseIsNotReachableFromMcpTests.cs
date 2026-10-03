@@ -26,8 +26,9 @@ public sealed class ResponseIsNotReachableFromMcpTests
     {
         ["WinSight.Response.ProcessResponder"] = ["Suspend", "Resume", "Terminate"],
         ["WinSight.Response.Win32ProcessController"] = ["SuspendThreads", "ResumeThreads", "TerminateProcess"],
-        ["WinSight.Response.RuleStore"] = ["Add", "Remove"],
-        ["WinSight.Response.ActionJournal"] = ["TryAppend", "MarkUndone"],
+        ["WinSight.Response.RuleStore"] = ["Add", "Remove", "RemoveWithOutcome"],
+        ["WinSight.Response.ActionJournal"] = ["TryAppend", "TryAppendWithStatus", "MarkUndone", "TryMarkUndone"],
+        ["WinSight.Response.ActionJournalStorage"] = ["Preserve", "Replace"],
         ["WinSight.Response.Quarantine"] = ["Store", "Remove"],
         ["WinSight.Application.PersistenceResponder"] = ["Block", "Restore"],
         ["WinSight.Application.RegistryAndFilePersistenceMutator"] = ["RemoveIfUnchanged", "RestoreIfFree"],
@@ -96,7 +97,7 @@ public sealed class ResponseIsNotReachableFromMcpTests
 
         // Through an async state machine, a lambda and a category table: the paths a naive walk misses.
         Assert.Contains("WinSight.Application.Adapters.Run", reached);
-        Assert.Contains("WinSight.Response.ActionJournal.Read", reached);
+        Assert.Contains("WinSight.Response.ActionJournal.ReadWithCoverage", reached);
         Assert.Contains("WinSight.Response.RuleStore.ActiveRules", reached);
         Assert.Contains("WinSight.Application.FirewallServiceGateway.GetViewAsync", reached);
     }
@@ -114,7 +115,8 @@ public sealed class ResponseIsNotReachableFromMcpTests
 
         Assert.Empty(graph.Unresolved);
         Assert.Contains("WinSight.Response.Win32ProcessController.TerminateProcess", reached);
-        Assert.Contains("WinSight.Response.RuleStore.Remove", reached);
+        Assert.Contains("WinSight.Response.RuleStore.RemoveWithOutcome", reached);
+        Assert.Contains("WinSight.Response.ActionJournal.TryAppendWithStatus", reached);
         Assert.Contains("WinSight.Application.RegistryAndFilePersistenceMutator.RestoreIfFree", reached);
     }
 
