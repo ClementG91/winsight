@@ -62,17 +62,26 @@ function Remove-DataDisks {
     if ($found) { Write-HostLog "$ControlName was $found, not off, when its data disk was detached: turned off" }
 }
 function Remove-StagedNetworkFixtures {
+    $failures = @()
     foreach ($disk in $data, $controlData) {
-        $cleanupLetter = Mount-WinSightData $disk
-        try { Remove-NetworkProbeFixture -Path "${cleanupLetter}:\network-credential.json" }
-        finally { Dismount-WinSightData $disk }
+        try {
+            $cleanupLetter = Mount-WinSightData $disk
+            try { Remove-NetworkProbeFixture -Path "${cleanupLetter}:\network-credential.json" }
+            finally { Dismount-WinSightData $disk }
+        }
+        catch { $failures += [IO.Path]::GetFileName($disk) }
     }
+    if ($failures.Count) { throw ('Disposable fixture cleanup failed for: ' + ($failures -join ', ')) }
 }
 # Puts both VMs back as they were: their checkpoints, the target's own network instead of the private
 # switch, and the memory each had.
 function Restore-BothVms {
-    Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
-    Restore-VMCheckpoint -VMName $ControlName -Name $ControlCheckpoint -Confirm:$false
+    $failures = @()
+    try { Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false }
+    catch { $failures += 'target checkpoint' }
+    try { Restore-VMCheckpoint -VMName $ControlName -Name $ControlCheckpoint -Confirm:$false }
+    catch { $failures += 'control checkpoint' }
+    if ($failures.Count) { throw ('VM restoration failed for: ' + ($failures -join ', ')) }
     # The checkpoint restores the configuration too. This only makes sure, since the full
     # qualification needs the target's own network (gates 23 and 33). Each query is retried: right
     # after a restore, Hyper-V can answer "object not found" for a moment.
@@ -95,6 +104,9 @@ if (-not $privateSwitch -or $privateSwitch.SwitchType -ne 'Private') { throw 'Ne
 # Both VMs start together. This is checked before anything changes: in the first network run the
 # target started, the control could not get its memory, and the target stayed on with its run staged.
 Assert-WinSightHostMemory -Bytes ($TargetMemoryBytes + $ControlMemoryBytes + 512MB) -Advice 'close applications on the host, or ask for less memory for the target ("memoryGB":3).'
+$originalAdapters = @(Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Select-Object Name, SwitchName)
+$originalMemory = (Get-VMMemory -VMName $Name).Startup
+$originalControlMemory = (Get-VMMemory -VMName $ControlName).Startup
 
 # --- Stage both data disks --------------------------------------------------------------------------
 Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
@@ -137,15 +149,13 @@ try {
 finally { Dismount-WinSightData $controlData }
 }
 catch {
-    Remove-StagedNetworkFixtures
-    throw 'Network staging failed; disposable credential fixtures removed.'
+    try { Remove-StagedNetworkFixtures }
+    finally { Restore-BothVms }
+    throw 'Network staging failed; cleanup and restoration were attempted.'
 }
 finally { $envelope = $null }
 
 # --- Wire the target to the private switch only, for this run -------------------------------------
-$originalAdapters = @(Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Select-Object Name, SwitchName)
-$originalMemory = (Get-VMMemory -VMName $Name).Startup
-$originalControlMemory = (Get-VMMemory -VMName $ControlName).Startup
 try {
     Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Disconnect-VMNetworkAdapter
     Get-VMNetworkAdapter -VMName $Name | Where-Object Name -eq 'WinSightPrivate' | Remove-VMNetworkAdapter
@@ -163,9 +173,11 @@ catch {
     # then fail with the cause.
     $failure = $_
     Write-HostLog "$RunName did not start: $($failure.Exception.Message)"
-    Remove-DataDisks
-    Remove-StagedNetworkFixtures
-    Restore-BothVms
+    try {
+        Remove-DataDisks
+        Remove-StagedNetworkFixtures
+    }
+    finally { Restore-BothVms }
     Write-HostLog "$RunName stopped before it began, both VMs off and restored ($Checkpoint, $ControlCheckpoint)"
     throw $failure
 }
@@ -195,6 +207,7 @@ else {
     Write-HostLog "$RunName resumed: target $(Get-WinSightVmState $Name), control $(Get-WinSightVmState $ControlName)"
 }
 
+try {
 $started = Get-Date
 $deadline = $started.AddMinutes($TimeoutMinutes)
 while (((Get-WinSightVmState $Name) -ne 'Off' -or (Get-WinSightVmState $ControlName) -ne 'Off') -and (Get-Date) -lt $deadline) {
@@ -235,7 +248,12 @@ Get-ChildItem -LiteralPath $runDir -Recurse -File | Where-Object Name -ne 'SHA25
     ForEach-Object { "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.FullName.Substring($runDir.Length + 1))" } |
     Set-Content -LiteralPath (Join-Path $runDir 'SHA256SUMS.txt')
 Write-HostLog "evidence sealed in $runDir"
-Restore-BothVms
+}
+finally {
+    # Idempotent recovery also covers an exception while querying the running VMs or collecting.
+    try { Remove-DataDisks; Remove-StagedNetworkFixtures }
+    finally { Restore-BothVms }
+}
 Write-HostLog "both VMs restored ($Checkpoint, $ControlCheckpoint), target network: $(Invoke-WinSightVmRetry { (Get-VMNetworkAdapter -VMName $Name | ForEach-Object { "$($_.Name)=$($_.SwitchName)" }) -join ', ' })"
 
 $resultsFile = Join-Path $runDir 'target\results.json'
