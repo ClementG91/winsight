@@ -30,7 +30,7 @@ It shows you what **persists** across reboots, what **watches** your camera and 
 traffic at the kernel filtering layer.
 
 > **Nothing acts on its own.** Every check observes and reports. The few things that change the
-> machine happen only when you choose them, are revalidated first, are recorded in an append-only
+> machine happen only when you choose them, are revalidated first, use a bounded action
 > journal (`winsight actions`), and can be undone: blocking a startup item from a Guardian alert
 > (restorable with `winsight restore`), allowing one (revocable with `winsight revoke`), and
 > suspending, resuming or terminating a process (`--confirm` required). Beyond those, one feature
@@ -105,8 +105,9 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   ```
 
   The response commands - the process actions and the two undo verbs - do nothing without
-  `--confirm`, and every change they make is recorded in an append-only journal readable with
-  `winsight actions`. Three maintenance verbs that setup and uninstall run also change the current
+  `--confirm`, and use a bounded action journal readable with `winsight actions`. Undo updates the
+  recorded action; rotation removes older entries. Unavailable or incomplete reads are reported.
+  This is not a permanent audit archive. Three maintenance verbs that setup and uninstall run also change the current
   user's state without `--confirm`: `register-signature-verb` and `unregister-signature-verb` add and
   remove the File Explorer entry, and `remove-decoys` deletes ransomware decoys whose content is
   still unchanged. A process action revalidates that the target is still the same process and
