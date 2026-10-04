@@ -56,10 +56,18 @@ $controlData = Join-Path $Root 'control-data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
 function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [network] $Message"; Add-SharedLine -Path $hostLog -Line $line; Write-Host $line }
 function Remove-DataDisks {
-    $found = Remove-WinSightDataDisk -VMName $Name -Path $data
-    if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }
-    $found = Remove-WinSightDataDisk -VMName $ControlName -Path $controlData
-    if ($found) { Write-HostLog "$ControlName was $found, not off, when its data disk was detached: turned off" }
+    $failures = @()
+    try {
+        $found = Remove-WinSightDataDisk -VMName $Name -Path $data
+        if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }
+    }
+    catch { $failures += 'target data disk' }
+    try {
+        $found = Remove-WinSightDataDisk -VMName $ControlName -Path $controlData
+        if ($found) { Write-HostLog "$ControlName was $found, not off, when its data disk was detached: turned off" }
+    }
+    catch { $failures += 'control data disk' }
+    if ($failures.Count) { throw ('Data disk detachment failed for: ' + ($failures -join ', ')) }
 }
 function Remove-StagedNetworkFixtures {
     $failures = @()
@@ -174,8 +182,8 @@ catch {
     $failure = $_
     Write-HostLog "$RunName did not start: $($failure.Exception.Message)"
     try {
-        Remove-DataDisks
-        Remove-StagedNetworkFixtures
+        try { Remove-DataDisks }
+        finally { Remove-StagedNetworkFixtures }
     }
     finally { Restore-BothVms }
     Write-HostLog "$RunName stopped before it began, both VMs off and restored ($Checkpoint, $ControlCheckpoint)"
@@ -251,7 +259,10 @@ Write-HostLog "evidence sealed in $runDir"
 }
 finally {
     # Idempotent recovery also covers an exception while querying the running VMs or collecting.
-    try { Remove-DataDisks; Remove-StagedNetworkFixtures }
+    try {
+        try { Remove-DataDisks }
+        finally { Remove-StagedNetworkFixtures }
+    }
     finally { Restore-BothVms }
 }
 Write-HostLog "both VMs restored ($Checkpoint, $ControlCheckpoint), target network: $(Invoke-WinSightVmRetry { (Get-VMNetworkAdapter -VMName $Name | ForEach-Object { "$($_.Name)=$($_.SwitchName)" }) -join ', ' })"

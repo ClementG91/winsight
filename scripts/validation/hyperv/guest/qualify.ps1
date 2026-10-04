@@ -265,6 +265,14 @@ function Get-Center($Element) {
 # Exits one dashboard through its notification-area icon: right-click -> Exit. Returns $false when the
 # icon or the menu cannot be driven, so the caller records NOT_RUN instead of substituting a kill.
 function Invoke-TrayExit([int[]]$DashboardIds) {
+    # The protected guest operator opens the real NotifyIcon menu even when Explorer hides its icon.
+    # Never choose an arbitrary process when the caller did not identify exactly one dashboard.
+    if ($DashboardIds.Count -ne 1 -or $DashboardIds[0] -le 0) { return $false }
+    $automation = Join-Path $Share 'operator-automation.ps1'
+    if (Test-Path -LiteralPath $automation) {
+        try { . $automation -Name TRAYEXIT -ProcessId $DashboardIds[0]; return $true }
+        catch { $script:TrayDiagnostic = 'Guest operator tray menu automation failed; trying the shell icon.' }
+    }
     $buttons = New-Condition $UIA::ControlTypeProperty ([System.Windows.Automation.ControlType]::Button)
     $icon = $null
     foreach ($attempt in 1..2) {
