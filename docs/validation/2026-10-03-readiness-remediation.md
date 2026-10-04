@@ -8,6 +8,9 @@ Baseline: `531b302eef3eea45389c61b94af536be9bb2adf3`; isolated branch
 `codex/readiness-verified`. The original checkout and its untracked audit were preserved.
 This is a targeted source/evidence review, not a complete pentest or a claim that no defects remain.
 
+Subsequent protected execution and the next campaign protocol are recorded in the
+[October 4 operator annex](2026-10-04-readiness-operator.md); the statements below are the October 3 snapshot.
+
 ## Verification of the supplied audit
 
 | Claim | Verified result / limit |
