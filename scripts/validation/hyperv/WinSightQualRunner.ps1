@@ -151,6 +151,12 @@ function Get-Arguments($Request) {
         $arguments += @($parameter, ([int64]$gb * 1GB))
     }
     if ($action -in 'collect', 'network-collect') { $arguments += '-Resume' }
+    $modeProperty = $Request.PSObject.Properties['credentialMode']
+    if ($modeProperty) {
+        if ($action -ne 'network' -or $modeProperty.Value -isnot [string] -or
+            $modeProperty.Value -cnotin 'automatic', 'interactive') { throw 'invalid credentialMode' }
+        if ($modeProperty.Value -ceq 'automatic') { $arguments += '-AutomaticCredential' }
+    }
     return , $arguments
 }
 

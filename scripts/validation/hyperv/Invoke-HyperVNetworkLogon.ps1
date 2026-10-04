@@ -3,10 +3,11 @@
 # switch. The target runs the harness with gate 36 only; the control VM logs on to it over WinRM
 # HTTPS with a disposable standard account.
 #
-# THE OPERATOR types one disposable password twice, in the Windows credential dialog of each VM:
+# By default THE OPERATOR types one disposable password twice, in each VM's credential dialog:
 # first on the target (it creates the account), then on the control (it logs on with it). Nothing on
 # the host sees it, and both VMs are restored to their clean checkpoints afterwards, so the account,
-# the listener and the certificate never outlive the run.
+# the listener and the certificate never outlive the run. -AutomaticCredential instead generates
+# a new test-only password and stages ACL-protected, consumed fixtures on the offline VM disks.
 #
 # RA-01: started by WinSightQualRunner.ps1 from its protected copies; both data disks are emptied by
 # formatting, results are copied without entering a reparse point into a new protected run directory.
@@ -29,6 +30,7 @@ param(
     # (3 GB), so that both VMs fit in the host's memory together.
     [int64]$ControlMemoryBytes = 2GB,
     [int]$TimeoutMinutes = 120,
+    [switch]$AutomaticCredential,
     # Collect a run whose driver was closed while both VMs kept going: wait for both to power off,
     # then collect, seal and restore. Nothing is staged or started.
     [switch]$Resume
@@ -44,6 +46,7 @@ if (-not $Root) { $Root = (Join-Path ([IO.Path]::GetPathRoot($PSScriptRoot)) 'Hy
 $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
+Import-Module (Join-Path $HarnessDir 'guest\NetworkProbeCredential.psm1') -Force
 Set-AdministratorsDefaultOwner
 foreach ($protected in $CandidateDir, $HarnessDir, $EvidenceRoot) { Assert-ProtectedPath -Path $protected }
 Assert-ProtectedPath -Path $BootstrapReceipt
@@ -57,6 +60,13 @@ function Remove-DataDisks {
     if ($found) { Write-HostLog "$Name was $found, not off, when its data disk was detached: turned off" }
     $found = Remove-WinSightDataDisk -VMName $ControlName -Path $controlData
     if ($found) { Write-HostLog "$ControlName was $found, not off, when its data disk was detached: turned off" }
+}
+function Remove-StagedNetworkFixtures {
+    foreach ($disk in $data, $controlData) {
+        $cleanupLetter = Mount-WinSightData $disk
+        try { Remove-NetworkProbeFixture -Path "${cleanupLetter}:\network-credential.json" }
+        finally { Dismount-WinSightData $disk }
+    }
 }
 # Puts both VMs back as they were: their checkpoints, the target's own network instead of the private
 # switch, and the memory each had.
@@ -80,7 +90,8 @@ $network = [ordered]@{
 
 if (-not $Resume) {
 foreach ($vm in $Name, $ControlName) { if ((Get-WinSightVmState $vm) -ne 'Off') { throw "VM $vm is $(Get-WinSightVmState $vm); turn it off first." } }
-if (-not (Get-VMSwitch -Name $Switch -ErrorAction SilentlyContinue)) { throw "No switch ${Switch}: run New-WinSightControlVm.ps1 first." }
+$privateSwitch = Get-VMSwitch -Name $Switch -ErrorAction SilentlyContinue
+if (-not $privateSwitch -or $privateSwitch.SwitchType -ne 'Private') { throw 'Network qualification requires an existing Private VM-only switch.' }
 # Both VMs start together. This is checked before anything changes: in the first network run the
 # target started, the control could not get its memory, and the target stayed on with its run staged.
 Assert-WinSightHostMemory -Bytes ($TargetMemoryBytes + $ControlMemoryBytes + 512MB) -Advice 'close applications on the host, or ask for less memory for the target ("memoryGB":3).'
@@ -89,14 +100,18 @@ Assert-WinSightHostMemory -Bytes ($TargetMemoryBytes + $ControlMemoryBytes + 512
 Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
 Restore-VMCheckpoint -VMName $ControlName -Name $ControlCheckpoint -Confirm:$false
 Remove-DataDisks
+$envelope = if ($AutomaticCredential) { New-NetworkProbeEnvelope } else { $null }
+if ($AutomaticCredential) { $network.credentialMode = 'automatic' }
+try {
 $letter = Mount-WinSightData $data
 try {
     Clear-WinSightDataVolume $letter
+    if ($AutomaticCredential) { Set-NetworkProbeVolumeProtection -Root "${letter}:\" }
     $staged = "${letter}:\candidate"
     New-Item -ItemType Directory -Path $staged | Out-Null
     Get-ChildItem -LiteralPath $CandidateDir | Where-Object Name -ne 'previous' |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $staged -Recurse }
-    foreach ($guestFile in 'qualify.ps1', 'operator-automation.ps1') {
+    foreach ($guestFile in 'qualify.ps1', 'operator-automation.ps1', 'NetworkProbeCredential.psm1') {
         Copy-Item -LiteralPath (Join-Path $HarnessDir "guest\$guestFile") -Destination $staged
     }
     $candidateJson = Join-Path $staged 'candidate.json'
@@ -105,6 +120,7 @@ try {
     $candidate | Add-Member -NotePropertyName gates -NotePropertyValue @('36-ipc-network-logon', '99-residue')
     $candidate | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $candidateJson -Encoding UTF8
     $network | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $staged 'network.json') -Encoding UTF8
+    if ($AutomaticCredential) { Write-NetworkProbeFixture -Path "${letter}:\network-credential.json" -Envelope $envelope }
     Copy-Item -LiteralPath (Join-Path $HarnessDir 'guest\run-guest-checks.ps1') -Destination "${letter}:\run-guest-checks.ps1"
     'qualify' | Set-Content -LiteralPath "${letter}:\mode.txt"
 }
@@ -112,11 +128,19 @@ finally { Dismount-WinSightData $data }
 $letter = Mount-WinSightData $controlData
 try {
     Clear-WinSightDataVolume $letter
-    Copy-Item -LiteralPath (Join-Path $HarnessDir 'guest\run-guest-checks.ps1'), (Join-Path $HarnessDir 'guest\control-network-logon.ps1') -Destination "${letter}:\"
+    if ($AutomaticCredential) { Set-NetworkProbeVolumeProtection -Root "${letter}:\" }
+    Copy-Item -LiteralPath (Join-Path $HarnessDir 'guest\run-guest-checks.ps1'), (Join-Path $HarnessDir 'guest\control-network-logon.ps1'), (Join-Path $HarnessDir 'guest\NetworkProbeCredential.psm1') -Destination "${letter}:\"
     $network | ConvertTo-Json | Set-Content -LiteralPath "${letter}:\network.json" -Encoding UTF8
+    if ($AutomaticCredential) { Write-NetworkProbeFixture -Path "${letter}:\network-credential.json" -Envelope $envelope }
     'control' | Set-Content -LiteralPath "${letter}:\mode.txt"
 }
 finally { Dismount-WinSightData $controlData }
+}
+catch {
+    Remove-StagedNetworkFixtures
+    throw 'Network staging failed; disposable credential fixtures removed.'
+}
+finally { $envelope = $null }
 
 # --- Wire the target to the private switch only, for this run -------------------------------------
 $originalAdapters = @(Get-VMNetworkAdapter -VMName $Name | Where-Object Name -ne 'WinSightPrivate' | Select-Object Name, SwitchName)
@@ -140,10 +164,15 @@ catch {
     $failure = $_
     Write-HostLog "$RunName did not start: $($failure.Exception.Message)"
     Remove-DataDisks
+    Remove-StagedNetworkFixtures
     Restore-BothVms
     Write-HostLog "$RunName stopped before it began, both VMs off and restored ($Checkpoint, $ControlCheckpoint)"
     throw $failure
 }
+if ($AutomaticCredential) {
+    Write-HostLog 'automatic disposable credentials staged; no operator password dialog required'
+}
+else {
 Write-Host ''
 Write-Host '================================================================================' -ForegroundColor Yellow
 Write-Host ' Both VMs are starting. Open their screens:' -ForegroundColor Yellow
@@ -156,6 +185,7 @@ Write-Host ' Both VMs shut themselves down when done; this window then collects 
 Write-Host '================================================================================' -ForegroundColor Yellow
 vmconnect.exe localhost $Name
 vmconnect.exe localhost $ControlName
+}
 }
 else {
     # The disconnected adapters are the VM's own, on the Default Switch it was built with.
@@ -178,6 +208,7 @@ foreach ($vm in $Name, $ControlName) {
 
 # --- Collect and seal both evidence sets, then restore ---------------------------------------------
 Remove-DataDisks
+Remove-StagedNetworkFixtures
 $runDir = Join-Path $EvidenceRoot $RunName
 if (-not $Resume -and (Test-Path -LiteralPath $runDir)) { throw "Run $RunName already exists; choose a new name." }
 foreach ($side in 'target', 'control') {

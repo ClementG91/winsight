@@ -9,7 +9,7 @@
 # dashboard languages, all-users uninstall with service (WS-63), upgrade from the published release,
 # Cloud Files placeholders (WS-40), ETW recovery, pre-opened write attribution (WS-60),
 # WFP contract/pre-arm/full, trust, local IPC, final residue.
-# Network Logon (36) needs the control VM and a disposable password typed by the operator: it runs only
+# Network Logon (36) needs the control VM and a disposable password (interactive or staged): it runs only
 # when Invoke-HyperVNetworkLogon.ps1 stages network.json, and is recorded NOT_RUN otherwise.
 
 $ErrorActionPreference = 'Continue'
@@ -1296,9 +1296,17 @@ Invoke-Gate '36-ipc-network-logon' {
         Set-NetConnectionProfile -InterfaceIndex $adapter.ifIndex -NetworkCategory Private
 
         # 3. The standard account: Users and Remote Management Users only.
-        $credential = Get-Credential -UserName $user -Message "WinSight gate 36 (TARGET): choose a disposable password for the local account $user. Type the same one on the control VM."
+        if ($net.PSObject.Properties['credentialMode']) {
+            if ($net.credentialMode -cne 'automatic') { throw 'Invalid network credential mode.' }
+            Import-Module (Join-Path $Share 'NetworkProbeCredential.psm1') -Force -ErrorAction Stop
+            $credential = Receive-NetworkProbeCredential -Path (Join-Path ([IO.Path]::GetPathRoot($Share)) 'network-credential.json') -ErrorAction Stop
+        }
+        else {
+            $credential = Get-Credential -UserName $user -Message "WinSight gate 36 (TARGET): choose a disposable password for the local account $user. Type the same one on the control VM."
+        }
         if ($null -eq $credential -or $credential.Password.Length -eq 0) { throw 'NOT_RUN: no disposable password was provided on the target.' }
-        New-LocalUser -Name $user -Password $credential.Password -Description 'WinSight Network Logon probe (disposable)' | Out-Null
+        try { New-LocalUser -Name $user -Password $credential.Password -Description 'WinSight Network Logon probe (disposable)' -ErrorAction Stop | Out-Null }
+        finally { $credential.Password.Dispose(); $credential = $null }
         $state.User = $true
         Add-LocalGroupMember -Group (Get-LocalGroup -SID 'S-1-5-32-580').Name -Member $user
 
