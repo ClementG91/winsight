@@ -31,9 +31,10 @@ traffic at the kernel filtering layer.
 
 > **Nothing acts on its own.** Every check observes and reports. The few things that change the
 > machine happen only when you choose them, are revalidated first, use a bounded action
-> journal (`winsight actions`), and can be undone: blocking a startup item from a Guardian alert
-> (restorable with `winsight restore`), allowing one (revocable with `winsight revoke`), and
-> suspending, resuming or terminating a process (`--confirm` required). Beyond those, one feature
+> journal (`winsight actions`): blocking a startup item from a Guardian alert (restorable with
+> `winsight restore`), allowing one (revocable with `winsight revoke`), and suspending, resuming
+> or terminating a process (`--confirm` required). A suspended process can be resumed;
+> terminating a process is irreversible. Beyond those, one feature
 > writes to disk, and says so here:
 >
 > - **Ransomware protection** creates its decoy files. It stays off until you turn it on. Cleanup
@@ -105,8 +106,8 @@ Full detection inventory: [`docs/DETECTIONS.md`](docs/DETECTIONS.md). Tool-by-to
   ```
 
   The response commands - the process actions and the two undo verbs - do nothing without
-  `--confirm`, and use a bounded action journal readable with `winsight actions`. Undo updates the
-  recorded action; rotation removes older entries. Unavailable or incomplete reads are reported.
+  `--confirm`, and use a bounded action journal readable with `winsight actions`. Undo can annotate a
+  retained action; rotation removes older entries. Unavailable or incomplete reads are reported.
   This is not a permanent audit archive. Three maintenance verbs that setup and uninstall run also change the current
   user's state without `--confirm`: `register-signature-verb` and `unregister-signature-verb` add and
   remove the File Explorer entry, and `remove-decoys` deletes ransomware decoys whose content is
