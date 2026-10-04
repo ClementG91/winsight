@@ -104,8 +104,15 @@ acceptance gates; implementing this path does not retroactively authenticate old
    `candidate.json` binding them by SHA-256, in `<vol>\WinSight-Qualification-Requests\candidates\<name>`.
 3. Queue requests as JSON files with unique names in `<vol>\WinSight-Qualification-Requests`:
    `{"action":"stage","candidate":"<name>"}`, then `{"action":"qualify","runName":"...","gates":[...],"memoryGB":4}`,
-   `{"action":"network","runName":"...","memoryGB":3}` for gate 36 (the operator types the disposable
-   password in each VM; the control VM runs with 2 GB, and the run is refused up front if the host
+   `{"action":"network","runName":"...","memoryGB":3,"credentialMode":"automatic"}` for gate 36
+   with a freshly generated disposable password staged on both protected offline guest volumes.
+   No password belongs in the request. The fixed account is not an administrator; the colocated AES
+   key/cipher rely on the Administrators/System-only volume DACL, not secrecy from administrators.
+   Each guest consumes/removes its fixture and host recovery attempts cleanup on both disks and
+   both checkpoints. Omitting `credentialMode`, or selecting `"interactive"`, retains the operator
+   dialog in each VM. Other values are rejected. Use the newly authenticated 14-file installation;
+   the older 13-file harness does not implement automatic mode.
+   The control VM runs with 2 GB, and the run is refused up front if the host
    cannot hold both VMs plus 0.5 GB), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json` and
    `runner.log` beside it; reading or following them while the runner works is safe (WS-83).
 4. Verify each run as an ordinary user, from the protected installation, before citing it:

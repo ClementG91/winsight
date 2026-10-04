@@ -6,7 +6,81 @@ protected execution path; the earlier unelevated Hyper-V access denial is no lon
 blocker. The initial VM execution phase changed no product, privileged harness, repository policy
 or release. The later product/test follow-ups are identified separately below.
 
-## Candidate and trust chain
+## Autonomous follow-up snapshot
+
+The owner subsequently authorized autonomous remaining qualifications, including Network Logon
+with a disposable test password. The earlier network deferral is superseded. The signed harness
+revision is `17e7d1039376c46d02a843f287f37af622a0f7be`; its three follow-up commits introduce an
+automatic credential mode, recovery of both VM fixtures/checkpoints after failures, and a real tray
+menu route restricted to the dashboard PID. No product `src/` files changed after `600acf4`.
+This does not establish binary equivalence between their CI packages.
+
+The latest local verification of that source passes **3,713 tests, zero failures/errors/skips**, with
+the existing 80% engine/privileged coverage floors, and **46 targeted harness tests**. All eleven
+local gates pass at fingerprint
+`fa256c582d8809535f049cd42fbda1f5c4c15b822e33fc4101a9e2f676e66d8b`.
+These are local results. [CI 37169114742](https://github.com/ClementG91/winsight/actions/runs/37169114742)
+is a separate exact-head run: both x64 verification legs and both packages pass, but native ARM64
+fails the first mount-recovery test on its 30-second PowerShell subprocess deadline. The aggregate
+`build-test` gate consequently fails. This timeout must be resolved without weakening its assertions;
+a completed package job is not the aggregate protected CI gate.
+Its x64 package checkout is merge `1b3fd15d80329ad0d3c28768ac64de7e81c0e53a`, parents
+`531b302`/`17e7d10`, tree `439f3ab1296a3311a9a4f562e77b768d70fff534`, independently matched to
+the signed source tree. Version 0.14.2 remains an unpublished rehearsal, not a replacement release.
+
+The generated 415,463-byte launcher has independently recalculated SHA-256
+`07acc62372f11862c3db1c202dcf6da41cc187b90f738ddeaeb102e06cf9d4e6`.
+A separate native Codex reviewer matched **14/14 payload files**, SHA-256 values and Git blob IDs
+to signed `17e7d10`, and the remaining bootstrap bytes to its template. The signature verifies.
+This authenticates source identity; it is not owner approval or VM qualification. Installation must
+use the reviewed entry functions in a fresh elevated console and execute the authenticated buffer;
+never elevate a mutable checkout file. This new installation has not yet been executed.
+
+The automatic network mode generates one fresh 52-character complexity-compliant credential with
+288 random bits for the fixed disposable account. The two offline guest transport volumes receive
+the same fixture only after their roots have an Administrators/System-only DACL. AES key and cipher
+are colocated: this is not confidentiality against administrators. The account is not an administrator.
+No password goes into runner requests, command lines, AI-router messages, logs or collected evidence.
+The actual disposable authentication uses Basic over the private HTTPS WinRM endpoint. Both guests
+consume/remove the fixture; host recovery attempts both disks and both checkpoints even after a
+preceding cleanup failure. Runtime gate 36 still requires actual HTTPS Network Logon, independent
+observer checks and the control VM's seven IPC boundary checks. **This mode has not yet run in VMs.**
+
+Recovery tests inject failures in mounting, removal, dismounting, checkpoint restoration and data-disk
+detachment. Tray tests validate exact-PID routing, rejection of invalid IDs, failure fallback and
+English/French/Spanish labels; they do not prove a rendered tray exit in those three guest languages.
+The real guest helper invokes the application's notification callback and UI Automation menu item;
+it does not turn forced termination into graceful shutdown evidence.
+
+A separate local laboratory test runs two real writer processes in the **same Windows session**,
+with the store initially at 10,000 physical rows. It reconciles independent operation receipts and
+the physical JSONL: **128 durable appends, 128 durable undo updates, one rotation**, 5,127 final rows
+(4,999 retained seed rows plus all 128 new actions), no duplicate/missing action IDs and matching
+undo markers. Elapsed time is 10.912 seconds; byte bounds pass. It uses local Release component
+DLLs, whose hashes are in the private manifest, not the CI single-file package bytes. Other sessions,
+other users, elevation differences and 168-hour endurance remain unqualified.
+
+On exact candidate `600acf43d8168caac6eacf9f0824271955a5852b`, the separate six-gate response run
+passes **6/6 gates and 12/12 protected provenance checks**. Its tray cleanup still used force.
+CI 37163659315 and its CodeQL run completed successfully on that exact head. Its x64 setup/ZIP/SBOM
+hashes are respectively `02401f67244c9b6d6ce9ca63755c01b85b4b65608680bbcbfdf97d50c1021709`,
+`5608eafb9db6f13f30040687e70f05c0760f18b6bc0ced7cc846587d2d803bfa`, and
+`64861a91d0122338d3b40d146d35979320599787f15421d95c71fedfd090588e`.
+Its full 31-gate campaign `readiness-600acf4-full-02` is **running**, with the previously installed
+13-file `0793f78` harness. Until sealing and provenance verification, no outcome is claimed.
+Neither result qualifies the new 14-file harness or the CI packages of `17e7d10`.
+
+The automatic-mode session `91e9e48e-1285-4af1-9b1e-a6b435aef18d` remains blocked by the router's
+secret detector on a public cmdlet assignment; it was not evaded or reclassified. Recovery session
+`5c6cd0d9-b1e7-46f1-807d-79e97cff72f0` and lifecycle session
+`9ebcb835-8ac6-4ba5-ba58-34f325764160` finish with **needs_human_review**, without failed test gates.
+The earlier test-only lifecycle setup `c5f3d356-a10a-42f2-a440-dbe5e07457dc` stays blocked: its missing
+UIAutomationClient fixture was repaired in a fresh session before the real red/green cycle.
+Independent review closed the reproduced first-cleanup/first-detach defects. A suspected mandatory
+menu getter failure was withdrawn after a PS5 probe; capturing the label before Invoke fixes trace
+loss, not a demonstrated mandatory exit failure. None of these reviews clears human supervision.
+
+## Historical candidate and trust chain
 
 The candidate is the exact x64 PR CI artifact from signed commit
 `8c1dd46a1a3c8e3ffe800deed009b8bc182574ec`,
@@ -49,12 +123,11 @@ cleanup, not graceful UI shutdown. Gate 99 independently found no process/servic
 Nominal revocation is proven here; locked/damaged-store failures remain covered by the separate
 local regression tests, not this VM gate.
 
-The separate 31-gate non-network campaign was launched as `readiness-8c1dd46-full-01`.
-Its outcomes belong to its own sealed evidence and local execution ledger; they cannot be
-inferred from the six-gate result or cited before sealing and provenance verification.
+The separate `readiness-8c1dd46-full-01` campaign completed with **31 PASS, 0 FAIL/NOT_RUN**,
+and **12/12 protected provenance checks**. Its evidence belongs to those earlier candidate bytes.
 Network Logon, disk pressure, failed UI delivery, sessions,
 adverse bootstrap trials and seven-day endurance are not part of the six-gate result.
-The operator explicitly deferred the Network Logon leg; it was not queued.
+The operator initially deferred the Network Logon leg; this decision was later superseded above.
 
 The published September 28 full run was also reauthenticated with the protected verifier:
 12/12 PASS. This preserves that historical evidence for its original published bytes; it does
@@ -83,7 +156,7 @@ Production HTTP code is unchanged by this test-only patch.
 Harness sessions: shape `57f98d9b-1cb1-4fee-a483-f77aa0ca4c34` (ready_for_ci), watchdog
 `1bc975ef-e066-4018-ad4a-b0b87bf2e44f` (needs_human_review: changed assertions). These later
 bytes need their own protected CI and candidate qualification; the `8c1dd46` VM result is not
-transferred. Rotation/undo with two concurrent writer processes remains an explicit missing proof.
+transferred. The later local two-process rotation/undo experiment is scoped separately above.
 A suspected sharing-lock RuleStore counterexample was withdrawn after checking attribute-only
 acquisition versus opening data; it was not used to justify a speculative change.
 
