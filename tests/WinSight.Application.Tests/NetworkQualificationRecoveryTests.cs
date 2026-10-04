@@ -5,6 +5,7 @@ using Xunit;
 
 namespace WinSight.Application.Tests;
 
+[Collection(QualificationPowerShellCollection.Name)]
 public sealed class NetworkQualificationRecoveryTests
 {
     private static readonly string Driver = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,

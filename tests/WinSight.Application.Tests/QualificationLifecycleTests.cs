@@ -5,6 +5,7 @@ using Xunit;
 
 namespace WinSight.Application.Tests;
 
+[Collection(QualificationPowerShellCollection.Name)]
 public sealed class QualificationLifecycleTests
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
