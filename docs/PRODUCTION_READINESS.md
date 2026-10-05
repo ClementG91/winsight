@@ -1,8 +1,11 @@
 # Production readiness
 
-Current support, corrections and remaining gates are tracked in the
-[2026-10-03 matrix](validation/2026-10-03-readiness-remediation.md). The records below retain their
-historical scope. Evidence is candidate-bound: a successful result for one commit or package
+Current corrections, recovery decisions and final-byte qualification limits are tracked in the
+[October 5 regression record](validation/2026-10-05-readiness-regressions.md), with the original
+[October 3 audit matrix](validation/2026-10-03-readiness-remediation.md) and
+[October 4 operator evidence](validation/2026-10-04-readiness-operator.md). The corrected draft
+candidate remains unqualified for production until its exact-head CI, new protected harness
+installation and remaining runtime gates are evidenced. The records below retain their historical scope. Evidence is candidate-bound: a successful result for one commit or package
 does not qualify different executable bytes, and a local rehearsal does not qualify a published
 release.
 

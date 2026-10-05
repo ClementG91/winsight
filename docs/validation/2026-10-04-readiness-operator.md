@@ -6,13 +6,16 @@ protected execution path; the earlier unelevated Hyper-V access denial is no lon
 blocker. The initial VM execution phase changed no product, privileged harness, repository policy
 or release. The later product/test follow-ups are identified separately below.
 
-## Autonomous follow-up snapshot
+The [October 5 regression record](2026-10-05-readiness-regressions.md) supersedes the current
+storage/harness description. This annex preserves earlier candidate-bound evidence and protocols.
+
+## Historical autonomous follow-up snapshot
 
 The owner subsequently authorized autonomous remaining qualifications, including Network Logon
 with a disposable test password. The earlier network deferral is superseded. The signed harness
 revision is `17e7d1039376c46d02a843f287f37af622a0f7be`; its three follow-up commits introduce an
 automatic credential mode, recovery of both VM fixtures/checkpoints after failures, and a real tray
-menu route restricted to the dashboard PID. No product `src/` files changed after `600acf4`.
+menu route restricted to the dashboard PID. No product `src/` files changed between `600acf4` and that historical `17e7d10` revision.
 This does not establish binary equivalence between their CI packages.
 
 The latest local verification of that source passes **3,713 tests, zero failures/errors/skips**, with
@@ -26,7 +29,8 @@ fails the first mount-recovery test on its 30-second PowerShell subprocess deadl
 a completed package job is not the aggregate protected CI gate.
 Its x64 package checkout is merge `1b3fd15d80329ad0d3c28768ac64de7e81c0e53a`, parents
 `531b302`/`17e7d10`, tree `439f3ab1296a3311a9a4f562e77b768d70fff534`, independently matched to
-the signed source tree. Version 0.14.2 remains an unpublished rehearsal, not a replacement release.
+the signed source tree. These changed candidate bytes retain the version 0.14.2 filename but
+are unpublished; the separately published v0.14.2 release is unchanged.
 
 The generated 415,463-byte launcher has independently recalculated SHA-256
 `07acc62372f11862c3db1c202dcf6da41cc187b90f738ddeaeb102e06cf9d4e6`.
@@ -34,7 +38,9 @@ A separate native Codex reviewer matched **14/14 payload files**, SHA-256 values
 to signed `17e7d10`, and the remaining bootstrap bytes to its template. The signature verifies.
 This authenticates source identity; it is not owner approval or VM qualification. Installation must
 use the reviewed entry functions in a fresh elevated console and execute the authenticated buffer;
-never elevate a mutable checkout file. This new installation has not yet been executed.
+never elevate a mutable checkout file. That launcher was not installed and is now superseded by the F6 harness changes; it must not
+be used for the final candidate. Regenerate and independently authenticate the final launcher
+before the owner's elevated installation.
 
 The automatic network mode generates one fresh 52-character complexity-compliant credential with
 288 random bits for the fixed disposable account. The two offline guest transport volumes receive
@@ -66,19 +72,19 @@ CI 37163659315 and its CodeQL run completed successfully on that exact head. Its
 hashes are respectively `02401f67244c9b6d6ce9ca63755c01b85b4b65608680bbcbfdf97d50c1021709`,
 `5608eafb9db6f13f30040687e70f05c0760f18b6bc0ced7cc846587d2d803bfa`, and
 `64861a91d0122338d3b40d146d35979320599787f15421d95c71fedfd090588e`.
-Its full 31-gate campaign `readiness-600acf4-full-02` is **running**, with the previously installed
-13-file `0793f78` harness. Until sealing and provenance verification, no outcome is claimed.
+Its full campaign `readiness-600acf4-full-02` is sealed: **31 PASS, 0 FAIL/NOT_RUN**, using the
+previously installed 13-file `0793f78` harness. On October 5, the protected verifier was rerun
+unelevated and all **12/12 provenance/protection checks pass**. This result belongs only to those
+candidate and harness bytes.
 Neither result qualifies the new 14-file harness or the CI packages of `17e7d10`.
 
-The automatic-mode session `91e9e48e-1285-4af1-9b1e-a6b435aef18d` remains blocked by the router's
-secret detector on a public cmdlet assignment; it was not evaded or reclassified. Recovery session
-`5c6cd0d9-b1e7-46f1-807d-79e97cff72f0` and lifecycle session
-`9ebcb835-8ac6-4ba5-ba58-34f325764160` finish with **needs_human_review**, without failed test gates.
-The earlier test-only lifecycle setup `c5f3d356-a10a-42f2-a440-dbe5e07457dc` stays blocked: its missing
-UIAutomationClient fixture was repaired in a fresh session before the real red/green cycle.
-Independent review closed the reproduced first-cleanup/first-detach defects. A suspected mandatory
-menu getter failure was withdrawn after a PS5 probe; capturing the label before Invoke fixes trace
-loss, not a demonstrated mandatory exit failure. None of these reviews clears human supervision.
+Historical automatic-mode review was blocked by the local secret detector on a public cmdlet
+assignment; this was not evaded or reclassified. Recovery/lifecycle reviews require human supervision.
+An earlier test-only setup failed because UIAutomationClient was missing; a fresh session repaired
+that fixture before the real red/green cycle. Independent review closed the reproduced first-cleanup
+and first-detach defects. A suspected mandatory menu-getter failure was withdrawn after a PS5 probe;
+capturing the label before Invoke fixes trace loss, not a demonstrated exit failure. Private ledgers
+retain those session identities and blocked attempts; reviews do not clear human supervision.
 
 ## Historical candidate and trust chain
 
@@ -153,19 +159,15 @@ cancellation oracle. The shorter HttpClient.Timeout case is added. Baseline 9 bo
 and final 10/179 pass, with build/format; the reviewer confirmed the failure/cleanup equivalence.
 Production HTTP code is unchanged by this test-only patch.
 
-Harness sessions: shape `57f98d9b-1cb1-4fee-a483-f77aa0ca4c34` (ready_for_ci), watchdog
-`1bc975ef-e066-4018-ad4a-b0b87bf2e44f` (needs_human_review: changed assertions). These later
-bytes need their own protected CI and candidate qualification; the `8c1dd46` VM result is not
-transferred. The later local two-process rotation/undo experiment is scoped separately above.
-A suspected sharing-lock RuleStore counterexample was withdrawn after checking attribute-only
-acquisition versus opening data; it was not used to justify a speculative change.
+The shape fix completed local checks; the watchdog assertions require human review. These later
+bytes need their own protected CI and candidate qualification; `8c1dd46` results do not transfer.
+The local two-process experiment remains separately scoped. A suspected sharing-lock RuleStore
+counterexample was withdrawn after comparing attribute-only acquisition with data opening.
 
-The initial operator draft session `22a9f25a-07e5-4b5d-a08e-b886928af198` was superseded after
-evidence edits invalidated its green fingerprints; its blocked finish remains recorded. The final
-checks in `7eda1365-e670-4df2-a9cf-75dc06b66980` passed (3,688 tests, ten gates), but finish was
-blocked by a shared Jev configuration change. Fresh clean-baseline closure uses
-`f113351a-1577-4580-831c-d5084a1c76b0`. The router/local ledgers retain actual reports,
-fingerprints and CI status; AI review neither overrides old blockers nor constitutes human approval.
+The first operator draft was superseded after evidence edits invalidated its fingerprints. Later
+checks passed 3,688 tests and ten gates, but finish was blocked by an advisory configuration change.
+Fresh clean-baseline closure retained the old blockers. Actual reports, fingerprints, internal
+session identities and decisions remain in private local evidence. AI review does not authorize merge.
 
 ## Proposed target for the next privileged harness change
 
@@ -181,7 +183,7 @@ authenticated protected installation. Never elevate a script from the user-writa
 | Coverage gain | Establish an unreadable disposable enumerator location, place 4,098 identities, then restore readability while the journal fails. The gain has 4,096 listed plus two unlisted identities. Verify the old baseline remains protected while the gain is pending; recovery/restart must report the gain including its overflow count. This is distinct from ordinary arrivals. |
 | UI failure | Separately test suppressed notifications, blocked dispatcher and process termination before/after a durable journal write. A rendered balloon is not the durable acknowledgment contract. Correlate journal/health/baseline using unique probe identities; accept at-least-once repetition after crashes, reject silently baselined undelivered evidence. |
 | Recovery/cleanup | Release only campaign-owned filler files and restore checkpoint after collection. Test exhausted-retry recovery, clean restart, journal bounds, effective state and no orphan ETW/service/process/probe. A missing oracle, timeout or forced termination is recorded explicitly; never convert it to a graceful-shutdown pass. |
-| Journal writers | Two separate writer processes in the same session, store near rotation, concurrent append/undo. Reconcile every returned durable result with an independent bounded receipt trace and the expected retained window/undo state in serialization order. Distinguish legitimate retention eviction from lost writes; verify unique IDs, ordering and byte/line caps. Run other sessions separately; the current Local mutex is not an intersession guarantee. |
+| Journal writers | Two separate writer processes in the same session, store near rotation, concurrent append/undo. Reconcile every returned durable result with an independent bounded receipt trace and the expected retained window/undo state in serialization order. Distinguish legitimate retention eviction from lost writes; verify unique IDs, ordering and byte/line caps. Run other sessions separately; current Global-mutex writers must be qualified across sessions and integrity levels, with older Local-mutex writers stopped before execution. |
 
 Abort before injection if the guest/volume/checkpoint identity is uncertain, a path is a reparse or
 host share, evidence cannot be preserved, or projected VHD growth would breach the operator's
@@ -214,11 +216,61 @@ claim unqualified. Stream measurements to protected, bounded evidence with expli
 bounded product journals are not seven-day archives. Run a short pilot first, then fresh full-duration
 campaigns without weakening the frozen thresholds. Neither profile has been measured yet.
 
+## Resume after an interrupted or partial network collection
+
+Use only the independently authenticated, owner-installed harness. Do not elevate a checkout script.
+Normal recovery uses the exact `-Resume` command in the protected host log. A transient observation
+failure leaves a possibly live campaign and its data disks in place. The driver retries queries and
+binds Resume to the candidate, harness, bootstrap, run ID and started receipt. Never restore a
+checkpoint, reformat a transport disk or start another campaign while recovering its evidence.
+
+Completed destination files are reusable only when their length and SHA-256 match the guest source.
+A divergent or partly copied individual file is preserved and refused. The guest source remains on
+its transport disk. This is an explicit manual recovery case; do not overwrite the old destination.
+
+For an owner-supervised isolated collection, keep the same protected qualification root, VM root,
+candidate/harness/bootstrap paths, run name, VM/checkpoint names and credential mode. In a fresh
+elevated Windows PowerShell 5.1 console, import the installed protected `WinSightHyperV.psm1`, set the
+Administrators default owner, and create a **new nonexisting EvidenceRoot** under the same protected
+qualification root with `New-ProtectedDirectory -UsersRead`. Copy only these immutable receipts from
+the old EvidenceRoot, without overwriting anything:
+
+- `network-state-<RunName>.json`
+- `network-started-<RunName>.json`
+- `network-timeout-<RunName>.json`, if it exists
+
+Verify each original/copy SHA-256 pair before invoking the protected driver. The timeout receipt is
+mandatory when present: omitting it could misrepresent a forced timeout. Do not edit any receipt or
+copy the conflicting partial run directory. Preserve the complete old EvidenceRoot for review.
+
+Use the logged command with **only `-EvidenceRoot` changed** to that new protected directory, retaining
+`-Resume`. Resume reloads the original credential mode from the immutable receipt; the logged command
+does not need an `-AutomaticCredential` switch. The canonical
+runner request does not expose an EvidenceRoot override; this exceptional recovery is a direct owner
+invocation of the installed protected driver. The new run directory collects fresh copies from the
+same guest disks. The current receipt schema binds `Root` to VM storage and does not bind EvidenceRoot;
+all candidate/harness/bootstrap/run identity checks still apply.
+
+Collection attempts both guest sides before automatic-fixture cleanup, reusing the mounts actually
+acquired. Failure to mount one side does not skip the attempt on the other side.
+Interactive runs have no automatic-fixture cleanup. Complete evidence is sealed before restoration;
+incomplete collection remains resumable. Restoration independently checks the exact recorded adapter
+switches and memory captured after checkpoint restore. A forced timeout remains a failure after Resume,
+even if VMs are later Off and individual gates pass. Verify the new seal unelevated with the installed
+`Verify-QualificationProvenance.ps1`, the original qualification root and externally authenticated
+launcher pin before citing its result.
+
+These recovery flows have native PS5 mock-boundary regressions; this record does not claim their live
+Hyper-V execution. Parent runner heartbeat and actual child PID/phase/UTC heartbeat are separate.
+A stale or missing child heartbeat is diagnostic uncertainty, not proof of progress or a reason to
+extend a watchdog. Tray evidence records shell-icon, exact-PID operator fallback or forced cleanup;
+only observed process exit and zero remaining ETW sessions support the exit gate.
+
 ## Owner handoff
 
 The [draft PR #167](https://github.com/ClementG91/winsight/pull/167) contains the corrected product
 and the full local test/CI trail. Owner review is still required, particularly A2 integration and
-the broad initial readiness document whose Jev contexts exceeded the 20 KB limit, plus security
+the broad initial readiness document whose advisory review contexts exceeded their bound, plus security
 changes and guard assertions. Offering to review is not a recorded approval. No blocked historical
 harness session was overridden. Governance decisions and any next privileged harness change remain
 owner-supervised. Corrected distribution requires a new version and its own release inventory.

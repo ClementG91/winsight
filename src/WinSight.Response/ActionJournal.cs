@@ -133,7 +133,8 @@ public sealed class ActionJournal : IActionJournal
 
     /// <summary>
     /// Marks the entry with <paramref name="actionId"/> as undone by <paramref name="undoActionId"/>.
-    /// Best-effort: a failure only means the history shows the original and the undo as two entries.
+    /// Best-effort: failure does not confirm the requested annotation; retention may remove either record.
+    /// Inspect the actual retained original and undo records instead of assuming both are present.
     /// </summary>
     public void MarkUndone(Guid actionId, Guid undoActionId) => _ = TryMarkUndone(actionId, undoActionId);
 

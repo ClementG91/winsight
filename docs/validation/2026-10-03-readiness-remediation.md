@@ -9,7 +9,9 @@ Baseline: `531b302eef3eea45389c61b94af536be9bb2adf3`; isolated branch
 This is a targeted source/evidence review, not a complete pentest or a claim that no defects remain.
 
 Subsequent protected execution and the next campaign protocol are recorded in the
-[October 4 operator annex](2026-10-04-readiness-operator.md); the statements below are the October 3 snapshot.
+[October 4 operator annex](2026-10-04-readiness-operator.md). The storage/MCP regressions below
+are superseded by the [October 5 record](2026-10-05-readiness-regressions.md); audit metadata remains
+the October 3 snapshot.
 
 ## Verification of the supplied audit
 
@@ -36,38 +38,22 @@ Public metadata references: [CI](https://github.com/ClementG91/winsight/actions/
 |---|---|
 | A1 — revoke/Allow rollback | Empty rule sets are persisted by flushed atomic replacement; failure cannot return successful revocation. Typed outcomes distinguish storage failure and absent target. Corrupt/unsupported stores are not overwritten by Add. Tests cover locked last/intermediate rules, denied creation, corrupt state and successful/failed Allow rollback with journal failure. |
 | A2 — reads / diagnostics | Reverse JSONL reader: 8 KiB blocks, 16 KiB lines, 16 MiB inspected bytes, 10,000 physical lines including corruption/blank lines. Latest physical action wins. Read coverage exposes unavailable, malformed, limited and preserved-evidence states; Application reports incomplete coverage. |
-| A2 — writes / recovery | Append preflights the bounded store. Rotation atomically includes the new entry and reports durable/failure status. Corruption is preserved byte-for-byte in one create-new `.corrupt.jsonl` before compaction; no overwrite. Oversized legacy stores and a second recovery collision fail closed, requiring operator recovery. Tests cover limits, torn writes, rotation sharing failure, concurrent instances and a separate process holding the mutex. |
+| A2 — writes / recovery, superseded October 5 | Typed durable/failure results preserve audit-before-act. Four bounded raw evidence slots and an index support idempotent retry; small torn tails do not force rotation. Streaming oversized migration exposes discarded-prefix accounting or uncertainty. Complete available action phases are retained within physical budgets. See F1–F5 in the October 5 record and RECOVERY.md. |
 | A3 — VirusTotal | Default completion buffered a 3 MiB body before the old limit. Headers-first streaming now rejects declared oversize without reading; absent/false length is capped at 1 MiB plus one probe byte. A linked deadline covers body reads; caller cancellation propagates. Strict UTF-8, valid exact-limit JSON, status errors and stalled-body cancellation tested with synthetic keys and fake handlers. No live network call. |
 
 Retention is bounded local history, **not seven-day guaranteed retention or a forensic archive**.
-Healthy rotation keeps at most 5,000 newest actions / 8 MiB, permitting further bounded growth.
-Evidence plus active journal consume at most approximately 32 MiB under automatic writes; an
-already oversized external file is retained and refused. A hostile same-user process can still
-alter this user state. `Local` mutex scope does not establish cross-session serialization.
+Current active bounds are 16 MiB / 10,000 physical lines; rotation retains complete available groups
+within 8 MiB / 5,000 physical lines. Normalized live journal/evidence/index files total at most
+80 MiB + 8 KiB, or conservatively 160 MiB + 16 KiB including fixed staging. Oversized external legacy
+sources can exceed this before maintenance. Current Global-mutex writers do not synchronize with
+older Local-mutex versions; cross-session and cross-integrity behavior remains unqualified.
 
-Harness trail (local evidence; no merge authorization):
-
-- A1: `6be7d296-1966-4f0c-86bd-abed8e7a33b2`, genuine red then green; human review required.
-- A2 reader: `9dd93d96-0431-47d9-b0fb-2367121a0c10`; helper extraction:
-  `57196e27-9a6f-4592-8c6f-8d0cf922044e`; supplemental tests:
-  `fcfa2cde-7fb1-4d84-86ad-47fb3d0fb6da`, local checks/reviews completed.
-- A2 integration: `597be2dd-5b50-450b-a28a-5de1aa943093`, red and final checks pass,
-  **finish blocked: missing current Jev review**, because complete review context exceeds its
-  20 KB bound. Earlier attempt `69dc5ce3-9535-45d5-8e19-c6d26ed93930` is also retained as blocked.
-  No limit increase or fabricated approval: independent human review remains required.
-- A3: `5164a54b-a806-409b-968a-db1fc8d67f4d`, red then 178 Core and 11 parser tests,
-  Release build and format pass; human review required.
-- Final reconciliation/full checks: `4569316f-1170-49a5-9354-1bc68d489d81`.
-  Initial full suite: 3,674 pass and four MCP symbolic positive-control failures, no skips; nine
-  other checks pass. Its broad document review also exceeded the Jev context limit, so finish
-  remains blocked. The document and A2 integration both require independent human review.
-- MCP guard refresh: `be0a5b68-2532-407d-87f4-1546123afc69`; all 127 MCP tests, build and format
-  pass. Negative authority assertions/owner exceptions are unchanged; typed mutation signatures
-  were added, read/revoke/HTTP overload anchors refreshed, and a direct RuleStore write-root
-  control avoids shared-sink predecessor ambiguity. Security-related test review remains required.
-- Superseding full validation is retained with its session ID, actual results and fingerprints in
-  the router evidence directories and
-  `out/readiness-final/validation.json`. This record alone does not assert those gates passed.
+Historical local review trail is retained privately with reports, fingerprints and session decisions.
+The A2 integration and initial broad document review exceeded the advisory context bound; their
+blocked finishes were not bypassed. Initial full validation had 3,674 passing tests and four MCP
+positive-control failures, no skips. Later MCP changes restored real CLI-rooted detection and added
+mutating verbs/tool aliases, as recorded on October 5. Security/assertion changes and these historical
+review gaps still require human supervision; no advisory result authorizes merge.
 
 ## Support and qualification contract
 
@@ -76,7 +62,8 @@ VM evidence is Windows 11 build 26200. Each additional supported client release 
 baseline and critical-path smoke; Server CI is not client runtime qualification. Windows 10
 compatibility is unqualified; `windows10.0.19041.0` is an API contract. Microsoft's
 [.NET 10 supported OS list](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)
-does not list Windows 10 22H2. Arm64 runtime remains outside this remediation's qualification scope.
+does not list Windows 10 22H2; the unchanged installer nevertheless accepts build 19045.
+Installer acceptance is not a support claim. Arm64 runtime remains outside this remediation's qualification scope.
 
 Two proposed **endpoint** profiles use the same engine. They are test targets, not measured capacity:
 
@@ -108,8 +95,10 @@ retention, remote control and enterprise SLA are not implemented by these profil
 | P2 | Sessions: distinct standard accounts, same account across sessions, admin non-elevated/elevated and fast switching; isolate per-user state, verify capabilities, mutex naming/contention and no falsely successful writes. |
 | P2 | Known Folder Move/Cloud Files decoys: disposable sync root; plant/watch/clean, substitute/modify files, preserve foreign data, no foreign hydration, record provider errors and recovery. Gate 17 proves reads, not this entire lifecycle. |
 
-The current `Get-VM` probe was denied for missing Hyper-V management permission. These VM gates
-remain unexecuted in this remediation and need an authorized operator via the trusted harness.
+The October 3 direct `Get-VM` probe was denied for missing Hyper-V management permission. Later
+protected historical executions are in the operator annex. New final-byte qualification requires
+an independently authenticated changed harness and its owner-led elevated installation; the old
+campaigns do not qualify these corrections. Fault, session and endurance gates remain open.
 
 Owner-supervised governance choices remain open: require an independent reviewer when available,
 otherwise record operator acceptance; protect future release tags and enable immutable releases;

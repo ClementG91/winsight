@@ -1,3 +1,33 @@
+## Unreleased
+
+### Fixed
+
+- Response rules: durable atomic revocation, honest Allow rollback and typed storage diagnostics.
+  Null/keyless or unsupported individual rules no longer disable valid neighbors; ignored entries
+  are visible and removed only by a successful write. Corrupt/unknown envelopes remain preserved.
+- Response history: bounded reverse reads with visible incomplete coverage, required legacy fields,
+  resumable bounded corruption evidence and automatic oversized legacy migration. Small damaged tails
+  no longer force rotation. Retained actions keep their available Prepared/Completed phases and
+  timestamps; a capacity refusal preserves the original bytes and reports annotation failure honestly.
+- Guardian response labels: long or heavily JSON-escaped names no longer prevent Block/Restore or
+  Allow/Revoke. Audit labels are centrally bounded with a marker/digest; functional identities stay full.
+- VirusTotal: stream and bound response bodies instead of buffering them before enforcing the cap;
+  preserve caller cancellation and body deadlines, including absent/false content lengths.
+- Qualification harness: capture configuration after checkpoint restore, preserve uncertain running
+  campaigns for identity-bound Resume, retain forced-timeout failures and collect both evidence sides
+  before automatic-only fixture cleanup. NonInteractive drivers expose actual PID/phase heartbeats;
+  tray evidence identifies shell-icon, operator fallback or forced cleanup and verifies process exit.
+- MCP security tests: restore CLI-rooted write detection and cover Resume/Allow/Revoke and configured
+  tool aliases. PS5 fixture diagnostics retain bounded concurrent output and the first failure while
+  preserving watchdogs. Native ARM64 timeout causation remains unproven.
+- Recovery/support records: document typed storage recovery and correct stale campaign/publication
+  statements. The unchanged installer accepts build 19045; Windows 10 22H2 is absent from the .NET 10
+  support matrix. These changes do not extend published-byte qualification to a new candidate.
+
+See the [October 5 regression and qualification record](docs/validation/2026-10-05-readiness-regressions.md).
+Final-byte CI, protected harness installation and remaining VM/load/platform evidence are required
+before claiming their acceptance. No release or version bump is made here.
+
 ## 0.14.2 - 2026-09-27
 
 ### Fixed
