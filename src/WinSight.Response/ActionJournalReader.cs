@@ -43,11 +43,11 @@ internal static class ActionJournalReader
         RespectRequiredConstructorParameters = true,
     };
 
-    internal static ActionJournalSnapshot Read(Stream stream, int max)
+    internal static ActionJournalSnapshot Read(Stream stream, int max, bool retainPhases = false)
     {
         max = max <= 0 ? MaxLines : Math.Min(max, MaxLines);
         var entries = new List<ActionJournalEntry>();
-        var seen = new HashSet<Guid>();
+        var seen = new HashSet<(Guid Id, ActionJournalPhase? Phase)>();
         var block = new byte[8192];
         var line = new byte[MaxLineBytes];
         var length = 0;
@@ -127,7 +127,7 @@ internal static class ActionJournalReader
                         {
                             malformed++;
                         }
-                        else if (seen.Add(entry.ActionId))
+                        else if (seen.Add((entry.ActionId, retainPhases ? entry.Phase : null)))
                         {
                             entries.Add(entry);
                         }

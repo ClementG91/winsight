@@ -43,8 +43,9 @@ public interface IActionJournal
 }
 
 /// <summary>
-/// An append-only record of every response attempt, kept so an operator (and, read-only, an MCP
-/// client) can see what WinSight did and undo it. Bounded and rotated atomically, one entry per line.
+/// A journal of response intent and completion, appended and compacted within fixed budgets so an
+/// operator (and, read-only, an MCP client) can inspect and undo actions. Atomic compaction retains
+/// both available phases of retained actions, one record per line; history shows their latest state.
 /// </summary>
 /// <remarks>
 /// It is written from the same process that performs the action, never from MCP: the MCP server can
@@ -100,7 +101,7 @@ public sealed class ActionJournal : IActionJournal
             {
                 return new(ActionJournalWriteStatus.EvidencePreservationFailed);
             }
-            var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines);
+            var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines, retainPhases: true);
             if (snapshot.Unreadable)
             {
                 return new(ActionJournalWriteStatus.Unavailable);
@@ -150,7 +151,7 @@ public sealed class ActionJournal : IActionJournal
             {
                 return new(ActionJournalWriteStatus.EvidencePreservationFailed);
             }
-            var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines);
+            var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines, retainPhases: true);
             if (snapshot.Unreadable)
             {
                 return new(ActionJournalWriteStatus.Unavailable);
@@ -169,7 +170,7 @@ public sealed class ActionJournal : IActionJournal
             }
             entries[index] = entries[index] with { UndoneByActionId = undoActionId };
             return ReplaceLocked(entries, ActionJournalReader.MaxBytes,
-                ActionJournalReader.MaxLines, ActionJournalWriteStatus.Updated);
+                ActionJournalReader.MaxLines, ActionJournalWriteStatus.Updated, actionId);
         }
         catch (Exception ex) when (IsUnavailable(ex))
         {
@@ -194,7 +195,7 @@ public sealed class ActionJournal : IActionJournal
         }
     }
 
-    private ActionJournalSnapshot ReadSnapshotLocked(int max)
+    private ActionJournalSnapshot ReadSnapshotLocked(int max, bool retainPhases = false)
     {
         using var lease = AutomaticFileAccess.TryAcquire(_path, out var missing);
         if (lease is null)
@@ -206,15 +207,15 @@ public sealed class ActionJournal : IActionJournal
             return new ActionJournalSnapshot([], Unreadable: true);
         }
         using var stream = lease.OpenRead(FileOptions.RandomAccess);
-        var snapshot = ActionJournalReader.Read(stream, max);
+        var snapshot = ActionJournalReader.Read(stream, max, retainPhases);
         return lease.IsCurrent() ? snapshot : new ActionJournalSnapshot([], Unreadable: true);
     }
 
     private bool PreserveEvidenceLocked() => ActionJournalStorage.Preserve(_path, RecoveryEvidencePath);
 
     private ActionJournalWriteResult ReplaceLocked(IEnumerable<ActionJournalEntry> newestFirst,
-        int byteBudget, int entryBudget, ActionJournalWriteStatus success) =>
-        ActionJournalStorage.Replace(_path, newestFirst, byteBudget, entryBudget, success);
+        int byteBudget, int entryBudget, ActionJournalWriteStatus success, Guid? requiredActionId = null) =>
+        ActionJournalStorage.Replace(_path, newestFirst, byteBudget, entryBudget, success, requiredActionId);
 
     private static bool IsUnavailable(Exception ex) => ex is IOException or UnauthorizedAccessException
         or System.Security.SecurityException or ArgumentException or NotSupportedException

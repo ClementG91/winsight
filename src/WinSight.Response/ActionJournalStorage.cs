@@ -11,7 +11,7 @@ namespace WinSight.Response;
 public enum ActionJournalWriteStatus
 {
     Appended, Rotated, Updated, TargetNotFound, Unavailable, InvalidRecord,
-    RotationFailed, EvidencePreservationFailed, RecoveryRequired,
+    RotationFailed, EvidencePreservationFailed, RecoveryRequired, RetentionLimit,
 }
 
 public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
@@ -25,6 +25,7 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
         ActionJournalWriteStatus.EvidencePreservationFailed => "recovery evidence could not be preserved; check disk space and access, then retry",
         ActionJournalWriteStatus.RotationFailed => "atomic journal replacement failed; close conflicting file handles and retry",
         ActionJournalWriteStatus.RecoveryRequired => "bounded history migration is required; inspect winsight actions and RECOVERY.md",
+        ActionJournalWriteStatus.RetentionLimit => "the requested history annotation exceeds retention budgets; original and undo actions remain separately recorded",
         ActionJournalWriteStatus.InvalidRecord => "the audit record is invalid; inspect the action input",
         _ => "inspect winsight actions for history coverage",
     });
@@ -47,33 +48,62 @@ internal static class ActionJournalStorage
 
     internal static ActionJournalWriteResult Replace(string path,
         IEnumerable<ActionJournalEntry> newestFirst, int byteBudget, int entryBudget,
-        ActionJournalWriteStatus success)
+        ActionJournalWriteStatus success, Guid? requiredActionId = null)
     {
-        var records = new List<byte[]>();
-        var ids = new HashSet<Guid>();
-        var total = 0;
-        foreach (var entry in newestFirst)
+        // Writer snapshots inspect at most MaxLines physical rows plus the new append. Keep the
+        // newest occurrence of each phase, then budget whole available action groups. Do not
+        // fabricate phases outside that bounded tail or reorder interleaved source records.
+        var groups = new Dictionary<Guid, List<(int Index, ActionJournalEntry Entry)>>();
+        var phases = new HashSet<(Guid Id, ActionJournalPhase Phase)>();
+        var index = 0;
+        foreach (var entry in newestFirst.Take(ActionJournalReader.MaxLines + 1))
         {
-            if (!ids.Add(entry.ActionId))
+            if (phases.Add((entry.ActionId, entry.Phase)))
             {
-                continue;
+                if (!groups.TryGetValue(entry.ActionId, out var group))
+                {
+                    group = [];
+                    groups.Add(entry.ActionId, group);
+                }
+                group.Add((index, entry));
             }
-            var bytes = Encode(entry);
-            if (bytes is null)
+            index++;
+        }
+        var records = new List<(int Index, byte[] Bytes)>();
+        var total = 0;
+        var requiredRetained = requiredActionId is null;
+        foreach (var group in groups.Values.OrderBy(g => g[0].Index))
+        {
+            var candidate = new List<(int Index, byte[] Bytes)>();
+            var groupBytes = 0;
+            foreach (var row in group)
             {
-                return new(ActionJournalWriteStatus.RecoveryRequired);
+                var bytes = Encode(row.Entry);
+                if (bytes is null)
+                {
+                    return new(ActionJournalWriteStatus.RecoveryRequired);
+                }
+                candidate.Add((row.Index, bytes));
+                groupBytes += bytes.Length;
             }
-            if (records.Count >= entryBudget || total + bytes.Length > byteBudget)
+            if (records.Count + candidate.Count > entryBudget || (long)total + groupBytes > byteBudget)
             {
                 break;
             }
-            records.Add(bytes);
-            total += bytes.Length;
+            records.AddRange(candidate);
+            total += groupBytes;
+            requiredRetained |= group[0].Entry.ActionId == requiredActionId;
+        }
+        if (!requiredRetained)
+        {
+            // Undo is a best-effort annotation. Never publish an update that evicts its own target
+            // or claim that target was durably annotated; leave the source and phases intact.
+            return new(ActionJournalWriteStatus.RetentionLimit);
         }
         using var output = new MemoryStream(total);
-        for (var i = records.Count - 1; i >= 0; i--)
+        foreach (var record in records.OrderByDescending(r => r.Index))
         {
-            output.Write(records[i]);
+            output.Write(record.Bytes);
         }
         var payload = output.GetBuffer().AsSpan(0, total);
         if (!ActionJournalEvidence.PrepareTrim(path, -1, Convert.ToHexString(SHA256.HashData(payload))))
