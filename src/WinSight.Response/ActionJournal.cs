@@ -89,7 +89,7 @@ public sealed class ActionJournal : IActionJournal
         var bytes = ActionJournalStorage.Encode(entry);
         if (bytes is null)
         {
-            return new(ActionJournalWriteStatus.RecordTooLarge);
+            return new(ActionJournalWriteStatus.InvalidRecord);
         }
         try
         {

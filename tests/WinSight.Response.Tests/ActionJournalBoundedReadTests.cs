@@ -70,9 +70,12 @@ public sealed class ActionJournalBoundedReadTests : IDisposable
     }
 
     [Fact]
-    public void OversizedRecordsAreRefusedWithoutCreatingTheJournal()
+    public void OversizedLabelsAreBoundedWithoutRefusingTheAction()
     {
-        Assert.False(new ActionJournal(PathName).TryAppend(Entry(new string('x', 16 * 1024))));
-        Assert.False(File.Exists(PathName));
+        Assert.True(new ActionJournal(PathName).TryAppend(Entry(new string('x', 16 * 1024))));
+        var entry = Assert.Single(new ActionJournal(PathName).Read());
+        Assert.InRange(entry.Target.Length, 1, 2048);
+        Assert.Contains("[truncated sha256:", entry.Target, StringComparison.Ordinal);
+        Assert.True(new FileInfo(PathName).Length <= ActionJournalReader.MaxLineBytes);
     }
 }
