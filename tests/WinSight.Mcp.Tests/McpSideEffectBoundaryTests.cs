@@ -119,7 +119,7 @@ public sealed class McpSideEffectBoundaryTests
         ["WinSight.Core.AutomaticFileAccess"] =
         [
             "TryEnsureDirectory", "TryApplyProtectedDirectoryDacl", "TryCreateNewFile", "TryCreateNewFileLease",
-            "TryAppendFile", "TryWriteAtomic", "TryDeleteFile", "TryRenameRelative",
+            "TryAppendFile", "TryWriteAtomic", "TryWriteAtomicBounded", "TryCopyTailAtomic", "TryDeleteFile", "TryRenameRelative",
         ],
         ["WinSight.Core.AutomaticFileAccess+LocalPathLease"] = ["TryDelete", "TryRename"],
     };

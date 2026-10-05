@@ -95,7 +95,10 @@ public sealed class GuardianAlertPresenter
     /// stored rule, or null when nothing could be stored (so the caller never reports an Allow that did
     /// not happen).
     /// </summary>
-    public ResponseRule? Allow(AutostartEntry entry)
+    public ResponseRule? Allow(AutostartEntry entry) => Allow(entry, out _);
+
+    /// <summary>Allows with an explicit outcome and storage detail, including failed rollback.</summary>
+    public ResponseRule? Allow(AutostartEntry entry, out ResponseResult result)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var target = PersistenceActionResolver.Resolve(entry);
@@ -110,8 +113,11 @@ public sealed class GuardianAlertPresenter
             // unsupported vector still silences that exact program rather than nothing.
             ImagePath: target is null ? entry.ImagePath : null);
         var targetDescription = $"allow {entry.Vector}/{entry.Name}";
-        if (!Prepare(ResponseActionKind.AddRule, rule.Id, targetDescription))
+        var prepared = Prepare(ResponseActionKind.AddRule, rule.Id, targetDescription);
+        if (!prepared.Durable)
         {
+            result = RuleResult(rule.Id, ResponseActionKind.AddRule, ResponseOutcome.Failed, targetDescription,
+                "action was not attempted because its audit intent could not be written; " + prepared.Detail);
             return null;
         }
         var stored = _rules.Add(rule);
@@ -121,34 +127,61 @@ public sealed class GuardianAlertPresenter
             rule.Id,
             targetDescription,
             reversible: stored is not null);
-        if (completed || stored is null)
+        result = RuleResult(rule.Id, ResponseActionKind.AddRule,
+            stored is null ? ResponseOutcome.Failed : ResponseOutcome.Succeeded, targetDescription,
+            stored is null ? "rule storage unavailable; inspect winsight rules and RECOVERY.md" : null);
+        if (completed.Durable || stored is null)
         {
+            if (!completed.Durable)
+            {
+                result = result with { Detail = result.Detail + "; " + completed.Detail };
+            }
             return stored;
         }
         // A suppression whose completion cannot be audited must not silently remain active. Roll it
         // back when possible; if rollback itself fails, return the still-active rule truthfully and
         // leave the durable Prepared entry as evidence that completion is unknown.
-        return _rules.Remove(rule.Id) ? null : stored;
+        var rolledBack = _rules.Remove(rule.Id);
+        result = result with
+        {
+            Outcome = rolledBack ? ResponseOutcome.Failed : ResponseOutcome.PartiallyApplied,
+            Detail = "Allow completion could not be journalled; " + completed.Detail
+                + (rolledBack ? "; the new rule was rolled back" : "; rollback failed and the rule remains active"),
+        };
+        return rolledBack ? null : stored;
     }
 
     /// <summary>The persistence Allow rules currently in force, so no Allow is invisible.</summary>
     public IReadOnlyList<ResponseRule> AllowRules() => _rules.ActiveRules(RuleScopeKind.Persistence);
 
     /// <summary>Removes an Allow rule, so its item alerts again. Journalled as the undo of the Allow.</summary>
-    public ResponseOutcome Revoke(Guid ruleId)
+    public ResponseOutcome Revoke(Guid ruleId) => Revoke(ruleId, out _);
+
+    /// <summary>Revokes with the actual outcome and a precise audit-storage diagnostic.</summary>
+    public ResponseOutcome Revoke(Guid ruleId, out ResponseResult result)
     {
         var revokeId = Guid.NewGuid();
         var target = $"rule {ruleId}";
-        if (!Prepare(ResponseActionKind.RemoveRule, revokeId, target))
+        var prepared = Prepare(ResponseActionKind.RemoveRule, revokeId, target);
+        if (!prepared.Durable)
         {
+            result = RuleResult(revokeId, ResponseActionKind.RemoveRule, ResponseOutcome.Failed, target,
+                "action was not attempted because its audit intent could not be written; " + prepared.Detail);
             return ResponseOutcome.Failed;
         }
         var outcome = _rules.RemoveWithOutcome(ruleId);
         var completed = Journal(
             ResponseActionKind.RemoveRule, outcome, revokeId, target, reversible: false);
-        if (!completed)
+        result = RuleResult(revokeId, ResponseActionKind.RemoveRule, outcome, target,
+            outcome == ResponseOutcome.Failed ? "rule storage unavailable; inspect winsight rules and RECOVERY.md" : null);
+        if (!completed.Durable)
         {
-            return outcome == ResponseOutcome.Succeeded ? ResponseOutcome.PartiallyApplied : outcome;
+            result = result with
+            {
+                Outcome = outcome == ResponseOutcome.Succeeded ? ResponseOutcome.PartiallyApplied : outcome,
+                Detail = "Revoke completion could not be journalled; " + completed.Detail,
+            };
+            return result.Outcome;
         }
         if (outcome == ResponseOutcome.Succeeded)
         {
@@ -176,13 +209,17 @@ public sealed class GuardianAlertPresenter
     /// <summary>Puts a blocked entry back, if its origin is still free. Takes the block's action id.</summary>
     public ResponseResult Restore(Guid blockActionId) => _responder.Restore(blockActionId);
 
-    private bool Prepare(ResponseActionKind kind, Guid actionId, string target) =>
-        _journal.TryAppend(new ActionJournalEntry(
+    private ResponseResult RuleResult(Guid actionId, ResponseActionKind kind, ResponseOutcome outcome, string target, string? detail) =>
+        new(actionId, kind, outcome, target, _clock(), Reversible: kind == ResponseActionKind.AddRule
+            && outcome is ResponseOutcome.Succeeded or ResponseOutcome.PartiallyApplied, Detail: detail);
+
+    private ActionJournalWriteResult Prepare(ResponseActionKind kind, Guid actionId, string target) =>
+        _journal.TryAppendWithStatus(new ActionJournalEntry(
             actionId, kind, ResponseOutcome.AuditPrepared, target, _clock(),
             Reversible: false, Phase: ActionJournalPhase.Prepared));
 
-    private bool Journal(
+    private ActionJournalWriteResult Journal(
         ResponseActionKind kind, ResponseOutcome outcome, Guid actionId, string target, bool reversible) =>
-        _journal.TryAppend(new ActionJournalEntry(
+        _journal.TryAppendWithStatus(new ActionJournalEntry(
             actionId, kind, outcome, target, _clock(), reversible));
 }

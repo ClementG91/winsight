@@ -36,6 +36,8 @@ public sealed record ActionJournalEntry(
 public interface IActionJournal
 {
     bool TryAppend(ActionJournalEntry entry);
+    ActionJournalWriteResult TryAppendWithStatus(ActionJournalEntry entry) =>
+        new(TryAppend(entry) ? ActionJournalWriteStatus.Appended : ActionJournalWriteStatus.Unavailable);
     void MarkUndone(Guid actionId, Guid undoActionId);
     IReadOnlyList<ActionJournalEntry> Read(int max = 200);
 }
@@ -66,7 +68,7 @@ public sealed class ActionJournal : IActionJournal
         _lockWait = lockWait;
     }
 
-    /// <summary>One bounded, create-new recovery copy; never overwritten by automatic maintenance.</summary>
+    /// <summary>The first of four bounded recovery-evidence slots.</summary>
     public string RecoveryEvidencePath => _path + ".corrupt.jsonl";
 
     /// <summary>Where the action journal lives, beside WinSight's other per-user state.</summary>
@@ -104,7 +106,7 @@ public sealed class ActionJournal : IActionJournal
                 return new(ActionJournalWriteStatus.RecoveryRequired);
             }
             var damaged = snapshot.MalformedEntries > 0 || snapshot.LimitReached;
-            var rotate = damaged || snapshot.LinesScanned >= ActionJournalReader.MaxLines
+            var rotate = snapshot.LinesScanned >= ActionJournalReader.MaxLines
                 || snapshot.SourceBytes + bytes.Length + 1 > ActionJournalReader.MaxBytes;
             if (rotate)
             {
@@ -182,10 +184,7 @@ public sealed class ActionJournal : IActionJournal
         try
         {
             using var gate = JournalLock.Acquire(_path, _lockWait);
-            return ReadSnapshotLocked(max) with
-            {
-                EvidencePreserved = AutomaticFileAccess.FileExists(RecoveryEvidencePath),
-            };
+            return ActionJournalEvidence.Coverage(_path, ReadSnapshotLocked(max));
         }
         catch (Exception ex) when (IsUnavailable(ex))
         {
@@ -195,10 +194,10 @@ public sealed class ActionJournal : IActionJournal
 
     private ActionJournalSnapshot ReadSnapshotLocked(int max)
     {
-        using var lease = AutomaticFileAccess.TryAcquire(_path);
+        using var lease = AutomaticFileAccess.TryAcquire(_path, out var missing);
         if (lease is null)
         {
-            return new ActionJournalSnapshot([], Unreadable: !AutomaticFileAccess.IsLocal(_path));
+            return new ActionJournalSnapshot([], Unreadable: !missing);
         }
         if (lease.IsDirectory)
         {
@@ -223,7 +222,7 @@ public sealed class ActionJournal : IActionJournal
     {
         var key = Convert.ToHexString(SHA256.HashData(
             Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
-        return $@"Local\WinSight.ActionJournal.{key}";
+        return $@"Global\WinSight.ActionJournal.{key}";
     }
 
     private sealed class JournalLock : IDisposable

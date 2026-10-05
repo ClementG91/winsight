@@ -47,7 +47,16 @@ public partial class AlertWindow : Window
     // can act on rather than a claim: `winsight restore <id>` for a block, `winsight revoke <id>` for an
     // allow. A rule that could not be stored is a failure, never reported as allowed.
     private void AllowButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
-        _presenter.Allow(_entry) is { } rule ? Text.Format("AlertAllowed", rule.Id) : Text["AlertFailed"]);
+    {
+        var rule = _presenter.Allow(_entry, out var result);
+        var message = rule is not null && result.Outcome == ResponseOutcome.Succeeded
+            ? Text.Format("AlertAllowed", rule.Id)
+            : result.Outcome == ResponseOutcome.PartiallyApplied
+                ? Text.Format("AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty)
+                : Text["AlertFailed"];
+        return result.Outcome == ResponseOutcome.Failed && result.Detail is { Length: > 0 }
+            ? message + " " + UntrustedDisplayText.Neutralize(result.Detail) : message;
+    });
 
     private void BlockButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
     {
@@ -63,7 +72,8 @@ public partial class AlertWindow : Window
             Text.Format("AlertBlockReasserted", result.ActionId),
         ResponseOutcome.PartiallyApplied => Text.Format(
             "AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty),
-        _ => Text[MessageKeyFor(result.Outcome)],
+        _ => Text[MessageKeyFor(result.Outcome)] + (string.IsNullOrEmpty(result.Detail)
+            ? string.Empty : " " + UntrustedDisplayText.Neutralize(result.Detail)),
     };
 
     private void LaterButton_Click(object sender, RoutedEventArgs e) => Close();

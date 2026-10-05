@@ -153,7 +153,8 @@ public static partial class Adapters
             return usage;
         }
         var result = presenter.Restore(id);
-        Console.WriteLine($"{result.Outcome}: restore {UntrustedDisplayText.Neutralize(result.Target)}");
+        Console.WriteLine($"{result.Outcome}: restore {UntrustedDisplayText.Neutralize(result.Target)}"
+            + (result.Detail is { Length: > 0 } ? " — " + UntrustedDisplayText.Neutralize(result.Detail) : string.Empty));
         return ExitCodeFor(result.Outcome);
     }
 
@@ -167,8 +168,9 @@ public static partial class Adapters
         {
             return usage;
         }
-        var outcome = presenter.Revoke(id);
-        Console.WriteLine($"{outcome}: revoke rule {id}");
+        var outcome = presenter.Revoke(id, out var result);
+        Console.WriteLine($"{outcome}: revoke rule {id}"
+            + (result.Detail is { Length: > 0 } ? " — " + UntrustedDisplayText.Neutralize(result.Detail) : string.Empty));
         return ExitCodeFor(outcome);
     }
 

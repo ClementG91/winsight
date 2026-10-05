@@ -29,12 +29,13 @@ public static partial class Adapters
         var entries = snapshot.Entries;
         var b = new ToolReport.Builder("actions");
         var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached
-            || snapshot.EvidencePreserved;
+            || snapshot.EvidencePreserved || snapshot.EvidenceRecoveryPending || snapshot.EvidenceCountersUnknown
+            || snapshot.DiscardedEvidenceBytes > 0 || snapshot.DiscardedMetadataBytes > 0;
         if (incomplete)
         {
             b.Add(Severity.Notable, "Action journal coverage incomplete",
                 snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
-                    : "History contains malformed records, reached a read limit, or has preserved recovery evidence.",
+                    : "History contains malformed records, reached a read limit, or has recovery evidence; inspect recovery and loss accounting.",
                 new Dictionary<string, string?>
                 {
                     ["kind"] = "actionJournalCoverage",
@@ -42,6 +43,12 @@ public static partial class Adapters
                     ["malformedEntries"] = snapshot.MalformedEntries.ToString(CultureInfo.InvariantCulture),
                     ["limitReached"] = snapshot.LimitReached ? "true" : "false",
                     ["evidencePreserved"] = snapshot.EvidencePreserved ? "true" : "false",
+                    ["evidenceRecoveryPending"] = snapshot.EvidenceRecoveryPending ? "true" : "false",
+                    ["discardedEvidenceBytes"] = snapshot.DiscardedEvidenceBytes.ToString(CultureInfo.InvariantCulture),
+                    ["discardedEvidenceFiles"] = snapshot.DiscardedEvidenceFiles.ToString(CultureInfo.InvariantCulture),
+                    ["evidenceLossReason"] = snapshot.EvidenceLossReason,
+                    ["evidenceCountersUnknown"] = snapshot.EvidenceCountersUnknown ? "true" : "false",
+                    ["discardedMetadataBytes"] = snapshot.DiscardedMetadataBytes.ToString(CultureInfo.InvariantCulture),
                 });
         }
         foreach (var entry in entries)

@@ -18,6 +18,16 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
 {
     public bool Durable => Status is ActionJournalWriteStatus.Appended
         or ActionJournalWriteStatus.Rotated or ActionJournalWriteStatus.Updated;
+
+    public string Detail => $"audit storage status: {Status}; " + (Status switch
+    {
+        ActionJournalWriteStatus.Unavailable => "check free disk space, local-file access and sharing; retry when available",
+        ActionJournalWriteStatus.EvidencePreservationFailed => "recovery evidence could not be preserved; check disk space and access, then retry",
+        ActionJournalWriteStatus.RotationFailed => "atomic journal replacement failed; close conflicting file handles and retry",
+        ActionJournalWriteStatus.RecoveryRequired => "bounded history migration is required; inspect winsight actions and RECOVERY.md",
+        ActionJournalWriteStatus.InvalidRecord => "the audit record is invalid; inspect the action input",
+        _ => "inspect winsight actions for history coverage",
+    });
 }
 
 /// <summary>Bounded serialization and exact local-file storage shared by append and undo.</summary>
@@ -30,15 +40,9 @@ internal static class ActionJournalStorage
 
     internal static bool Preserve(string path, string evidencePath)
     {
-        using var lease = AutomaticFileAccess.TryAcquire(path);
-        if (lease is null || lease.IsDirectory || lease.Length > ActionJournalReader.MaxBytes)
-        {
-            return false;
-        }
-        using var stream = lease.OpenRead();
-        var bytes = new byte[(int)lease.Length];
-        stream.ReadExactly(bytes);
-        return lease.IsCurrent() && AutomaticFileAccess.TryCreateNewFile(evidencePath, bytes);
+        // The supplied path is retained for compatibility; all evidence now shares one bounded ring.
+        return string.Equals(evidencePath, path + ".corrupt.jsonl", StringComparison.OrdinalIgnoreCase)
+            && ActionJournalEvidence.Preserve(path);
     }
 
     internal static ActionJournalWriteResult Replace(string path,
@@ -71,7 +75,7 @@ internal static class ActionJournalStorage
         {
             output.Write(records[i]);
         }
-        return new(AtomicFile.TryWrite(path, output.GetBuffer().AsSpan(0, total))
+        return new(AutomaticFileAccess.TryWriteAtomicBounded(path, output.GetBuffer().AsSpan(0, total))
             ? success : ActionJournalWriteStatus.RotationFailed);
     }
 

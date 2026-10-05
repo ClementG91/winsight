@@ -309,16 +309,23 @@ public static partial class AutomaticFileAccess
     /// for missing, remote, device, reparse or inaccessible paths.
     /// </summary>
     public static LocalPathLease? TryAcquire(string? path)
+        => TryAcquire(path, out _);
+
+    /// <summary>Classifies absence from the same native acquisition, never from a second probe.</summary>
+    public static LocalPathLease? TryAcquire(string? path, out bool missing)
     {
+        missing = false;
         if (!TryNormalize(path, out var fullPath))
         {
             return null;
         }
-        return TryAcquireNormalized(
+        var lease = TryAcquireNormalized(
             fullPath,
             FileReadAttributes | Synchronize,
             (uint)FileShare.Read,
-            out _);
+            out var error);
+        missing = lease is null && error is ErrorFileNotFound or ErrorPathNotFound;
+        return lease;
     }
 
     /// <summary>
@@ -361,7 +368,12 @@ public static partial class AutomaticFileAccess
     /// Content validation and deletion can therefore operate on the same object handle.
     /// </summary>
     public static LocalPathLease? TryAcquireForDelete(string? path)
+        => TryAcquireForDelete(path, out _);
+
+    /// <summary>Acquires the exact delete target and distinguishes a genuinely absent entry.</summary>
+    public static LocalPathLease? TryAcquireForDelete(string? path, out bool missing)
     {
+        missing = false;
         if (!TryNormalize(path, out var fullPath))
         {
             return null;
@@ -370,7 +382,8 @@ public static partial class AutomaticFileAccess
             fullPath,
             GenericRead | DeleteAccess | Synchronize,
             (uint)FileShare.Read,
-            out _);
+            out var error);
+        missing = lease is null && error is ErrorFileNotFound or ErrorPathNotFound;
         if (lease is null || !lease.IsDirectory)
         {
             return lease;

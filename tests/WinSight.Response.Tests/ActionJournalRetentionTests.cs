@@ -20,10 +20,14 @@ public sealed class ActionJournalRetentionTests : IDisposable
         var original = "{ corrupt evidence\n" + string.Concat(Enumerable.Repeat(
             JsonSerializer.Serialize(Entry()) + "\n", 10_000));
         File.WriteAllText(PathName, original, new UTF8Encoding(false));
-        Assert.True(new ActionJournal(PathName).TryAppend(Entry()));
+        var newest = Entry();
+        var journal = new ActionJournal(PathName);
+        Assert.Equal(ActionJournalWriteStatus.Rotated, journal.TryAppendWithStatus(newest).Status);
         var archive = PathName + ".corrupt.jsonl";
-        Assert.True(File.ReadAllText(PathName).Contains("{ corrupt evidence", StringComparison.Ordinal)
-            || File.Exists(archive) && File.ReadAllText(archive) == original);
+        Assert.Equal(original, File.ReadAllText(archive));
+        Assert.InRange(File.ReadAllLines(PathName).Length, 1, 5000);
+        Assert.InRange(new FileInfo(PathName).Length, 1, 8 * 1024 * 1024);
+        Assert.Equal(newest.ActionId, journal.Read(1)[0].ActionId);
     }
 
     [Fact]
@@ -36,12 +40,12 @@ public sealed class ActionJournalRetentionTests : IDisposable
     }
 
     [Fact]
-    public void CorruptEvidenceCannotBeOverwrittenByASecondRecovery()
+    public void ASecondDamagedTailRemainsWritableWithoutOverwritingEarlierEvidence()
     {
         File.WriteAllText(PathName, "{ second corruption\n");
         File.WriteAllText(PathName + ".corrupt.jsonl", "original evidence");
-        Assert.False(new ActionJournal(PathName).TryAppend(Entry()));
-        Assert.Equal("{ second corruption\n", File.ReadAllText(PathName));
+        Assert.True(new ActionJournal(PathName).TryAppend(Entry()));
+        Assert.StartsWith("{ second corruption\n", File.ReadAllText(PathName), StringComparison.Ordinal);
         Assert.Equal("original evidence", File.ReadAllText(PathName + ".corrupt.jsonl"));
     }
 

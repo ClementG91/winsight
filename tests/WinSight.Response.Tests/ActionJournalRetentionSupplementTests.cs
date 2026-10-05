@@ -56,8 +56,8 @@ public sealed class ActionJournalRetentionSupplementTests : IDisposable
         var original = File.ReadAllBytes(PathName);
         Assert.True(journal.TryAppend(Entry()));
         Assert.Equal(3, journal.Read().Count);
-        Assert.Equal(original, File.ReadAllBytes(journal.RecoveryEvidencePath));
-        Assert.True(journal.ReadWithCoverage().EvidencePreserved);
+        Assert.Equal(original, File.ReadAllBytes(PathName).Take(original.Length));
+        Assert.Equal(1, journal.ReadWithCoverage().MalformedEntries);
     }
 
     [Fact]

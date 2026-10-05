@@ -20,7 +20,8 @@ public sealed class ActionJournalStorageTests : IDisposable
         Assert.Equal(rows.Skip(1).Select(e => JsonSerializer.Serialize(e)), File.ReadAllLines(path));
         Assert.True(ActionJournalStorage.Preserve(path, path + ".corrupt.jsonl"));
         Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(path + ".corrupt.jsonl"));
-        Assert.False(ActionJournalStorage.Preserve(path, path + ".corrupt.jsonl"));
+        Assert.True(ActionJournalStorage.Preserve(path, path + ".corrupt.jsonl"));
+        Assert.Equal(File.ReadAllBytes(path), File.ReadAllBytes(path + ".corrupt.jsonl"));
     }
 
     [Fact]
