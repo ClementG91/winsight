@@ -1,5 +1,7 @@
 using System.Reflection;
 
+using ModelContextProtocol.Server;
+
 using Xunit;
 
 namespace WinSight.Mcp.Tests;
@@ -57,23 +59,59 @@ public sealed class ResponseIsNotReachableFromMcpTests
     [Fact]
     public void NoMcpTypeExposesAResponseActionVerb()
     {
+        Assert.Empty(ResponseVerbs(typeof(WinSight.Mcp.McpScanService).Assembly.GetTypes()));
+    }
+
+    [Theory]
+    [InlineData("Resume")]
+    [InlineData("Allow")]
+    [InlineData("Revoke")]
+    [InlineData("ReadA")]
+    [InlineData("ReadB")]
+    [InlineData("ReadC")]
+    [InlineData("ReadD")]
+    public void TheResponseVerbGuardDetectsMethodNamesAndSdkToolAliases(string method)
+    {
+        Assert.Contains($"VerbCanaries.{method}", ResponseVerbs([typeof(VerbCanaries)]));
+    }
+
+    [Fact]
+    public void TheResponseVerbGuardAllowsAReadOnlyAlias()
+    {
+        Assert.DoesNotContain("VerbCanaries.ReadSafe", ResponseVerbs([typeof(VerbCanaries)]));
+    }
+
+    private sealed class VerbCanaries
+    {
+        [McpServerTool] public static void Resume() { }
+        [McpServerTool] public static void Allow() { }
+        [McpServerTool] public static void Revoke() { }
+        [McpServerTool(Name = "winsight_resume")] public static void ReadA() { }
+        [McpServerTool(Name = "winsight_allow")] public static void ReadB() { }
+        [McpServerTool(Name = "winsight_revoke")] public static void ReadC() { }
+        [McpServerTool(Name = "winsight_suspend")] public static void ReadD() { }
+        [McpServerTool(Name = "winsight_list")] public static void ReadSafe() { }
+    }
+
+    private static string[] ResponseVerbs(IEnumerable<Type> types)
+    {
         var forbidden = new[]
         {
             "Suspend", "Terminate", "Kill", "Quarantine", "Remove", "Disable", "Enable",
-            "AddRule", "Block", "Delete", "Restore", "Apply", "Mutate", "Write",
+            "AddRule", "Block", "Delete", "Restore", "Apply", "Mutate", "Write", "Resume", "Allow", "Revoke",
         };
 
-        var offenders = typeof(WinSight.Mcp.McpScanService).Assembly
-            .GetTypes()
+        return types
             .SelectMany(type => type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static))
             .Where(method => method.GetCustomAttributes()
                 .Any(attribute => attribute.GetType().Name.Contains("McpServerTool", StringComparison.Ordinal)))
             .Where(method => forbidden.Any(verb =>
-                method.Name.Contains(verb, StringComparison.OrdinalIgnoreCase)))
+                method.Name.Contains(verb, StringComparison.OrdinalIgnoreCase)
+                || method.GetCustomAttributes<McpServerToolAttribute>().Any(attribute =>
+                    attribute.Name?.Contains(verb, StringComparison.OrdinalIgnoreCase) == true)))
             .Select(method => $"{method.DeclaringType?.Name}.{method.Name}")
             .ToArray();
 
-        Assert.Empty(offenders);
     }
 
     /// <summary>
@@ -118,9 +156,27 @@ public sealed class ResponseIsNotReachableFromMcpTests
 
         Assert.Empty(graph.Unresolved);
         Assert.Contains("WinSight.Response.Win32ProcessController.TerminateProcess", reached);
+        Assert.Contains("WinSight.Response.ProcessResponder.Resume", reached);
+        Assert.Contains("WinSight.Response.Win32ProcessController.ResumeThreads", reached);
         Assert.Contains("WinSight.Response.RuleStore.RemoveWithOutcome", reached);
         Assert.Contains("WinSight.Response.ActionJournal.TryAppendWithStatus", reached);
         Assert.Contains("WinSight.Application.RegistryAndFilePersistenceMutator.RestoreIfFree", reached);
+    }
+
+    [Fact]
+    public void TheSameWalkFindsTheAllowAndRevokeMutatorsThePresenterOffers()
+    {
+        var presenter = WinSightAssemblies.Value.Single(a => a.GetName().Name == "WinSight.Application")
+            .GetType("WinSight.Application.GuardianAlertPresenter", throwOnError: true)!;
+        var roots = presenter.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .Where(method => method.Name is "Allow" or "Revoke").ToArray();
+        Assert.NotEmpty(roots);
+        var graph = new IlCallGraph(WinSightAssemblies.Value).Walk(roots);
+        Assert.Empty(graph.Unresolved);
+        var reached = graph.Reached.Where(IsMutator).Select(IlCallGraph.Describe).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("WinSight.Response.RuleStore.Add", reached);
+        Assert.Contains("WinSight.Response.RuleStore.RemoveWithOutcome", reached);
+        Assert.Contains("WinSight.Response.ActionJournal.TryAppendWithStatus", reached);
     }
 
     private static bool IsMutator(MethodBase method) =>

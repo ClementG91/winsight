@@ -2,11 +2,12 @@ using System.Diagnostics;
 using System.Text;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
 [Collection(QualificationPowerShellCollection.Name)]
-public sealed class QualificationLifecycleTests
+public sealed class QualificationLifecycleTests(ITestOutputHelper output)
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "scripts", "validation", "hyperv"));
@@ -70,7 +71,7 @@ public sealed class QualificationLifecycleTests
         }
     }
 
-    private static Task TrayRun(string assertions, bool failOperator)
+    private Task TrayRun(string assertions, bool failOperator)
     {
         return Run("guest/qualify.ps1", "Invoke-TrayExit", $$"""
             # The UIA types are loaded for enum constants only; RootElement is a synthetic empty tree.
@@ -93,7 +94,7 @@ public sealed class QualificationLifecycleTests
             """);
     }
 
-    private static async Task Run(string file, string function, string script)
+    private async Task Run(string file, string function, string script)
     {
         var start = new ProcessStartInfo
         {
@@ -106,27 +107,25 @@ public sealed class QualificationLifecycleTests
         start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
         start.Environment["WINSIGHT_LIFECYCLE_SOURCE"] = Path.Combine(Harness, file);
         start.Environment["WINSIGHT_LIFECYCLE_FUNCTION"] = function;
-        var command = """
+        var command = PowerShellProcessEvidence.Prelude + """
             $ErrorActionPreference = 'Stop'; $tokens = $null; $errors = $null
             $ast = [Management.Automation.Language.Parser]::ParseFile($env:WINSIGHT_LIFECYCLE_SOURCE, [ref]$tokens, [ref]$errors)
             if ($errors.Count) { throw 'Parse failed' }
+            Write-TestPhase 'parsed'
             $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $env:WINSIGHT_LIFECYCLE_FUNCTION }, $true)
             Invoke-Expression $definition.Extent.Text
             if ($env:WINSIGHT_LIFECYCLE_FUNCTION -eq 'Invoke-TrayExit') {
                 $shell = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-ShellTrayExit' }, $true)
                 if ($shell) { Invoke-Expression $shell.Extent.Text }
             }
-            """ + "\n" + script;
+            Write-TestPhase 'definitions-loaded'
+            Write-TestPhase 'body-begin'
+            """ + "\n" + script + PowerShellProcessEvidence.BodyEnd;
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) })
         {
             start.ArgumentList.Add(argument);
         }
-        using var process = Process.Start(start)!;
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 0, $"PowerShell assertion failed: {await stdout}\n{await stderr}");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
+        Assert.True(result.ExitCode == 0, $"PowerShell assertion failed: {result.Stdout}\n{result.Stderr}");
     }
 }

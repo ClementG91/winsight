@@ -2,11 +2,12 @@ using System.Diagnostics;
 using System.Text;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
 [Collection(QualificationPowerShellCollection.Name)]
-public sealed class NetworkQualificationLifecycleRegressionTests
+public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelper output)
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "scripts", "validation", "hyperv"));
@@ -408,7 +409,7 @@ public sealed class NetworkQualificationLifecycleRegressionTests
         $observationScript=$wait.Extent.Text+"`n"+$failureReturn.Extent.Text;
         """;
 
-    private static async Task Run(string script)
+    private async Task Run(string script)
     {
         var start = new ProcessStartInfo
         {
@@ -420,7 +421,7 @@ public sealed class NetworkQualificationLifecycleRegressionTests
         };
         start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
         start.Environment["WINSIGHT_LIFECYCLE_HARNESS"] = Harness;
-        var command = """
+        var command = PowerShellProcessEvidence.Prelude + """
             $ErrorActionPreference='Stop'
             $driver=Join-Path $env:WINSIGHT_LIFECYCLE_HARNESS 'Invoke-HyperVNetworkLogon.ps1'
             $errors=$null
@@ -428,20 +429,18 @@ public sealed class NetworkQualificationLifecycleRegressionTests
             if ($errors.Count) {throw 'Driver parse failed'}
             $moduleAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $env:WINSIGHT_LIFECYCLE_HARNESS 'WinSightHyperV.psm1'),[ref]$null,[ref]$errors)
             if ($errors.Count) {throw 'Module parse failed'}
+            Write-TestPhase 'parsed'
             $heartbeat=$moduleAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-WinSightDriverHeartbeat'},$true)
             if ($heartbeat) {Invoke-Expression $heartbeat.Extent.Text}
             foreach ($definition in $ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)) {Invoke-Expression $definition.Extent.Text}
-            """ + "\n" + script + "\nexit 0";
+            Write-TestPhase 'definitions-loaded'
+            Write-TestPhase 'body-begin'
+            """ + "\n" + script + "\nWrite-TestPhase 'body-end'\nexit 0";
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) })
         {
             start.ArgumentList.Add(argument);
         }
-        using var process = Process.Start(start)!;
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 0, $"PowerShell assertion failed: {await stdout}\n{await stderr}");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
+        Assert.True(result.ExitCode == 0, $"PowerShell assertion failed: {result.Stdout}\n{result.Stderr}");
     }
 }

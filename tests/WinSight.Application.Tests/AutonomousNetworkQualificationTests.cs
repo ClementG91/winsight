@@ -2,11 +2,12 @@ using System.Diagnostics;
 using System.Text;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
 [Collection(QualificationPowerShellCollection.Name)]
-public sealed class AutonomousNetworkQualificationTests
+public sealed class AutonomousNetworkQualificationTests(ITestOutputHelper output)
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", "validation", "hyperv"));
@@ -15,10 +16,12 @@ public sealed class AutonomousNetworkQualificationTests
         $tokens = $null; $errors = $null
         $ast = [Management.Automation.Language.Parser]::ParseFile((Join-Path $harness 'WinSightQualRunner.ps1'), [ref]$tokens, [ref]$errors)
         if ($errors.Count) { throw 'Runner parse failed' }
+        Write-TestPhase 'parsed'
         foreach ($name in 'Get-Field', 'Get-Arguments') {
             $function = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
             Invoke-Expression $function.Extent.Text
         }
+        Write-TestPhase 'definitions-loaded'
         """;
 
     [Fact]
@@ -141,14 +144,14 @@ public sealed class AutonomousNetworkQualificationTests
         Assert.Contains("Result: 7 checks, 0 failure(s).", control, StringComparison.Ordinal);
     }
 
-    private static async Task ModuleRun(string script)
+    private async Task ModuleRun(string script)
     {
         var module = Path.Combine(Harness, "guest", "NetworkProbeCredential.psm1");
         Assert.True(File.Exists(module), "Disposable credential helper is missing");
-        await Run("Import-Module (Join-Path $harness 'guest\\NetworkProbeCredential.psm1') -Force\n" + script);
+        await Run("Import-Module (Join-Path $harness 'guest\\NetworkProbeCredential.psm1') -Force\nWrite-TestPhase 'module-imported'\n" + script);
     }
 
-    private static async Task Run(string script)
+    private async Task Run(string script)
     {
         var start = new ProcessStartInfo
         {
@@ -162,17 +165,12 @@ public sealed class AutonomousNetworkQualificationTests
         start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
             "WindowsPowerShell", "v1.0", "Modules");
         start.Environment["WINSIGHT_TEST_HARNESS"] = Harness;
-        var command = "$ErrorActionPreference = 'Stop'; $harness = $env:WINSIGHT_TEST_HARNESS; " + script;
+        var command = PowerShellProcessEvidence.Prelude + "$ErrorActionPreference = 'Stop'; $harness = $env:WINSIGHT_TEST_HARNESS; Write-TestPhase 'body-begin'; " + script + PowerShellProcessEvidence.BodyEnd;
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) })
         {
             start.ArgumentList.Add(argument);
         }
-        using var process = Process.Start(start)!;
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 0, $"PowerShell assertion failed: {await output}\n{await error}");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
+        Assert.True(result.ExitCode == 0, $"PowerShell assertion failed: {result.Stdout}\n{result.Stderr}");
     }
 }

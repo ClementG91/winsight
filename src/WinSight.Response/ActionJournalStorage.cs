@@ -25,7 +25,7 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
         ActionJournalWriteStatus.EvidencePreservationFailed => "recovery evidence could not be preserved; check disk space and access, then retry",
         ActionJournalWriteStatus.RotationFailed => "atomic journal replacement failed; close conflicting file handles and retry",
         ActionJournalWriteStatus.RecoveryRequired => "bounded history migration is required; inspect winsight actions and RECOVERY.md",
-        ActionJournalWriteStatus.RetentionLimit => "the requested history annotation exceeds retention budgets; original and undo actions remain separately recorded",
+        ActionJournalWriteStatus.RetentionLimit => "the requested history annotation exceeds retention budgets; annotation refused and original journal unchanged; inspect available original and undo records",
         ActionJournalWriteStatus.InvalidRecord => "the audit record is invalid; inspect the action input",
         _ => "inspect winsight actions for history coverage",
     });

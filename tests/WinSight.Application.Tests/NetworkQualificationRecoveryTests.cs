@@ -2,11 +2,12 @@ using System.Diagnostics;
 using System.Text;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
 [Collection(QualificationPowerShellCollection.Name)]
-public sealed class NetworkQualificationRecoveryTests
+public sealed class NetworkQualificationRecoveryTests(ITestOutputHelper output)
 {
     private static readonly string Driver = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "scripts", "validation", "hyperv", "Invoke-HyperVNetworkLogon.ps1"));
@@ -85,7 +86,7 @@ public sealed class NetworkQualificationRecoveryTests
             """);
     }
 
-    private static async Task Run(string script)
+    private async Task Run(string script)
     {
         var start = new ProcessStartInfo
         {
@@ -98,25 +99,23 @@ public sealed class NetworkQualificationRecoveryTests
         };
         start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
         start.Environment["WINSIGHT_RECOVERY_DRIVER"] = Driver;
-        var command = """
+        var command = PowerShellProcessEvidence.Prelude + """
             $ErrorActionPreference = 'Stop'
             $tokens = $null; $errors = $null
             $ast = [Management.Automation.Language.Parser]::ParseFile($env:WINSIGHT_RECOVERY_DRIVER, [ref]$tokens, [ref]$errors)
             if ($errors.Count) { throw 'Driver parse failed' }
+            Write-TestPhase 'parsed'
             foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
                 Invoke-Expression $definition.Extent.Text
             }
-            """ + "\n" + script;
+            Write-TestPhase 'definitions-loaded'
+            Write-TestPhase 'body-begin'
+            """ + "\n" + script + PowerShellProcessEvidence.BodyEnd;
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) })
         {
             start.ArgumentList.Add(argument);
         }
-        using var process = Process.Start(start)!;
-        var stdout = process.StandardOutput.ReadToEndAsync();
-        var stderr = process.StandardError.ReadToEndAsync();
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        try { await process.WaitForExitAsync(timeout.Token); }
-        catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw; }
-        Assert.True(process.ExitCode == 0, $"PowerShell assertion failed: {await stdout}\n{await stderr}");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
+        Assert.True(result.ExitCode == 0, $"PowerShell assertion failed: {result.Stdout}\n{result.Stderr}");
     }
 }

@@ -122,6 +122,33 @@ public sealed class ActionJournalPhaseRetentionTests : IDisposable
     [Fact]
     public void UndoRefusesPublicationIfTheAnnotationWouldEvictItsOwnAction()
     {
+        var rows = SeedAtAnnotationBoundary();
+        var original = File.ReadAllBytes(PathName);
+        var result = new ActionJournal(PathName).TryMarkUndone(rows[0].ActionId, Guid.NewGuid());
+        Assert.False(result.Durable, "An evicted target cannot be reported as durably annotated.");
+        Assert.Equal("RetentionLimit", result.Status.ToString());
+        Assert.Equal(original, File.ReadAllBytes(PathName));
+        Assert.Equal(rows, Physical());
+    }
+
+    [Fact]
+    public void RetentionLimitDoesNotInventAnAbsentUndoAction()
+    {
+        var rows = SeedAtAnnotationBoundary();
+        var original = File.ReadAllBytes(PathName);
+        var undo = Guid.NewGuid();
+        var result = new ActionJournal(PathName).TryMarkUndone(rows[0].ActionId, undo);
+        Assert.Equal(ActionJournalWriteStatus.RetentionLimit, result.Status);
+        Assert.False(result.Durable);
+        Assert.Equal(original, File.ReadAllBytes(PathName));
+        Assert.Equal(rows, Physical());
+        Assert.DoesNotContain(Physical(), row => row.ActionId == undo || row.UndoneByActionId == undo);
+        Assert.DoesNotContain("remain separately recorded", result.Detail, StringComparison.Ordinal);
+        Assert.Contains("unchanged", result.Detail, StringComparison.Ordinal);
+    }
+
+    private ActionJournalEntry[] SeedAtAnnotationBoundary()
+    {
         var rows = Enumerable.Range(0, 4000).SelectMany(i =>
         {
             var id = Guid.NewGuid();
@@ -140,11 +167,6 @@ public sealed class ActionJournalPhaseRetentionTests : IDisposable
             foreach (var row in rows) { output.Write(ActionJournalStorage.Encode(row)!); }
         }
         Assert.Equal(ActionJournalReader.MaxBytes - 2, new FileInfo(PathName).Length);
-        var original = File.ReadAllBytes(PathName);
-        var result = new ActionJournal(PathName).TryMarkUndone(rows[0].ActionId, Guid.NewGuid());
-        Assert.False(result.Durable, "An evicted target cannot be reported as durably annotated.");
-        Assert.Equal("RetentionLimit", result.Status.ToString());
-        Assert.Equal(original, File.ReadAllBytes(PathName));
-        Assert.Equal(rows, Physical());
+        return rows;
     }
 }
