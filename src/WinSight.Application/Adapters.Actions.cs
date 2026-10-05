@@ -30,12 +30,21 @@ public static partial class Adapters
         var b = new ToolReport.Builder("actions");
         var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached
             || snapshot.EvidencePreserved || snapshot.EvidenceRecoveryPending || snapshot.EvidenceCountersUnknown
-            || snapshot.DiscardedEvidenceBytes > 0 || snapshot.DiscardedMetadataBytes > 0;
+            || snapshot.DiscardedEvidenceBytes > 0 || snapshot.DiscardedMetadataBytes > 0
+            || snapshot.DiscardedEvidenceFiles > 0 || snapshot.DiscardedJournalPrefixBytes > 0 || snapshot.RecoveryRequired;
         if (incomplete)
         {
-            b.Add(Severity.Notable, "Action journal coverage incomplete",
+            var accounting = $" Discarded journal-prefix bytes: {snapshot.DiscardedJournalPrefixBytes}; "
+                + $"evidence bytes/files: {snapshot.DiscardedEvidenceBytes}/{snapshot.DiscardedEvidenceFiles}; "
+                + $"metadata bytes: {snapshot.DiscardedMetadataBytes}; reason: {snapshot.EvidenceLossReason}; "
+                + $"pending prefix bytes: {snapshot.PendingPrefixDiscardBytes}; "
+                + $"unverified prefix/evidence bytes: {snapshot.UnverifiedPrefixDiscardBytes}/{snapshot.UnverifiedEvidenceBytes}; "
+                + $"prior accounting: {(snapshot.EvidenceCountersUnknown ? "unknown" : "known")}.";
+            b.Add(Severity.Notable, snapshot.RecoveryRequired ? "Action journal recovery required" : "Action journal coverage incomplete",
                 snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
-                    : "History contains malformed records, reached a read limit, or has recovery evidence; inspect recovery and loss accounting.",
+                    : (snapshot.RecoveryRequired
+                        ? "History exceeds 16 MiB; the next response write requires automatic bounded migration."
+                        : "History contains malformed records, reached a read limit, or has recovery evidence.") + accounting,
                 new Dictionary<string, string?>
                 {
                     ["kind"] = "actionJournalCoverage",
@@ -49,6 +58,12 @@ public static partial class Adapters
                     ["evidenceLossReason"] = snapshot.EvidenceLossReason,
                     ["evidenceCountersUnknown"] = snapshot.EvidenceCountersUnknown ? "true" : "false",
                     ["discardedMetadataBytes"] = snapshot.DiscardedMetadataBytes.ToString(CultureInfo.InvariantCulture),
+                    ["discardedMetadataTailSha256"] = snapshot.DiscardedMetadataTailSha256,
+                    ["discardedJournalPrefixBytes"] = snapshot.DiscardedJournalPrefixBytes.ToString(CultureInfo.InvariantCulture),
+                    ["pendingPrefixDiscardBytes"] = snapshot.PendingPrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["unverifiedPrefixDiscardBytes"] = snapshot.UnverifiedPrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["unverifiedEvidenceBytes"] = snapshot.UnverifiedEvidenceBytes.ToString(CultureInfo.InvariantCulture),
+                    ["recoveryRequired"] = snapshot.RecoveryRequired ? "true" : "false",
                 });
         }
         foreach (var entry in entries)
@@ -74,6 +89,7 @@ public static partial class Adapters
                 });
         }
         return b.Build(snapshot.Unreadable ? "response action history unavailable"
+            : snapshot.RecoveryRequired ? $"{entries.Count} recorded response action(s); recovery required"
             : incomplete ? $"{entries.Count} recorded response action(s); history incomplete"
             : entries.Count == 0
             ? "no response actions recorded"

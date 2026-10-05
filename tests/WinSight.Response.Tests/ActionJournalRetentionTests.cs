@@ -31,12 +31,18 @@ public sealed class ActionJournalRetentionTests : IDisposable
     }
 
     [Fact]
-    public void AnOversizedExistingFileIsNotGrownOrDestroyed()
+    public void AnOversizedExistingFilePreservesItsBoundedTailAndReportsPrefixDiscard()
     {
         File.WriteAllText(PathName, new string('x', 20 * 1024 * 1024));
         var length = new FileInfo(PathName).Length;
-        Assert.False(new ActionJournal(PathName).TryAppend(Entry()));
-        Assert.Equal(length, new FileInfo(PathName).Length);
+        var journal = new ActionJournal(PathName);
+        Assert.True(journal.TryAppend(Entry()));
+        Assert.InRange(new FileInfo(PathName).Length, 1, 8 * 1024 * 1024);
+        Assert.Equal(16 * 1024 * 1024, new FileInfo(journal.RecoveryEvidencePath).Length);
+        Assert.All(File.ReadAllBytes(journal.RecoveryEvidencePath), b => Assert.Equal((byte)'x', b));
+        var discarded = typeof(ActionJournalSnapshot).GetProperty("DiscardedJournalPrefixBytes");
+        Assert.NotNull(discarded);
+        Assert.Equal(length - 16 * 1024 * 1024, Convert.ToInt64(discarded.GetValue(journal.ReadWithCoverage())));
     }
 
     [Fact]

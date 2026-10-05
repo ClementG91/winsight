@@ -237,23 +237,24 @@ public sealed class ActionJournalRecoveryRegressionTests : IDisposable
             }
             return;
         }
-        var children = Enumerable.Range(0, 2).Select(_ =>
-        {
-            var start = new ProcessStartInfo("dotnet")
-            {
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-            };
-            start.ArgumentList.Add("vstest");
-            start.ArgumentList.Add(typeof(ActionJournalRecoveryRegressionTests).Assembly.Location);
-            start.ArgumentList.Add("/TestCaseFilter:FullyQualifiedName=WinSight.Response.Tests.ActionJournalRecoveryRegressionTests.TwoSeparateWriterProcessesPreserveEveryDurableRecord");
-            start.Environment[pathVariable] = PathName;
-            return Process.Start(start)!;
-        }).ToArray();
+        var children = new List<Process>();
         try
         {
+            for (var i = 0; i < 2; i++)
+            {
+                var start = new ProcessStartInfo("dotnet")
+                {
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                start.ArgumentList.Add("vstest");
+                start.ArgumentList.Add(typeof(ActionJournalRecoveryRegressionTests).Assembly.Location);
+                start.ArgumentList.Add("/TestCaseFilter:FullyQualifiedName=WinSight.Response.Tests.ActionJournalRecoveryRegressionTests.TwoSeparateWriterProcessesPreserveEveryDurableRecord");
+                start.Environment[pathVariable] = PathName;
+                children.Add(Process.Start(start)!);
+            }
             var outputs = children.Select(async child =>
             {
                 var stdout = child.StandardOutput.ReadToEndAsync();

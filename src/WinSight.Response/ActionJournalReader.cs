@@ -18,7 +18,13 @@ public sealed record ActionJournalSnapshot(
     string EvidenceLossReason = "",
     bool EvidenceCountersUnknown = false,
     bool EvidenceRecoveryPending = false,
-    long DiscardedMetadataBytes = 0);
+    long DiscardedMetadataBytes = 0,
+    string? DiscardedMetadataTailSha256 = null,
+    long DiscardedJournalPrefixBytes = 0,
+    long PendingPrefixDiscardBytes = 0,
+    long UnverifiedPrefixDiscardBytes = 0,
+    long UnverifiedEvidenceBytes = 0,
+    bool RecoveryRequired = false);
 
 /// <summary>Reads JSONL backwards with fixed buffers, including corrupt bytes in every budget.</summary>
 internal static class ActionJournalReader

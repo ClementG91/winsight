@@ -6,7 +6,7 @@ using WinSight.Core;
 namespace WinSight.Response;
 
 /// <summary>Four exact bounded archives and a resumable, bounded write-ahead eviction index.</summary>
-internal static class ActionJournalEvidence
+internal static partial class ActionJournalEvidence
 {
     internal const int Slots = 4;
     internal const int MaxMetadataBytes = 8192;
@@ -22,15 +22,30 @@ internal static class ActionJournalEvidence
         int PendingSlot = -1,
         long PendingBytes = 0,
         string? PendingSha256 = null,
-        long DiscardedMetadataBytes = 0);
+        long DiscardedMetadataBytes = 0,
+        string? DiscardedMetadataTailSha256 = null,
+        long DiscardedJournalPrefixBytes = 0,
+        long UnverifiedPrefixDiscardBytes = 0,
+        long UnverifiedEvidenceBytes = 0,
+        int PendingTrimSlot = -2,
+        long PendingTrimBytes = 0,
+        long PendingTrimLength = 0,
+        uint PendingTrimVolume = 0,
+        ulong PendingTrimFileIndex = 0,
+        string? PendingTrimTailSha256 = null,
+        string? PendingTrimPublishedSha256 = null);
 
     internal static string SlotPath(string path, int slot) => slot == 0
         ? path + ".corrupt.jsonl" : path + $".corrupt.{slot}.jsonl";
 
     internal static bool Preserve(string path)
     {
+        if (!Maintain(path))
+        {
+            return false;
+        }
         using var source = AutomaticFileAccess.TryAcquire(path);
-        if (source is null || source.IsDirectory || source.Length > ActionJournalReader.MaxBytes)
+        if (source is null || source.IsDirectory)
         {
             return false;
         }
@@ -40,6 +55,7 @@ internal static class ActionJournalEvidence
             return false;
         }
         using var input = source.OpenRead();
+        input.Position = Math.Max(0, input.Length - ActionJournalReader.MaxBytes);
         var digest = Convert.ToHexString(SHA256.HashData(input));
         var free = -1;
         for (var i = 0; i < Slots; i++)
@@ -56,7 +72,7 @@ internal static class ActionJournalEvidence
                     free = i;
                 }
             }
-            else if (!existing.IsDirectory && existing.Length == source.Length)
+            else if (!existing.IsDirectory && existing.Length == Math.Min(source.Length, ActionJournalReader.MaxBytes))
             {
                 using var evidence = existing.OpenRead();
                 if (Convert.ToHexString(SHA256.HashData(evidence)) == digest
@@ -141,6 +157,8 @@ internal static class ActionJournalEvidence
         // the next writer confirms native not-found and applies these increments exactly once.
         state = state with
         {
+            PriorCountersUnknown = state.PriorCountersUnknown
+                || WouldOverflow(state.DiscardedBytes, state.PendingBytes) || WouldOverflow(state.DiscardedFiles, 1),
             DiscardedBytes = SaturatingAdd(state.DiscardedBytes, state.PendingBytes),
             DiscardedFiles = SaturatingAdd(state.DiscardedFiles, 1),
             LossReason = "evidence-budget",
@@ -162,8 +180,14 @@ internal static class ActionJournalEvidence
             DiscardedEvidenceFiles = state.DiscardedFiles,
             EvidenceLossReason = state.LossReason,
             EvidenceCountersUnknown = state.PriorCountersUnknown || unavailable || invalid,
-            EvidenceRecoveryPending = state.PendingSlot >= 0 || unavailable || invalid,
             DiscardedMetadataBytes = state.DiscardedMetadataBytes,
+            DiscardedMetadataTailSha256 = state.DiscardedMetadataTailSha256,
+            DiscardedJournalPrefixBytes = state.DiscardedJournalPrefixBytes,
+            UnverifiedPrefixDiscardBytes = state.UnverifiedPrefixDiscardBytes,
+            UnverifiedEvidenceBytes = state.UnverifiedEvidenceBytes,
+            PendingPrefixDiscardBytes = state.PendingTrimSlot == -1 ? state.PendingTrimBytes : 0,
+            RecoveryRequired = snapshot.SourceBytes > ActionJournalReader.MaxBytes,
+            EvidenceRecoveryPending = state.PendingSlot >= 0 || state.PendingTrimSlot >= -1 || unavailable || invalid,
         };
     }
 
@@ -197,7 +221,8 @@ internal static class ActionJournalEvidence
                     && state.DiscardedMetadataBytes >= 0 && state.NextSlot is >= 0 and < Slots
                     && state.PendingSlot is >= -1 and < Slots && state.PendingBytes >= 0
                     && state.PendingBytes <= ActionJournalReader.MaxBytes && state.LossReason is { Length: <= 128 }
-                    && (state.PendingSlot < 0 || state.PendingSha256 is { Length: 64 }) && lease.IsCurrent())
+                    && (state.PendingSlot < 0 || IsHash(state.PendingSha256))
+                    && TrimStateValid(value, state) && lease.IsCurrent())
                 {
                     return state;
                 }
@@ -209,8 +234,11 @@ internal static class ActionJournalEvidence
             // durable writer. The unknown-prior-counters flag survives every later update.
         }
         invalid = true;
+        using var tail = lease.OpenRead();
+        tail.Position = Math.Max(0, tail.Length - MaxMetadataBytes);
         return new State(LossReason: "invalid-evidence-metadata", PriorCountersUnknown: true,
-            DiscardedMetadataBytes: lease.Length);
+            DiscardedMetadataBytes: lease.Length,
+            DiscardedMetadataTailSha256: Convert.ToHexString(SHA256.HashData(tail)));
     }
 
     private static bool Save(string path, State state)
@@ -221,4 +249,6 @@ internal static class ActionJournalEvidence
     }
 
     private static long SaturatingAdd(long left, long right) => long.MaxValue - left < right ? long.MaxValue : left + right;
+    private static bool WouldOverflow(long left, long right) => long.MaxValue - left < right;
+    private static bool IsHash(string? hash) => hash is { Length: 64 } && hash.All(char.IsAsciiHexDigit);
 }

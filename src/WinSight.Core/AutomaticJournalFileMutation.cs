@@ -34,10 +34,10 @@ public static partial class AutomaticFileAccess
     /// staging before publishing create-new evidence; keeps source intact if any step fails.
     /// Requires the same journal mutex as <see cref="TryWriteAtomicBounded"/>.
     /// </summary>
-    public static bool TryCopyTailAtomic(string sourcePath, string destinationPath, int maxBytes)
+    public static bool TryCopyTailAtomic(string sourcePath, string destinationPath, int maxBytes, bool replaceExisting = false)
     {
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(maxBytes, 0);
-        using var source = TryAcquire(sourcePath);
+        using var source = replaceExisting ? TryAcquireReplaceableRead(sourcePath) : TryAcquire(sourcePath);
         if (source is null || source.IsDirectory
             || !TryPrepareTarget(destinationPath, true, out var fullPath, out var leaf, out var parent))
         {
@@ -66,7 +66,7 @@ public static partial class AutomaticFileAccess
                     input.CopyTo(output, 80 * 1024);
                     output.Flush(flushToDisk: true);
                 }
-                if (source.IsCurrent() && TryRenameRelative(temp, parent, leaf, replaceExisting: false))
+                if (source.IsCurrent() && TryRenameRelative(temp, parent, leaf, replaceExisting))
                 {
                     return true;
                 }

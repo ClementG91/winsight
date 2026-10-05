@@ -75,8 +75,19 @@ internal static class ActionJournalStorage
         {
             output.Write(records[i]);
         }
-        return new(AutomaticFileAccess.TryWriteAtomicBounded(path, output.GetBuffer().AsSpan(0, total))
-            ? success : ActionJournalWriteStatus.RotationFailed);
+        var payload = output.GetBuffer().AsSpan(0, total);
+        if (!ActionJournalEvidence.PrepareTrim(path, -1, Convert.ToHexString(SHA256.HashData(payload))))
+        {
+            return new(ActionJournalWriteStatus.EvidencePreservationFailed);
+        }
+        if (!AutomaticFileAccess.TryWriteAtomicBounded(path, payload))
+        {
+            return new(ActionJournalWriteStatus.RotationFailed);
+        }
+        // Publication is durable even if a transient index failure leaves finalization pending.
+        // The durable intent remains visible and the next writer resumes it before another action.
+        _ = ActionJournalEvidence.Maintain(path);
+        return new(success);
     }
 
     internal static byte[]? Encode(ActionJournalEntry entry)

@@ -96,16 +96,17 @@ public sealed class ActionJournal : IActionJournal
         try
         {
             using var gate = JournalLock.Acquire(_path, _lockWait);
+            if (!ActionJournalEvidence.Maintain(_path))
+            {
+                return new(ActionJournalWriteStatus.EvidencePreservationFailed);
+            }
             var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines);
             if (snapshot.Unreadable)
             {
                 return new(ActionJournalWriteStatus.Unavailable);
             }
-            if (snapshot.SourceBytes > ActionJournalReader.MaxBytes)
-            {
-                return new(ActionJournalWriteStatus.RecoveryRequired);
-            }
-            var damaged = snapshot.MalformedEntries > 0 || snapshot.LimitReached;
+            var damaged = snapshot.MalformedEntries > 0 || snapshot.LimitReached
+                || snapshot.SourceBytes > ActionJournalReader.MaxBytes;
             var rotate = snapshot.LinesScanned >= ActionJournalReader.MaxLines
                 || snapshot.SourceBytes + bytes.Length + 1 > ActionJournalReader.MaxBytes;
             if (rotate)
@@ -145,14 +146,14 @@ public sealed class ActionJournal : IActionJournal
         try
         {
             using var gate = JournalLock.Acquire(_path, _lockWait);
+            if (!ActionJournalEvidence.Maintain(_path))
+            {
+                return new(ActionJournalWriteStatus.EvidencePreservationFailed);
+            }
             var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines);
             if (snapshot.Unreadable)
             {
                 return new(ActionJournalWriteStatus.Unavailable);
-            }
-            if (snapshot.SourceBytes > ActionJournalReader.MaxBytes)
-            {
-                return new(ActionJournalWriteStatus.RecoveryRequired);
             }
             var entries = snapshot.Entries.ToList();
             var index = entries.FindIndex(e =>
@@ -161,7 +162,8 @@ public sealed class ActionJournal : IActionJournal
             {
                 return new(ActionJournalWriteStatus.TargetNotFound);
             }
-            if ((snapshot.MalformedEntries > 0 || snapshot.LimitReached) && !PreserveEvidenceLocked())
+            if ((snapshot.MalformedEntries > 0 || snapshot.LimitReached
+                    || snapshot.SourceBytes > ActionJournalReader.MaxBytes) && !PreserveEvidenceLocked())
             {
                 return new(ActionJournalWriteStatus.EvidencePreservationFailed);
             }

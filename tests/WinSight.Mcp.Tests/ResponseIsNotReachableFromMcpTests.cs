@@ -30,7 +30,7 @@ public sealed class ResponseIsNotReachableFromMcpTests
         ["WinSight.Response.ActionJournal"] = ["TryAppend", "TryAppendWithStatus", "MarkUndone", "TryMarkUndone"],
         ["WinSight.Response.ActionJournalStorage"] = ["Preserve", "Replace"],
         ["WinSight.Response.IActionJournal"] = ["TryAppend", "TryAppendWithStatus", "MarkUndone"],
-        ["WinSight.Response.ActionJournalEvidence"] = ["Preserve", "ResumeEviction", "Save"],
+        ["WinSight.Response.ActionJournalEvidence"] = ["Preserve", "ResumeEviction", "Save", "Maintain", "PrepareTrim", "ResumeTrim"],
         ["WinSight.Core.AutomaticFileAccess"] = ["TryWriteAtomicBounded", "TryCopyTailAtomic"],
         ["WinSight.Response.Quarantine"] = ["Store", "Remove"],
         ["WinSight.Application.PersistenceResponder"] = ["Block", "Restore"],
