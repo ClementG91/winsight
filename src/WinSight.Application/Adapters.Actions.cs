@@ -38,12 +38,18 @@ public static partial class Adapters
                 + $"evidence bytes/files: {snapshot.DiscardedEvidenceBytes}/{snapshot.DiscardedEvidenceFiles}; "
                 + $"metadata bytes: {snapshot.DiscardedMetadataBytes}; reason: {snapshot.EvidenceLossReason}; "
                 + $"pending prefix bytes: {snapshot.PendingPrefixDiscardBytes}; "
+                + $"pending evidence prefix bytes: {snapshot.PendingEvidencePrefixDiscardBytes}; "
+                + $"recovery pending: {(snapshot.EvidenceRecoveryPending ? "true" : "false")}; "
                 + $"unverified prefix/evidence bytes: {snapshot.UnverifiedPrefixDiscardBytes}/{snapshot.UnverifiedEvidenceBytes}; "
                 + $"prior accounting: {(snapshot.EvidenceCountersUnknown ? "unknown" : "known")}.";
             b.Add(Severity.Notable, snapshot.RecoveryRequired ? "Action journal recovery required" : "Action journal coverage incomplete",
                 snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
                     : (snapshot.RecoveryRequired
-                        ? "History exceeds 16 MiB; the next response write requires automatic bounded migration."
+                        ? snapshot.EvidenceUnavailable
+                            ? "Recovery evidence or metadata is unavailable; check local-file access and disk space, then retry."
+                            : snapshot.EvidenceOverBudget
+                                ? "Recovery evidence exceeds 16 MiB; the next response write requires automatic bounded migration."
+                                : "History exceeds 16 MiB; the next response write requires automatic bounded migration."
                         : "History contains malformed records, reached a read limit, or has recovery evidence.") + accounting,
                 new Dictionary<string, string?>
                 {
@@ -61,6 +67,9 @@ public static partial class Adapters
                     ["discardedMetadataTailSha256"] = snapshot.DiscardedMetadataTailSha256,
                     ["discardedJournalPrefixBytes"] = snapshot.DiscardedJournalPrefixBytes.ToString(CultureInfo.InvariantCulture),
                     ["pendingPrefixDiscardBytes"] = snapshot.PendingPrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["pendingEvidencePrefixDiscardBytes"] = snapshot.PendingEvidencePrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["evidenceUnavailable"] = snapshot.EvidenceUnavailable ? "true" : "false",
+                    ["evidenceOverBudget"] = snapshot.EvidenceOverBudget ? "true" : "false",
                     ["unverifiedPrefixDiscardBytes"] = snapshot.UnverifiedPrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
                     ["unverifiedEvidenceBytes"] = snapshot.UnverifiedEvidenceBytes.ToString(CultureInfo.InvariantCulture),
                     ["recoveryRequired"] = snapshot.RecoveryRequired ? "true" : "false",

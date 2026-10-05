@@ -126,13 +126,19 @@ internal static partial class ActionJournalEvidence
             }
             else
             {
-                if (victim.IsDirectory || victim.Length > ActionJournalReader.MaxBytes)
+                if (victim.IsDirectory)
                 {
                     return false;
                 }
-                using var input = victim.OpenRead();
-                var hash = Convert.ToHexString(SHA256.HashData(input));
-                if (victim.Length != state.PendingBytes || hash != state.PendingSha256)
+                // A different length already disproves identity with the approved bytes. In
+                // particular, do not hash an unbounded external replacement or prevent its trim.
+                var matches = victim.Length == state.PendingBytes;
+                if (matches)
+                {
+                    using var input = victim.OpenRead();
+                    matches = Convert.ToHexString(SHA256.HashData(input)) == state.PendingSha256;
+                }
+                if (!matches)
                 {
                     // An external replacement is not the object approved for eviction. Leave it
                     // intact and persist that the historical accounting can no longer be complete.
@@ -146,7 +152,6 @@ internal static partial class ActionJournalEvidence
                     };
                     return Save(path, state);
                 }
-                input.Dispose();
                 if (!victim.TryDelete())
                 {
                     return false;
@@ -173,21 +178,52 @@ internal static partial class ActionJournalEvidence
     internal static ActionJournalSnapshot Coverage(string path, ActionJournalSnapshot snapshot)
     {
         var state = ReadState(path, out var unavailable, out var invalid);
+        var preserved = false;
+        var evidenceUnavailable = unavailable;
+        var evidenceOverBudget = false;
+        for (var slot = 0; slot < Slots; slot++)
+        {
+            using var archive = AutomaticFileAccess.TryAcquire(SlotPath(path, slot), out var missing);
+            if (archive is null)
+            {
+                evidenceUnavailable |= !missing;
+                continue;
+            }
+            preserved |= !archive.IsDirectory;
+            evidenceOverBudget |= archive.Length > ActionJournalReader.MaxBytes;
+            if (archive.IsDirectory)
+            {
+                evidenceUnavailable = true;
+                continue;
+            }
+            try
+            {
+                using var input = archive.OpenRead();
+                evidenceUnavailable |= !archive.IsCurrent();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                evidenceUnavailable = true;
+            }
+        }
         return snapshot with
         {
-            EvidencePreserved = Enumerable.Range(0, Slots).Any(i => AutomaticFileAccess.FileExists(SlotPath(path, i))),
+            EvidencePreserved = preserved,
             DiscardedEvidenceBytes = state.DiscardedBytes,
             DiscardedEvidenceFiles = state.DiscardedFiles,
             EvidenceLossReason = state.LossReason,
-            EvidenceCountersUnknown = state.PriorCountersUnknown || unavailable || invalid,
+            EvidenceCountersUnknown = state.PriorCountersUnknown || evidenceUnavailable || invalid,
             DiscardedMetadataBytes = state.DiscardedMetadataBytes,
             DiscardedMetadataTailSha256 = state.DiscardedMetadataTailSha256,
             DiscardedJournalPrefixBytes = state.DiscardedJournalPrefixBytes,
             UnverifiedPrefixDiscardBytes = state.UnverifiedPrefixDiscardBytes,
             UnverifiedEvidenceBytes = state.UnverifiedEvidenceBytes,
             PendingPrefixDiscardBytes = state.PendingTrimSlot == -1 ? state.PendingTrimBytes : 0,
-            RecoveryRequired = snapshot.SourceBytes > ActionJournalReader.MaxBytes,
-            EvidenceRecoveryPending = state.PendingSlot >= 0 || state.PendingTrimSlot >= -1 || unavailable || invalid,
+            PendingEvidencePrefixDiscardBytes = state.PendingTrimSlot >= 0 ? state.PendingTrimBytes : 0,
+            EvidenceUnavailable = evidenceUnavailable,
+            EvidenceOverBudget = evidenceOverBudget,
+            RecoveryRequired = snapshot.SourceBytes > ActionJournalReader.MaxBytes || evidenceOverBudget || evidenceUnavailable,
+            EvidenceRecoveryPending = state.PendingSlot >= 0 || state.PendingTrimSlot >= -1 || evidenceUnavailable || invalid,
         };
     }
 

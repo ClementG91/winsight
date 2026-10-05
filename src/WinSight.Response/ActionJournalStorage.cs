@@ -86,7 +86,15 @@ internal static class ActionJournalStorage
         }
         // Publication is durable even if a transient index failure leaves finalization pending.
         // The durable intent remains visible and the next writer resumes it before another action.
-        _ = ActionJournalEvidence.Maintain(path);
+        try
+        {
+            _ = ActionJournalEvidence.Maintain(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // A durable record cannot become an audit refusal because later accounting could not
+            // be read. Pending remains durable and resumes when its transient storage cause clears.
+        }
         return new(success);
     }
 
