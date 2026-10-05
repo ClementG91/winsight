@@ -117,8 +117,19 @@ public static partial class Adapters
 
     internal static ToolReport Rules(GuardianAlertPresenter presenter)
     {
-        var rules = presenter.AllowRules();
+        var rules = presenter.AllowRules(out var storage);
         var builder = new ToolReport.Builder("rules");
+        if (!storage.Readable || storage.IgnoredEntries > 0)
+        {
+            builder.Add(Severity.Notable, "Rule store coverage incomplete", storage.Detail,
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "ruleStoreCoverage",
+                    ["storageStatus"] = storage.Status.ToString(),
+                    ["ignoredEntries"] = storage.IgnoredEntries.ToString(CultureInfo.InvariantCulture),
+                    ["readable"] = storage.Readable ? "true" : "false",
+                });
+        }
         foreach (var rule in rules)
         {
             builder.Add(Severity.Info,
@@ -137,7 +148,9 @@ public static partial class Adapters
                     ["created"] = rule.CreatedUtc.ToString("O", CultureInfo.InvariantCulture),
                 });
         }
-        return builder.Build(rules.Count == 0
+        return builder.Build(!storage.Readable ? "allow rule storage unavailable; inspect the storage diagnostic"
+            : storage.IgnoredEntries > 0 ? $"{rules.Count} allow rule(s) in force; {storage.IgnoredEntries} invalid entry/entries ignored"
+            : rules.Count == 0
             ? "no allow rules in force"
             : $"{rules.Count} allow rule(s) in force; `winsight revoke <id> --confirm` removes one");
     }

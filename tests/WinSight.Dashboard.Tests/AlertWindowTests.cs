@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text.Json;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls.Primitives;
@@ -86,9 +87,35 @@ public sealed class AlertWindowTests
 
         window.AllowButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
-        Assert.Equal(LocalizationManager.Instance["AlertFailed"], window.StatusText.Text);
+        Assert.StartsWith(LocalizationManager.Instance["AlertFailed"], window.StatusText.Text, StringComparison.Ordinal);
+        Assert.Contains("rule storage status: Unavailable", window.StatusText.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("winsight revoke", window.StatusText.Text, StringComparison.Ordinal);
+        Assert.Empty(presenter.AllowRules());
         window.Close();
+    });
+
+    [Fact]
+    public void ASuccessfulAllowReportsTheInvalidEntriesRemovedByItsWrite() => RunSta(state =>
+    {
+        var path = Path.Combine(state.Root, "cleanup-rules.json");
+        var valid = new ResponseRule(Guid.NewGuid(), RuleScopeKind.Persistence, RuleDecision.Allow,
+            RuleDuration.Permanent, DateTimeOffset.UtcNow, Item: "existing");
+        File.WriteAllText(path, JsonSerializer.Serialize(new { Version = 1, Rules = new ResponseRule?[] { valid, null } }));
+        var presenter = new GuardianAlertPresenter(new FakeMutator(), rules: new RuleStore(path), journal: state.Journal);
+        var window = new AlertWindow(RunEntry(), presenter);
+        try
+        {
+            window.AllowButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Equal(2, presenter.AllowRules().Count);
+            var id = Assert.Single(presenter.AllowRules(), rule => rule.Id != valid.Id).Id;
+            Assert.Contains($"winsight revoke {id}", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.Contains("ignored entries: 1", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.Contains("removed by this successful write", window.StatusText.Text, StringComparison.Ordinal);
+        }
+        finally
+        {
+            window.Close();
+        }
     });
 
     [Fact]

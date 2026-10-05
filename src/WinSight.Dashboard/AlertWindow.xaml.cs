@@ -54,7 +54,7 @@ public partial class AlertWindow : Window
             : result.Outcome == ResponseOutcome.PartiallyApplied
                 ? Text.Format("AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty)
                 : Text["AlertFailed"];
-        return result.Outcome == ResponseOutcome.Failed && result.Detail is { Length: > 0 }
+        return result.Outcome != ResponseOutcome.PartiallyApplied && result.Detail is { Length: > 0 }
             ? message + " " + UntrustedDisplayText.Neutralize(result.Detail) : message;
     });
 

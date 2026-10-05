@@ -120,7 +120,7 @@ public sealed class GuardianAlertPresenter
                 "action was not attempted because its audit intent could not be written; " + prepared.Detail);
             return null;
         }
-        var stored = _rules.Add(rule);
+        var stored = _rules.Add(rule, out var storage);
         var completed = Journal(
             ResponseActionKind.AddRule,
             stored is null ? ResponseOutcome.Failed : ResponseOutcome.Succeeded,
@@ -129,7 +129,7 @@ public sealed class GuardianAlertPresenter
             reversible: stored is not null);
         result = RuleResult(rule.Id, ResponseActionKind.AddRule,
             stored is null ? ResponseOutcome.Failed : ResponseOutcome.Succeeded, targetDescription,
-            stored is null ? "rule storage unavailable; inspect winsight rules and RECOVERY.md" : null);
+            stored is null || storage.IgnoredEntries > 0 ? storage.Detail : null);
         if (completed.Durable || stored is null)
         {
             if (!completed.Durable)
@@ -139,20 +139,29 @@ public sealed class GuardianAlertPresenter
             return stored;
         }
         // A suppression whose completion cannot be audited must not silently remain active. Roll it
-        // back when possible; if rollback itself fails, return the still-active rule truthfully and
-        // leave the durable Prepared entry as evidence that completion is unknown.
-        var rolledBack = _rules.Remove(rule.Id);
+        // back when possible. A failed atomic write after a valid read confirms the old rule remains;
+        // unreadable storage cannot confirm its current activity. Prepared keeps the audit gap visible.
+        var rollback = _rules.RemoveWithOutcome(rule.Id, out var rollbackStorage);
+        var rolledBack = rollback is ResponseOutcome.Succeeded or ResponseOutcome.TargetNotFound;
+        var activeConfirmed = !rolledBack && rollbackStorage.Status == RuleStoreStatus.WriteFailed;
         result = result with
         {
             Outcome = rolledBack ? ResponseOutcome.Failed : ResponseOutcome.PartiallyApplied,
+            Reversible = activeConfirmed,
             Detail = "Allow completion could not be journalled; " + completed.Detail
-                + (rolledBack ? "; the new rule was rolled back" : "; rollback failed and the rule remains active"),
+                + (rolledBack ? "; the new rule is confirmed absent after rollback"
+                    : activeConfirmed ? "; rollback failed and the rule remains active"
+                    : "; rollback could not be verified; the rule's active state is unconfirmed; inspect winsight rules when storage is readable")
+                + "; " + rollbackStorage.Detail,
         };
-        return rolledBack ? null : stored;
+        return activeConfirmed ? stored : null;
     }
 
     /// <summary>The persistence Allow rules currently in force, so no Allow is invisible.</summary>
     public IReadOnlyList<ResponseRule> AllowRules() => _rules.ActiveRules(RuleScopeKind.Persistence);
+
+    /// <summary>Active persistence rules plus precise store availability and ignored-entry coverage.</summary>
+    public IReadOnlyList<ResponseRule> AllowRules(out RuleStoreResult result) => _rules.ActiveRules(RuleScopeKind.Persistence, out result);
 
     /// <summary>Removes an Allow rule, so its item alerts again. Journalled as the undo of the Allow.</summary>
     public ResponseOutcome Revoke(Guid ruleId) => Revoke(ruleId, out _);
@@ -169,17 +178,18 @@ public sealed class GuardianAlertPresenter
                 "action was not attempted because its audit intent could not be written; " + prepared.Detail);
             return ResponseOutcome.Failed;
         }
-        var outcome = _rules.RemoveWithOutcome(ruleId);
+        var outcome = _rules.RemoveWithOutcome(ruleId, out var storage);
         var completed = Journal(
             ResponseActionKind.RemoveRule, outcome, revokeId, target, reversible: false);
         result = RuleResult(revokeId, ResponseActionKind.RemoveRule, outcome, target,
-            outcome == ResponseOutcome.Failed ? "rule storage unavailable; inspect winsight rules and RECOVERY.md" : null);
+            outcome == ResponseOutcome.Failed || storage.IgnoredEntries > 0 ? storage.Detail : null);
         if (!completed.Durable)
         {
             result = result with
             {
                 Outcome = outcome == ResponseOutcome.Succeeded ? ResponseOutcome.PartiallyApplied : outcome,
-                Detail = "Revoke completion could not be journalled; " + completed.Detail,
+                Detail = "Revoke completion could not be journalled; " + completed.Detail
+                    + "; " + storage.Detail,
             };
             return result.Outcome;
         }

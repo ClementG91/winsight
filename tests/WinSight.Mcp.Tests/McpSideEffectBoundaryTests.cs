@@ -342,15 +342,26 @@ public sealed class McpSideEffectBoundaryTests
     {
         var cli = McpRoots.WinSightAssemblies.Value.Single(assembly => assembly.GetName().Name == "winsight");
 
-        var violations = Violations(StrictWalk([cli.EntryPoint!]));
-
-        // A shared write gateway has one predecessor in the graph, which can be another CLI writer.
-        Assert.Contains(violations, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
-        var rules = typeof(WinSight.Response.RuleStore).GetMethod(nameof(WinSight.Response.RuleStore.Add))!;
-        var ruleWrites = Violations(StrictWalk([rules]));
-        Assert.Empty(StrictWalk([rules]).Unresolved);
-        Assert.Contains(ruleWrites, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
-            && violation.Contains("WinSight.Response.RuleStore", StringComparison.Ordinal));
+        var cliGraph = StrictWalk([cli.EntryPoint!]);
+        Assert.Empty(cliGraph.Unresolved);
+        Assert.Contains(Violations(cliGraph), violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
+        // The CLI must reach a real RuleStore mutator before its rooted subwalk is inspected.
+        // The shared gateway's single predecessor need not happen to belong to RuleStore.
+        var ruleMutators = cliGraph.Reached.Where(method => method.DeclaringType == typeof(WinSight.Response.RuleStore)
+            && method.Name is nameof(WinSight.Response.RuleStore.Add) or nameof(WinSight.Response.RuleStore.Remove)
+                or nameof(WinSight.Response.RuleStore.RemoveWithOutcome)).ToArray();
+        Assert.NotEmpty(ruleMutators);
+        foreach (var mutator in ruleMutators)
+        {
+            var ruleGraph = StrictWalk([mutator]);
+            Assert.Empty(ruleGraph.Unresolved);
+            Assert.Contains(Violations(ruleGraph), violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
+        }
+        // An unrelated file-write root cannot satisfy the CLI-to-RuleStore part of the property.
+        var unrelated = StrictWalk([typeof(Canaries).GetMethod(nameof(Canaries.WritesAFile))!]);
+        Assert.Empty(unrelated.Unresolved);
+        Assert.NotEmpty(Violations(unrelated));
+        Assert.DoesNotContain(unrelated.Reached, method => method.DeclaringType == typeof(WinSight.Response.RuleStore));
     }
 
     /// <summary>
