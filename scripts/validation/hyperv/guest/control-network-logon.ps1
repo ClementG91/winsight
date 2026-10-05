@@ -12,7 +12,7 @@ New-Item -ItemType Directory -Force $evidence | Out-Null
 Start-Transcript -Path (Join-Path $evidence 'transcript.txt') -Force | Out-Null
 $net = Get-Content -LiteralPath (Join-Path $root 'network.json') -Raw | ConvertFrom-Json
 $base = "http://$($net.targetAddress):$($net.httpPort)"
-$result = [ordered]@{ startedUtc = [DateTime]::UtcNow.ToString('O'); computer = $env:COMPUTERNAME; status = 'NOT_RUN'; detail = '' }
+$result = [ordered]@{ startedUtc = [DateTime]::UtcNow.ToString('O'); computer = $env:COMPUTERNAME; qualificationRunId = [string]$net.qualificationRunId; status = 'NOT_RUN'; detail = '' }
 $imported = $null
 $clientBasicPath = 'WSMan:\localhost\Client\Auth\Basic'
 $previousClientBasic = $null

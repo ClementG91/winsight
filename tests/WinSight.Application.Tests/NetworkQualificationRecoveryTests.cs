@@ -59,16 +59,29 @@ public sealed class NetworkQualificationRecoveryTests
     }
 
     [Fact]
-    public async Task FailurePathsGuaranteeCheckpointRestorationInFinally()
+    public async Task StagingAndStartFailuresAttemptRestorationWithoutMaskingTheirCause()
     {
         await Run("""
             $protected = @($ast.FindAll({
                 param($node)
-                $node -is [Management.Automation.Language.TryStatementAst] -and $node.Finally -and
-                $node.Body.Extent.Text.Contains('Remove-StagedNetworkFixtures') -and
-                $node.Finally.Extent.Text.Contains('Restore-BothVms')
+                $node -is [Management.Automation.Language.CatchClauseAst] -and
+                ($node.Parent.Body.Extent.Text.Contains('Clear-WinSightDataVolume') -or
+                $node.Parent.Body.Extent.Text.Contains('Start-VM'))
             }, $true))
-            if ($protected.Count -lt 3) { throw 'ASSERT: staging, start-failure and collection cleanup need independent finally restoration' }
+            if ($protected.Count -ne 2) { throw 'ASSERT: staging and start recovery boundaries missing' }
+            $AutomaticCredential=$true
+            function Write-HostLog($Message) {}
+            function Remove-DataDisks {throw 'secondary detach failure'}
+            function Remove-StagedNetworkFixtures {throw 'secondary fixture cleanup failure'}
+            function Restore-BothVms {$script:restores++}
+            foreach ($clause in $protected) {
+                $script:restores=0
+                $injected=[IO.IOException]::new('primary cause')
+                $caught=$null
+                try {Invoke-Expression ('try {throw $injected} '+$clause.Extent.Text)} catch {$caught=$_}
+                if ($script:restores -ne 1) {throw 'ASSERT: restoration skipped after cleanup failure'}
+                if (-not [object]::ReferenceEquals($caught.Exception,$injected)) {throw 'ASSERT: recovery masked the primary failure'}
+            }
             """);
     }
 
@@ -90,8 +103,7 @@ public sealed class NetworkQualificationRecoveryTests
             $tokens = $null; $errors = $null
             $ast = [Management.Automation.Language.Parser]::ParseFile($env:WINSIGHT_RECOVERY_DRIVER, [ref]$tokens, [ref]$errors)
             if ($errors.Count) { throw 'Driver parse failed' }
-            foreach ($functionName in 'Remove-StagedNetworkFixtures', 'Restore-BothVms') {
-                $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+            foreach ($definition in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
                 Invoke-Expression $definition.Extent.Text
             }
             """ + "\n" + script;

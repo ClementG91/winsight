@@ -112,6 +112,10 @@ public sealed class QualificationLifecycleTests
             if ($errors.Count) { throw 'Parse failed' }
             $definition = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $env:WINSIGHT_LIFECYCLE_FUNCTION }, $true)
             Invoke-Expression $definition.Extent.Text
+            if ($env:WINSIGHT_LIFECYCLE_FUNCTION -eq 'Invoke-TrayExit') {
+                $shell = $ast.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-ShellTrayExit' }, $true)
+                if ($shell) { Invoke-Expression $shell.Extent.Text }
+            }
             """ + "\n" + script;
         foreach (var argument in new[] { "-NoProfile", "-NonInteractive", "-EncodedCommand", Convert.ToBase64String(Encoding.Unicode.GetBytes(command)) })
         {

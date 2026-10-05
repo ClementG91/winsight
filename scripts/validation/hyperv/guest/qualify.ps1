@@ -67,6 +67,7 @@ function Invoke-Gate([string]$Name, [scriptblock]$Body) {
     "===== GATE $Name  $(Get-Date -Format o) ====="
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $status = 'PASS'
+    $script:GateEvidence = @{}
     try {
         $detail = (& $Body | Out-String).Trim()
     }
@@ -77,6 +78,9 @@ function Invoke-Gate([string]$Name, [scriptblock]$Body) {
     }
     if ($detail.Length -gt 4000) { $detail = $detail.Substring($detail.Length - 4000) }
     $Results.gates[$Name] = [ordered]@{ status = $status; seconds = [math]::Round($watch.Elapsed.TotalSeconds, 1); detail = $detail }
+    foreach ($key in 'route','exitVerified') {
+        if ($script:GateEvidence.ContainsKey($key)) { $Results.gates[$Name][$key] = $script:GateEvidence[$key] }
+    }
     "----- $Name -> $status"
     Save-Results
 }
@@ -265,14 +269,21 @@ function Get-Center($Element) {
 # Exits one dashboard through its notification-area icon: right-click -> Exit. Returns $false when the
 # icon or the menu cannot be driven, so the caller records NOT_RUN instead of substituting a kill.
 function Invoke-TrayExit([int[]]$DashboardIds) {
-    # The protected guest operator opens the real NotifyIcon menu even when Explorer hides its icon.
-    # Never choose an arbitrary process when the caller did not identify exactly one dashboard.
+    $script:TrayRoute = 'unavailable'
     if ($DashboardIds.Count -ne 1 -or $DashboardIds[0] -le 0) { return $false }
+    try { if (Invoke-ShellTrayExit $DashboardIds) { $script:TrayRoute = 'shell-icon'; return $true } }
+    catch { $script:TrayDiagnostic = 'Shell tray automation failed; trying the guest operator.' }
+    # The fallback opens the product NotifyIcon menu through its callback; it is explicitly labeled
+    # and never substitutes a process kill. Callers still verify actual exit and session cleanup.
     $automation = Join-Path $Share 'operator-automation.ps1'
     if (Test-Path -LiteralPath $automation) {
-        try { . $automation -Name TRAYEXIT -ProcessId $DashboardIds[0]; return $true }
-        catch { $script:TrayDiagnostic = 'Guest operator tray menu automation failed; trying the shell icon.' }
+        try { . $automation -Name TRAYEXIT -ProcessId $DashboardIds[0]; $script:TrayRoute = 'guest-operator'; return $true }
+        catch { $script:TrayDiagnostic = 'Guest operator tray menu automation failed.' }
     }
+    return $false
+}
+
+function Invoke-ShellTrayExit([int[]]$DashboardIds) {
     $buttons = New-Condition $UIA::ControlTypeProperty ([System.Windows.Automation.ControlType]::Button)
     $icon = $null
     foreach ($attempt in 1..2) {
@@ -715,8 +726,14 @@ Invoke-Gate '13-guardian-cleanup' {
     if ($script:GuardianDashboard -and -not $script:GuardianDashboard.HasExited) {
         if (-not (Invoke-TrayExit @($script:GuardianDashboard.Id)) -or -not $script:GuardianDashboard.WaitForExit(20000)) {
             Stop-Process -Id $script:GuardianDashboard.Id -Force -ErrorAction SilentlyContinue
+            $script:GateEvidence.route = 'forced-cleanup'
+            $script:GateEvidence.exitVerified = $false
             'tray Exit could not be driven for the unelevated dashboard; stopped it (not an ETW gate)'
-        } else { 'unelevated dashboard exited through tray Exit' }
+        } else {
+            $script:GateEvidence.route = $script:TrayRoute
+            $script:GateEvidence.exitVerified = $true
+            'unelevated dashboard exited through tray Exit'
+        }
     }
     if (Get-ItemProperty -Path $RunKey -Name $ProbeValue -ErrorAction SilentlyContinue) { throw 'Probe value remains.' }
     'probe value absent'
@@ -902,15 +919,13 @@ exit 0
     # button to UI Automation, so when the automated path cannot drive it the gate waits for a human
     # (or a screen-driving operator) to right-click the WinSight icon and choose Exit.
     $trayExited = Invoke-TrayExit @($dashboard.Id)
+    $script:GateEvidence.route = $script:TrayRoute
+    $script:GateEvidence.exitVerified = $false
     $waitDeadline = (Get-Date).AddMinutes(10)
     $trayMarker = Join-Path $Evidence 'TRAY-EXIT-REQUIRED.txt'
     if (-not $trayExited) {
+        $script:GateEvidence.route = 'operator-request'
         "waiting until $($waitDeadline.ToString('o')) for the WinSight tray icon to be exited" | Set-Content -LiteralPath $trayMarker
-    }
-    $automation = Join-Path $Share 'operator-automation.ps1'
-    if (-not $trayExited -and (Test-Path -LiteralPath $automation)) {
-        try { . $automation -Name 'TRAYEXIT' -ProcessId $dashboard.Id }
-        catch { Add-Content -LiteralPath (Join-Path $Evidence 'operator-automation.txt') -Value "$(Get-Date -Format o) [TRAYEXIT] failed: $($_.Exception.Message)" }
     }
     while ((Get-Date) -lt $waitDeadline) {
         $dashboard.Refresh()
@@ -929,6 +944,7 @@ exit 0
     }
     Start-Sleep -Seconds 2
     if ((Get-AttributionSessions).Count -ne 0) { throw 'Attribution sessions remain after tray Exit.' }
+    $script:GateEvidence.exitVerified = $true
     'single instance: second launch handed over (exit 0, no session); X hides; kill leaves orphan; relaunch reclaims it and preserves the live watcher session; two kill cycles never exceed 2 owners; watcher Ctrl+C exit 0 without residue; dashboard exited through tray Exit with zero sessions'
     }
     finally {

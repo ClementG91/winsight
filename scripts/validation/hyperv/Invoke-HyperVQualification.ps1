@@ -25,6 +25,7 @@ param(
     [int]$TimeoutMinutes = 480,
     # Memory for this run only (0 = the checkpoint's own); the checkpoint restore at the end resets it.
     [int64]$MemoryBytes = 0,
+    [string]$DriverHeartbeat,
     # Collect a run whose driver was closed while the VM kept going: wait for it to power off, then seal and restore.
     [switch]$Resume
 )
@@ -47,6 +48,8 @@ Assert-ProtectedPath -Path $BootstrapReceipt
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 $data = Join-Path $Root 'data.vhdx'
 $hostLog = Join-Path $EvidenceRoot 'host-operations.txt'
+if ($DriverHeartbeat) { Assert-ProtectedPath -Path (Split-Path -Parent $DriverHeartbeat) }
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'initializing'
 function Write-HostLog([string]$Message) { $line = "$(Get-Date -Format o) [hyper-v] $Message"; Add-SharedLine -Path $hostLog -Line $line; Write-Host $line }
 function Remove-DataDisk {
     $found = Remove-WinSightDataDisk -VMName $Name -Path $data
@@ -62,6 +65,7 @@ if ($Resume) {
     Write-HostLog "$RunName resumed: waiting for $Name ($(Get-WinSightVmState $Name)) to finish"
 }
 else {
+    Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'staging'
     # --- Stage --------------------------------------------------------------------------------------
     Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
     Remove-DataDisk
@@ -94,11 +98,13 @@ else {
     if ($freeBytes -lt $vmBytes + 512MB) {
         Write-Warning ("Only {0:N1} GB of RAM free for a {1:N1} GB VM: close memory-heavy applications first, or Hyper-V may refuse to start it." -f ($freeBytes / 1GB), ($vmBytes / 1GB))
     }
+    Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'starting'
     Start-VM -Name $Name
 }
 $started = Get-Date
 $deadline = $started.AddMinutes($TimeoutMinutes)
 while ((Get-WinSightVmState $Name) -ne 'Off' -and (Get-Date) -lt $deadline) {
+    Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'waiting'
     Start-Sleep -Seconds 60
     Write-Host ("  running {0:N0} min" -f ((Get-Date) - $started).TotalMinutes)
 }
@@ -108,6 +114,7 @@ else { Write-HostLog "the guest shut itself down after $([int]((Get-Date) - $sta
 
 # --- Collect and seal (kit section 8: before restoring) --------------------------------------------------
 Remove-DataDisk
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'collecting'
 if (-not (Test-Path -LiteralPath $runDir)) { [void](New-Item -ItemType Directory -Path $runDir) }
 Assert-ProtectedPath -Path $runDir
 $letter = Mount-WinSightData $data
@@ -125,11 +132,13 @@ Get-ChildItem -LiteralPath $runDir -Recurse -File | Where-Object Name -ne 'SHA25
     ForEach-Object { "$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)  $($_.FullName.Substring($runDir.Length + 1))" } |
     Set-Content -LiteralPath (Join-Path $runDir 'SHA256SUMS.txt')
 Write-HostLog "evidence sealed in $runDir"
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'restoring'
 Restore-VMCheckpoint -VMName $Name -Name $Checkpoint -Confirm:$false
 Write-HostLog "VM restored to $Checkpoint"
 
 # --- Summary --------------------------------------------------------------------------------------------
 $resultsFile = Join-Path $runDir 'results.json'
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'finished'
 if (-not (Test-Path -LiteralPath $resultsFile)) { Write-Warning 'No results.json: the harness never started or never saved.'; exit 2 }
 $final = Get-Content -LiteralPath $resultsFile -Raw | ConvertFrom-Json
 $rows = foreach ($gate in $final.gates.PSObject.Properties) {

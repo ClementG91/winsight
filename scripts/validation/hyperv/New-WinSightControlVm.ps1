@@ -26,7 +26,8 @@ param(
     [string]$Switch = 'WinSight-Qual-Private',
     [string]$Checkpoint = 'C0-control',
     [int64]$MemoryBytes = 3GB,
-    [int]$SettleTimeoutMinutes = 45
+    [int]$SettleTimeoutMinutes = 45,
+    [string]$DriverHeartbeat
 )
 
 # Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
@@ -41,6 +42,8 @@ Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
 Set-AdministratorsDefaultOwner
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
+if ($DriverHeartbeat) { Assert-ProtectedPath -Path (Split-Path -Parent $DriverHeartbeat) }
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'initializing'
 
 $base = Join-Path $Root 'os.vhdx'
 $disk = Join-Path $Root 'control.vhdx'
@@ -98,8 +101,10 @@ Add-VMHardDiskDrive -VMName $Name -Path $data
 
 Write-Host "First boot of $Name (settles, then shuts itself down; up to $SettleTimeoutMinutes minutes)..."
 Start-VM -Name $Name
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'starting'
 $started = Get-Date
 while ((Get-WinSightVmState $Name) -ne 'Off' -and (Get-Date) -lt $started.AddMinutes($SettleTimeoutMinutes)) {
+    Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'waiting'
     Start-Sleep -Seconds 30
     Write-Host ("  running {0:N0} min" -f ((Get-Date) - $started).TotalMinutes)
 }
@@ -111,3 +116,4 @@ Checkpoint-VM -Name $Name -SnapshotName $Checkpoint
 Write-Host "Ready: $Name, clean checkpoint $Checkpoint, private switch $Switch."
 Add-SharedLine -Path (Join-Path $EvidenceRoot 'host-operations.txt') -Line "$(Get-Date -Format o) [control] $Name ready, checkpoint $Checkpoint"
 Write-Host 'Next: queue a network request for the runner.'
+Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'finished'
