@@ -88,10 +88,11 @@ public sealed class PersistenceResponder
         ArgumentNullException.ThrowIfNull(target);
         var actionId = Guid.NewGuid();
         var preparedAt = _clock();
-        if (!TryPrepare(actionId, ResponseActionKind.QuarantinePersistence, target.DisplayName, preparedAt))
+        var prepared = TryPrepare(actionId, ResponseActionKind.QuarantinePersistence, target.DisplayName, preparedAt);
+        if (!prepared.Durable)
         {
             return AuditUnavailable(actionId, ResponseActionKind.QuarantinePersistence,
-                target.DisplayName, preparedAt);
+                target.DisplayName, preparedAt, prepared);
         }
         var (outcome, detail) = BlockCore(target, actionId);
         var result = new ResponseResult(actionId, ResponseActionKind.QuarantinePersistence, outcome,
@@ -154,49 +155,51 @@ public sealed class PersistenceResponder
         var actionId = Guid.NewGuid();
         var preparedAt = _clock();
         var preparedTarget = blockActionId.ToString();
-        if (!TryPrepare(actionId, ResponseActionKind.RestorePersistence, preparedTarget, preparedAt))
+        var prepared = TryPrepare(actionId, ResponseActionKind.RestorePersistence, preparedTarget, preparedAt);
+        if (!prepared.Durable)
         {
             return AuditUnavailable(actionId, ResponseActionKind.RestorePersistence,
-                preparedTarget, preparedAt);
+                preparedTarget, preparedAt, prepared);
         }
         var (outcome, target) = RestoreCore(blockActionId);
         var result = new ResponseResult(actionId, ResponseActionKind.RestorePersistence, outcome,
             target, _clock(), Reversible: false);
-        var completed = _journal.TryAppend(new ActionJournalEntry(
+        var completed = _journal.TryAppendWithStatus(new ActionJournalEntry(
             actionId, ResponseActionKind.RestorePersistence, outcome, target, result.AtUtc, false));
-        if (outcome == ResponseOutcome.Succeeded && completed)
+        if (outcome == ResponseOutcome.Succeeded && completed.Durable)
         {
             _journal.MarkUndone(blockActionId, actionId);
         }
-        return completed ? result : ExposeCompletionGap(result);
+        return completed.Durable ? result : ExposeCompletionGap(result, completed);
     }
 
-    private bool TryPrepare(
+    private ActionJournalWriteResult TryPrepare(
         Guid actionId, ResponseActionKind kind, string target, DateTimeOffset atUtc) =>
-        _journal.TryAppend(new ActionJournalEntry(
+        _journal.TryAppendWithStatus(new ActionJournalEntry(
             actionId, kind, ResponseOutcome.AuditPrepared, target, atUtc,
             Reversible: false, Phase: ActionJournalPhase.Prepared));
 
     private static ResponseResult AuditUnavailable(
-        Guid actionId, ResponseActionKind kind, string target, DateTimeOffset atUtc) =>
+        Guid actionId, ResponseActionKind kind, string target, DateTimeOffset atUtc, ActionJournalWriteResult status) =>
         new(actionId, kind, ResponseOutcome.Failed, target, atUtc, Reversible: false,
-            Detail: "action was not attempted because its audit intent could not be written");
+            Detail: "action was not attempted because its audit intent could not be written; " + status.Detail);
 
-    private ResponseResult CompleteOrExposeGap(ResponseResult result) =>
-        _journal.TryAppend(new ActionJournalEntry(
-            result.ActionId, result.Kind, result.Outcome, result.Target, result.AtUtc, result.Reversible))
-            ? result
-            : ExposeCompletionGap(result);
+    private ResponseResult CompleteOrExposeGap(ResponseResult result)
+    {
+        var completed = _journal.TryAppendWithStatus(new ActionJournalEntry(
+            result.ActionId, result.Kind, result.Outcome, result.Target, result.AtUtc, result.Reversible));
+        return completed.Durable ? result : ExposeCompletionGap(result, completed);
+    }
 
-    private static ResponseResult ExposeCompletionGap(ResponseResult result)
+    private static ResponseResult ExposeCompletionGap(ResponseResult result, ActionJournalWriteResult status)
     {
         var applied = result.Outcome is ResponseOutcome.Succeeded or ResponseOutcome.PartiallyApplied;
         return result with
         {
             Outcome = applied ? ResponseOutcome.PartiallyApplied : result.Outcome,
-            Detail = applied
+            Detail = (applied
                 ? "the action may have changed the target, but its completion could not be journalled"
-                : "the refusal/failure completion could not be journalled",
+                : "the refusal/failure completion could not be journalled") + "; " + status.Detail,
         };
     }
 

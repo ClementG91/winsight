@@ -1,0 +1,145 @@
+using System.Text.Json;
+
+namespace WinSight.Response;
+
+/// <summary>Coverage of the inspected tail, not a claim about the complete historical file.</summary>
+public sealed record ActionJournalSnapshot(
+    IReadOnlyList<ActionJournalEntry> Entries,
+    bool Unreadable = false,
+    int MalformedEntries = 0,
+    bool LimitReached = false,
+    long BytesRead = 0,
+    int LinesScanned = 0,
+    long SourceBytes = 0,
+    bool EndsWithNewline = true,
+    bool EvidencePreserved = false,
+    long DiscardedEvidenceBytes = 0,
+    long DiscardedEvidenceFiles = 0,
+    string EvidenceLossReason = "",
+    bool EvidenceCountersUnknown = false,
+    bool EvidenceRecoveryPending = false,
+    long DiscardedMetadataBytes = 0,
+    string? DiscardedMetadataTailSha256 = null,
+    long DiscardedJournalPrefixBytes = 0,
+    long PendingPrefixDiscardBytes = 0,
+    long UnverifiedPrefixDiscardBytes = 0,
+    long UnverifiedEvidenceBytes = 0,
+    bool RecoveryRequired = false,
+    long PendingEvidencePrefixDiscardBytes = 0,
+    bool EvidenceUnavailable = false,
+    bool EvidenceOverBudget = false);
+
+/// <summary>Reads JSONL backwards with fixed buffers, including corrupt bytes in every budget.</summary>
+internal static class ActionJournalReader
+{
+    internal const int MaxBytes = 16 * 1024 * 1024;
+    internal const int MaxLineBytes = 16 * 1024;
+    internal const int MaxLines = 10_000;
+
+    // Missing required fields must not synthesize a successful action. The optional phase/undo
+    // parameters retain their defaults for historical records.
+    private static readonly JsonSerializerOptions ReadOptions = new()
+    {
+        RespectRequiredConstructorParameters = true,
+    };
+
+    internal static ActionJournalSnapshot Read(Stream stream, int max, bool retainPhases = false)
+    {
+        max = max <= 0 ? MaxLines : Math.Min(max, MaxLines);
+        var entries = new List<ActionJournalEntry>();
+        var seen = new HashSet<(Guid Id, ActionJournalPhase? Phase)>();
+        var block = new byte[8192];
+        var line = new byte[MaxLineBytes];
+        var length = 0;
+        var oversized = false;
+        var malformed = 0;
+        var lines = 0;
+        var bytes = 0L;
+        var remaining = stream.Length;
+        var end = remaining;
+        var terminated = end == 0;
+        while (remaining > 0 && bytes < MaxBytes && lines < MaxLines && entries.Count < max)
+        {
+            var count = (int)Math.Min(block.Length, Math.Min(remaining, MaxBytes - bytes));
+            var start = remaining - count;
+            stream.Position = start;
+            stream.ReadExactly(block.AsSpan(0, count));
+            if (bytes == 0)
+            {
+                terminated = block[count - 1] == (byte)'\n';
+            }
+            bytes += count;
+            for (var i = count - 1; i >= 0; i--)
+            {
+                remaining = start + i;
+                if (block[i] == (byte)'\n')
+                {
+                    if (remaining != end - 1)
+                    {
+                        FinishLine();
+                    }
+                    if (lines >= MaxLines || entries.Count >= max)
+                    {
+                        break;
+                    }
+                }
+                else if (length < line.Length)
+                {
+                    line[length++] = block[i];
+                }
+                else
+                {
+                    oversized = true;
+                }
+            }
+        }
+        if (remaining == 0 && (length > 0 || oversized) && lines < MaxLines && entries.Count < max)
+        {
+            FinishLine();
+        }
+        return new ActionJournalSnapshot(entries, MalformedEntries: malformed,
+            LimitReached: remaining > 0 && (lines >= MaxLines || bytes >= MaxBytes),
+            BytesRead: bytes, LinesScanned: lines, SourceBytes: end, EndsWithNewline: terminated);
+
+        void FinishLine()
+        {
+            lines++;
+            if (oversized)
+            {
+                malformed++;
+            }
+            else if (length > 0)
+            {
+                Array.Reverse(line, 0, length);
+                var content = line.AsSpan(0, length);
+                if (content.StartsWith(new byte[] { 0xef, 0xbb, 0xbf }))
+                {
+                    content = content[3..];
+                }
+                if (!content.Trim(new byte[] { (byte)'\r', (byte)' ', (byte)'\t' }).IsEmpty)
+                {
+                    try
+                    {
+                        var entry = JsonSerializer.Deserialize<ActionJournalEntry>(content, ReadOptions);
+                        if (entry is null || entry.ActionId == Guid.Empty || entry.Target is null
+                            || !Enum.IsDefined(entry.Kind) || !Enum.IsDefined(entry.Outcome)
+                            || !Enum.IsDefined(entry.Phase))
+                        {
+                            malformed++;
+                        }
+                        else if (seen.Add((entry.ActionId, retainPhases ? entry.Phase : null)))
+                        {
+                            entries.Add(entry);
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        malformed++;
+                    }
+                }
+            }
+            length = 0;
+            oversized = false;
+        }
+    }
+}

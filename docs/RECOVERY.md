@@ -3,8 +3,10 @@
 For when something is wrong now. Each section states the symptom, what is actually true underneath,
 and the shortest safe way out.
 
-Every command below is read-only unless it says otherwise. Run them from an **elevated** console in
-the install directory.
+Each section identifies whether a command changes state. Per-user Guardian history, rules and
+response commands run as the affected user. Service install/uninstall and policy mutations require
+an elevated trusted console; read-only service status does not. Examples using service executables
+assume the install directory.
 
 ## First: get the ground truth
 
@@ -160,6 +162,87 @@ registry value (with its kind) or startup file **only if that location is still 
 else has taken the name, WinSight leaves the new occupant alone and reports the conflict, so restoring
 never overwrites a legitimate replacement. A quarantined payload is stored under the user's own DACL;
 deleting the quarantine directory discards the ability to restore.
+
+## Response audit storage needs attention
+
+Run `winsight actions` as the affected user, in an ordinary console. The per-user files are under
+`%LOCALAPPDATA%\WinSight`; elevating as a different account inspects a different profile. CLI,
+dashboard history and MCP use the same read-only coverage report. Reading never repairs storage.
+The next response writer performs bounded recovery under the storage lock.
+
+Every response requires a durable Prepared record before it changes anything. A successful machine
+change whose Completed write failed is reported separately; do not automatically replay it. Inspect
+the effective process, persistence entry or rule before deciding whether to retry. A pending recovery
+counter can coexist with a durable write; it is not evidence that the machine change failed.
+
+| Journal result / coverage | Meaning and recovery |
+|---|---|
+| `Appended`, `Rotated`, `Updated` | The requested write is durable. Inspect history coverage separately; retention is bounded. |
+| Missing active journal | A new journal can be created when its ordinary local parent is writable. Existing evidence is still inspected; absence of the active file does not prove absence of prior history. |
+| Malformed or torn records | The reader reports incomplete coverage. Small damaged tails remain intact, separated from later appends by a newline. A required rewrite preserves raw evidence within the documented budgets. Retry after resolving a transient storage failure. |
+| `RecoveryRequired` / oversized legacy state | The next writer attempts to normalize the active journal and evidence, preserving the newest raw 16 MiB tail and reporting discarded prefix bytes. Access and storage must still permit recovery. Before allowing maintenance, make a separate private backup if the entire legacy file must be retained. This backup is outside the automatic storage budget. |
+| `EvidencePreservationFailed` | Recovery cannot safely preserve or account for evidence. Check free space, file permissions and sharing; close conflicting handles, then retry. Do not delete the evidence or index to make the error disappear. |
+| `RotationFailed` | Atomic replacement did not complete. The old source remains available. Resolve sharing/ACL/disk-space problems and retry. |
+| `Unavailable` | The exact ordinary local file could not be acquired or the writer lock was unavailable. Reparse points and unavailable cloud placeholders are refused. Restore the intended ordinary file/permissions or availability, then retry; do not bypass the acquisition checks. |
+| `InvalidRecord` | The action identity or enum/input is invalid. Inspect the supplied action; increasing storage budgets is not a repair. Product labels are centrally bounded with a truncation marker and digest; full functional rule/quarantine keys remain intact. |
+| `TargetNotFound` | No retained completed target could be annotated. Retention may already have removed it. Inspect the actual action and its undo records; do not invent a successful annotation. |
+| `RetentionLimit` | The undo annotation cannot fit without evicting its own target. Publication is refused and the original journal is unchanged. An externally supplied undo ID need not have a record; inspect what is actually available. |
+| Pending eviction/trim | A durable recovery intent is awaiting completion or verification. Leave the source, evidence, index and fixed staging files together; a subsequent writer resumes it. Restore transient access before retrying. |
+| Unknown counters / unverified loss | Exact earlier loss cannot be established, for example after present but corrupt/unreadable metadata, saturation or an unexpected source replacement. History explicitly reports that uncertainty and available digests. A genuinely absent index initializes a new accounting state; this does not establish absence of historical losses. Never delete the index to clear a diagnostic. A zero counter with unknown accounting is not proof of zero loss. |
+
+The normalized active journal is capped at **16 MiB / 10,000 physical lines**; rotation retains
+complete available action groups within **8 MiB / 5,000 physical lines**. Writers preserve the newest
+Prepared and Completed phases and their timestamps for retained actions. Ordinary history returns
+the latest logical state. Original-to-undo annotation is best-effort after a durable undo completion;
+a failed link does not reverse the machine change, and both records are not guaranteed to remain.
+Unknown newer journal enum values are treated as malformed opaque evidence, not executable actions.
+
+Four raw-evidence slots are capped at 16 MiB each, with an 8 KiB index. The normalized live-file bound
+is **80 MiB + 8 KiB**; including all fixed staging names gives a conservative **160 MiB + 16 KiB**.
+This covers these journal-managed files, not quarantine, other WinSight state or separate backups.
+Externally oversized legacy sources/archives can exceed the bound before maintenance. When the bounded
+budget discards evidence, history names the reason and exposes counters or explicit uncertainty.
+
+Do not delete `.corrupt*.jsonl`, `.evidence.json` or recovery staging files to retry a response. Preserve
+them together if storage is genuinely lost and a reviewed backup must be recovered. Stop all WinSight
+writers first, including older versions: current writers use a `Global` mutex, but old `Local`-mutex
+processes do not participate in that protocol. Same-session tests do not qualify cross-session or
+cross-integrity behavior. See the [regression record](validation/2026-10-05-readiness-regressions.md).
+
+## Response rules are malformed or unavailable
+
+Run `winsight rules` as the affected user. `response-rules.json` lives beside the journal. The report
+includes typed storage status and ignored-entry counts. An unreadable suppression store yields no
+honored Allow rules: alerts continue, while new Allow/Revoke writes are refused. Missing is distinguished
+from access denial on the same file acquisition: only confirmed absence permits interpreting a file
+that could not be opened as an empty store. A readable valid store with no active rules is also healthy.
+
+| Rule status | Meaning and recovery |
+|---|---|
+| `Loaded`, `Missing` | The store was read, or its absence was confirmed. A missing file can be created on the next successful write. |
+| `Written` | Flushed atomic publication succeeded. Invalid individual entries are removed only by this successful write. |
+| Ignored invalid entries | Null/keyless, incomplete or unsupported individual rules are never honored. Valid neighbors remain usable. The read preserves all bytes; inspect the ignored count before authorizing a write that drops those entries. |
+| `TargetNotFound` | The rule is absent from a readable store. This is distinct from a failed read or failed revocation. |
+| `InvalidRule` | A proposed rule lacks a supported identity/key/scope/decision/lifetime or required timed expiry. Correct the input; never interpret unknown values as an Allow. |
+| `InvalidJson`, `InvalidFormat` | The versioned envelope is malformed. The original file is preserved and no rules are honored or overwritten. Use the deliberate recovery procedure below. |
+| `UnsupportedVersion` | This version cannot interpret the file. Prefer the compatible WinSight version or a reviewed backup; a downgrade does not silently overwrite newer policy. |
+| `ByteLimit` | The unchanged 8 MiB file budget is exceeded. Recover a reviewed in-budget backup; no automatic overwrite of the oversized policy occurs. |
+| `RuleLimit` | The unchanged raw 8,192-entry budget is exceeded. Revoke from a readable in-budget store or recover a reviewed backup. Replacing the same ID at capacity remains possible. |
+| `Unavailable` | Restore ordinary local-file availability, permissions, free space and sharing, then retry. A placeholder/reparse refusal is not a missing store. |
+| `WriteFailed` | Atomic replacement failed. Preserve the old file, resolve the transient cause and retry. Failed Revoke is never reported as successful removal. |
+
+For a malformed or incompatible envelope, close every dashboard/CLI writer for this user and retain
+an exact private copy with its SHA-256 before changing the original. Prefer restoring a reviewed
+compatible backup. If deliberately starting a new empty suppression policy, move the original to a
+**new, nonexisting backup name**, preserving its bytes and ACL, then leave the active path absent.
+The next authorized write creates the new versioned store. Verify `winsight rules` as this same user;
+review which suppressions were lost and re-add only intended rules. Never edit an unknown-version
+file into version 1 or discard evidence to make it appear readable.
+
+Allow rollback reports confirmed absence as failed/non-reversible, a confirmed remaining active rule
+as partially applied, and unreadable state as unconfirmed. Check the actual rule status before retrying
+an Allow or Revoke. The process/Guardian responses and the machine-wide firewall policy are separate
+stores; repairing per-user suppression must not change service policy.
 
 ## Full removal
 

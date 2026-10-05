@@ -14,17 +14,21 @@ component is installed.
 The x64 installer deliberately refuses to install on Arm when the native Arm64
 package is available. 32-bit x86 Windows is not supported.
 
-## Supported Windows baseline
+## Windows qualification baseline
 
-- Windows 11 x64 or Arm64.
-- Windows 10 22H2 x64 or Arm64, only while that Windows edition remains supported
-  by Microsoft (including an applicable ESU program).
-- Minimum installer build: Windows 10 22H2, build 19045.
+- Windows 11 x64, on an edition/version within Microsoft's .NET 10 support lifecycle,
+  is the runtime qualification target. See the [current evidence and remaining gates](PRODUCTION_READINESS.md).
+- Native Arm64 packages have CI build, test and installer coverage. Privileged Arm64
+  runtime behavior still needs its own VM qualification.
+- Windows 10 22H2 compatibility is unqualified. Its ESU status does not establish .NET 10
+  or WinSight support; the [official .NET 10 OS matrix](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md)
+  lists specific Windows 10 LTSC editions, but not 22H2.
 
-WinSight may run on newer Windows Server editions, but the desktop dashboard and
-consumer registry surfaces are not formally supported there. Older Windows builds
-and 32-bit Windows are intentionally rejected: a security product should not claim
-production support for an operating system outside its vendor security lifecycle.
+The installer currently accepts builds from 19045. This technical installation threshold
+does not confer support or qualification on every accepted Windows version. The build target
+`windows10.0.19041.0` likewise identifies an API contract, not a tested operating system.
+Windows Server and x64 emulation on Arm64 remain outside the desktop runtime qualification;
+32-bit x86 packages are not provided. Production readiness remains unestablished.
 
 ## Installer
 

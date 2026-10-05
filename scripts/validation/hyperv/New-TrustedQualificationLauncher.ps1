@@ -95,7 +95,8 @@ $relativePaths = @(
     'guest\run-guest-checks.ps1',
     'guest\control-network-logon.ps1',
     'guest\qualify.ps1',
-    'guest\operator-automation.ps1'
+    'guest\operator-automation.ps1',
+    'guest\NetworkProbeCredential.psm1'
 )
 $files = @(
     foreach ($relative in $relativePaths) {

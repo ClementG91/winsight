@@ -119,7 +119,7 @@ public sealed class McpSideEffectBoundaryTests
         ["WinSight.Core.AutomaticFileAccess"] =
         [
             "TryEnsureDirectory", "TryApplyProtectedDirectoryDacl", "TryCreateNewFile", "TryCreateNewFileLease",
-            "TryAppendFile", "TryWriteAtomic", "TryDeleteFile", "TryRenameRelative",
+            "TryAppendFile", "TryWriteAtomic", "TryWriteAtomicBounded", "TryCopyTailAtomic", "TryDeleteFile", "TryRenameRelative",
         ],
         ["WinSight.Core.AutomaticFileAccess+LocalPathLease"] = ["TryDelete", "TryRename"],
     };
@@ -246,7 +246,8 @@ public sealed class McpSideEffectBoundaryTests
         // walk passes because of the review, not because the detectors are blind.
         var unexempted = Violations(full);
         Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Diagnostics.Process.Start", StringComparison.Ordinal));
-        Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Net.Http.HttpMessageInvoker.Send", StringComparison.Ordinal));
+        Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.Net.Http.HttpClient.Send", StringComparison.Ordinal)
+            && violation.Contains("VirusTotalClient.Lookup", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
             && violation.Contains("VirusTotalQuotaLimiter.Save", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.IO.Pipes.NamedPipeClientStream", StringComparison.Ordinal)
@@ -341,10 +342,26 @@ public sealed class McpSideEffectBoundaryTests
     {
         var cli = McpRoots.WinSightAssemblies.Value.Single(assembly => assembly.GetName().Name == "winsight");
 
-        var violations = Violations(StrictWalk([cli.EntryPoint!]));
-
-        Assert.Contains(violations, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
-            && violation.Contains("WinSight.Response.RuleStore", StringComparison.Ordinal));
+        var cliGraph = StrictWalk([cli.EntryPoint!]);
+        Assert.Empty(cliGraph.Unresolved);
+        Assert.Contains(Violations(cliGraph), violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
+        // The CLI must reach a real RuleStore mutator before its rooted subwalk is inspected.
+        // The shared gateway's single predecessor need not happen to belong to RuleStore.
+        var ruleMutators = cliGraph.Reached.Where(method => method.DeclaringType == typeof(WinSight.Response.RuleStore)
+            && method.Name is nameof(WinSight.Response.RuleStore.Add) or nameof(WinSight.Response.RuleStore.Remove)
+                or nameof(WinSight.Response.RuleStore.RemoveWithOutcome)).ToArray();
+        Assert.NotEmpty(ruleMutators);
+        foreach (var mutator in ruleMutators)
+        {
+            var ruleGraph = StrictWalk([mutator]);
+            Assert.Empty(ruleGraph.Unresolved);
+            Assert.Contains(Violations(ruleGraph), violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
+        }
+        // An unrelated file-write root cannot satisfy the CLI-to-RuleStore part of the property.
+        var unrelated = StrictWalk([typeof(Canaries).GetMethod(nameof(Canaries.WritesAFile))!]);
+        Assert.Empty(unrelated.Unresolved);
+        Assert.NotEmpty(Violations(unrelated));
+        Assert.DoesNotContain(unrelated.Reached, method => method.DeclaringType == typeof(WinSight.Response.RuleStore));
     }
 
     /// <summary>

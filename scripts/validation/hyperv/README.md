@@ -4,9 +4,12 @@ The host side of WinSight's disposable-VM qualification (`docs/validation/VM_QUA
 kept in the repository so that what runs elevated on the host, and what runs in the guest, is
 reviewed like any other code and can be bound to a commit.
 
-It installs nothing on the host beyond two Hyper-V VMs and a private switch, never authenticates to a
-guest, and never touches the development workstation's own WinSight, WFP or services: every
-privileged step happens inside a VM that is restored to a clean checkpoint afterwards.
+The host installs the protected qualification harness and manages two disposable Hyper-V VMs,
+their transport disks and a private switch. Product enforcement tests run inside the guests;
+the harness does not manipulate the development workstation's WinSight, WFP or product services.
+The network gate authenticates from the control guest to the target guest's private HTTPS WinRM
+endpoint using a disposable non-administrator account. Privileged host staging, collection and
+checkpoint recovery require the independently authenticated owner-installed harness.
 
 ## Trust boundary (RA-01)
 
@@ -72,7 +75,7 @@ acceptance gates; implementing this path does not retroactively authenticate old
 
    ```powershell
    Install-WinSightTrustedHarness `
-       -LauncherUri 'https://github.com/ClementG91/winsight/releases/download/v0.14.1/winsight-v0.14.1-qualification.ps1' `
+       -LauncherUri 'https://github.com/ClementG91/winsight/releases/download/v<version>/winsight-v<version>-qualification.ps1' `
        -ExpectedSha256 '<digest from the independently verified attestation>' `
        -Destination 'D:\WinSight-TrustedHarness-<commit>'
    ```
@@ -96,18 +99,28 @@ acceptance gates; implementing this path does not retroactively authenticate old
 1. After authentication and installation above, start the protected runner in the operator console:
    `& '<protected-installation>\WinSightQualRunner.ps1' -Root '<vol>\WinSight-Qualification' -Requests '<vol>\WinSight-Qualification-Requests' -VmRoot '<vol>\Hyper-V\WinSight-Qualification'`.
    It refuses a writable installation, missing bootstrap receipt, changed bytes, or unsafe VM storage.
-2. Build the candidate unelevated from a clean checkout of the commit (a worktree on a drive with
-   room: `Build-Release.ps1 -Version <v> -Architectures x64 -DisableSignature`), then assemble it with
+2. For final PR qualification, obtain the exact successful CI x64 artifact and verify its run/head,
+   packaging checkout tree and artifact digest. Put its unchanged setup/ZIP/SBOM in `out/release`
+   under a clean checkout of that source revision, then assemble unelevated with
    `New-QualificationCandidate.ps1 -BuildTree <checkout> -Name <name> -PreviousInstaller <published setup>
    -PreviousSha256 <its published hash> -PreviousCommit <its commit>`: the artifacts, the repository's
    `scripts` at that commit, the published installer the upgrade gate starts from, and
    `candidate.json` binding them by SHA-256, in `<vol>\WinSight-Qualification-Requests\candidates\<name>`.
 3. Queue requests as JSON files with unique names in `<vol>\WinSight-Qualification-Requests`:
    `{"action":"stage","candidate":"<name>"}`, then `{"action":"qualify","runName":"...","gates":[...],"memoryGB":4}`,
-   `{"action":"network","runName":"...","memoryGB":3}` for gate 36 (the operator types the disposable
-   password in each VM; the control VM runs with 2 GB, and the run is refused up front if the host
+   `{"action":"network","runName":"...","memoryGB":3,"credentialMode":"automatic"}` for gate 36
+   with a freshly generated disposable password staged on both protected offline guest volumes.
+   No password belongs in the request. The fixed account is not an administrator; the colocated AES
+   key/cipher rely on the Administrators/System-only volume DACL, not secrecy from administrators.
+   Each guest consumes/removes its fixture and host recovery attempts cleanup on both disks and
+   both checkpoints. Omitting `credentialMode`, or selecting `"interactive"`, retains the operator
+   dialog in each VM. Other values are rejected. Use the newly authenticated 14-file installation;
+   the older 13-file harness does not implement automatic mode.
+   The control VM runs with 2 GB, and the run is refused up front if the host
    cannot hold both VMs plus 0.5 GB), `{"action":"stop"}` at the end. Progress: `<vol>\WinSight-Qualification\runner\status.json` and
-   `runner.log` beside it; reading or following them while the runner works is safe (WS-83).
+   `runner.log` beside it. Use short snapshot reads; do not follow logs or block on the driver.
+   Parent runner heartbeat and actual child PID/phase/UTC heartbeat are separate; stale child data
+   does not prove progress or authorize extending a watchdog.
 4. Verify each run as an ordinary user, from the protected installation, before citing it:
    `& '<protected-installation>\Verify-QualificationProvenance.ps1' -RunDir '<vol>\WinSight-Qualification\sealed\<run>' -HarnessCommit <sha> -LauncherSha256 <independently-trusted-digest> -Repository <reviewed-checkout> -Root '<vol>\WinSight-Qualification' -VmRoot '<vol>\Hyper-V\WinSight-Qualification'`.
    Every check must print PASS: the seal, the harness blob ids against the reviewed commit, the
@@ -119,6 +132,22 @@ acceptance gates; implementing this path does not retroactively authenticate old
 Use fresh `-NoProfile` system Windows PowerShell 5.1 processes for the runner, other host scripts
 and verifier. Their module search path is restricted to OS modules before any imports; a session
 that already loaded untrusted functions or modules is not a trusted execution environment.
+
+## Interrupted network campaigns
+
+Transient observation failures preserve a possibly live campaign for the logged `-Resume` command.
+Resume verifies immutable candidate/harness/bootstrap/run receipts and reloads the original credential
+mode. Forced-timeout receipts remain failures after Resume. Collection attempts both guest sides
+before automatic-only fixture cleanup through mounts actually acquired; successful sealing precedes
+checkpoint restoration. Partial or divergent destination files are preserved and refused, not overwritten.
+For exceptional isolated collection into a fresh protected evidence directory, use the
+[owner recovery procedure](../../../docs/validation/2026-10-04-readiness-operator.md#resume-after-an-interrupted-or-partial-network-collection).
+Do not restore checkpoints, restage disks or omit timeout receipts while evidence is pending.
+
+Any harness change needs a newly generated, independently authenticated launcher and the owner's
+elevated installation before stage/qualification, including automatic gate 36. Old runs qualify only
+their exact artifacts. Tray gate evidence identifies the actual exit route; forced cleanup does not
+prove graceful shutdown. Native self-tests/mock-boundary tests do not establish live Hyper-V results.
 
 ## Files
 

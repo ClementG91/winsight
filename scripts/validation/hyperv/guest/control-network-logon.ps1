@@ -1,8 +1,9 @@
 # CONTROL VM (WinSight-Control-HV), elevated, started by run-guest-checks.ps1 in mode 'control'.
 # Kit section 7, "Network Logon", second machine: logs on to the target over WinRM HTTPS with the
-# disposable standard account and runs Test-IpcBoundary.ps1 -NetworkLogon there. The operator types
+# disposable standard account and runs Test-IpcBoundary.ps1 -NetworkLogon there. By default the operator types
 # the disposable password in the Windows credential dialog; it never leaves this VM except inside
-# the TLS-protected WinRM logon. Evidence goes to control-results on this VM's data disk, and the
+# the TLS-protected WinRM logon. Automatic mode consumes the protected offline test fixture instead.
+# Evidence goes to control-results on this VM's data disk, and the
 # probe's output is also handed back to the target over the private switch.
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -11,11 +12,12 @@ New-Item -ItemType Directory -Force $evidence | Out-Null
 Start-Transcript -Path (Join-Path $evidence 'transcript.txt') -Force | Out-Null
 $net = Get-Content -LiteralPath (Join-Path $root 'network.json') -Raw | ConvertFrom-Json
 $base = "http://$($net.targetAddress):$($net.httpPort)"
-$result = [ordered]@{ startedUtc = [DateTime]::UtcNow.ToString('O'); computer = $env:COMPUTERNAME; status = 'NOT_RUN'; detail = '' }
+$result = [ordered]@{ startedUtc = [DateTime]::UtcNow.ToString('O'); computer = $env:COMPUTERNAME; qualificationRunId = [string]$net.qualificationRunId; status = 'NOT_RUN'; detail = '' }
 $imported = $null
 $clientBasicPath = 'WSMan:\localhost\Client\Auth\Basic'
 $previousClientBasic = $null
 $winRm = $null
+$credential = $null
 try {
     # The private address, on the adapter the host created with a known MAC. This VM has no other.
     $mac = ($net.controlMac -replace '[-:]', '').ToUpperInvariant()
@@ -51,7 +53,14 @@ try {
     $previousClientBasic = [bool](Get-Item -LiteralPath $clientBasicPath).Value
     Set-Item -LiteralPath $clientBasicPath -Value $true -Force
 
-    $credential = Get-Credential -UserName 'WinSightNetworkProbe' -Message 'WinSight gate 36 (CONTROL): type the same disposable password you chose on the target VM.'
+    if ($net.PSObject.Properties['credentialMode']) {
+        if ($net.credentialMode -cne 'automatic') { throw 'Invalid network credential mode.' }
+        Import-Module (Join-Path $root 'NetworkProbeCredential.psm1') -Force -ErrorAction Stop
+        $credential = Receive-NetworkProbeCredential -Path (Join-Path $root 'network-credential.json')
+    }
+    else {
+        $credential = Get-Credential -UserName 'WinSightNetworkProbe' -Message 'WinSight gate 36 (CONTROL): type the same disposable password you chose on the target VM.'
+    }
     if ($null -eq $credential) { throw 'NOT_RUN: no password was provided on the control VM.' }
     $networkResult = Invoke-Command -ComputerName $net.targetAddress -Credential $credential -UseSSL -Authentication Basic -ScriptBlock {
         param($RemotePackageRoot)
@@ -76,6 +85,7 @@ catch {
     $result.detail
 }
 finally {
+    if ($credential) { $credential.Password.Dispose(); $credential = $null }
     # Always report, so the target stops waiting and runs its observer and cleanup.
     try { Invoke-WebRequest -Uri "$base/done" -Method Post -UseBasicParsing -TimeoutSec 30 -ContentType 'text/plain; charset=utf-8' `
             -Body ([Text.Encoding]::UTF8.GetBytes([string]$result.detail)) | Out-Null } catch { "could not report to the target: $($_.Exception.Message)" }

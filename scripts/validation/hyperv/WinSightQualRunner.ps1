@@ -151,6 +151,12 @@ function Get-Arguments($Request) {
         $arguments += @($parameter, ([int64]$gb * 1GB))
     }
     if ($action -in 'collect', 'network-collect') { $arguments += '-Resume' }
+    $modeProperty = $Request.PSObject.Properties['credentialMode']
+    if ($modeProperty) {
+        if ($action -ne 'network' -or $modeProperty.Value -isnot [string] -or
+            $modeProperty.Value -cnotin 'automatic', 'interactive') { throw 'invalid credentialMode' }
+        if ($modeProperty.Value -ceq 'automatic') { $arguments += '-AutomaticCredential' }
+    }
     return , $arguments
 }
 
@@ -226,7 +232,7 @@ while ((Get-Date) -lt $deadline) {
     Add-SharedLine -Path $processedPath -Line $next.Name
     $id = ([IO.Path]::GetFileNameWithoutExtension($next.Name) -replace '[^A-Za-z0-9-]', '')
     if (-not $id) { $id = 'request' }
-    $entry = [ordered]@{ id = $id; action = $null; arguments = $null; exit = $null; startedUtc = [DateTime]::UtcNow.ToString('o'); finishedUtc = $null; log = $null; error = $null }
+    $entry = [ordered]@{ id = $id; action = $null; arguments = $null; exit = $null; startedUtc = [DateTime]::UtcNow.ToString('o'); finishedUtc = $null; log = $null; error = $null; driverPid = $null; driverHeartbeatUtc = $null; driverPhase = $null; driverHeartbeatAgeSeconds = $null; driverHeartbeatUnavailable = $true }
     try {
         $request = Read-Request $next
         if ($null -eq $request) { throw 'not a well-formed request' }
@@ -242,16 +248,33 @@ while ((Get-Date) -lt $deadline) {
         if ($entry.action -ne 'control') { $arguments += @('-CandidateDir', (Assert-Candidate), '-BootstrapReceipt', $bootstrapReceiptPath) }
         $arguments += @('-HarnessDir', $harness, '-EvidenceRoot', $sealed, '-Root', $VmRoot)
         $log = Join-Path $runnerDir "logs\$id-$stamp.log"
+        $driverHeartbeat = Join-Path $runnerDir "logs\$id-$stamp-heartbeat.json"
+        $arguments += @('-DriverHeartbeat', $driverHeartbeat)
         $entry.log = $log
         $status.current = $entry
         Save-Status
         Say "running $($entry.action) $($entry.arguments)"
-        $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $harness $scripts[$entry.action])`"") +
+        $argumentList = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', "`"$(Join-Path $harness $scripts[$entry.action])`"") +
             ($arguments | ForEach-Object { if ("$_" -match '\s') { "`"$_`"" } else { "$_" } })
         $process = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $argumentList `
-            -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Minimized -PassThru
+            -RedirectStandardOutput $log -RedirectStandardError "$log.err" -WindowStyle Hidden -PassThru
         $null = $process.Handle
-        while (-not $process.WaitForExit(30000)) { Save-Status }
+        $entry.driverPid = $process.Id
+        $staleReported = $false
+        do {
+            $exited = $process.WaitForExit(30000)
+            $beat = Read-WinSightDriverHeartbeat -Path $driverHeartbeat -ExpectedProcessId $process.Id
+            $entry.driverHeartbeatUnavailable = $null -eq $beat
+            $entry.driverHeartbeatUtc = if ($beat) { $beat.heartbeatUtc } else { $null }
+            $entry.driverPhase = if ($beat) { $beat.phase } else { $null }
+            $entry.driverHeartbeatAgeSeconds = if ($beat) { $beat.ageSeconds } else { $null }
+            $age = if ($beat) { $beat.ageSeconds } else { ([DateTime]::UtcNow - [DateTime]::Parse($entry.startedUtc)).TotalSeconds }
+            if (-not $exited -and $age -gt 120 -and -not $staleReported) {
+                Say "driver $($process.Id) has no recent child heartbeat; inspect phase/status and its log (campaign is preserved)"
+                $staleReported = $true
+            }
+            Save-Status
+        } while (-not $exited)
         $entry.exit = $process.ExitCode
         Say "$($entry.action) finished with exit $($entry.exit)"
     }

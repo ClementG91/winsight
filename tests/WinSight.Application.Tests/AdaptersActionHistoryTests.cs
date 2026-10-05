@@ -31,6 +31,26 @@ public sealed class AdaptersActionHistoryTests : IDisposable
     }
 
     [Fact]
+    public void AReadExposesUnreadabilityInsteadOfPretendingTheJournalIsEmpty()
+    {
+        File.WriteAllText(_journal, "history");
+        using var locked = new FileStream(_journal, FileMode.Open, FileAccess.Read, FileShare.None);
+        var report = Adapters.Actions(_journal, 200);
+        Assert.Equal(1, report.NotableCount);
+        Assert.Equal("actionJournalCoverage", Assert.Single(report.Items).Fields["kind"]);
+        Assert.Contains("unavailable", report.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MalformedHistoryIsReportedAsIncomplete()
+    {
+        File.WriteAllText(_journal, "{ not json\n");
+        var report = Adapters.Actions(_journal, 200);
+        Assert.Equal(1, report.NotableCount);
+        Assert.Contains("incomplete", report.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void ASucceededActionIsHistoryAndAFailedOneIsNotable()
     {
         var journal = new ActionJournal(_journal);

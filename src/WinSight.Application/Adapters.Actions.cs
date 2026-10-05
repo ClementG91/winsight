@@ -25,8 +25,56 @@ public static partial class Adapters
     /// </summary>
     internal static ToolReport Actions(string journalPath, int max)
     {
-        var entries = new ActionJournal(journalPath).Read(max);
+        var snapshot = new ActionJournal(journalPath).ReadWithCoverage(max);
+        var entries = snapshot.Entries;
         var b = new ToolReport.Builder("actions");
+        var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached
+            || snapshot.EvidencePreserved || snapshot.EvidenceRecoveryPending || snapshot.EvidenceCountersUnknown
+            || snapshot.DiscardedEvidenceBytes > 0 || snapshot.DiscardedMetadataBytes > 0
+            || snapshot.DiscardedEvidenceFiles > 0 || snapshot.DiscardedJournalPrefixBytes > 0 || snapshot.RecoveryRequired;
+        if (incomplete)
+        {
+            var accounting = $" Discarded journal-prefix bytes: {snapshot.DiscardedJournalPrefixBytes}; "
+                + $"evidence bytes/files: {snapshot.DiscardedEvidenceBytes}/{snapshot.DiscardedEvidenceFiles}; "
+                + $"metadata bytes: {snapshot.DiscardedMetadataBytes}; reason: {snapshot.EvidenceLossReason}; "
+                + $"pending prefix bytes: {snapshot.PendingPrefixDiscardBytes}; "
+                + $"pending evidence prefix bytes: {snapshot.PendingEvidencePrefixDiscardBytes}; "
+                + $"recovery pending: {(snapshot.EvidenceRecoveryPending ? "true" : "false")}; "
+                + $"unverified prefix/evidence bytes: {snapshot.UnverifiedPrefixDiscardBytes}/{snapshot.UnverifiedEvidenceBytes}; "
+                + $"prior accounting: {(snapshot.EvidenceCountersUnknown ? "unknown" : "known")}.";
+            b.Add(Severity.Notable, snapshot.RecoveryRequired ? "Action journal recovery required" : "Action journal coverage incomplete",
+                snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
+                    : (snapshot.RecoveryRequired
+                        ? snapshot.EvidenceUnavailable
+                            ? "Recovery evidence or metadata is unavailable; check local-file access and disk space, then retry."
+                            : snapshot.EvidenceOverBudget
+                                ? "Recovery evidence exceeds 16 MiB; the next response write requires automatic bounded migration."
+                                : "History exceeds 16 MiB; the next response write requires automatic bounded migration."
+                        : "History contains malformed records, reached a read limit, or has recovery evidence.") + accounting,
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "actionJournalCoverage",
+                    ["unreadable"] = snapshot.Unreadable ? "true" : "false",
+                    ["malformedEntries"] = snapshot.MalformedEntries.ToString(CultureInfo.InvariantCulture),
+                    ["limitReached"] = snapshot.LimitReached ? "true" : "false",
+                    ["evidencePreserved"] = snapshot.EvidencePreserved ? "true" : "false",
+                    ["evidenceRecoveryPending"] = snapshot.EvidenceRecoveryPending ? "true" : "false",
+                    ["discardedEvidenceBytes"] = snapshot.DiscardedEvidenceBytes.ToString(CultureInfo.InvariantCulture),
+                    ["discardedEvidenceFiles"] = snapshot.DiscardedEvidenceFiles.ToString(CultureInfo.InvariantCulture),
+                    ["evidenceLossReason"] = snapshot.EvidenceLossReason,
+                    ["evidenceCountersUnknown"] = snapshot.EvidenceCountersUnknown ? "true" : "false",
+                    ["discardedMetadataBytes"] = snapshot.DiscardedMetadataBytes.ToString(CultureInfo.InvariantCulture),
+                    ["discardedMetadataTailSha256"] = snapshot.DiscardedMetadataTailSha256,
+                    ["discardedJournalPrefixBytes"] = snapshot.DiscardedJournalPrefixBytes.ToString(CultureInfo.InvariantCulture),
+                    ["pendingPrefixDiscardBytes"] = snapshot.PendingPrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["pendingEvidencePrefixDiscardBytes"] = snapshot.PendingEvidencePrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["evidenceUnavailable"] = snapshot.EvidenceUnavailable ? "true" : "false",
+                    ["evidenceOverBudget"] = snapshot.EvidenceOverBudget ? "true" : "false",
+                    ["unverifiedPrefixDiscardBytes"] = snapshot.UnverifiedPrefixDiscardBytes.ToString(CultureInfo.InvariantCulture),
+                    ["unverifiedEvidenceBytes"] = snapshot.UnverifiedEvidenceBytes.ToString(CultureInfo.InvariantCulture),
+                    ["recoveryRequired"] = snapshot.RecoveryRequired ? "true" : "false",
+                });
+        }
         foreach (var entry in entries)
         {
             var undone = entry.UndoneByActionId is not null;
@@ -49,7 +97,10 @@ public static partial class Adapters
                     ["undoneBy"] = entry.UndoneByActionId?.ToString(),
                 });
         }
-        return b.Build(entries.Count == 0
+        return b.Build(snapshot.Unreadable ? "response action history unavailable"
+            : snapshot.RecoveryRequired ? $"{entries.Count} recorded response action(s); recovery required"
+            : incomplete ? $"{entries.Count} recorded response action(s); history incomplete"
+            : entries.Count == 0
             ? "no response actions recorded"
             : $"{entries.Count} recorded response action(s), newest first");
     }

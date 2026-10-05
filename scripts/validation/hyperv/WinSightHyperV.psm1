@@ -301,16 +301,26 @@ function Get-FileManifest([Parameter(Mandatory)][string]$Root) {
 
 # Mounts the WINSIGHTQ data disk on the host and returns its drive letter.
 function Mount-WinSightData([Parameter(Mandatory)][string]$Path) {
-    $disk = Mount-VHD -Path $Path -Passthru | Get-Disk
+    $mounted = $false
+    try {
+    $vhd = Mount-VHD -Path $Path -Passthru
+    $mounted = $true
+    $disk = $vhd | Get-Disk
     $partition = Get-Partition -DiskNumber $disk.Number | Where-Object Type -eq 'Basic' | Select-Object -First 1
-    if (-not $partition) { Dismount-VHD -Path $Path; throw "No data partition on $Path." }
+    if (-not $partition) { throw 'No data partition on the qualification disk.' }
     if (-not $partition.DriveLetter) {
         $partition | Add-PartitionAccessPath -AssignDriveLetter
         $partition = Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber
     }
     $volume = Get-Volume -Partition $partition
-    if ($volume.FileSystemLabel -ne 'WINSIGHTQ') { Dismount-VHD -Path $Path; throw "Unexpected volume label '$($volume.FileSystemLabel)' on $Path." }
+    if ($volume.FileSystemLabel -ne 'WINSIGHTQ') { throw 'Unexpected qualification data volume label.' }
     return [string]$partition.DriveLetter
+    }
+    catch {
+        $failure = $_
+        if ($mounted) { try { Dismount-VHD -Path $Path } catch { [Console]::Error.WriteLine('Partial data-disk mount cleanup failed; original error retained.') } }
+        throw $failure
+    }
 }
 
 function Dismount-WinSightData([Parameter(Mandatory)][string]$Path) {
@@ -330,7 +340,7 @@ function Clear-WinSightDataVolume([Parameter(Mandatory)][string]$Letter) {
 # only, never through a reparse point, within a bound. What is refused is listed, not followed.
 function Copy-GuestResults {
     param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To,
-        [int]$MaximumFiles = 20000, [int64]$MaximumBytes = 4GB)
+        [int]$MaximumFiles = 20000, [int64]$MaximumBytes = 4GB, [switch]$Resume)
     $refused = New-Object System.Collections.Generic.List[string]
     if (-not (Test-Path -LiteralPath $From)) { return @() }
     if ([IO.File]::GetAttributes($From) -band [IO.FileAttributes]::ReparsePoint) { return @("$From (reparse point)") }
@@ -346,16 +356,47 @@ function Copy-GuestResults {
             if ($attributes -band [IO.FileAttributes]::ReparsePoint) { $refused.Add("$relative (reparse point)"); continue }
             $destination = Join-Path $To $relative
             if ($attributes -band [IO.FileAttributes]::Directory) {
-                [void](New-Item -ItemType Directory -Path $destination)
+                if ($Resume -and (Test-Path -LiteralPath $destination)) {
+                    $existing = [IO.File]::GetAttributes($destination)
+                    if (-not ($existing -band [IO.FileAttributes]::Directory) -or ($existing -band [IO.FileAttributes]::ReparsePoint)) { throw 'Existing collection directory is not an ordinary directory.' }
+                }
+                else { [void](New-Item -ItemType Directory -Path $destination) }
                 $pending.Push($entry)
                 continue
             }
             $length = (New-Object IO.FileInfo $entry).Length
             if (++$files -gt $MaximumFiles -or ($bytes += $length) -gt $MaximumBytes) { $refused.Add("$relative (over the collection bound)"); continue }
-            [IO.File]::Copy($entry, $destination, $false)
+            if ($Resume -and (Test-Path -LiteralPath $destination)) {
+                $existing = [IO.File]::GetAttributes($destination)
+                if ($existing -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) { throw 'Existing collection file is not an ordinary file.' }
+                $sourceHash = Get-SharedFileHash -Path $entry
+                $destinationHash = Get-SharedFileHash -Path $destination
+                if ((New-Object IO.FileInfo $destination).Length -ne $length -or -not $sourceHash -or -not $destinationHash -or $sourceHash -cne $destinationHash) { throw 'Existing collection evidence differs; preserve it and use an isolated collection attempt.' }
+            }
+            else { [IO.File]::Copy($entry, $destination, $false) }
         }
     }
     return $refused.ToArray()
+}
+
+function Write-WinSightDriverHeartbeat([AllowEmptyString()][string]$Path, [ValidateSet('initializing','staging','starting','observing','waiting','collecting','restoring','finished')][string]$Phase) {
+    if (-not $Path) { return }
+    try { Write-SharedText -Path $Path -Text ([ordered]@{ processId = $PID; heartbeatUtc = [DateTime]::UtcNow.ToString('o'); phase = $Phase } | ConvertTo-Json -Compress) }
+    catch { [Console]::Error.WriteLine('Driver heartbeat unavailable; recovery continues and runner status reports missing or stale child progress.') }
+}
+
+function Read-WinSightDriverHeartbeat([string]$Path, [int]$ExpectedProcessId) {
+    try {
+        $file = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if ($file.Length -gt 4096 -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $null }
+        $value = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json
+        if ($value.processId -ne $ExpectedProcessId -or $value.phase -notin 'initializing','staging','starting','observing','waiting','collecting','restoring','finished') { return $null }
+        $utc = [DateTime]::Parse($value.heartbeatUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::RoundtripKind).ToUniversalTime()
+        $seconds = ([DateTime]::UtcNow - $utc).TotalSeconds
+        if ($seconds -lt -30) { return $null }
+        return [pscustomobject]@{ processId = $value.processId; heartbeatUtc = $utc.ToString('o'); phase = $value.phase; ageSeconds = [math]::Max(0, [math]::Round($seconds, 1)) }
+    }
+    catch { return $null }
 }
 
 function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
@@ -443,4 +484,4 @@ function Assert-WinSightHostMemory([int64]$Bytes, [string]$Advice) {
 Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
     Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine,
-    Invoke-WinSightVmRetry
+    Invoke-WinSightVmRetry, Write-WinSightDriverHeartbeat, Read-WinSightDriverHeartbeat

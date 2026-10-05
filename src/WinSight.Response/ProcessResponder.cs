@@ -79,13 +79,14 @@ public sealed class ProcessResponder
         ArgumentNullException.ThrowIfNull(captured);
         var actionId = Guid.NewGuid();
         var preparedAt = _clock();
-        if (!_journal.TryAppend(new ActionJournalEntry(
+        var prepared = _journal.TryAppendWithStatus(new ActionJournalEntry(
                 actionId, kind, ResponseOutcome.AuditPrepared, target, preparedAt,
-                Reversible: false, Phase: ActionJournalPhase.Prepared)))
+                Reversible: false, Phase: ActionJournalPhase.Prepared));
+        if (!prepared.Durable)
         {
             return new ResponseResult(actionId, kind, ResponseOutcome.Failed, target, preparedAt,
                 Reversible: false,
-                Detail: "action was not attempted because its audit intent could not be written");
+                Detail: "action was not attempted because its audit intent could not be written; " + prepared.Detail);
         }
         var outcome = Evaluate(captured, operation);
         var result = new ResponseResult(actionId, kind, outcome, target, _clock(),
@@ -93,8 +94,9 @@ public sealed class ProcessResponder
             Detail: outcome == ResponseOutcome.PartiallyApplied
                 ? "suspension rollback was incomplete; one or more threads may still be suspended"
                 : null);
-        if (_journal.TryAppend(new ActionJournalEntry(
-                actionId, kind, outcome, target, result.AtUtc, result.Reversible)))
+        var completion = _journal.TryAppendWithStatus(new ActionJournalEntry(
+                actionId, kind, outcome, target, result.AtUtc, result.Reversible));
+        if (completion.Durable)
         {
             return result;
         }
@@ -105,7 +107,7 @@ public sealed class ProcessResponder
             Detail = AppendDetail(result.Detail,
                 applied
                     ? "the action may have changed the target, but its completion could not be journalled"
-                    : "the refusal/failure completion could not be journalled"),
+                    : "the refusal/failure completion could not be journalled") + "; " + completion.Detail,
         };
     }
 
