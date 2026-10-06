@@ -178,9 +178,11 @@ public sealed class ActionJournalRecoveryRegressionTests : IDisposable
     }
 
     [Fact]
-    public void MutexIsSharedAcrossWindowsSessionsForTheSamePath()
+    public void LockPathIsSharedAcrossWindowsSessionsForTheSameState()
     {
-        Assert.StartsWith(@"Global\", ActionJournal.LockNameFor(PathName), StringComparison.Ordinal);
+        var method = typeof(ActionJournal).GetMethod("LockPathFor", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Assert.NotNull(method);
+        Assert.Equal(Path.GetFullPath(PathName) + ".lock", method.Invoke(null, [PathName]));
     }
 
     [Fact]

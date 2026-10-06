@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 using WinSight.Core;
@@ -9,7 +7,7 @@ namespace WinSight.Response;
 /// <summary>
 /// The per-user store of operator decisions (allow/ignore/block) for Guardian, ransomware and
 /// camera/microphone. One versioned JSON file, written atomically and serialized across threads and
-/// processes by a named mutex, exactly like the decoy manifest.
+/// processes and Windows sessions by a persistent per-user exclusive file lock.
 /// </summary>
 /// <remarks>
 /// Network policy is not kept here: machine-wide firewall rules live in the service-owned,
@@ -103,7 +101,7 @@ public sealed class RuleStore
         }
         try
         {
-            using var gate = StoreLock.Acquire(_path, _lockWait);
+            using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!TryLoadLocked(out var loaded, out result))
             {
                 return null;
@@ -118,6 +116,11 @@ public sealed class RuleStore
             rules.Add(rule);
             result = Save(rules, result.IgnoredEntries);
             return result.Durable ? rule : null;
+        }
+        catch (ResponseFileLockException ex)
+        {
+            result = new(LockFailure(ex.Status));
+            return null;
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
@@ -140,7 +143,7 @@ public sealed class RuleStore
     {
         try
         {
-            using var gate = StoreLock.Acquire(_path, _lockWait);
+            using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!TryLoadLocked(out var loaded, out result))
             {
                 return ResponseOutcome.Failed;
@@ -153,6 +156,11 @@ public sealed class RuleStore
             }
             result = Save(rules, result.IgnoredEntries);
             return result.Durable ? ResponseOutcome.Succeeded : ResponseOutcome.Failed;
+        }
+        catch (ResponseFileLockException ex)
+        {
+            result = new(LockFailure(ex.Status));
+            return ResponseOutcome.Failed;
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
@@ -170,8 +178,19 @@ public sealed class RuleStore
     {
         try
         {
-            using var gate = StoreLock.Acquire(_path, _lockWait);
-            return TryLoadLocked(out var rules, out result) ? rules : [];
+            using var gate = ResponseFileLock.AcquireReader(_path, _lockWait);
+            var loaded = TryLoadLocked(out var rules, out result);
+            if (!gate.IsCurrent)
+            {
+                result = new(RuleStoreStatus.LockUnavailable);
+                return [];
+            }
+            return loaded ? rules : [];
+        }
+        catch (ResponseFileLockException ex)
+        {
+            result = new(LockFailure(ex.Status));
+            return [];
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
@@ -301,44 +320,12 @@ public sealed class RuleStore
             : AtomicFile.TryWrite(_path, json) ? RuleStoreStatus.Written : RuleStoreStatus.WriteFailed, ignored);
     }
 
-    /// <summary>Serializes read-modify-write of one rule file across threads and processes.</summary>
-    private sealed class StoreLock : IDisposable
+    internal static string LockPathFor(string path) => ResponseFileLock.PathFor(path);
+
+    private static RuleStoreStatus LockFailure(LocalFileLockStatus status) => status switch
     {
-        private readonly Mutex _mutex;
-
-        private StoreLock(Mutex mutex) => _mutex = mutex;
-
-        public static StoreLock Acquire(string path, TimeSpan wait)
-        {
-            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
-            bool held;
-            try
-            {
-                held = mutex.WaitOne(wait);
-            }
-            catch (AbandonedMutexException)
-            {
-                held = true; // the previous holder died; the atomic write kept the file whole
-            }
-            if (!held)
-            {
-                mutex.Dispose();
-                throw new IOException("Timed out waiting for the response-rule store lock.");
-            }
-            return new StoreLock(mutex);
-        }
-
-        public void Dispose()
-        {
-            _mutex.ReleaseMutex();
-            _mutex.Dispose();
-        }
-    }
-
-    internal static string LockNameFor(string path)
-    {
-        var key = Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
-        return $@"Global\WinSight.ResponseRules.{key}";
-    }
+        LocalFileLockStatus.Busy => RuleStoreStatus.LockTimeout,
+        LocalFileLockStatus.UnsafePath => RuleStoreStatus.UnsafeLockPath,
+        _ => RuleStoreStatus.LockUnavailable,
+    };
 }

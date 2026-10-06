@@ -84,7 +84,7 @@ public sealed class ActionJournalRetentionSupplementTests : IDisposable
     }
 
     [Fact]
-    public async Task ASeparateProcessHoldingTheMutexCausesObservableTimeoutAndThenRecovery()
+    public async Task ASeparateProcessHoldingTheSidecarCausesObservableTimeoutAndThenRecovery()
     {
         var start = new ProcessStartInfo("powershell.exe")
         {
@@ -97,16 +97,16 @@ public sealed class ActionJournalRetentionSupplementTests : IDisposable
         start.ArgumentList.Add("-NoProfile");
         start.ArgumentList.Add("-NonInteractive");
         start.ArgumentList.Add("-Command");
-        start.ArgumentList.Add("$m = [Threading.Mutex]::new($false, $env:WINSIGHT_ACTION_LOCK); "
-            + "if (-not $m.WaitOne(5000)) { exit 2 }; try { [Console]::WriteLine('ready'); "
-            + "[Console]::ReadLine() | Out-Null } finally { $m.ReleaseMutex(); $m.Dispose() }");
-        start.Environment["WINSIGHT_ACTION_LOCK"] = ActionJournal.LockNameFor(PathName);
+        start.ArgumentList.Add("$m = [IO.File]::Open($env:WINSIGHT_ACTION_LOCK, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::Read, [IO.FileShare]::None); "
+            + "try { [Console]::WriteLine('ready'); "
+            + "[void][Console]::ReadLine() } finally { $m.Dispose() }");
+        start.Environment["WINSIGHT_ACTION_LOCK"] = Path.GetFullPath(PathName) + ".lock";
         using var holder = Process.Start(start)!;
         try
         {
             Assert.Equal("ready", await holder.StandardOutput.ReadLineAsync().WaitAsync(TimeSpan.FromSeconds(15)));
             var journal = new ActionJournal(PathName, TimeSpan.FromMilliseconds(50));
-            Assert.Equal(ActionJournalWriteStatus.Unavailable, journal.TryAppendWithStatus(Entry()).Status);
+            Assert.Equal("LockTimeout", journal.TryAppendWithStatus(Entry()).Status.ToString());
             Assert.False(File.Exists(PathName));
             await holder.StandardInput.WriteLineAsync("release");
             await holder.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(15));

@@ -193,14 +193,10 @@ public sealed class RuleStoreTests : IDisposable
         {
             try
             {
-                using var mutex = new Mutex(false, RuleStore.LockNameFor(path));
-                if (!mutex.WaitOne(TimeSpan.FromSeconds(5)))
-                {
-                    throw new TimeoutException("Test holder could not acquire the rule-store mutex.");
-                }
+                using var gate = new FileStream(Path.GetFullPath(path) + ".lock", FileMode.OpenOrCreate,
+                    FileAccess.Read, FileShare.None);
                 lockHeld.Set();
                 releaseLock.Wait(CancellationToken.None);
-                mutex.ReleaseMutex();
             }
             catch (Exception ex)
             {

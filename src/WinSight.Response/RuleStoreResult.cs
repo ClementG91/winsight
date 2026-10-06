@@ -7,6 +7,7 @@ public enum RuleStoreStatus
 {
     Loaded, Missing, Written, TargetNotFound, InvalidRule, InvalidJson, InvalidFormat,
     UnsupportedVersion, ByteLimit, RuleLimit, Unavailable, WriteFailed,
+    LockTimeout, UnsafeLockPath, LockUnavailable,
 }
 
 public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries = 0)
@@ -16,6 +17,9 @@ public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries 
 
     public string Detail => $"rule storage status: {Status}; " + (Status switch
     {
+        RuleStoreStatus.LockTimeout => "the rule .lock is held by another operation; retry after it exits (30-second lock budget)",
+        RuleStoreStatus.UnsafeLockPath => "the rule .lock path or parent is not an accessible ordinary local file/directory; inspect reparses and directory entries using RECOVERY.md",
+        RuleStoreStatus.LockUnavailable => "the rule .lock could not be opened; check permissions or concurrent initialization and retry; never delete a live lock",
         RuleStoreStatus.InvalidJson or RuleStoreStatus.InvalidFormat => "the rule file is malformed and was preserved; inspect winsight rules and RECOVERY.md",
         RuleStoreStatus.UnsupportedVersion => "the rule-file version is unsupported and was preserved; use the compatible version or recover a reviewed backup",
         RuleStoreStatus.ByteLimit => "the 8 MiB rule-file budget was exceeded; the existing file was preserved",

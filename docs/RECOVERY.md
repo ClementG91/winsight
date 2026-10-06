@@ -205,8 +205,15 @@ budget discards evidence, history names the reason and exposes counters or expli
 
 Do not delete `.corrupt*.jsonl`, `.evidence.json` or recovery staging files to retry a response. Preserve
 them together if storage is genuinely lost and a reviewed backup must be recovered. Stop all WinSight
-writers first, including older versions: current writers use a `Global` mutex, but old `Local`-mutex
-processes do not participate in that protocol. Same-session tests do not qualify cross-session or
+writers first, including older versions in every Windows session: current writers use persistent
+per-user adjacent `.lock` files; old `Local`/`Global` mutex writers do not participate in that protocol.
+Never remove or rename a live `.lock`: that can split serialization into two distinct files. Readers
+only open existing locks. A legacy lockless read retains a directory bootstrap gate and a DATA read
+lease through coverage; a first writer waits before initializing the sidecar. The gate is released
+before any mutation after sidecar acquisition. Bootstrap needs directory listing access and may
+wait on a competing directory DATA handle; close that operation and retry a `LockTimeout`. Established
+sidecars use no directory DATA gate. Every legacy snapshot still verifies sidecar absence at acceptance.
+Same-session tests do not qualify cross-session or
 cross-integrity behavior. See the [regression record](validation/2026-10-05-readiness-regressions.md).
 
 ## Response rules are malformed or unavailable
@@ -230,6 +237,9 @@ that could not be opened as an empty store. A readable valid store with no activ
 | `RuleLimit` | The unchanged raw 8,192-entry budget is exceeded. Revoke from a readable in-budget store or recover a reviewed backup. Replacing the same ID at capacity remains possible. |
 | `Unavailable` | Restore ordinary local-file availability, permissions, free space and sharing, then retry. A placeholder/reparse refusal is not a missing store. |
 | `WriteFailed` | Atomic replacement failed. Preserve the old file, resolve the transient cause and retry. Failed Revoke is never reported as successful removal. |
+| `LockTimeout` (journal or rules) | Another operation holds the persistent `.lock`. Wait for it to exit and retry. The existing 30-second budget is unchanged; the OS releases its handle after a crash. Never delete a live sidecar. |
+| `UnsafeLockPath` (journal or rules) | The sidecar or parent is a directory, reparse, non-local or inaccessible path. Stop all writers across sessions; inspect the exact adjacent `.lock` and its parent without following reparses. Preserve an unexpected entry separately before repairing the state directory and its per-user ACL. Never replace it while a writer may run. |
+| `LockUnavailable` (journal or rules) | Opening the sidecar failed, or a writer initialized it during a legacy read. Retry a transient read; otherwise inspect sidecar permissions and sharing as the affected user. A missing sidecar alone is permitted for read-only legacy inspection. |
 
 For a malformed or incompatible envelope, close every dashboard/CLI writer for this user and retain
 an exact private copy with its SHA-256 before changing the original. Prefer restoring a reviewed
@@ -269,3 +279,46 @@ Collect, and open an issue:
 If the problem is that WinSight **misreported its own state** - said filtered when it was not, or the
 reverse - report it privately as a security issue rather than a bug. For a security tool that is a
 vulnerability.
+
+## Response coordination after the second review
+
+N1 replaces the two PR-introduced `Global` mutex names with persistent adjacent `.lock` files.
+The supported default state directory is per-user LocalAppData. Custom state paths must have the
+same private access policy; a world-writable custom directory cannot isolate accounts. Native opens
+reject network paths and reparses, hold the parent and a DATA read handle with `FileShare.None`, and
+retry only sharing contention within the existing 30 seconds. Handles are crash-released; files are
+never deleted. Readers create nothing and share the existing sidecar. Before a first writer creates
+it, a legacy read holds an exclusive directory DATA gate and the data file against writes/deletes
+through coverage. A first writer waits for that reader within its lock budget before initializing the
+sidecar. Both open the sidecar relative to the acquired parent; the bootstrap gate is released before
+any maintenance or mutation once a sidecar exists. Normal operations do not acquire that directory
+DATA gate, so directory watchers cannot block established sidecar coordination. Bootstrap requires
+directory listing access and can time out on an existing directory DATA handle; initialize only
+after closing competing directory operations. These are typed lock refusals, never missing storage.
+
+A SID-bound private namespace was considered. It requires additional boundary/DACL, namespace
+handle-lifetime and cross-session interop to prove isolation. The file protocol reuses the existing
+native local-file safety layer and Windows sharing enforcement. Taking the legacy `Local` mutex too
+would reintroduce squatting; stop all older writers across sessions before upgrading instead.
+
+The permanent N1 regression asserts successful actions/rule publication while a child holds both
+former Global names with a restrictive DACL. It replaces the review probe's intentional defect
+assertions. The original probe directory remains untouched. Tests that asserted Global naming or
+held that mutex now assert/hold the sidecar, retaining their failure, timeout and recovery oracles.
+
+### Named kernel object inventory against main 531b302
+
+| Object | Introduced by this PR? | Remaining observation |
+|---|---|---|
+| ActionJournal / RuleStore Global mutexes | Yes; removed by N1 | Persistent per-user file coordination replaces them. |
+| PersistenceBaseline Local mutex | No | Same-session predictable name; no intersession serialization. |
+| VirusTotal quota Local mutex | No | Constructor outside catch may propagate a restrictive-name failure. |
+| CanaryManifest Local mutex | No | Same-session predictable name; no intersession serialization. |
+| CanarySession Local mutex plus GUID | No | Cross-session ownership observation may misclassify another session's live canaries. |
+| Dashboard Local mutex and activation event plus SID | No | Inaccessible-object fallback exists; a permissive pre-created mutex may imply a false secondary instance. |
+| Firewall pipe | No | Explicit DACL, network refusal, first-instance reservation and client SYSTEM-owner verification; prior squatting may deny startup but cannot authenticate a false SYSTEM peer. |
+
+These unchanged observations are residual risks from source review, not reproduced vulnerabilities
+or a claim of qualification. They require separate scoped work; changing all of them inside N1 would
+broaden authority and lifecycle behavior beyond the two PR-introduced response locks. A real
+same-user second-session run and cross-integrity qualification remain NOT_RUN until measured.

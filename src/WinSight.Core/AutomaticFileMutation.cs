@@ -276,7 +276,20 @@ public static partial class AutomaticFileAccess
         uint shareAccess,
         uint createDisposition,
         uint createOptions)
+        => TryOpenRelative(parent, relativeName, fullPath, desiredAccess, shareAccess,
+            createDisposition, createOptions, out _);
+
+    private static LocalPathLease? TryOpenRelative(
+        LocalPathLease parent,
+        string relativeName,
+        string fullPath,
+        uint desiredAccess,
+        uint shareAccess,
+        uint createDisposition,
+        uint createOptions,
+        out int error)
     {
+        error = 5;
         if (!parent.IsDirectory || !IsSafeRelativeName(relativeName))
         {
             return null;
@@ -322,15 +335,23 @@ public static partial class AutomaticFileAccess
                 0);
             if (status < 0 || handle.IsInvalid)
             {
+                error = unchecked((int)RtlNtStatusToDosError(status));
                 handle.Dispose();
                 return null;
             }
-            if (!GetFileInformationByHandle(handle, out var information)
-                || (information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+            if (!GetFileInformationByHandle(handle, out var information))
             {
+                error = Marshal.GetLastPInvokeError();
                 handle.Dispose();
                 return null;
             }
+            if ((information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+            {
+                error = 1920; // ERROR_CANT_ACCESS_FILE: never classify a reparse as ordinary absence.
+                handle.Dispose();
+                return null;
+            }
+            error = 0;
             var isDirectory = (information.FileAttributes & (uint)FileAttributes.Directory) != 0;
             var length = ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
             return new LocalPathLease(

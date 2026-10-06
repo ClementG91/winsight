@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 using WinSight.Core;
@@ -96,7 +94,7 @@ public sealed class ActionJournal : IActionJournal
         }
         try
         {
-            using var gate = JournalLock.Acquire(_path, _lockWait);
+            using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!ActionJournalEvidence.Maintain(_path))
             {
                 return new(ActionJournalWriteStatus.EvidencePreservationFailed);
@@ -125,6 +123,10 @@ public sealed class ActionJournal : IActionJournal
             return new(AutomaticFileAccess.TryAppendFile(_path, payload)
                 ? ActionJournalWriteStatus.Appended : ActionJournalWriteStatus.Unavailable);
         }
+        catch (ResponseFileLockException ex)
+        {
+            return new(LockFailure(ex.Status));
+        }
         catch (Exception ex) when (IsUnavailable(ex))
         {
             return new(ActionJournalWriteStatus.Unavailable);
@@ -147,7 +149,7 @@ public sealed class ActionJournal : IActionJournal
         }
         try
         {
-            using var gate = JournalLock.Acquire(_path, _lockWait);
+            using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!ActionJournalEvidence.Maintain(_path))
             {
                 return new(ActionJournalWriteStatus.EvidencePreservationFailed);
@@ -173,6 +175,10 @@ public sealed class ActionJournal : IActionJournal
             return ReplaceLocked(entries, ActionJournalReader.MaxBytes,
                 ActionJournalReader.MaxLines, ActionJournalWriteStatus.Updated, actionId);
         }
+        catch (ResponseFileLockException ex)
+        {
+            return new(LockFailure(ex.Status));
+        }
         catch (Exception ex) when (IsUnavailable(ex))
         {
             return new(ActionJournalWriteStatus.Unavailable);
@@ -187,8 +193,14 @@ public sealed class ActionJournal : IActionJournal
     {
         try
         {
-            using var gate = JournalLock.Acquire(_path, _lockWait);
-            return ActionJournalEvidence.Coverage(_path, ReadSnapshotLocked(max));
+            using var gate = ResponseFileLock.AcquireReader(_path, _lockWait);
+            var snapshot = ActionJournalEvidence.Coverage(_path, ReadSnapshotLocked(max));
+            return gate.IsCurrent ? snapshot : new ActionJournalSnapshot([], Unreadable: true,
+                LockFailure: ActionJournalWriteStatus.LockUnavailable);
+        }
+        catch (ResponseFileLockException ex)
+        {
+            return new ActionJournalSnapshot([], Unreadable: true, LockFailure: LockFailure(ex.Status));
         }
         catch (Exception ex) when (IsUnavailable(ex))
         {
@@ -222,51 +234,12 @@ public sealed class ActionJournal : IActionJournal
         or System.Security.SecurityException or ArgumentException or NotSupportedException
         or WaitHandleCannotBeOpenedException;
 
-    internal static string LockNameFor(string path)
+    internal static string LockPathFor(string path) => ResponseFileLock.PathFor(path);
+
+    private static ActionJournalWriteStatus LockFailure(LocalFileLockStatus status) => status switch
     {
-        var key = Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
-        return $@"Global\WinSight.ActionJournal.{key}";
-    }
-
-    private sealed class JournalLock : IDisposable
-    {
-        private readonly Mutex _mutex;
-        private readonly bool _held;
-
-        private JournalLock(Mutex mutex, bool held)
-        {
-            _mutex = mutex;
-            _held = held;
-        }
-
-        public static JournalLock Acquire(string path, TimeSpan wait)
-        {
-            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
-            bool held;
-            try
-            {
-                held = mutex.WaitOne(wait);
-            }
-            catch (AbandonedMutexException)
-            {
-                held = true;
-            }
-            if (!held)
-            {
-                mutex.Dispose();
-                throw new IOException("Timed out waiting for the action-journal lock.");
-            }
-            return new JournalLock(mutex, held);
-        }
-
-        public void Dispose()
-        {
-            if (_held)
-            {
-                _mutex.ReleaseMutex();
-            }
-            _mutex.Dispose();
-        }
-    }
+        LocalFileLockStatus.Busy => ActionJournalWriteStatus.LockTimeout,
+        LocalFileLockStatus.UnsafePath => ActionJournalWriteStatus.UnsafeLockPath,
+        _ => ActionJournalWriteStatus.LockUnavailable,
+    };
 }

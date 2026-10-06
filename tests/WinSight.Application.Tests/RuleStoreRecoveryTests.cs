@@ -307,10 +307,10 @@ public sealed class RuleStoreRecoveryTests : IDisposable
     }
 
     [Fact]
-    public void RuleWritersUseTheSameMutexAcrossCooperatingWindowsSessions()
+    public void RuleWritersUseTheSameSidecarAcrossCooperatingWindowsSessions()
     {
-        var method = typeof(RuleStore).GetMethod("LockNameFor", BindingFlags.Static | BindingFlags.NonPublic)!;
-        Assert.StartsWith(@"Global\", Assert.IsType<string>(method.Invoke(null, [PathName])), StringComparison.Ordinal);
+        var method = typeof(RuleStore).GetMethod("LockPathFor", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.Equal(Path.GetFullPath(PathName) + ".lock", Assert.IsType<string>(method.Invoke(null, [PathName])));
     }
 
     private void WriteRules(params ResponseRule?[] rules) => File.WriteAllText(PathName,

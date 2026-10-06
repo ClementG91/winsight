@@ -12,6 +12,7 @@ public enum ActionJournalWriteStatus
 {
     Appended, Rotated, Updated, TargetNotFound, Unavailable, InvalidRecord,
     RotationFailed, EvidencePreservationFailed, RecoveryRequired, RetentionLimit,
+    LockTimeout, UnsafeLockPath, LockUnavailable,
 }
 
 public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
@@ -21,6 +22,9 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
 
     public string Detail => $"audit storage status: {Status}; " + (Status switch
     {
+        ActionJournalWriteStatus.LockTimeout => "the journal sidecar is held by another operation; retry after it exits (30-second lock budget)",
+        ActionJournalWriteStatus.UnsafeLockPath => "the journal .lock path or parent is not an accessible ordinary local file/directory; inspect reparses and directory entries using RECOVERY.md",
+        ActionJournalWriteStatus.LockUnavailable => "the journal .lock could not be opened; check permissions or concurrent initialization and retry; never delete a live lock",
         ActionJournalWriteStatus.Unavailable => "check free disk space, local-file access and sharing; retry when available",
         ActionJournalWriteStatus.EvidencePreservationFailed => "recovery evidence could not be preserved; check disk space and access, then retry",
         ActionJournalWriteStatus.RotationFailed => "atomic journal replacement failed; close conflicting file handles and retry",
