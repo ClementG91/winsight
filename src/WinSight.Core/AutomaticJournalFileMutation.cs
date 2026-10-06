@@ -6,8 +6,9 @@ public static partial class AutomaticFileAccess
     /// Journal-only atomic replacement with one deterministic crash staging file per destination.
     /// Callers must hold the journal's cross-session file lock for this path and all its evidence paths.
     /// An existing staging path is preserved: its name alone is not proof that this operation owns it.
+    /// Set replaceExisting to false for the first publication after native confirmed absence.
     /// </summary>
-    public static bool TryWriteAtomicBounded(string path, ReadOnlySpan<byte> bytes)
+    public static bool TryWriteAtomicBounded(string path, ReadOnlySpan<byte> bytes, bool replaceExisting = true)
     {
         if (!TryPrepareTarget(path, true, out var fullPath, out var leaf, out var parent))
         {
@@ -21,7 +22,7 @@ public static partial class AutomaticFileAccess
                 return false;
             }
             if (TryWriteAndFlush(temp, bytes, append: false)
-                && TryRenameRelative(temp, parent, leaf, replaceExisting: true))
+                && TryRenameRelative(temp, parent, leaf, replaceExisting))
             {
                 return true;
             }

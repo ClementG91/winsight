@@ -116,6 +116,9 @@ public sealed class RuleStore
             {
                 return null;
             }
+            // Native absence is an observation, not permission to replace a later publication
+            // from another configured store using this path with a different sidecar family.
+            var replaceExisting = result.Status != RuleStoreStatus.Missing;
             var rules = loaded.ToList();
             if (rules.Any(existing => existing.Rule.Id == rule.Id && !IsSupported(existing.Rule)))
             {
@@ -129,7 +132,7 @@ public sealed class RuleStore
                 return null;
             }
             rules.Add(new(rule, default));
-            result = Save(rules, result.IgnoredEntries, result.RetainedUnsupportedEntries);
+            result = Save(rules, result.IgnoredEntries, result.RetainedUnsupportedEntries, replaceExisting);
             return result.Durable ? rule : null;
         }
         catch (ResponseFileLockException ex)
@@ -454,7 +457,8 @@ public sealed class RuleStore
         return values;
     }
 
-    private RuleStoreResult Save(List<StoredEntry> rules, int ignored, int retainedBeforeWrite)
+    private RuleStoreResult Save(List<StoredEntry> rules, int ignored, int retainedBeforeWrite,
+        bool replaceExisting = true)
     {
         var retained = rules.Count(entry => !IsSupported(entry.Rule));
         if (rules.Count > MaxRules)
@@ -486,7 +490,7 @@ public sealed class RuleStore
                 writer.Flush();
             }
             // Empty stores also use flushed atomic replacement, never best-effort deletion.
-            var written = AtomicFile.TryWrite(_path, stream.ToArray());
+            var written = AtomicFile.TryWrite(_path, stream.ToArray(), replaceExisting);
             return new(written ? RuleStoreStatus.Written : RuleStoreStatus.WriteFailed,
                 ignored, written ? retained : retainedBeforeWrite);
         }

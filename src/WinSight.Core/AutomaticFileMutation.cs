@@ -120,13 +120,15 @@ public static partial class AutomaticFileAccess
     }
 
     /// <summary>
-    /// Replaces a local file atomically with durable bytes. A unique temporary file is created and
+    /// Publishes a local file atomically with durable bytes. A unique temporary file is created and
     /// renamed relative to the same acquired parent handle, so neither operation follows a reparse.
+    /// Set replaceExisting to false after observing absence; a later destination is preserved.
     /// </summary>
     public static bool TryWriteAtomic(
         string? path,
         ReadOnlySpan<byte> bytes,
-        bool createParentDirectories = true)
+        bool createParentDirectories = true,
+        bool replaceExisting = true)
     {
         if (!TryPrepareTarget(path, createParentDirectories, out var fullPath, out var leaf, out var parent))
         {
@@ -149,7 +151,7 @@ public static partial class AutomaticFileAccess
                 temp?.TryDelete();
                 return false;
             }
-            if (TryRenameRelative(temp, parent, leaf, replaceExisting: true))
+            if (TryRenameRelative(temp, parent, leaf, replaceExisting))
             {
                 return true;
             }

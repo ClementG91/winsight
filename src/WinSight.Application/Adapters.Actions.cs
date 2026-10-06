@@ -65,7 +65,9 @@ public static partial class Adapters
                     : snapshot.RecoveryRequired ? "Action journal recovery required" : "Action journal coverage incomplete",
                 (snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
                     : (snapshot.RecoveryRequired
-                        ? snapshot.EvidenceUnavailable
+                        ? snapshot.EvidenceMetadataUnrecognized
+                            ? "Evidence metadata is unrecognized; its bytes are preserved and response writes are refused. Inspect the configured stores and RECOVERY.md before operator recovery."
+                            : snapshot.EvidenceUnavailable
                             ? "Recovery evidence or metadata is unavailable; check local-file access and disk space, then retry."
                             : snapshot.EvidenceOverBudget
                                 ? "Recovery evidence exceeds 16 MiB; the next response write requires automatic bounded migration."
@@ -87,6 +89,7 @@ public static partial class Adapters
                     ["limitReached"] = snapshot.LimitReached ? "true" : "false",
                     ["evidencePreserved"] = snapshot.EvidencePreserved ? "true" : "false",
                     ["evidenceRecoveryPending"] = snapshot.EvidenceRecoveryPending ? "true" : "false",
+                    ["evidenceMetadataUnrecognized"] = snapshot.EvidenceMetadataUnrecognized ? "true" : "false",
                     ["discardedEvidenceBytes"] = snapshot.DiscardedEvidenceBytes.ToString(CultureInfo.InvariantCulture),
                     ["discardedEvidenceFiles"] = snapshot.DiscardedEvidenceFiles.ToString(CultureInfo.InvariantCulture),
                     ["evidenceLossReason"] = snapshot.EvidenceLossReason,

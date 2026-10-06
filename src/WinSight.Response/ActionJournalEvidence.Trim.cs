@@ -25,7 +25,7 @@ internal static partial class ActionJournalEvidence
     private static bool MaintainCore(string path)
     {
         var state = ReadState(path, out var unavailable, out var invalid);
-        if (unavailable || invalid && !Save(path, state) || !ResumeTrim(path, ref state) || !ResumeEviction(path, ref state))
+        if (unavailable || invalid || !ResumeTrim(path, ref state) || !ResumeEviction(path, ref state))
         {
             return false;
         }
@@ -132,7 +132,7 @@ internal static partial class ActionJournalEvidence
             PendingTrimTailSha256 = tailHash,
             PendingTrimPublishedSha256 = publishedSha256,
         };
-        return source.IsCurrent() && Save(path, state);
+        return source.IsCurrent() && Save(path, ref state);
     }
 
     private static bool ResumeTrim(string path, ref State state)
@@ -215,7 +215,7 @@ internal static partial class ActionJournalEvidence
             PendingTrimTailSha256 = null,
             PendingTrimPublishedSha256 = null,
         };
-        return Save(path, state);
+        return Save(path, ref state);
     }
 
     private static string TrimPath(string path, int slot) => slot == -1 ? path : SlotPath(path, slot);
@@ -251,6 +251,7 @@ internal static partial class ActionJournalEvidence
         }
         return state.PendingTrimSlot == -2
             ? state.PendingTrimBytes == 0 && state.PendingTrimLength == 0
+                && state.PendingTrimVolume == 0 && state.PendingTrimFileIndex == 0
                 && state.PendingTrimTailSha256 is null && state.PendingTrimPublishedSha256 is null
             : state.PendingTrimLength > ActionJournalReader.MaxBytes
                 && state.PendingTrimBytes == state.PendingTrimLength - ActionJournalReader.MaxBytes

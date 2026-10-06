@@ -186,16 +186,23 @@ public sealed class ActionJournalRecoveryRegressionTests : IDisposable
     }
 
     [Fact]
-    public void CorruptMetadataRecoversWithoutPretendingItsOldCountersAreKnown()
+    public void UnrecognizedMetadataIsPreservedRatherThanMigrated()
     {
-        File.WriteAllText(PathName + ".evidence.json", "{ interrupted metadata");
+        const string metadata = "{ interrupted metadata";
+        File.WriteAllText(PathName + ".evidence.json", metadata);
         for (var i = 0; i < 2; i++)
         {
-            File.WriteAllText(PathName, RetentionSource());
-            Assert.True(new ActionJournal(PathName).TryAppend(Entry()));
+            var original = RetentionSource();
+            File.WriteAllText(PathName, original);
+            Assert.Equal("EvidenceRecoveryBlocked",
+                new ActionJournal(PathName).TryAppendWithStatus(Entry()).Status.ToString());
             var snapshot = new ActionJournal(PathName).ReadWithCoverage();
             Assert.Equal(true, typeof(ActionJournalSnapshot).GetProperty("EvidenceCountersUnknown")?.GetValue(snapshot));
-            Assert.Equal(22, SnapshotLong(snapshot, "DiscardedMetadataBytes"));
+            Assert.Equal(0, SnapshotLong(snapshot, "DiscardedMetadataBytes"));
+            Assert.Null(snapshot.DiscardedMetadataTailSha256);
+            Assert.Equal(metadata, File.ReadAllText(PathName + ".evidence.json"));
+            Assert.Equal(original, File.ReadAllText(PathName));
+            Assert.Empty(Directory.GetFiles(_root, "*.corrupt*.jsonl"));
         }
     }
 
@@ -219,14 +226,20 @@ public sealed class ActionJournalRecoveryRegressionTests : IDisposable
     [InlineData("{}")]
     [InlineData("{\"Version\":1}")]
     [InlineData("{\"Version\":99}")]
-    public void MissingOrUnknownMetadataNeverSilentlyResetsLossAccounting(string metadata)
+    public void UnknownMetadataNeverSilentlyResetsLossAccounting(string metadata)
     {
         File.WriteAllText(PathName + ".evidence.json", metadata);
         var snapshot = new ActionJournal(PathName).ReadWithCoverage();
         Assert.Equal(true, typeof(ActionJournalSnapshot).GetProperty("EvidenceCountersUnknown")?.GetValue(snapshot));
         Assert.Equal(metadata, File.ReadAllText(PathName + ".evidence.json"));
-        File.WriteAllText(PathName, RetentionSource());
-        Assert.True(new ActionJournal(PathName).TryAppend(Entry()));
+        var original = RetentionSource();
+        File.WriteAllText(PathName, original);
+        Assert.Equal("EvidenceRecoveryBlocked",
+            new ActionJournal(PathName).TryAppendWithStatus(Entry()).Status.ToString());
+        Assert.Equal(original, File.ReadAllText(PathName));
+        Assert.Equal(metadata, File.ReadAllText(PathName + ".evidence.json"));
+        Assert.Equal(0, new ActionJournal(PathName).ReadWithCoverage().DiscardedMetadataBytes);
+        Assert.Null(new ActionJournal(PathName).ReadWithCoverage().DiscardedMetadataTailSha256);
         Assert.Equal(true, typeof(ActionJournalSnapshot).GetProperty("EvidenceCountersUnknown")?.GetValue(new ActionJournal(PathName).ReadWithCoverage()));
     }
 

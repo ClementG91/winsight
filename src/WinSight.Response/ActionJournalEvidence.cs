@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 using WinSight.Core;
 
@@ -33,7 +34,25 @@ internal static partial class ActionJournalEvidence
         uint PendingTrimVolume = 0,
         ulong PendingTrimFileIndex = 0,
         string? PendingTrimTailSha256 = null,
-        string? PendingTrimPublishedSha256 = null);
+        string? PendingTrimPublishedSha256 = null)
+    {
+        // Only native confirmed absence sets this observation. It is never accepted from disk,
+        // and changes to false only after our create-new publication succeeds durably.
+        [JsonIgnore]
+        public bool IndexMissing { get; init; }
+    }
+
+    private static readonly HashSet<string> KnownMetadataFields = new(StringComparer.Ordinal)
+    {
+        nameof(State.Version), nameof(State.DiscardedBytes), nameof(State.DiscardedFiles), nameof(State.LossReason),
+        nameof(State.PriorCountersUnknown), nameof(State.NextSlot), nameof(State.PendingSlot),
+        nameof(State.PendingBytes), nameof(State.PendingSha256), nameof(State.DiscardedMetadataBytes),
+        nameof(State.DiscardedMetadataTailSha256), nameof(State.DiscardedJournalPrefixBytes),
+        nameof(State.UnverifiedPrefixDiscardBytes), nameof(State.UnverifiedEvidenceBytes),
+        nameof(State.PendingTrimSlot), nameof(State.PendingTrimBytes), nameof(State.PendingTrimLength),
+        nameof(State.PendingTrimVolume), nameof(State.PendingTrimFileIndex),
+        nameof(State.PendingTrimTailSha256), nameof(State.PendingTrimPublishedSha256),
+    };
 
     internal static string SlotPath(string path, int slot) => slot == 0
         ? path + ".corrupt.jsonl" : path + $".corrupt.{slot}.jsonl";
@@ -62,7 +81,7 @@ internal static partial class ActionJournalEvidence
             return false;
         }
         var state = ReadState(path, out var unavailable, out var invalid);
-        if (unavailable || invalid && !Save(path, state) || !ResumeEviction(path, ref state))
+        if (unavailable || invalid || !ResumeEviction(path, ref state))
         {
             return false;
         }
@@ -124,7 +143,7 @@ internal static partial class ActionJournalEvidence
                 };
             }
             // No slot is deleted or reused before this intent is durable.
-            if (!Save(path, state) || !ResumeEviction(path, ref state))
+            if (!Save(path, ref state) || !ResumeEviction(path, ref state))
             {
                 return false;
             }
@@ -174,7 +193,7 @@ internal static partial class ActionJournalEvidence
                         PendingBytes = 0,
                         PendingSha256 = null,
                     };
-                    return Save(path, state);
+                    return Save(path, ref state);
                 }
                 if (!victim.TryDelete())
                 {
@@ -196,7 +215,7 @@ internal static partial class ActionJournalEvidence
             PendingBytes = 0,
             PendingSha256 = null,
         };
-        return Save(path, state);
+        return Save(path, ref state);
     }
 
     internal static ActionJournalSnapshot Coverage(string path, ActionJournalSnapshot snapshot,
@@ -256,8 +275,9 @@ internal static partial class ActionJournalEvidence
             PendingPrefixDiscardBytes = state.PendingTrimSlot == -1 ? state.PendingTrimBytes : 0,
             PendingEvidencePrefixDiscardBytes = state.PendingTrimSlot >= 0 ? state.PendingTrimBytes : 0,
             EvidenceUnavailable = evidenceUnavailable,
+            EvidenceMetadataUnrecognized = invalid,
             EvidenceOverBudget = evidenceOverBudget,
-            RecoveryRequired = snapshot.SourceBytes > ActionJournalReader.MaxBytes || evidenceOverBudget || evidenceUnavailable,
+            RecoveryRequired = snapshot.SourceBytes > ActionJournalReader.MaxBytes || evidenceOverBudget || evidenceUnavailable || invalid,
             EvidenceRecoveryPending = state.PendingSlot >= 0 || state.PendingTrimSlot >= -1 || evidenceUnavailable || invalid,
         };
     }
@@ -289,7 +309,7 @@ internal static partial class ActionJournalEvidence
         if (lease is null)
         {
             unavailable = !missing;
-            return new();
+            return new() { IndexMissing = missing };
         }
         if (lease.IsDirectory)
         {
@@ -305,13 +325,17 @@ internal static partial class ActionJournalEvidence
                 var value = document.RootElement;
                 var required = new[] { "Version", "DiscardedBytes", "DiscardedFiles", "LossReason", "PriorCountersUnknown",
                     "NextSlot", "PendingSlot", "PendingBytes", "PendingSha256" };
-                var complete = value.ValueKind == JsonValueKind.Object && required.All(name => value.TryGetProperty(name, out _));
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                var complete = value.ValueKind == JsonValueKind.Object
+                    && value.EnumerateObject().All(property => KnownMetadataFields.Contains(property.Name) && names.Add(property.Name))
+                    && required.All(names.Contains);
                 var state = complete ? value.Deserialize<State>(ReadOptions) : null;
                 if (state is not null && state.Version == 1 && state.DiscardedBytes >= 0 && state.DiscardedFiles >= 0
                     && state.DiscardedMetadataBytes >= 0 && state.NextSlot is >= 0 and < Slots
                     && state.PendingSlot is >= -1 and < Slots && state.PendingBytes >= 0
                     && state.PendingBytes <= ActionJournalReader.MaxBytes && state.LossReason is { Length: <= 128 }
-                    && (state.PendingSlot < 0 || IsHash(state.PendingSha256))
+                    && (state.PendingSlot < 0 ? state.PendingBytes == 0 && state.PendingSha256 is null : IsHash(state.PendingSha256))
+                    && !(state.PendingSlot >= 0 && state.PendingTrimSlot >= -1)
                     && TrimStateValid(value, state) && lease.IsCurrent())
                 {
                     return state;
@@ -320,22 +344,31 @@ internal static partial class ActionJournalEvidence
         }
         catch (JsonException)
         {
-            // Invalid/version-unknown metadata is explicitly discarded by the next successful
-            // durable writer. The unknown-prior-counters flag survives every later update.
+            // Interrupted, foreign and future bytes do not establish a recognized intent index.
+            // Preserve them and refuse every writer; never invent a discard that did not happen.
         }
         invalid = true;
-        using var tail = lease.OpenRead();
-        tail.Position = Math.Max(0, tail.Length - MaxMetadataBytes);
-        return new State(LossReason: "invalid-evidence-metadata", PriorCountersUnknown: true,
-            DiscardedMetadataBytes: lease.Length,
-            DiscardedMetadataTailSha256: Convert.ToHexString(SHA256.HashData(tail)));
+        return new State(LossReason: "unrecognized-evidence-metadata", PriorCountersUnknown: true);
     }
 
-    private static bool Save(string path, State state)
+    private static bool Save(string path, ref State state)
     {
+        if (!state.IndexMissing)
+        {
+            var current = ReadState(path, out var unavailable, out var invalid);
+            if (unavailable || invalid || current.IndexMissing)
+            {
+                return false;
+            }
+        }
         var bytes = JsonSerializer.SerializeToUtf8Bytes(state);
-        return bytes.Length <= MaxMetadataBytes
-            && AutomaticFileAccess.TryWriteAtomicBounded(path + ".evidence.json", bytes);
+        if (bytes.Length > MaxMetadataBytes
+            || !AutomaticFileAccess.TryWriteAtomicBounded(path + ".evidence.json", bytes, replaceExisting: !state.IndexMissing))
+        {
+            return false;
+        }
+        state = state with { IndexMissing = false };
+        return true;
     }
 
     private static long SaturatingAdd(long left, long right) => long.MaxValue - left < right ? long.MaxValue : left + right;

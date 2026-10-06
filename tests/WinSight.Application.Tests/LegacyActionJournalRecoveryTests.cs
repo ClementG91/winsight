@@ -113,21 +113,27 @@ public sealed class LegacyActionJournalRecoveryTests : IDisposable
     }
 
     [Fact]
-    public void CorruptMetadataHasAnExplicitDiscardHashWithABoundedTailScope()
+    public void UnrecognizedOversizedMetadataIsPreservedWithoutInventedDiscardHash()
     {
         var metadata = Encoding.UTF8.GetBytes(new string('m', 10 * 1024));
         File.WriteAllBytes(PathName + ".evidence.json", metadata);
-        File.WriteAllText(PathName, "{ damaged\n" + new string('\n', 10_000));
+        var original = "{ damaged\n" + new string('\n', 10_000);
+        File.WriteAllText(PathName, original);
         var journal = new ActionJournal(PathName);
-        Assert.True(journal.TryAppend(Entry()));
+        Assert.Equal("EvidenceRecoveryBlocked", journal.TryAppendWithStatus(Entry()).Status.ToString());
         var snapshot = journal.ReadWithCoverage();
         Assert.True(snapshot.EvidenceCountersUnknown);
-        Assert.Equal(metadata.Length, snapshot.DiscardedMetadataBytes);
-        Assert.Equal(Convert.ToHexString(SHA256.HashData(metadata.AsSpan(metadata.Length - 8192))),
-            typeof(ActionJournalSnapshot).GetProperty("DiscardedMetadataTailSha256")?.GetValue(snapshot));
+        Assert.Equal(0, snapshot.DiscardedMetadataBytes);
+        Assert.Null(typeof(ActionJournalSnapshot).GetProperty("DiscardedMetadataTailSha256")?.GetValue(snapshot));
+        Assert.Equal(metadata, File.ReadAllBytes(PathName + ".evidence.json"));
+        Assert.Equal(original, File.ReadAllText(PathName));
+        var report = Adapters.Actions(PathName, 200);
+        var coverage = Assert.Single(report.Items, item => item.Fields["kind"] == "actionJournalCoverage");
+        Assert.True(coverage.Fields.TryGetValue("evidenceMetadataUnrecognized", out var unrecognized));
+        Assert.Equal("true", unrecognized);
         using var text = new StringWriter();
-        ReportRenderer.RenderText(Adapters.Actions(PathName, 200), text);
-        Assert.Contains(metadata.Length.ToString(System.Globalization.CultureInfo.InvariantCulture), text.ToString(), StringComparison.Ordinal);
+        ReportRenderer.RenderText(report, text);
+        Assert.Contains("unrecognized", text.ToString(), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("unknown", text.ToString(), StringComparison.OrdinalIgnoreCase);
     }
 

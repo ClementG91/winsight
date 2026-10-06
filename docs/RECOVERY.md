@@ -182,7 +182,7 @@ counter can coexist with a durable write; it is not evidence that the machine ch
 | Malformed or torn records | The reader reports incomplete coverage. Small damaged tails remain intact, separated from later appends by a newline. A required rewrite preserves raw evidence within the documented budgets. Retry after resolving a transient storage failure. |
 | `RecoveryRequired` / oversized legacy state | The next writer attempts to normalize the active journal and evidence, preserving the newest raw 16 MiB tail and reporting discarded prefix bytes. Access and storage must still permit recovery. Before allowing maintenance, make a separate private backup if the entire legacy file must be retained. This backup is outside the automatic storage budget. |
 | `EvidencePreservationFailed` | A required journal rewrite cannot safely preserve raw evidence or assess the bounded ring. All four slots must be ordinary readable local files or confirmed absent before allocation or eviction; a directory, reparse or read denial is uncertain evidence, even if another slot is free. Check free space, file permissions and sharing; close conflicting handles, then retry. Preserve unexpected directories/reparses separately with their identity and contents before an operator repairs the slot path. Do not delete evidence or the index to clear the diagnostic. |
-| `EvidenceRecoveryBlocked` | A pending eviction/trim or its intent metadata could not be read, published or finalized safely. New append/undo is refused because the writer cannot exclude unfinished recovery. Keep journal, slots, index and staging files together; inspect `winsight actions`, restore local read/write access and space, close conflicting handles, then retry. Invalid readable metadata can be replaced with explicit unknown-prior accounting only after its bounded loss/digest record is durable. Unreadable metadata must never be assumed empty. |
+| `EvidenceRecoveryBlocked` | A pending eviction/trim or its intent metadata could not be read, published or finalized safely. New append/undo is refused because the writer cannot exclude unfinished recovery. Keep journal, slots, index and staging files together; inspect `winsight actions`, restore local read/write access and space, close conflicting handles, then retry. Unrecognized readable metadata is preserved and blocks every mutation; follow the operator recovery procedure below. No discard amount or digest is invented for preserved bytes. Unreadable metadata must never be assumed empty. |
 | Unusable archive without a pending intent | A healthy append/undo proceeds; coverage still marks unavailable or oversized evidence as a current problem. Optional archive migration is attempted before writing, but a read/acquisition failure without a durable intent does not block the healthy journal. Once a trim intent is durable, an unresolved publication blocks the next mutation. A damaged rewrite that needs preservation uses the stricter ring check above. |
 | `RotationFailed` | Atomic replacement did not complete. The old source remains available. Resolve sharing/ACL/disk-space problems and retry. A pre-existing `.winsight-journal.tmp` is preserved and requires the staging procedure below; its name does not prove ownership. |
 | `Unavailable` | The exact ordinary local file could not be acquired or the writer lock was unavailable. Reparse points and unavailable cloud placeholders are refused. Restore the intended ordinary file/permissions or availability, then retry; do not bypass the acquisition checks. |
@@ -221,8 +221,46 @@ Coverage marks the metadata unavailable, recovery/verification pending and prior
 zero-valued fields are not proof of zero historical loss. Append and undo refuse with
 `EvidenceRecoveryBlocked` until ordinary index access is restored. Inspect its permissions, local
 availability and conflicting handles, preserve the index, then retry as the affected user. A
-readable but malformed index retains the separate documented durable migration policy; an ACL
+readable but unrecognized index is preserved and blocks every mutation as described below; an ACL
 entry alone is not proof that Windows actually refused a DATA read.
+
+### Unrecognized intent metadata and first publication
+
+The index is recognized only when its decoded property names are unique and known, its nine legacy
+fields are present and correctly typed, and its bounded counters and intents are coherent. The seven
+trim fields must be absent together or present together. Inactive intents cannot contain stale
+pending amounts/identities, and simultaneous trim and eviction intents are refused. A valid legacy
+index remains supported; recognized pending recovery still resumes and counts loss exactly once.
+
+A malformed, interrupted, empty, oversized, future-version, unknown-field or ambiguous index is
+**unrecognized**. Append and undo return `EvidenceRecoveryBlocked`; no index, archive or history bytes
+are overwritten or destructively resumed from those unknown instructions. Readable journal entries
+remain visible. Coverage reports unrecognized metadata, recovery required and unknown accounting;
+it does not invent `DiscardedMetadataBytes` or a discard hash for bytes that remain preserved. This
+supersedes the former test/document contract that automatically discarded arbitrary malformed
+metadata. Historical discard counters already present in a recognized legacy index remain visible.
+
+Stop all writers across sessions, preserve and inventory the journal, all archives, index, sidecars
+and staging with hashes, then determine which configured store owns each path. Prefer a compatible
+version or reviewed complete backup. A real rule store at the index path must remain intact; choose
+nonoverlapping store families instead. If deliberately rebuilding accounting after review, move the
+unrecognized index intact to a new backup outside every store family, keep its hash/identity record,
+and explicitly record that prior loss accounting cannot be established. A newly absent index does
+not prove zero historical loss. Never edit a future index into version 1 or delete it to hide a gap.
+
+Native confirmed absence permits only a first atomic publication **without replacement**. Both
+index and rule-store initialization use that rule: a destination that appears after the observation
+wins, and the losing publication preserves its bytes. The missing observation is not serialized and
+becomes recognized only after successful durable publication. Existing recognized state retains
+atomic replacement under its writer protocol; callers keep their default replacement behavior.
+The complete application bundle must be rebuilt together for the updated Core method signatures.
+
+Recognition establishes a format, not cryptographic ownership. Current metadata is revalidated
+before replacement, but this is not a general compare-and-swap against actors outside the writer
+protocol, copied recognized indexes or every alias between configured journals. Private state and
+nonoverlapping configured families remain required. The correction closes the reproduced foreign
+rule-store/index collision and their cooperative first-publication race; broader alias and external
+actor qualification remains separate.
 
 Structurally valid rule entries whose scope, decision or duration is unknown to this version are
 retained as their exact UTF-8 object bytes across neighboring writes. They are never matched or

@@ -15,9 +15,10 @@ public static class AtomicFile
     /// <summary>
     /// Replaces <paramref name="path"/> with <paramref name="bytes"/> atomically. Returns false when
     /// the path is not local or the write could not be completed; the previous file is left intact.
+    /// Set replaceExisting to false when initializing a destination observed to be absent.
     /// </summary>
-    public static bool TryWrite(string path, ReadOnlySpan<byte> bytes)
-        => AutomaticFileAccess.TryWriteAtomic(path, bytes);
+    public static bool TryWrite(string path, ReadOnlySpan<byte> bytes, bool replaceExisting = true)
+        => AutomaticFileAccess.TryWriteAtomic(path, bytes, replaceExisting: replaceExisting);
 
     /// <summary>Best-effort removal of a stray temporary file; failure is not fatal.</summary>
     public static void TryDelete(string path)
