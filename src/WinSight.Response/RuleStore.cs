@@ -155,22 +155,77 @@ public sealed class RuleStore
 
     /// <summary>Durably removes a rule or gives an exact storage refusal/confirmed absence.</summary>
     public ResponseOutcome RemoveWithOutcome(Guid id, out RuleStoreResult result)
+        => RemoveCore(id, null, out result, out _);
+
+    /// <summary>
+    /// Rolls back only the exact object serialized by Add. A changed value, extension, byte version
+    /// or duplicate identity is preserved. Activity is observed under the same writer lock and is
+    /// confirmed only when publication of an unchanged rule's removal fails with WriteFailed.
+    /// Explicit operator revocation continues to use RemoveWithOutcome instead.
+    /// </summary>
+    public ResponseOutcome RemoveIfUnchanged(ResponseRule expected, out RuleStoreResult result,
+        out bool expectedRuleActive)
     {
+        ArgumentNullException.ThrowIfNull(expected);
+        return RemoveCore(expected.Id, expected, out result, out expectedRuleActive);
+    }
+
+    private ResponseOutcome RemoveCore(Guid id, ResponseRule? expected, out RuleStoreResult result,
+        out bool expectedRuleActive)
+    {
+        expectedRuleActive = false;
+        result = new(RuleStoreStatus.InvalidRule);
+        if (expected is not null)
+        {
+            if (!IsSupported(expected))
+            {
+                return ResponseOutcome.Failed;
+            }
+            if ((long)(expected.Item?.Length ?? 0) + (expected.ImagePath?.Length ?? 0)
+                + (expected.ImageSha256?.Length ?? 0) + (expected.Publisher?.Length ?? 0) > MaxBytes)
+            {
+                result = new(RuleStoreStatus.ByteLimit);
+                return ResponseOutcome.Failed;
+            }
+        }
         try
         {
             using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
-            if (!TryLoadLocked(out var loaded, out result))
+            if (!TryLoadLocked(out var loaded, out result, out var identityOccurrences, expected is null ? null : id))
             {
                 return ResponseOutcome.Failed;
             }
             var rules = loaded.ToList();
+            if (expected is not null)
+            {
+                var matching = rules.Where(entry => entry.Rule.Id == id).ToArray();
+                if (identityOccurrences == 0 && matching.Length == 0)
+                {
+                    result = result with { Status = RuleStoreStatus.TargetNotFound };
+                    return ResponseOutcome.TargetNotFound;
+                }
+                if (identityOccurrences != 1 || matching.Length != 1 || matching[0].Rule != expected
+                    || !matching[0].Raw.Span.SequenceEqual(SerializedRule(expected)))
+                {
+                    // Do not Save: even cleaning invalid neighbors would mutate another version.
+                    result = result with { Status = RuleStoreStatus.TargetChanged };
+                    return ResponseOutcome.TargetChanged;
+                }
+            }
             if (rules.RemoveAll(entry => entry.Rule.Id == id) == 0)
             {
                 result = result with { Status = RuleStoreStatus.TargetNotFound };
                 return ResponseOutcome.TargetNotFound;
             }
             result = Save(rules, result.IgnoredEntries, result.RetainedUnsupportedEntries);
+            expectedRuleActive = expected is not null && result.Status == RuleStoreStatus.WriteFailed
+                && IsSupported(expected) && expected.IsActive(_clock());
             return result.Durable ? ResponseOutcome.Succeeded : ResponseOutcome.Failed;
+        }
+        catch (RuleFileBudgetExceededException)
+        {
+            result = result with { Status = RuleStoreStatus.ByteLimit };
+            return ResponseOutcome.Failed;
         }
         catch (ResponseFileLockException ex)
         {
@@ -223,8 +278,13 @@ public sealed class RuleStore
             or ArgumentException or NotSupportedException or WaitHandleCannotBeOpenedException;
 
     private bool TryLoadLocked(out StoredEntry[] rules, out RuleStoreResult result)
+        => TryLoadLocked(out rules, out result, out _, null);
+
+    private bool TryLoadLocked(out StoredEntry[] rules, out RuleStoreResult result,
+        out int identityOccurrences, Guid? observedId)
     {
         rules = [];
+        identityOccurrences = 0;
         result = new(RuleStoreStatus.Unavailable);
         try
         {
@@ -285,6 +345,23 @@ public sealed class RuleStore
             var index = 0;
             foreach (var entry in entries.EnumerateArray())
             {
+                if (observedId is { } identity && identityOccurrences < 2 && entry.ValueKind == JsonValueKind.Object)
+                {
+                    // Count decoded physical identities before structural validation drops entries.
+                    // An invalid replacement or duplicate is not absence of the rollback target.
+                    foreach (var property in entry.EnumerateObject())
+                    {
+                        if (property.NameEquals("Id") && property.Value.ValueKind == JsonValueKind.String
+                            && property.Value.TryGetGuid(out var candidateId) && candidateId == identity)
+                        {
+                            identityOccurrences++;
+                            if (identityOccurrences == 2)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
                 var raw = rawEntries[index++];
                 ResponseRule? rule = null;
                 if (HasUniqueSemanticFields(entry))
@@ -417,6 +494,18 @@ public sealed class RuleStore
         {
             return new(RuleStoreStatus.ByteLimit, ignored, retainedBeforeWrite);
         }
+    }
+
+    private static byte[] SerializedRule(ResponseRule rule)
+    {
+        using var stream = new BoundedRuleStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            // The same options and object representation as a newly added entry in Save.
+            JsonSerializer.Serialize(writer, rule);
+            writer.Flush();
+        }
+        return stream.ToArray();
     }
 
     private sealed class RuleFileBudgetExceededException : Exception

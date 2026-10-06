@@ -351,7 +351,7 @@ public sealed class McpSideEffectBoundaryTests
         // The shared gateway's single predecessor need not happen to belong to RuleStore.
         var ruleMutators = cliGraph.Reached.Where(method => method.DeclaringType == typeof(WinSight.Response.RuleStore)
             && method.Name is nameof(WinSight.Response.RuleStore.Add) or nameof(WinSight.Response.RuleStore.Remove)
-                or nameof(WinSight.Response.RuleStore.RemoveWithOutcome)).ToArray();
+                or nameof(WinSight.Response.RuleStore.RemoveWithOutcome) or "RemoveIfUnchanged").ToArray();
         Assert.NotEmpty(ruleMutators);
         foreach (var mutator in ruleMutators)
         {
@@ -364,6 +364,18 @@ public sealed class McpSideEffectBoundaryTests
         Assert.Empty(unrelated.Unresolved);
         Assert.NotEmpty(Violations(unrelated));
         Assert.DoesNotContain(unrelated.Reached, method => method.DeclaringType == typeof(WinSight.Response.RuleStore));
+    }
+
+    [Fact]
+    public void TheDetectorsSeeTheConditionalRollbackWriteGateway()
+    {
+        // Reflection keeps this regression compilable on the pre-helper baseline. Its absence
+        // must fail rather than let the write-gateway positive control pass vacuously.
+        var mutator = typeof(WinSight.Response.RuleStore).GetMethod("RemoveIfUnchanged");
+        Assert.NotNull(mutator);
+        var graph = StrictWalk([mutator]);
+        Assert.Empty(graph.Unresolved);
+        Assert.Contains(Violations(graph), violation => violation.StartsWith("write gateway:", StringComparison.Ordinal));
     }
 
     /// <summary>

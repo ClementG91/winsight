@@ -310,6 +310,20 @@ as partially applied, and unreadable state as unconfirmed. Check the actual rule
 an Allow or Revoke. The process/Guardian responses and the machine-wide firewall policy are separate
 stores; repairing per-user suppression must not change service policy.
 
+If Allow's completion cannot be journalled, automatic rollback removes only the exact single rule
+object that the failed Allow wrote. Comparison, removal and the activity observation share one
+writer lock. A replacement with the same ID, an opaque extension, changed object bytes (including
+external reformatting) or duplicate IDs returns `TargetChanged`: the complete store is preserved,
+the original rule is not returned as active, and the action remains partially applied and
+non-reversible with its Prepared audit gap visible. No invalid neighbor is cleaned on this refusal.
+Identity observation includes decoded ID properties in invalid entries before those entries are
+filtered from active rules. A keyless or incomplete replacement is therefore a changed target,
+and an invalid same-ID duplicate cannot authorize deleting the original or cleaning that duplicate.
+An unchanged rule whose atomic removal returns `WriteFailed` is reported as remaining active only
+if its supported semantics and the store clock confirm activity under that lock. This observation
+does not prevent a later operator action from changing the store. Explicit journalled Revoke by ID
+still removes all matching entries when requested by the operator; inspect `winsight rules` first.
+
 ## Full removal
 
 ```powershell

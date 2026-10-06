@@ -7,7 +7,7 @@ public enum RuleStoreStatus
 {
     Loaded, Missing, Written, TargetNotFound, InvalidRule, InvalidJson, InvalidFormat,
     UnsupportedVersion, ByteLimit, RuleLimit, Unavailable, WriteFailed,
-    LockTimeout, UnsafeLockPath, LockUnavailable, UnsupportedIdentityCollision,
+    LockTimeout, UnsafeLockPath, LockUnavailable, UnsupportedIdentityCollision, TargetChanged,
 }
 
 public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries = 0, int RetainedUnsupportedEntries = 0)
@@ -29,6 +29,7 @@ public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries 
         RuleStoreStatus.InvalidRule => "a rule requires a nonempty identity, a key and supported scope, decision and duration; timed rules require an expiry",
         RuleStoreStatus.UnsupportedIdentityCollision => "the identity belongs to a retained rule with unknown semantics; use a compatible version or explicitly revoke that identity before adding a replacement",
         RuleStoreStatus.TargetNotFound => "the rule is absent from the readable store",
+        RuleStoreStatus.TargetChanged => "the expected rule value or byte version changed, or its identity is ambiguous; the replacement was preserved without rewriting the store",
         _ => "inspect winsight rules for the stored decisions",
     }) + (IgnoredEntries == 0 ? string.Empty
         : $"; ignored entries: {IgnoredEntries.ToString(CultureInfo.InvariantCulture)}; "

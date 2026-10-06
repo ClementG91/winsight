@@ -139,11 +139,11 @@ public sealed class GuardianAlertPresenter
             return stored;
         }
         // A suppression whose completion cannot be audited must not silently remain active. Roll it
-        // back when possible. A failed atomic write after a valid read confirms the old rule remains;
-        // unreadable storage cannot confirm its current activity. Prepared keeps the audit gap visible.
-        var rollback = _rules.RemoveWithOutcome(rule.Id, out var rollbackStorage);
+        // back only if it is still the exact object we added. The store checks its byte version and
+        // activity under the same writer lock as removal; an ID or WriteFailed alone proves neither.
+        // Prepared keeps the audit gap visible, including a replacement that we must preserve.
+        var rollback = _rules.RemoveIfUnchanged(rule, out var rollbackStorage, out var activeConfirmed);
         var rolledBack = rollback is ResponseOutcome.Succeeded or ResponseOutcome.TargetNotFound;
-        var activeConfirmed = !rolledBack && rollbackStorage.Status == RuleStoreStatus.WriteFailed;
         result = result with
         {
             Outcome = rolledBack ? ResponseOutcome.Failed : ResponseOutcome.PartiallyApplied,
@@ -151,6 +151,7 @@ public sealed class GuardianAlertPresenter
             Detail = "Allow completion could not be journalled; " + completed.Detail
                 + (rolledBack ? "; the new rule is confirmed absent after rollback"
                     : activeConfirmed ? "; rollback failed and the rule remains active"
+                    : rollback == ResponseOutcome.TargetChanged ? "; the rollback target changed; the replacement was preserved; the original rule's active state is unconfirmed; inspect winsight rules"
                     : "; rollback could not be verified; the rule's active state is unconfirmed; inspect winsight rules when storage is readable")
                 + "; " + rollbackStorage.Detail,
         };

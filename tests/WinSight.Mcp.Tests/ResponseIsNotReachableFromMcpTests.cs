@@ -28,7 +28,7 @@ public sealed class ResponseIsNotReachableFromMcpTests
     {
         ["WinSight.Response.ProcessResponder"] = ["Suspend", "Resume", "Terminate"],
         ["WinSight.Response.Win32ProcessController"] = ["SuspendThreads", "ResumeThreads", "TerminateProcess"],
-        ["WinSight.Response.RuleStore"] = ["Add", "Remove", "RemoveWithOutcome"],
+        ["WinSight.Response.RuleStore"] = ["Add", "Remove", "RemoveWithOutcome", "RemoveIfUnchanged"],
         ["WinSight.Response.ActionJournal"] = ["TryAppend", "TryAppendWithStatus", "MarkUndone", "TryMarkUndone"],
         ["WinSight.Response.ActionJournalStorage"] = ["Preserve", "Replace"],
         ["WinSight.Response.IActionJournal"] = ["TryAppend", "TryAppendWithStatus", "MarkUndone"],
@@ -176,6 +176,7 @@ public sealed class ResponseIsNotReachableFromMcpTests
         var reached = graph.Reached.Where(IsMutator).Select(IlCallGraph.Describe).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("WinSight.Response.RuleStore.Add", reached);
         Assert.Contains("WinSight.Response.RuleStore.RemoveWithOutcome", reached);
+        Assert.Contains("WinSight.Response.RuleStore.RemoveIfUnchanged", reached);
         Assert.Contains("WinSight.Response.ActionJournal.TryAppendWithStatus", reached);
     }
 
