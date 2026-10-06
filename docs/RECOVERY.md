@@ -181,7 +181,9 @@ counter can coexist with a durable write; it is not evidence that the machine ch
 | Missing active journal | A new journal can be created when its ordinary local parent is writable. Existing evidence is still inspected; absence of the active file does not prove absence of prior history. |
 | Malformed or torn records | The reader reports incomplete coverage. Small damaged tails remain intact, separated from later appends by a newline. A required rewrite preserves raw evidence within the documented budgets. Retry after resolving a transient storage failure. |
 | `RecoveryRequired` / oversized legacy state | The next writer attempts to normalize the active journal and evidence, preserving the newest raw 16 MiB tail and reporting discarded prefix bytes. Access and storage must still permit recovery. Before allowing maintenance, make a separate private backup if the entire legacy file must be retained. This backup is outside the automatic storage budget. |
-| `EvidencePreservationFailed` | Recovery cannot safely preserve or account for evidence. Check free space, file permissions and sharing; close conflicting handles, then retry. Do not delete the evidence or index to make the error disappear. |
+| `EvidencePreservationFailed` | A required journal rewrite cannot safely preserve raw evidence or assess the bounded ring. All four slots must be ordinary readable local files or confirmed absent before allocation or eviction; a directory, reparse or read denial is uncertain evidence, even if another slot is free. Check free space, file permissions and sharing; close conflicting handles, then retry. Preserve unexpected directories/reparses separately with their identity and contents before an operator repairs the slot path. Do not delete evidence or the index to clear the diagnostic. |
+| `EvidenceRecoveryBlocked` | A pending eviction/trim or its intent metadata could not be read, published or finalized safely. New append/undo is refused because the writer cannot exclude unfinished recovery. Keep journal, slots, index and staging files together; inspect `winsight actions`, restore local read/write access and space, close conflicting handles, then retry. Invalid readable metadata can be replaced with explicit unknown-prior accounting only after its bounded loss/digest record is durable. Unreadable metadata must never be assumed empty. |
+| Unusable archive without a pending intent | A healthy append/undo proceeds; coverage still marks unavailable or oversized evidence as a current problem. Optional archive migration is attempted before writing, but a read/acquisition failure without a durable intent does not block the healthy journal. Once a trim intent is durable, an unresolved publication blocks the next mutation. A damaged rewrite that needs preservation uses the stricter ring check above. |
 | `RotationFailed` | Atomic replacement did not complete. The old source remains available. Resolve sharing/ACL/disk-space problems and retry. |
 | `Unavailable` | The exact ordinary local file could not be acquired or the writer lock was unavailable. Reparse points and unavailable cloud placeholders are refused. Restore the intended ordinary file/permissions or availability, then retry; do not bypass the acquisition checks. |
 | `InvalidRecord` | The action identity or enum/input is invalid. Inspect the supplied action; increasing storage budgets is not a repair. Product labels are centrally bounded with a truncation marker and digest; full functional rule/quarantine keys remain intact. |
@@ -202,6 +204,17 @@ is **80 MiB + 8 KiB**; including all fixed staging names gives a conservative **
 This covers these journal-managed files, not quarantine, other WinSight state or separate backups.
 Externally oversized legacy sources/archives can exceed the bound before maintenance. When the bounded
 budget discards evidence, history names the reason and exposes counters or explicit uncertainty.
+
+`winsight actions` separates current coverage from historical accounting. An unreadable journal,
+malformed records in the inspected tail, the physical read budget, pending recovery, inaccessible
+evidence/metadata or oversized state is **Notable**. Historical archives and loss/unknown-prior
+counters alone are **Info**, with their counters, reasons and configured journal/index/slot paths;
+they do not claim that older history was complete. The normal CLI exit code is `1` when a Notable
+item exists and `0` when only Info is present, including historical accounting. A recorded failed
+response can independently remain Notable. Reading a requested shorter list is not itself a physical
+coverage failure. CLI/MCP reads never acknowledge, delete or reset accounting. No acknowledgment verb
+is introduced; the archives and counters remain available without requiring deletion to clear a
+current-coverage diagnostic.
 
 Do not delete `.corrupt*.jsonl`, `.evidence.json` or recovery staging files to retry a response. Preserve
 them together if storage is genuinely lost and a reviewed backup must be recovered. Stop all WinSight

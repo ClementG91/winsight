@@ -11,6 +11,19 @@ internal static partial class ActionJournalEvidence
     // No persisted string is ever interpreted as a filesystem target.
     internal static bool Maintain(string path)
     {
+        try
+        {
+            return MaintainCore(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // An unreadable intent index or unresolved durable intent cannot be assumed absent.
+            return false;
+        }
+    }
+
+    private static bool MaintainCore(string path)
+    {
         var state = ReadState(path, out var unavailable, out var invalid);
         if (unavailable || invalid && !Save(path, state) || !ResumeTrim(path, ref state) || !ResumeEviction(path, ref state))
         {
@@ -21,19 +34,14 @@ internal static partial class ActionJournalEvidence
             var archivePath = SlotPath(path, slot);
             long length;
             string digest;
-            using (var archive = AutomaticFileAccess.TryAcquire(archivePath, out var missing))
+            try
             {
-                if (archive is null)
+                using var archive = AutomaticFileAccess.TryAcquire(archivePath);
+                if (archive is null || archive.IsDirectory)
                 {
-                    if (!missing)
-                    {
-                        return false;
-                    }
+                    // Optional historical evidence is a coverage gap, not a journal write gate.
+                    // Required preservation assesses every slot separately before any reuse.
                     continue;
-                }
-                if (archive.IsDirectory)
-                {
-                    return false;
                 }
                 length = archive.Length;
                 if (length <= ActionJournalReader.MaxBytes)
@@ -44,8 +52,32 @@ internal static partial class ActionJournalEvidence
                 input.Position = length - ActionJournalReader.MaxBytes;
                 digest = Convert.ToHexString(SHA256.HashData(input));
             }
-            if (!PrepareTrim(path, slot, digest)
-                || !AutomaticFileAccess.TryCopyTailAtomic(archivePath, archivePath,
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                // No trim intent has been created for this optional archive yet.
+                continue;
+            }
+            bool prepared;
+            try
+            {
+                prepared = PrepareTrim(path, slot, digest);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                prepared = false;
+            }
+            if (!prepared)
+            {
+                state = ReadState(path, out unavailable, out invalid);
+                if (unavailable || invalid || state.PendingSlot >= 0 || state.PendingTrimSlot >= -1)
+                {
+                    return false;
+                }
+                // A failed optional migration without a durable intent does not affect the
+                // healthy journal. Coverage continues to report the archive and byte budget.
+                continue;
+            }
+            if (!AutomaticFileAccess.TryCopyTailAtomic(archivePath, archivePath,
                     ActionJournalReader.MaxBytes, replaceExisting: true))
             {
                 return false;

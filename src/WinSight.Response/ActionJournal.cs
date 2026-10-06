@@ -97,7 +97,7 @@ public sealed class ActionJournal : IActionJournal
             using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!ActionJournalEvidence.Maintain(_path))
             {
-                return new(ActionJournalWriteStatus.EvidencePreservationFailed);
+                return new(ActionJournalWriteStatus.EvidenceRecoveryBlocked);
             }
             var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines, retainPhases: true);
             if (snapshot.Unreadable)
@@ -152,7 +152,7 @@ public sealed class ActionJournal : IActionJournal
             using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!ActionJournalEvidence.Maintain(_path))
             {
-                return new(ActionJournalWriteStatus.EvidencePreservationFailed);
+                return new(ActionJournalWriteStatus.EvidenceRecoveryBlocked);
             }
             var snapshot = ReadSnapshotLocked(ActionJournalReader.MaxLines, retainPhases: true);
             if (snapshot.Unreadable)

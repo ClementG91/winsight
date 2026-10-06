@@ -29,10 +29,13 @@ public static partial class Adapters
         var entries = snapshot.Entries;
         var b = new ToolReport.Builder("actions");
         var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached
-            || snapshot.EvidencePreserved || snapshot.EvidenceRecoveryPending || snapshot.EvidenceCountersUnknown
+            || snapshot.EvidenceRecoveryPending || snapshot.EvidenceUnavailable || snapshot.EvidenceOverBudget
+            || snapshot.RecoveryRequired;
+        var historical = snapshot.EvidencePreserved || snapshot.EvidenceCountersUnknown
             || snapshot.DiscardedEvidenceBytes > 0 || snapshot.DiscardedMetadataBytes > 0
-            || snapshot.DiscardedEvidenceFiles > 0 || snapshot.DiscardedJournalPrefixBytes > 0 || snapshot.RecoveryRequired;
-        if (incomplete)
+            || snapshot.DiscardedEvidenceFiles > 0 || snapshot.DiscardedJournalPrefixBytes > 0
+            || snapshot.UnverifiedPrefixDiscardBytes > 0 || snapshot.UnverifiedEvidenceBytes > 0;
+        if (incomplete || historical)
         {
             var accounting = $" Discarded journal-prefix bytes: {snapshot.DiscardedJournalPrefixBytes}; "
                 + $"evidence bytes/files: {snapshot.DiscardedEvidenceBytes}/{snapshot.DiscardedEvidenceFiles}; "
@@ -42,18 +45,32 @@ public static partial class Adapters
                 + $"recovery pending: {(snapshot.EvidenceRecoveryPending ? "true" : "false")}; "
                 + $"unverified prefix/evidence bytes: {snapshot.UnverifiedPrefixDiscardBytes}/{snapshot.UnverifiedEvidenceBytes}; "
                 + $"prior accounting: {(snapshot.EvidenceCountersUnknown ? "unknown" : "known")}.";
-            b.Add(Severity.Notable, snapshot.RecoveryRequired ? "Action journal recovery required" : "Action journal coverage incomplete",
-                snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
+            var paths = $" Journal: {UntrustedDisplayText.Neutralize(journalPath)}; "
+                + $"evidence metadata: {UntrustedDisplayText.Neutralize(journalPath + ".evidence.json")}; "
+                + "evidence slots: " + string.Join(", ", Enumerable.Range(0, 4).Select(slot =>
+                    UntrustedDisplayText.Neutralize(journalPath + (slot == 0 ? ".corrupt.jsonl" : $".corrupt.{slot}.jsonl")))) + ".";
+            b.Add(incomplete ? Severity.Notable : Severity.Info,
+                !incomplete ? "Action journal historical accounting"
+                    : snapshot.RecoveryRequired ? "Action journal recovery required" : "Action journal coverage incomplete",
+                (snapshot.Unreadable ? "Action history unavailable; storage could not be read safely."
                     : (snapshot.RecoveryRequired
                         ? snapshot.EvidenceUnavailable
                             ? "Recovery evidence or metadata is unavailable; check local-file access and disk space, then retry."
                             : snapshot.EvidenceOverBudget
                                 ? "Recovery evidence exceeds 16 MiB; the next response write requires automatic bounded migration."
                                 : "History exceeds 16 MiB; the next response write requires automatic bounded migration."
-                        : "History contains malformed records, reached a read limit, or has recovery evidence.") + accounting,
+                        : snapshot.EvidenceRecoveryPending ? "Evidence recovery or verification of its intent metadata is pending."
+                            : incomplete ? "History contains malformed records or reached a read limit."
+                            : "Historical evidence and loss accounting; the inspected journal tail has no current coverage problem.")) + accounting + paths,
                 new Dictionary<string, string?>
                 {
                     ["kind"] = "actionJournalCoverage",
+                    ["journalPath"] = journalPath,
+                    ["evidenceMetadataPath"] = journalPath + ".evidence.json",
+                    ["evidenceSlot0Path"] = journalPath + ".corrupt.jsonl",
+                    ["evidenceSlot1Path"] = journalPath + ".corrupt.1.jsonl",
+                    ["evidenceSlot2Path"] = journalPath + ".corrupt.2.jsonl",
+                    ["evidenceSlot3Path"] = journalPath + ".corrupt.3.jsonl",
                     ["unreadable"] = snapshot.Unreadable ? "true" : "false",
                     ["malformedEntries"] = snapshot.MalformedEntries.ToString(CultureInfo.InvariantCulture),
                     ["limitReached"] = snapshot.LimitReached ? "true" : "false",

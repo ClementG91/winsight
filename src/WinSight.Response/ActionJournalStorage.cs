@@ -12,7 +12,7 @@ public enum ActionJournalWriteStatus
 {
     Appended, Rotated, Updated, TargetNotFound, Unavailable, InvalidRecord,
     RotationFailed, EvidencePreservationFailed, RecoveryRequired, RetentionLimit,
-    LockTimeout, UnsafeLockPath, LockUnavailable,
+    LockTimeout, UnsafeLockPath, LockUnavailable, EvidenceRecoveryBlocked,
 }
 
 public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
@@ -27,6 +27,7 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
         ActionJournalWriteStatus.LockUnavailable => "the journal .lock could not be opened; check permissions or concurrent initialization and retry; never delete a live lock",
         ActionJournalWriteStatus.Unavailable => "check free disk space, local-file access and sharing; retry when available",
         ActionJournalWriteStatus.EvidencePreservationFailed => "recovery evidence could not be preserved; check disk space and access, then retry",
+        ActionJournalWriteStatus.EvidenceRecoveryBlocked => "pending evidence recovery or its intent metadata could not be resolved safely; inspect winsight actions and the recovery steps in RECOVERY.md before retrying",
         ActionJournalWriteStatus.RotationFailed => "atomic journal replacement failed; close conflicting file handles and retry",
         ActionJournalWriteStatus.RecoveryRequired => "bounded history migration is required; inspect winsight actions and RECOVERY.md",
         ActionJournalWriteStatus.RetentionLimit => "the requested history annotation exceeds retention budgets; annotation refused and original journal unchanged; inspect available original and undo records",

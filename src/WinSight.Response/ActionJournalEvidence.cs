@@ -40,6 +40,18 @@ internal static partial class ActionJournalEvidence
 
     internal static bool Preserve(string path)
     {
+        try
+        {
+            return PreserveCore(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    private static bool PreserveCore(string path)
+    {
         if (!Maintain(path))
         {
             return false;
@@ -58,6 +70,7 @@ internal static partial class ActionJournalEvidence
         input.Position = Math.Max(0, input.Length - ActionJournalReader.MaxBytes);
         var digest = Convert.ToHexString(SHA256.HashData(input));
         var free = -1;
+        var alreadyPreserved = false;
         for (var i = 0; i < Slots; i++)
         {
             using var existing = AutomaticFileAccess.TryAcquire(SlotPath(path, i), out var missing);
@@ -72,15 +85,26 @@ internal static partial class ActionJournalEvidence
                     free = i;
                 }
             }
-            else if (!existing.IsDirectory && existing.Length == Math.Min(source.Length, ActionJournalReader.MaxBytes))
+            else
             {
-                using var evidence = existing.OpenRead();
-                if (Convert.ToHexString(SHA256.HashData(evidence)) == digest
-                    && existing.IsCurrent() && source.IsCurrent())
+                if (existing.IsDirectory)
                 {
-                    return true;
+                    return false;
+                }
+                using var evidence = existing.OpenRead();
+                if (existing.Length == Math.Min(source.Length, ActionJournalReader.MaxBytes))
+                {
+                    alreadyPreserved |= Convert.ToHexString(SHA256.HashData(evidence)) == digest;
+                }
+                if (!existing.IsCurrent())
+                {
+                    return false;
                 }
             }
+        }
+        if (alreadyPreserved)
+        {
+            return source.IsCurrent();
         }
         if (free < 0)
         {
