@@ -4,7 +4,8 @@ public static partial class AutomaticFileAccess
 {
     /// <summary>
     /// Journal-only atomic replacement with one deterministic crash staging file per destination.
-    /// Callers must hold the journal's cross-session mutex for this path and all its evidence paths.
+    /// Callers must hold the journal's cross-session file lock for this path and all its evidence paths.
+    /// An existing staging path is preserved: its name alone is not proof that this operation owns it.
     /// </summary>
     public static bool TryWriteAtomicBounded(string path, ReadOnlySpan<byte> bytes)
     {
@@ -32,7 +33,7 @@ public static partial class AutomaticFileAccess
     /// <summary>
     /// Copies at most maxBytes from an exact local source tail with a fixed 80KiB buffer. Flushes
     /// staging before publishing create-new evidence; keeps source intact if any step fails.
-    /// Requires the same journal mutex as <see cref="TryWriteAtomicBounded"/>.
+    /// Requires the same journal file lock as <see cref="TryWriteAtomicBounded"/>.
     /// </summary>
     public static bool TryCopyTailAtomic(string sourcePath, string destinationPath, int maxBytes, bool replaceExisting = false)
     {
@@ -73,7 +74,7 @@ public static partial class AutomaticFileAccess
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ObjectDisposedException)
             {
-                // The source remains authoritative, and the same staging name is retried next time.
+                // The source remains authoritative. Only this freshly created handle is cleaned up.
             }
             temp.TryDelete();
             return false;
@@ -84,13 +85,9 @@ public static partial class AutomaticFileAccess
     {
         var tempLeaf = leaf + ".winsight-journal.tmp";
         var tempPath = fullPath + ".winsight-journal.tmp";
-        using (var stale = TryAcquireForDelete(tempPath, out var missing))
-        {
-            if (stale is null ? !missing : !stale.TryDelete())
-            {
-                return null;
-            }
-        }
+        // FILE_CREATE atomically refuses any existing entry. A predictable suffix cannot prove
+        // ownership: this may be another configured journal or an unrelated operator file.
+        // Never acquire/delete unknown bytes, even when they look like a partial crash copy.
         return TryOpenRelative(parent, tempLeaf, tempPath,
             GenericWrite | FileReadAttributes | DeleteAccess | Synchronize, 0, FileCreate,
             FileNonDirectoryFile | FileSynchronousIoNonAlert | FileOpenReparsePoint | FileOpenNoRecall);

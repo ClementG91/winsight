@@ -200,15 +200,19 @@ public sealed class ActionJournalRecoveryRegressionTests : IDisposable
     }
 
     [Fact]
-    public void APartialCopyLeftByACrashIsReplacedBeforeItCanBecomeEvidence()
+    public void UnownedCrashStagingIsPreservedAndNeverPublishedAsEvidence()
     {
         var original = RetentionSource();
         File.WriteAllText(PathName, original);
         File.WriteAllText(EvidencePath(0) + ".winsight-journal.tmp", "partial copy");
         File.WriteAllText(PathName + ".winsight-journal.tmp", "partial rotation");
-        Assert.True(new ActionJournal(PathName).TryAppend(Entry()));
-        AssertEvidenceContains(original);
-        Assert.Empty(Directory.GetFiles(_root, "*.winsight-journal.tmp"));
+        var result = new ActionJournal(PathName).TryAppendWithStatus(Entry());
+        Assert.Equal(ActionJournalWriteStatus.EvidencePreservationFailed, result.Status);
+        Assert.False(result.Durable);
+        Assert.Equal(original, File.ReadAllText(PathName));
+        Assert.Equal("partial copy", File.ReadAllText(EvidencePath(0) + ".winsight-journal.tmp"));
+        Assert.Equal("partial rotation", File.ReadAllText(PathName + ".winsight-journal.tmp"));
+        Assert.False(File.Exists(EvidencePath(0)));
     }
 
     [Theory]

@@ -184,12 +184,12 @@ counter can coexist with a durable write; it is not evidence that the machine ch
 | `EvidencePreservationFailed` | A required journal rewrite cannot safely preserve raw evidence or assess the bounded ring. All four slots must be ordinary readable local files or confirmed absent before allocation or eviction; a directory, reparse or read denial is uncertain evidence, even if another slot is free. Check free space, file permissions and sharing; close conflicting handles, then retry. Preserve unexpected directories/reparses separately with their identity and contents before an operator repairs the slot path. Do not delete evidence or the index to clear the diagnostic. |
 | `EvidenceRecoveryBlocked` | A pending eviction/trim or its intent metadata could not be read, published or finalized safely. New append/undo is refused because the writer cannot exclude unfinished recovery. Keep journal, slots, index and staging files together; inspect `winsight actions`, restore local read/write access and space, close conflicting handles, then retry. Invalid readable metadata can be replaced with explicit unknown-prior accounting only after its bounded loss/digest record is durable. Unreadable metadata must never be assumed empty. |
 | Unusable archive without a pending intent | A healthy append/undo proceeds; coverage still marks unavailable or oversized evidence as a current problem. Optional archive migration is attempted before writing, but a read/acquisition failure without a durable intent does not block the healthy journal. Once a trim intent is durable, an unresolved publication blocks the next mutation. A damaged rewrite that needs preservation uses the stricter ring check above. |
-| `RotationFailed` | Atomic replacement did not complete. The old source remains available. Resolve sharing/ACL/disk-space problems and retry. |
+| `RotationFailed` | Atomic replacement did not complete. The old source remains available. Resolve sharing/ACL/disk-space problems and retry. A pre-existing `.winsight-journal.tmp` is preserved and requires the staging procedure below; its name does not prove ownership. |
 | `Unavailable` | The exact ordinary local file could not be acquired or the writer lock was unavailable. Reparse points and unavailable cloud placeholders are refused. Restore the intended ordinary file/permissions or availability, then retry; do not bypass the acquisition checks. |
 | `InvalidRecord` | The action identity or enum/input is invalid. Inspect the supplied action; increasing storage budgets is not a repair. Product labels are centrally bounded with a truncation marker and digest; full functional rule/quarantine keys remain intact. |
 | `TargetNotFound` | No retained completed target could be annotated. Retention may already have removed it. Inspect the actual action and its undo records; do not invent a successful annotation. |
 | `RetentionLimit` | The undo annotation cannot fit without evicting its own target. Publication is refused and the original journal is unchanged. An externally supplied undo ID need not have a record; inspect what is actually available. |
-| Pending eviction/trim | A durable recovery intent is awaiting completion or verification. Leave the source, evidence, index and fixed staging files together; a subsequent writer resumes it. Restore transient access before retrying. |
+| Pending eviction/trim | A durable recovery intent is awaiting completion or verification. Leave the source, evidence, index and fixed staging files together; a subsequent writer resumes it when access and staging allow safe publication. Restore transient access before retrying; a pre-existing staging file requires the procedure below. |
 | Unknown counters / unverified loss | Exact earlier loss cannot be established, for example after present but corrupt/unreadable metadata, saturation or an unexpected source replacement. History explicitly reports that uncertainty and available digests. A genuinely absent index initializes a new accounting state; this does not establish absence of historical losses. Never delete the index to clear a diagnostic. A zero counter with unknown accounting is not proof of zero loss. |
 
 The normalized active journal is capped at **16 MiB / 10,000 physical lines**; rotation retains
@@ -223,6 +223,23 @@ zero-valued fields are not proof of zero historical loss. Append and undo refuse
 availability and conflicting handles, preserve the index, then retry as the affected user. A
 readable but malformed index retains the separate documented durable migration policy; an ACL
 entry alone is not proof that Windows actually refused a DATA read.
+
+Atomic journal publication creates its fixed `.winsight-journal.tmp` with native create-new semantics.
+It never removes or overwrites a pre-existing entry at that name. Such an entry may be another
+configured journal, unrelated data, or a crash remnant; neither its suffix nor plausible partial
+contents prove ownership. A blocked undo/rotation reports `RotationFailed`; required evidence
+publication reports `EvidencePreservationFailed`, or `EvidenceRecoveryBlocked` while resuming an
+already durable intent. The original source and unknown staging bytes remain available.
+
+After a crash, one fixed staging file per destination may therefore require operator recovery.
+Stop every writer in every session, inventory and preserve the journal, all slots, index and staging
+together with their hashes and identities, and inspect which configured store owns each path.
+Keep any actual second journal at its configured location and choose nonoverlapping paths for the
+stores. For a reviewed crash remnant, move it intact to a reviewed backup location outside every
+store's derived paths, retain the hash/identity record, then retry as the affected user. Never delete
+unknown staging to retry. This is a deliberate availability limitation: automatic crash cleanup
+cannot safely claim ownership of arbitrary pre-existing bytes. Normal failures clean only the
+freshly created exclusive staging handle; the fixed-name storage budget above remains unchanged.
 
 Do not delete `.corrupt*.jsonl`, `.evidence.json` or recovery staging files to retry a response. Preserve
 them together if storage is genuinely lost and a reviewed backup must be recovered. Stop all WinSight
