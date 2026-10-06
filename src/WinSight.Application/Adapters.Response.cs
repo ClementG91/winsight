@@ -119,14 +119,17 @@ public static partial class Adapters
     {
         var rules = presenter.AllowRules(out var storage);
         var builder = new ToolReport.Builder("rules");
-        if (!storage.Readable || storage.IgnoredEntries > 0)
+        if (!storage.Readable || storage.IgnoredEntries > 0 || storage.RetainedUnsupportedEntries > 0)
         {
-            builder.Add(Severity.Notable, "Rule store coverage incomplete", storage.Detail,
+            var incomplete = !storage.Readable || storage.IgnoredEntries > 0;
+            builder.Add(incomplete ? Severity.Notable : Severity.Info,
+                incomplete ? "Rule store coverage incomplete" : "Unsupported rule entries retained inactive", storage.Detail,
                 new Dictionary<string, string?>
                 {
                     ["kind"] = "ruleStoreCoverage",
                     ["storageStatus"] = storage.Status.ToString(),
                     ["ignoredEntries"] = storage.IgnoredEntries.ToString(CultureInfo.InvariantCulture),
+                    ["retainedUnsupportedEntries"] = storage.RetainedUnsupportedEntries.ToString(CultureInfo.InvariantCulture),
                     ["readable"] = storage.Readable ? "true" : "false",
                 });
         }

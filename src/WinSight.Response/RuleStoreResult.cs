@@ -7,10 +7,10 @@ public enum RuleStoreStatus
 {
     Loaded, Missing, Written, TargetNotFound, InvalidRule, InvalidJson, InvalidFormat,
     UnsupportedVersion, ByteLimit, RuleLimit, Unavailable, WriteFailed,
-    LockTimeout, UnsafeLockPath, LockUnavailable,
+    LockTimeout, UnsafeLockPath, LockUnavailable, UnsupportedIdentityCollision,
 }
 
-public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries = 0)
+public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries = 0, int RetainedUnsupportedEntries = 0)
 {
     public bool Readable => Status is RuleStoreStatus.Loaded or RuleStoreStatus.Missing;
     public bool Durable => Status == RuleStoreStatus.Written;
@@ -27,9 +27,12 @@ public sealed record RuleStoreResult(RuleStoreStatus Status, int IgnoredEntries 
         RuleStoreStatus.Unavailable => "check ordinary local-file access, sharing and free disk space, then retry",
         RuleStoreStatus.WriteFailed => "atomic rule replacement failed; check disk space, permissions and conflicting file handles, then retry",
         RuleStoreStatus.InvalidRule => "a rule requires a nonempty identity, a key and supported scope, decision and duration; timed rules require an expiry",
+        RuleStoreStatus.UnsupportedIdentityCollision => "the identity belongs to a retained rule with unknown semantics; use a compatible version or explicitly revoke that identity before adding a replacement",
         RuleStoreStatus.TargetNotFound => "the rule is absent from the readable store",
         _ => "inspect winsight rules for the stored decisions",
     }) + (IgnoredEntries == 0 ? string.Empty
         : $"; ignored entries: {IgnoredEntries.ToString(CultureInfo.InvariantCulture)}; "
-            + (Durable ? "invalid entries were removed by this successful write" : "invalid entries remain intact until a successful write"));
+            + (Durable ? "invalid entries were removed by this successful write" : "invalid entries remain intact until a successful write"))
+        + (RetainedUnsupportedEntries == 0 ? string.Empty
+            : $"; retained unsupported entries: {RetainedUnsupportedEntries.ToString(CultureInfo.InvariantCulture)}; preserved without applying their unknown semantics");
 }

@@ -50,9 +50,6 @@ public sealed class RuleStoreRecoveryTests : IDisposable
     }
 
     [Theory]
-    [InlineData("Scope")]
-    [InlineData("Decision")]
-    [InlineData("Duration")]
     [InlineData("Once")]
     [InlineData("UntilReboot")]
     [InlineData("UntilProcessExit")]
@@ -70,7 +67,6 @@ public sealed class RuleStoreRecoveryTests : IDisposable
         var invalid = JsonSerializer.SerializeToNode(Rule("run:unsafe"))!;
         switch (defect)
         {
-            case "Scope": case "Decision": case "Duration": invalid[defect] = 99; break;
             case "Once": case "UntilReboot": case "UntilProcessExit": invalid["Duration"] = (int)Enum.Parse<RuleDuration>(defect); break;
             case "EmptyId": invalid["Id"] = Guid.Empty; break;
             case "MissingDecision": case "MissingScope": case "MissingDuration": invalid.AsObject().Remove(defect[7..]); break;

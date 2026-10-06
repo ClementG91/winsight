@@ -224,6 +224,24 @@ availability and conflicting handles, preserve the index, then retry as the affe
 readable but malformed index retains the separate documented durable migration policy; an ACL
 entry alone is not proof that Windows actually refused a DATA read.
 
+Structurally valid rule entries whose scope, decision or duration is unknown to this version are
+retained as their exact UTF-8 object bytes across neighboring writes. They are never matched or
+returned as active rules, even if their duration would otherwise appear permanent. Their separate
+`retainedUnsupportedEntries` count is informational; it is not an invalid-entry removal count.
+Use a compatible version to apply those semantics. A new rule cannot replace an unknown entry
+with the same ID (`UnsupportedIdentityCollision`). Explicit `winsight revoke --confirm` can remove
+that ID through the existing journalled response path; MCP cannot perform this mutation.
+
+Null, keyless, incomplete, mistyped or ambiguously duplicated semantic fields remain invalid:
+reads report them as current coverage problems, and a successful write removes them visibly.
+Decoded duplicate field names are rejected, including escaped spellings. Fully understood
+Once/UntilReboot/UntilProcessExit rules remain unstorable; any entry containing an unknown enum
+stays opaque and inactive if structurally valid. Timed entries still require an expiry.
+Known entries also retain their raw extension fields. All retained entries count toward 8192,
+and their complete raw bytes count toward the 8 MiB output budget; a writer never discards them
+to make room. This corrects the previous unknown-enum test contract that treated future entries
+as invalid and expected their removal. Genuinely invalid-entry assertions remain in place.
+
 Atomic journal publication creates its fixed `.winsight-journal.tmp` with native create-new semantics.
 It never removes or overwrites a pre-existing entry at that name. Such an entry may be another
 configured journal, unrelated data, or a crash remnant; neither its suffix nor plausible partial
