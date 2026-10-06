@@ -322,7 +322,35 @@ and an invalid same-ID duplicate cannot authorize deleting the original or clean
 An unchanged rule whose atomic removal returns `WriteFailed` is reported as remaining active only
 if its supported semantics and the store clock confirm activity under that lock. This observation
 does not prevent a later operator action from changing the store. Explicit journalled Revoke by ID
-still removes all matching entries when requested by the operator; inspect `winsight rules` first.
+still removes all loader-retained matching entries when requested by the operator; invalid-only
+records are ignored by that loader and do not become removable rules. Inspect `winsight rules` first.
+
+### Journal filename family and archive order
+
+The configured journal filename must contain at most **218 UTF-16 units** for writes. The longest
+derived component combines a numbered archive suffix (16 units) and its fixed staging suffix
+(21 units), within the Windows ordinary 255-unit component budget. This validates the normalized
+filename, including supplementary characters counted as two units; it does not guarantee access,
+validate every volume's limits, or canonicalize aliases/hardlinks into a shared lock identity.
+Default filenames fit this budget. Append and undo report non-durable `PathTooLong` before creating
+directories, locks, metadata or staging. Existing bytes remain intact.
+
+Existing longer filenames remain available for bounded read-only history inspection, using an
+ordinary local DATA read handle that denies simultaneous writes/deletes. Native local-file and
+reparse protections still apply. The report separates write refusal from actual history coverage;
+that refusal alone does not claim the readable history is incomplete. Representable metadata and
+archives retain their real coverage/counters; auxiliary components beyond 255 units are uninspected
+and accounting is marked unknown, without inventing discarded bytes or an access failure. Physical
+history budgets and malformed-record reporting remain in force. Stop all writers across sessions,
+inventory and preserve the entire family with hashes, then choose a reviewed shorter, nonoverlapping
+path and transfer the preserved state consistently before retrying. Never truncate a configured
+name or delete evidence just to clear this diagnostic.
+
+Archive slots use cyclic replacement when all four are occupied. If an external operation removes
+a slot, preservation fills an available slot before later cyclic replacement. Slot numbers are
+therefore not a chronological order, and after a manual deletion the next victim is not guaranteed
+to be the oldest surviving archive. No chronology is reconstructed from untrusted file timestamps.
+Preserve and inventory all four slots together; deletion is not a supported recovery shortcut.
 
 ## Full removal
 

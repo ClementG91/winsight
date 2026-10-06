@@ -13,6 +13,7 @@ public enum ActionJournalWriteStatus
     Appended, Rotated, Updated, TargetNotFound, Unavailable, InvalidRecord,
     RotationFailed, EvidencePreservationFailed, RecoveryRequired, RetentionLimit,
     LockTimeout, UnsafeLockPath, LockUnavailable, EvidenceRecoveryBlocked,
+    PathTooLong,
 }
 
 public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
@@ -22,6 +23,7 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
 
     public string Detail => $"audit storage status: {Status}; " + (Status switch
     {
+        ActionJournalWriteStatus.PathTooLong => "the configured journal filename exceeds 218 UTF-16 units required for its complete archive/index/staging family; existing history remains read-only; preserve all files and choose a shorter nonoverlapping journal path using RECOVERY.md",
         ActionJournalWriteStatus.LockTimeout => "the journal sidecar is held by another operation; retry after it exits (30-second lock budget)",
         ActionJournalWriteStatus.UnsafeLockPath => "the journal .lock path or parent is not an accessible ordinary local file/directory; inspect reparses and directory entries using RECOVERY.md",
         ActionJournalWriteStatus.LockUnavailable => "the journal .lock could not be opened; check permissions or concurrent initialization and retry; never delete a live lock",
@@ -39,6 +41,13 @@ public sealed record ActionJournalWriteResult(ActionJournalWriteStatus Status)
 /// <summary>Bounded serialization and exact local-file storage shared by append and undo.</summary>
 internal static class ActionJournalStorage
 {
+    // A Windows 255-unit component must fit the longest numbered archive suffix (16)
+    // and deterministic staging suffix (21). This is necessary, not a guarantee of access.
+    internal const int MaxJournalNameUnits = 255 - 16 - 21;
+
+    internal static bool SupportsWritePath(string path) =>
+        Path.GetFileName(Path.GetFullPath(path)).Length <= MaxJournalNameUnits;
+
     // JSON's default encoder uses at most six bytes per UTF-16 unit. 2048 units,
     // including the marker, leave over 3 KiB for the fixed record fields under
     // the 16 KiB line budget. Functional keys and quarantine data are untouched.

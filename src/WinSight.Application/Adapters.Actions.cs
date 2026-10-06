@@ -28,6 +28,17 @@ public static partial class Adapters
         var snapshot = new ActionJournal(journalPath).ReadWithCoverage(max);
         var entries = snapshot.Entries;
         var b = new ToolReport.Builder("actions");
+        if (snapshot.WritePathFailure is { } writePathFailure)
+        {
+            b.Add(Severity.Notable, "Action journal write path unsupported",
+                new ActionJournalWriteResult(writePathFailure).Detail,
+                new Dictionary<string, string?>
+                {
+                    ["kind"] = "actionJournalWritePath",
+                    ["journalPath"] = journalPath,
+                    ["writePathFailure"] = writePathFailure.ToString(),
+                });
+        }
         var incomplete = snapshot.Unreadable || snapshot.MalformedEntries > 0 || snapshot.LimitReached
             || snapshot.EvidenceRecoveryPending || snapshot.EvidenceUnavailable || snapshot.EvidenceOverBudget
             || snapshot.RecoveryRequired;
@@ -117,6 +128,7 @@ public static partial class Adapters
         return b.Build(snapshot.Unreadable ? "response action history unavailable"
             : snapshot.RecoveryRequired ? $"{entries.Count} recorded response action(s); history incomplete; recovery required"
             : incomplete ? $"{entries.Count} recorded response action(s); history incomplete"
+            : snapshot.WritePathFailure is { } failure ? $"{entries.Count} recorded response action(s); writes refused: {failure}"
             : entries.Count == 0
             ? "no response actions recorded"
             : $"{entries.Count} recorded response action(s), newest first");

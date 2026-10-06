@@ -199,14 +199,25 @@ internal static partial class ActionJournalEvidence
         return Save(path, state);
     }
 
-    internal static ActionJournalSnapshot Coverage(string path, ActionJournalSnapshot snapshot)
+    internal static ActionJournalSnapshot Coverage(string path, ActionJournalSnapshot snapshot,
+        bool representablePathsOnly = false)
     {
-        var state = ReadState(path, out var unavailable, out var invalid);
+        var uninspected = representablePathsOnly && !HasRepresentableLeaf(path + ".evidence.json");
+        var unavailable = false;
+        var invalid = false;
+        var state = uninspected ? new State() : ReadState(path, out unavailable, out invalid);
         var preserved = false;
         var evidenceUnavailable = unavailable;
         var evidenceOverBudget = false;
         for (var slot = 0; slot < Slots; slot++)
         {
+            if (representablePathsOnly && !HasRepresentableLeaf(SlotPath(path, slot)))
+            {
+                // An impossible derived component is not an access failure or evidence loss.
+                // Its uninspected accounting remains unknown, independently of write refusal.
+                uninspected = true;
+                continue;
+            }
             using var archive = AutomaticFileAccess.TryAcquire(SlotPath(path, slot), out var missing);
             if (archive is null)
             {
@@ -236,7 +247,7 @@ internal static partial class ActionJournalEvidence
             DiscardedEvidenceBytes = state.DiscardedBytes,
             DiscardedEvidenceFiles = state.DiscardedFiles,
             EvidenceLossReason = state.LossReason,
-            EvidenceCountersUnknown = state.PriorCountersUnknown || evidenceUnavailable || invalid,
+            EvidenceCountersUnknown = state.PriorCountersUnknown || evidenceUnavailable || invalid || uninspected,
             DiscardedMetadataBytes = state.DiscardedMetadataBytes,
             DiscardedMetadataTailSha256 = state.DiscardedMetadataTailSha256,
             DiscardedJournalPrefixBytes = state.DiscardedJournalPrefixBytes,
@@ -250,6 +261,9 @@ internal static partial class ActionJournalEvidence
             EvidenceRecoveryPending = state.PendingSlot >= 0 || state.PendingTrimSlot >= -1 || evidenceUnavailable || invalid,
         };
     }
+
+    private static bool HasRepresentableLeaf(string path) =>
+        Path.GetFileName(Path.GetFullPath(path)).Length <= 255;
 
     private static State ReadState(string path, out bool unavailable, out bool invalid)
     {

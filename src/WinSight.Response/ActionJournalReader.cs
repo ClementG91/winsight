@@ -28,7 +28,8 @@ public sealed record ActionJournalSnapshot(
     long PendingEvidencePrefixDiscardBytes = 0,
     bool EvidenceUnavailable = false,
     bool EvidenceOverBudget = false,
-    ActionJournalWriteStatus? LockFailure = null);
+    ActionJournalWriteStatus? LockFailure = null,
+    ActionJournalWriteStatus? WritePathFailure = null);
 
 /// <summary>Reads JSONL backwards with fixed buffers, including corrupt bytes in every budget.</summary>
 internal static class ActionJournalReader

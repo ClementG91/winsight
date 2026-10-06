@@ -94,6 +94,10 @@ public sealed class ActionJournal : IActionJournal
         }
         try
         {
+            if (!ActionJournalStorage.SupportsWritePath(_path))
+            {
+                return new(ActionJournalWriteStatus.PathTooLong);
+            }
             using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!ActionJournalEvidence.Maintain(_path))
             {
@@ -149,6 +153,10 @@ public sealed class ActionJournal : IActionJournal
         }
         try
         {
+            if (!ActionJournalStorage.SupportsWritePath(_path))
+            {
+                return new(ActionJournalWriteStatus.PathTooLong);
+            }
             using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
             if (!ActionJournalEvidence.Maintain(_path))
             {
@@ -191,8 +199,14 @@ public sealed class ActionJournal : IActionJournal
     /// <summary>Most recent actions plus availability/corruption/budget information for the read tail.</summary>
     public ActionJournalSnapshot ReadWithCoverage(int max = 200)
     {
+        ActionJournalWriteStatus? writePathFailure = null;
         try
         {
+            if (!ActionJournalStorage.SupportsWritePath(_path))
+            {
+                writePathFailure = ActionJournalWriteStatus.PathTooLong;
+                return ReadUnsupportedWritePath(max);
+            }
             using var gate = ResponseFileLock.AcquireReader(_path, _lockWait);
             var snapshot = ActionJournalEvidence.Coverage(_path, ReadSnapshotLocked(max));
             return gate.IsCurrent ? snapshot : new ActionJournalSnapshot([], Unreadable: true,
@@ -204,8 +218,28 @@ public sealed class ActionJournal : IActionJournal
         }
         catch (Exception ex) when (IsUnavailable(ex))
         {
-            return new ActionJournalSnapshot([], Unreadable: true);
+            return new ActionJournalSnapshot([], Unreadable: true, WritePathFailure: writePathFailure);
         }
+    }
+
+    private ActionJournalSnapshot ReadUnsupportedWritePath(int max)
+    {
+        // The derived lock may itself exceed the component limit. Supported writers refuse
+        // this family before mutation; DATA Read sharing also refuses external writers/deletes.
+        // Keep the same ordinary local handle through coverage and final identity validation.
+        using var lease = AutomaticFileAccess.TryAcquireStableRead(_path, out var missing);
+        var snapshot = new ActionJournalSnapshot([], Unreadable: !missing);
+        if (lease is { IsDirectory: false, DataIsLocal: true })
+        {
+            using var stream = lease.OpenRead(FileOptions.RandomAccess);
+            snapshot = ActionJournalReader.Read(stream, max);
+        }
+        snapshot = ActionJournalEvidence.Coverage(_path, snapshot, representablePathsOnly: true) with
+        {
+            WritePathFailure = ActionJournalWriteStatus.PathTooLong,
+        };
+        return lease is not null && !lease.IsCurrent()
+            ? snapshot with { Entries = [], Unreadable = true } : snapshot;
     }
 
     private ActionJournalSnapshot ReadSnapshotLocked(int max, bool retainPhases = false)
