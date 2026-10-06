@@ -21,6 +21,7 @@ public static partial class AutomaticFileAccess
         private readonly LocalPathLease _parent;
         private LocalPathLease? _file;
         private LocalPathLease? _bootstrap;
+        private readonly List<LocalPathLease> _writeParents = [];
 
         internal LocalFileLock(LocalPathLease parent, LocalPathLease? file, LocalPathLease? bootstrap = null)
         {
@@ -33,7 +34,69 @@ public static partial class AutomaticFileAccess
         {
             _file?.Dispose();
             _bootstrap?.Dispose();
+            foreach (var lease in _writeParents)
+            {
+                lease.Dispose();
+            }
             _parent.Dispose();
+        }
+
+        // Writer-only. Mutators traverse every ancestor, so protect that entire ordinary path
+        // against an unrelated legacy reader's exclusive directory bootstrap. Use the mutator's
+        // minimal access mask: directory listing is not required. No waiting with a sidecar held.
+        internal bool TryProtectParentWrites(out LocalFileLockStatus status)
+        {
+            status = LocalFileLockStatus.Unavailable;
+            var root = Path.GetPathRoot(_parent.FullPath);
+            if (string.IsNullOrEmpty(root))
+            {
+                return false;
+            }
+            var current = TryAcquireNormalized(root, FileTraverse | FileReadAttributes | Synchronize,
+                (uint)FileShare.ReadWrite, out var error);
+            if (!KeepParent(current, error, out status))
+            {
+                return false;
+            }
+            foreach (var component in _parent.FullPath[root.Length..].Split(
+                         [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+                         StringSplitOptions.RemoveEmptyEntries))
+            {
+                var nextPath = Path.Combine(current!.FullPath, component);
+                var next = TryOpenRelative(current, component, nextPath,
+                    FileTraverse | FileReadAttributes | Synchronize, (uint)FileShare.ReadWrite,
+                    FileOpen, FileDirectoryFile | FileSynchronousIoNonAlert | FileOpenReparsePoint,
+                    out error);
+                if (!KeepParent(next, error, out status))
+                {
+                    return false;
+                }
+                current = next;
+            }
+            if (current!.Identity != _parent.Identity || !_parent.IsCurrent()
+                || _file is null || !_file.IsCurrent())
+            {
+                status = LocalFileLockStatus.Unavailable;
+                return false;
+            }
+            status = LocalFileLockStatus.Acquired;
+            return true;
+        }
+
+        private bool KeepParent(LocalPathLease? lease, int error, out LocalFileLockStatus status)
+        {
+            status = LockStatus(error);
+            if (lease is { IsDirectory: true, DataIsLocal: true })
+            {
+                _writeParents.Add(lease);
+                return true;
+            }
+            if (lease is not null)
+            {
+                status = LocalFileLockStatus.UnsafePath;
+                lease.Dispose();
+            }
+            return false;
         }
 
         // Called only from the writer gateway. Read callers never reach a create disposition.
@@ -86,11 +149,12 @@ public static partial class AutomaticFileAccess
             }
         }
         var gate = TryAcquireExistingLockFile(fullPath, out status);
-        if (gate is null || status != LocalFileLockStatus.Missing)
+        if (gate is null)
         {
-            return gate;
+            return null;
         }
-        if (gate.TryInitializeSidecar(fullPath, out status))
+        if ((status != LocalFileLockStatus.Missing || gate.TryInitializeSidecar(fullPath, out status))
+            && gate.TryProtectParentWrites(out status))
         {
             return gate;
         }
