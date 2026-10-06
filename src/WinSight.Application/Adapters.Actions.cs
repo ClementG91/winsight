@@ -115,7 +115,7 @@ public static partial class Adapters
                 });
         }
         return b.Build(snapshot.Unreadable ? "response action history unavailable"
-            : snapshot.RecoveryRequired ? $"{entries.Count} recorded response action(s); recovery required"
+            : snapshot.RecoveryRequired ? $"{entries.Count} recorded response action(s); history incomplete; recovery required"
             : incomplete ? $"{entries.Count} recorded response action(s); history incomplete"
             : entries.Count == 0
             ? "no response actions recorded"

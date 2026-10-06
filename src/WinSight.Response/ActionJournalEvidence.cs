@@ -253,6 +253,22 @@ internal static partial class ActionJournalEvidence
 
     private static State ReadState(string path, out bool unavailable, out bool invalid)
     {
+        try
+        {
+            return ReadStateCore(path, out unavailable, out invalid);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // Unreadable intent metadata does not make the separately acquired journal unreadable.
+            // Keep its entries for inspection, but never permit a writer to bypass unknown intents.
+            unavailable = true;
+            invalid = false;
+            return new State(LossReason: "unavailable-evidence-metadata", PriorCountersUnknown: true);
+        }
+    }
+
+    private static State ReadStateCore(string path, out bool unavailable, out bool invalid)
+    {
         unavailable = false;
         invalid = false;
         using var lease = AutomaticFileAccess.TryAcquire(path + ".evidence.json", out var missing);

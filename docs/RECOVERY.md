@@ -216,6 +216,14 @@ coverage failure. CLI/MCP reads never acknowledge, delete or reset accounting. N
 is introduced; the archives and counters remain available without requiring deletion to clear a
 current-coverage diagnostic.
 
+If the index can be acquired but its DATA read fails, the readable journal entries remain visible.
+Coverage marks the metadata unavailable, recovery/verification pending and prior counters unknown;
+zero-valued fields are not proof of zero historical loss. Append and undo refuse with
+`EvidenceRecoveryBlocked` until ordinary index access is restored. Inspect its permissions, local
+availability and conflicting handles, preserve the index, then retry as the affected user. A
+readable but malformed index retains the separate documented durable migration policy; an ACL
+entry alone is not proof that Windows actually refused a DATA read.
+
 Do not delete `.corrupt*.jsonl`, `.evidence.json` or recovery staging files to retry a response. Preserve
 them together if storage is genuinely lost and a reviewed backup must be recovered. Stop all WinSight
 writers first, including older versions in every Windows session: current writers use persistent
