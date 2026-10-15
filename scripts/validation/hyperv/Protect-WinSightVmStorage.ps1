@@ -15,7 +15,9 @@ param(
     [string]$Root,
     [string[]]$VmNames = @('WinSight-Qualification-HV', 'WinSight-Control-HV'),
     # Also protect a parent folder of the VM storage that holds other things.
-    [switch]$AllowAncestorChange
+    [switch]$AllowAncestorChange,
+    # Explicit owner migration: preserve legacy transports cold before granting initial Idle ownership.
+    [switch]$InitializeCampaignOwnership
 )
 
 # Do not resolve system cmdlets or Hyper-V through user-controlled module search directories.
@@ -30,7 +32,15 @@ $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force
 Set-AdministratorsDefaultOwner
+if ([IO.Path]::GetFullPath($VmRoot).TrimEnd('\') -ceq [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($VmRoot)).TrimEnd('\')) { throw 'Qualification storage must be a dedicated directory, never a drive root.' }
 
+$maintenanceLease = $null
+$ownershipMissing = $false
+try { [void][IO.File]::GetAttributes((Join-Path $VmRoot 'host-campaign')) }
+catch [IO.FileNotFoundException] { $ownershipMissing = $true }
+catch [IO.DirectoryNotFoundException] { $ownershipMissing = $true }
+if (-not $ownershipMissing) { $maintenanceLease = Get-WinSightCampaignContext -Root $VmRoot -RequireIdle -Hold }
+try {
 foreach ($vm in $VmNames) {
     $found = Get-VM -Name $vm -ErrorAction SilentlyContinue
     if ($found -and $found.State -ne 'Off') { throw "VM $vm is $($found.State); turn it off first." }
@@ -114,3 +124,10 @@ foreach ($disk in $items | Where-Object { $_ -match '\.(a?vhdx?|vmgs|vmrs|vmcx)$
 }
 $lines | Set-Content -LiteralPath $record
 Write-Host "Disk hashes sealed in $record$(if ($unread) { " ($unread file(s) held open by another process named without a hash)" })"
+
+if ($InitializeCampaignOwnership) {
+    if (-not $ownershipMissing) { throw 'Campaign ownership already exists; never initialize over prior or partial state.' }
+    Initialize-WinSightCampaignOwnership -Root $VmRoot -VmNames $VmNames
+}
+}
+finally { if ($maintenanceLease) { $maintenanceLease.Handle.Dispose() } }

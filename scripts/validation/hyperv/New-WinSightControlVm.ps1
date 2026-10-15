@@ -41,6 +41,8 @@ $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $HarnessDir 'WinSightHyperV.psm1') -Force
 Set-AdministratorsDefaultOwner
+if ([IO.Path]::GetFullPath($Root).TrimEnd('\') -ceq [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Root)).TrimEnd('\')) { throw 'Qualification storage must be a dedicated directory, never a drive root.' }
+Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 if ($DriverHeartbeat) { Assert-ProtectedPath -Path (Split-Path -Parent $DriverHeartbeat) }
 Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'initializing'
@@ -59,6 +61,9 @@ if ($chain -contains $base) {
     throw "$TargetName writes to $base directly (no checkpoint); a second VM must not share it. Take its clean checkpoint first."
 }
 
+$maintenanceContract = [ordered]@{version=1;kind='control';runName='control';vm=$Name;checkpoint=$Checkpoint;memoryBytes=$MemoryBytes;harnessDir=$PSScriptRoot;harnessDigest=(Get-WinSightTextDigest (@(Get-FileManifest $PSScriptRoot) -join "`n"))}
+$maintenanceLease = Enter-WinSightCampaign -Root $Root -Contract $maintenanceContract
+try {
 if (-not (Get-VMSwitch -Name $Switch -ErrorAction SilentlyContinue)) {
     New-VMSwitch -Name $Switch -SwitchType Private | Out-Null
     Write-Host "Private switch $Switch created."
@@ -100,6 +105,7 @@ Get-VMHardDiskDrive -VMName $Name | Where-Object Path -eq $data | Remove-VMHardD
 Add-VMHardDiskDrive -VMName $Name -Path $data
 
 Write-Host "First boot of $Name (settles, then shuts itself down; up to $SettleTimeoutMinutes minutes)..."
+Assert-WinSightHostMemory -Bytes ($MemoryBytes + 512MB) -Advice 'close applications before maintenance first boot'
 Start-VM -Name $Name
 Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'starting'
 $started = Get-Date
@@ -117,3 +123,10 @@ Write-Host "Ready: $Name, clean checkpoint $Checkpoint, private switch $Switch."
 Add-SharedLine -Path (Join-Path $EvidenceRoot 'host-operations.txt') -Line "$(Get-Date -Format o) [control] $Name ready, checkpoint $Checkpoint"
 Write-Host 'Next: queue a network request for the runner.'
 Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'finished'
+
+if ((Get-WinSightVmState $Name) -cne 'Off' -or -not (Get-VMCheckpoint -VMName $Name -Name $Checkpoint -ErrorAction Stop)) { throw 'Maintenance did not confirm Off and the clean checkpoint.' }
+$maintenanceReceipt = Join-Path $Root ('host-campaign\maintenance-'+$maintenanceLease.RunId+'.json')
+Write-WinSightAtomicText -Path $maintenanceReceipt -Text (@{runId=$maintenanceLease.RunId;vm=$Name;checkpoint=$Checkpoint;status='maintenance-complete';finishedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress)
+Close-WinSightCampaign -Lease $maintenanceLease -SealPath $maintenanceReceipt
+}
+finally { if ($maintenanceLease) { $maintenanceLease.Handle.Dispose() } }

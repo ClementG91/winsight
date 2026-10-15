@@ -20,7 +20,7 @@ changed a script before a run or a result after it. Now:
 
 | Location | Who can write | What the runner does there |
 |---|---|---|
-| `<vol>\WinSight-Qualification-Requests` | the requesting user | reads request files (≤ 4 KB), never writes, moves or deletes; reads `candidates\<name>` when asked to stage it |
+| `<vol>\WinSight-Qualification-Requests` | the requesting user | reads request files (at most 4 KB), never writes, moves or deletes; reads `candidates\<name>` when asked to stage it |
 | `<protected-installation>` | administrators (users read) | runner and verifier installed by the independently authenticated launcher |
 | `<vol>\WinSight-Qualification\harness\<stamp>` | administrators | the harness copied from the protected installation, re-hashed before every action |
 | `<vol>\WinSight-Qualification\candidates\<id>` | administrators | a candidate copied file by file on a `stage` request, re-hashed before every action |
@@ -172,3 +172,78 @@ prove graceful shutdown. Native self-tests/mock-boundary tests do not establish 
 | `guest\qualify.ps1` | guest, elevated | the gates; results into `guest-results` |
 | `guest\operator-automation.ps1` | guest | the scripted operator decisions of gates 21 and 33 |
 | `guest\control-network-logon.ps1` | control VM | the network-logon side of gate 36 |
+
+### Closed network campaigns with missing results
+
+After both VMs are confirmed Off, collection attempts both evidence sets. Native Get-Content
+ItemNotFound is the only result-absence oracle; Test-Path false never hides a present result.
+Every present result must identify the exact candidate/campaign and a recognized schema/status
+before any missing-result receipt, seal or checkpoint restoration. Malformed, stale, inaccessible
+or shared results preserve the campaign and its Resume path instead of attributing uncertainty.
+
+A closed campaign without one or both results records network-missing-results.json, with canonical
+candidate/run identity, per-side NOT_RUN and result-file-missing, and the durable timeout state.
+This means no attributable result was collected; it does not prove that the gate never executed.
+The bounded receipt is flushed to a fresh owned GUID staging file and moved without replacement.
+Resume reuses only identical canonical bytes; divergent, oversized or unreadable receipts survive.
+Once collection/provenance/receipt hashes are sealed, both VM restorations are attempted and missing
+results return exit 2. A present failed/not-run control, timeout or refused collection prevents exit 0.
+Receipt or seal failure, uncertain VM state, or a VM still Running after Stop preserves Resume and
+does not authorize restoration. Protected roots and the single-runner protocol remain required;
+these receipts do not provide compare-and-swap protection against out-of-protocol administrators.
+
+Native preflight, Hyper-V and VHD error messages are retained in stderr and the protected host log
+after its root is verified. Each recovery cause is logged before aggregation, and diagnostic failure
+cannot replace the original exception or skip independent recovery. Only actual disposable envelope
+creation and fixture publication redact arbitrary payloads to type/HRESULT, including rethrow to the
+driver trap. ErrorRecord, InvocationInfo and InnerException are never formatted into readable logs.
+Envelope generation is inside the staging recovery boundary. Regenerate/authenticate the trusted
+launcher for changed harness bytes before elevated use; do not elevate the checkout.
+
+Independent network review follow-up: native diagnostic messages (including literal braces) are
+data, never format strings; stderr, protected host log and host display are independent best-effort
+sinks. A full or closed stderr cannot prevent the other diagnostic attempt or VM recovery. Initial
+data detachment is inside the staging recovery boundary. Mounted staging preserves the first native
+exception if dismount also fails; cleanup attempts both data disks and records every native cause.
+Before PS5 JSON normalization, a bounded Framework JSON reader rejects duplicate decoded object
+member names (case-insensitive to match PS5 property access), including escaped identity/status keys.
+Repeated names in different objects and ordinary array elements remain valid. UTF8 input is limited
+to 16 MiB and JSON reader depth to 64. Ambiguity keeps the campaign resumable without sealing or
+checkpoint restoration. These source/test contracts still require final exact-revision CI and actual
+protected VM qualification; local mock tests do not qualify Windows/Hyper-V execution.
+
+
+### Campaign ownership and crash recovery
+
+The host serializes every transport mutation under the same physical VM storage root,
+independently of runner/evidence directories. The host-campaign directory is private to
+Administrators/SYSTEM. Its exclusive file handle prevents a second live driver; its bounded,
+atomically published Active state survives process death. Off alone never authorizes a new run
+to format unresolved data. Unknown, corrupt or partially initialized ownership is preserved.
+
+After reviewing the final signed source and its exact-revision CI, the operator explicitly runs
+Protect-WinSightVmStorage.ps1 -InitializeCampaignOwnership for first setup. Both VMs must be Off.
+Legacy data/control-data transports are copied cold into a private unique backup and verified
+by length/SHA256 before Idle is granted. Failed initialization is never reset or silently adopted;
+review its retained originals, private backup and marker before owner recovery. This protected
+host step belongs to verified operator installation, without automatic elevation.
+
+The runner holds the common Idle lease throughout bounded candidate staging and pointer updates,
+then releases it before launching a driver. Resume selects the original protected candidate,
+harness, bootstrap receipt and evidence root, validates their original hashes, and retains the
+original VM/checkpoint, gate, memory, credential mode, nonce and absolute deadline contract.
+An observation gap after deadline produces NOT_RUN provenance, never a fabricated forced stop.
+Interrupted maintenance before committed staging requires owner review rather than automatic
+transport reuse. Data remains owned until collection and native cleanup complete, an atomic,
+flushed checksum seal is committed, and independent checkpoint/resource recovery succeeds.
+Failed gates can close safely but cannot produce a successful qualification verdict.
+
+Network success requires gates01/36/99 and the paired control to PASS with real UTC completion.
+Full qualification always includes01/99 and all explicitly requested gates; its default runs
+every protected guest gate except36, which needs the separate paired private-network campaign.
+NOT_RUN, unknown/missing mandatory results, refusals, timeouts and uncertain completion fail
+qualification. Collection refuses reparse points in every source ancestor before descendant
+reads and bounds examined entries, directory depth, bytes/files, traversal and refusal output.
+Local synthetic/process regressions do not qualify real Hyper-V, ACLs, ARM64, disk-full/UI
+failure, network service availability or seven-day endurance. These remain exact-artifact
+operator gates.

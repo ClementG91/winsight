@@ -98,10 +98,20 @@ function Write-NetworkProbeFixture([string]$Path, [string]$Envelope) {
 }
 
 function Remove-NetworkProbeFixture([string]$Path) {
-    # Fixed caller-owned filename only. No recursive deletion or reparse traversal.
-    if (-not [IO.File]::Exists($Path)) { return }
+    # File.Exists returns false on access and IO failures too. Only native file-not-found under
+    # a still accessible ordinary parent is confirmed absence; unavailable parents are errors.
+    $parent = [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($Path))
+    $parentAttributes = [IO.File]::GetAttributes($parent)
+    if (-not ($parentAttributes -band [IO.FileAttributes]::Directory) -or ($parentAttributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Disposable fixture parent is not an ordinary directory.' }
+    Assert-NetworkProbePath $parent
+    try { $attributes = [IO.File]::GetAttributes($Path) }
+    catch [IO.FileNotFoundException] { return }
+    if ($attributes -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) { throw 'Disposable fixture is not an ordinary file.' }
     Assert-NetworkProbePath $Path
     [IO.File]::Delete($Path)
+    try { [void][IO.File]::GetAttributes($Path) }
+    catch [IO.FileNotFoundException] { return }
+    throw 'Disposable fixture deletion was not confirmed.'
 }
 
 function Receive-NetworkProbeCredential([string]$Path) {

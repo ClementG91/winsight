@@ -7,7 +7,7 @@ using Xunit.Abstractions;
 namespace WinSight.Application.Tests;
 
 [Collection(QualificationPowerShellCollection.Name)]
-public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelper output)
+public sealed partial class NetworkQualificationLifecycleRegressionTests(ITestOutputHelper output)
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "scripts", "validation", "hyperv"));
@@ -34,7 +34,7 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
     }
 
     [Fact]
-    public async Task StagingPreservesTheOriginalCauseWithoutLoggingArbitrarySecretText()
+    public async Task SecretFreeStagingPreservesTheOriginalCauseAndNativeMessage()
     {
         await Run("""
             $script:logs=@(); $script:restores=0; $AutomaticCredential=$true
@@ -44,12 +44,12 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
             $clause=$ast.Find({param($n) $n -is [Management.Automation.Language.CatchClauseAst] -and
                 $n.Parent.Body.Extent.Text.Contains('Clear-WinSightDataVolume')},$true)
             if (-not $clause) { throw 'ASSERT: staging catch missing' }
-            $injected=[IO.IOException]::new('secret-fixture-value-never-log-me')
+            $injected=[IO.IOException]::new('native staging volume failure')
             $caught=$null
             try { Invoke-Expression ('try { throw $injected } '+$clause.Extent.Text) } catch { $caught=$_ }
             if (-not [object]::ReferenceEquals($caught.Exception,$injected)) { throw 'ASSERT: original staging cause masked' }
             if ($script:restores -ne 1) { throw 'ASSERT: restoration skipped after cleanup failure' }
-            if (-not ($script:logs -join ' ').Contains('IOException') -or ($script:logs -join ' ').Contains('secret-fixture-value-never-log-me')) { throw 'ASSERT: staging diagnostic missing or leaks arbitrary message' }
+            if (-not ($script:logs -join ' ').Contains('IOException') -or -not ($script:logs -join ' ').Contains('native staging volume failure')) { throw 'ASSERT: original non-secret staging diagnostic missing' }
             """);
     }
 
@@ -302,7 +302,7 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
             $script:routes=@();$script:fakeExited=$false;$script:sessionChecks=0
             $dashboard=[pscustomobject]@{Id=4242;HasExited=$false}
             $dashboard|Add-Member ScriptMethod Refresh {$this.HasExited=$script:fakeExited}
-            $Candidate=[pscustomobject]@{};$Results=[ordered]@{gates=[ordered]@{}}
+            $Candidate=[pscustomobject]@{};$Results=[ordered]@{gates=[ordered]@{} }
             $source=Get-Content -LiteralPath $guest -Raw
             $start=$source.IndexOf('$trayExited = Invoke-TrayExit')
             $end=$source.IndexOf("`n    'single instance: second launch",$start)
@@ -328,14 +328,14 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
             $timeoutPath=Join-Path ([IO.Path]::GetTempPath()) ('winsight-timeout-'+[guid]::NewGuid().ToString('N')+'.json')
             $TimeoutMinutes=0;$script:stopped=@();$script:firstPass=$true
             function Test-Path($LiteralPath) {return [IO.File]::Exists($LiteralPath)}
-            function Get-WinSightVmState($VMName) {if ($VMName -in $script:stopped) {'Off'} else {'Running'}}
+            function Get-WinSightVmState($VMName) {if ($VMName -in $script:stopped) {'Off'} else {'Running'} }
             function Stop-VM($Name,[switch]$TurnOff,[switch]$Force) {$script:stopped+=$Name}
             function Get-Content($LiteralPath,[switch]$Raw) {
                 if ($LiteralPath -eq $timeoutPath) {return [IO.File]::ReadAllText($timeoutPath)}
-                if ($LiteralPath -like '*control-result.json') {return (@{qualificationRunId=$runState.runId}|ConvertTo-Json)}
-                return (@{candidate=@{commit=$candidate.commit;qualificationRunId=$runState.runId} }|ConvertTo-Json -Depth 6)
+                if ($LiteralPath -like '*control-result.json') {return (@{qualificationRunId=$runState.runId;startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');status='PASS'}|ConvertTo-Json)}
+                return (@{candidate=@{commit=$candidate.commit;qualificationRunId=$runState.runId};startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');gates=@{'01-identity-and-protected-root'=@{status='PASS'};'36-ipc-network-logon'=@{status='PASS'};'99-residue'=@{status='PASS'} } }|ConvertTo-Json -Depth 6)
             }
-            function Copy-GuestResults($From,$To) {if ($script:firstPass) {throw [IO.IOException]::new('collection interrupted after timeout')}}
+            function Copy-GuestResults($From,$To) {if ($script:firstPass) {throw [IO.IOException]::new('collection interrupted after timeout')} }
             try {
                 try {Invoke-Expression $observationScript} catch {}
                 if (-not [IO.File]::Exists($timeoutPath)) {throw 'ASSERT: forced timeout has no durable receipt'}
@@ -377,6 +377,344 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
             """);
     }
 
+
+    [Theory]
+    [InlineData("target", false)]
+    [InlineData("control", false)]
+    [InlineData("both", false)]
+    [InlineData("both", true)]
+    public async Task ClosedCampaignWithMissingResultsIsSealedAndRestored(string missing, bool timeout)
+    {
+        await Run(WaitSetup + $$"""
+            $work=[IO.Path]::Combine([IO.Path]::GetTempPath(), 'winsight-missing-network-'+[guid]::NewGuid().ToString('N'))
+            $EvidenceRoot=$work;$runDir=[IO.Path]::Combine($work,$RunName)
+            [void][IO.Directory]::CreateDirectory([IO.Path]::Combine($runDir,'target'))
+            [void][IO.Directory]::CreateDirectory([IO.Path]::Combine($runDir,'control'))
+            $targetPath=[IO.Path]::Combine($runDir,'target\results.json');$controlPath=[IO.Path]::Combine($runDir,'control\control-result.json')
+            $target=@{candidate=@{commit=$candidate.commit;qualificationRunId=$runState.runId};startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');gates=@{'01-identity-and-protected-root'=@{status='PASS'};'36-ipc-network-logon'=@{status='PASS'};'99-residue'=@{status='PASS'} } }
+            $control=@{qualificationRunId=$runState.runId;startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');status='PASS'}
+            if ('{{missing}}' -notin 'target','both') {[IO.File]::WriteAllText($targetPath,($target|ConvertTo-Json -Depth 6))}
+            if ('{{missing}}' -notin 'control','both') {[IO.File]::WriteAllText($controlPath,($control|ConvertTo-Json))}
+            function Get-Content($LiteralPath,[switch]$Raw) {Microsoft.PowerShell.Management\Get-Content -LiteralPath $LiteralPath -Raw -ErrorAction Stop}
+            $timeoutPath=[IO.Path]::Combine($work,'timeout.json')
+            if (${{timeout.ToString().ToLowerInvariant()}}) {
+                [IO.File]::WriteAllText($timeoutPath,(@{version=1;runId=$runState.runId;reason='forced-timeout'}|ConvertTo-Json))
+            }
+            function Test-Path($LiteralPath) {return $LiteralPath -ceq $timeoutPath -and [IO.File]::Exists($timeoutPath)}
+            $script:seal=0
+            function Set-Content($LiteralPath,[Parameter(ValueFromPipeline=$true)]$Value) {if ([IO.Path]::GetFileName($LiteralPath) -ceq 'SHA256SUMS.txt') {$script:seal++} }
+            try {
+                $caught=$null;try {Invoke-Expression $observationScript} catch {$caught=$_}
+                if ($caught -or $script:copies -ne 2 -or $script:detaches -ne 1 -or $script:restores -ne 1 -or $script:seal -ne 1) {throw 'ASSERT: closed missing-result campaign was not collected, sealed and restored'}
+                $receiptPath=[IO.Path]::Combine($runDir,'network-missing-results.json')
+                $bytes=[IO.File]::ReadAllBytes($receiptPath);$receipt=[Text.Encoding]::UTF8.GetString($bytes)|ConvertFrom-Json
+                if ($receipt.version -ne 1 -or $receipt.runId -cne $runState.runId -or $receipt.candidateCommit -cne $candidate.commit) {throw 'ASSERT: missing receipt is not bound to candidate/run'}
+                foreach ($side in 'target','control') {
+                    $expected=if ('{{missing}}' -in $side,'both') {'NOT_RUN'} else {'PASS'}
+                    if ($receipt.$side.status -cne $expected) {throw 'ASSERT: missing or present side has incorrect qualification status'}
+                    if ($expected -ceq 'NOT_RUN' -and $receipt.$side.reason -cne 'result-file-missing') {throw 'ASSERT: missing side lacks explicit reason'}
+                }
+                if ($receipt.timedOut -ne ${{timeout.ToString().ToLowerInvariant()}}) {throw 'ASSERT: timeout was forgotten in missing receipt'}
+                if (Get-NetworkQualificationExitCode -Target $targetResults -Control $controlResults -TimedOut $timedOut -RefusedCount $refused.Count) { }
+                else {throw 'ASSERT: a missing-result campaign returned success'}
+                $code=Get-NetworkQualificationExitCode -Target $targetResults -Control $controlResults -TimedOut $timedOut -RefusedCount $refused.Count
+                if ($code -ne 2) {throw 'ASSERT: missing results require exact exit2'}
+                $Resume=$true;$primaryFailure=$null;$safeToRestore=$false
+                Invoke-Expression $observationScript
+                if ($script:restores -ne 2 -or $script:seal -ne 2 -or [Convert]::ToBase64String([IO.File]::ReadAllBytes($receiptPath)) -cne [Convert]::ToBase64String($bytes)) {throw 'ASSERT: Resume did not reuse byte-identical immutable receipt'}
+                if (([IO.Directory]::GetFiles($runDir,'*.tmp')).Count -ne 0) {throw 'ASSERT: owned receipt staging leaked'}
+            }
+            finally {[IO.Directory]::Delete($work,$true)}
+            """);
+    }
+
+    [Theory]
+    [InlineData("preflight")]
+    [InlineData("staging")]
+    [InlineData("starting")]
+    [InlineData("detaching")]
+    [InlineData("restoring")]
+    [InlineData("collect-target")]
+    [InlineData("collect-control")]
+    [InlineData("observing")]
+    public async Task SecretFreeNetworkFailuresRetainTheOriginalDiagnostic(string phase)
+    {
+        await Run($$"""
+            $script:logs=@();function Write-HostLog($Message) {$script:logs+=$Message}
+            $injected=[IO.IOException]::new('native cause {{phase}}: sharing and volume failure')
+            try {throw $injected} catch {Write-SafeFailure '{{phase}}' $_}
+            if (-not ($script:logs -join ' ').Contains($injected.Message)) {throw 'ASSERT: non-secret native cause was erased by generic redaction'}
+            """);
+    }
+
+    [Theory]
+    [InlineData("envelope")]
+    [InlineData("fixture")]
+    public async Task OnlyActualCredentialOperationsRedactSyntheticSecretsAndRecover(string operation)
+    {
+        await Run($$"""
+            $AutomaticCredential=$true;$script:logs=@();$script:restores=0;$script:fixtures=0;$script:secretCalls=0
+            function Write-HostLog($Message) {$script:logs+=$Message}
+            function Remove-StagedNetworkFixtures {$script:fixtures++}
+            function Restore-BothVms {$script:restores++}
+            $injected=[IO.IOException]::new('synthetic-credential-payload-never-log');$Envelope='synthetic-credential-payload-never-log';$letter='D'
+            function New-NetworkProbeEnvelope {$script:secretCalls++;throw $injected}
+            function Write-NetworkProbeFixture($Path,$Envelope) {$script:secretCalls++;throw $injected}
+            $staging=$ast.Find({param($n) $n -is [Management.Automation.Language.TryStatementAst] -and $n.Body.Extent.Text.Contains('Clear-WinSightDataVolume')},$true)
+            if (-not $staging.Body.Extent.Text.Contains('New-NetworkProbeEnvelope')) {throw 'ASSERT: credential creation lies outside protected staging catch'}
+            $call=$staging.Body.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Invoke-NetworkCredentialOperation' -and $n.Extent.Text.Contains('{{(operation == "envelope" ? "New-NetworkProbeEnvelope" : "Write-NetworkProbeFixture")}}')},$true)
+            if (-not $call) {throw 'ASSERT: actual secret call site missing'}
+            $caught=$null
+            try {Invoke-Expression ('try {'+$call.Extent.Text+'} '+$staging.CatchClauses[0].Extent.Text)} catch {$caught=$_}
+            if ($script:secretCalls -ne 1 -or $script:fixtures -ne 1 -or $script:restores -ne 1) {throw 'ASSERT: actual secret operation failure skipped independent recovery'}
+            if (-not [object]::ReferenceEquals($caught.Exception,$injected)) {throw 'ASSERT: secret boundary changed original exception identity'}
+            if (($script:logs -join ' ').Contains($injected.Message) -or -not ($script:logs -join ' ').Contains('HRESULT')) {throw 'ASSERT: actual credential exception leaked or lacks safe diagnostic'}
+            """);
+    }
+
+    [Theory]
+    [InlineData("PASS", 0)]
+    [InlineData("FAIL", 1)]
+    [InlineData("NOT_RUN", 1)]
+    public async Task ControlMustPassForTheNetworkCampaignToPass(string controlStatus, int expected)
+    {
+        await Run($$"""
+            $target=[pscustomobject]@{startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');gates=[pscustomobject]@{'01-identity-and-protected-root'=[pscustomobject]@{status='PASS'};'36-ipc-network-logon'=[pscustomobject]@{status='PASS'};'99-residue'=[pscustomobject]@{status='PASS'} } }
+            $control=[pscustomobject]@{startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');status='{{controlStatus}}'}
+            if ((Get-NetworkQualificationExitCode -Target $target -Control $control -TimedOut $false -RefusedCount 0) -ne {{expected}}) {throw 'ASSERT: control failure was ignored'}
+            if ((Get-NetworkQualificationExitCode -Target $target -Control $control -TimedOut $true -RefusedCount 0) -ne 1) {throw 'ASSERT: forced-timeout campaign passed'}
+            if ((Get-NetworkQualificationExitCode -Target $target -Control $control -TimedOut $false -RefusedCount 1) -ne 1) {throw 'ASSERT: refused collection campaign passed'}
+            $source=Microsoft.PowerShell.Management\Get-Content -LiteralPath $driver -Raw
+            if ($source -notmatch 'exit \(Get-NetworkQualificationExitCode') {throw 'ASSERT: actual driver exit does not use target/control aggregate'}
+            """);
+    }
+
+
+    [Theory]
+    [InlineData("stale", true)]
+    [InlineData("malformed", true)]
+    [InlineData("denied", true)]
+    [InlineData("sharing", true)]
+    [InlineData("stale", false)]
+    [InlineData("malformed", false)]
+    [InlineData("denied", false)]
+    [InlineData("sharing", false)]
+    public async Task MissingCounterpartNeverAuthorizesUncertainPresentResults(string failure, bool presentTarget)
+    {
+        await Run(WaitSetup + $$"""
+            $script:receipt=0;$injected=[IO.IOException]::new('present result unreadable')
+            function Get-Content($LiteralPath,[switch]$Raw) {
+                $isTarget=$LiteralPath -like '*target\results.json'
+                if ($isTarget -ne ${{presentTarget.ToString().ToLowerInvariant()}}) {throw [Management.Automation.ItemNotFoundException]::new('missing counterpart')}
+                if ('{{failure}}' -eq 'stale') {
+                    if ($isTarget) {return (@{candidate=@{commit='ffffffffffffffffffffffffffffffffffffffff';qualificationRunId=$runState.runId} }|ConvertTo-Json -Depth 6)}
+                    return (@{qualificationRunId=[guid]::NewGuid().ToString('D');status='PASS'}|ConvertTo-Json)
+                }
+                if ('{{failure}}' -eq 'malformed') {return '{broken'}
+                if ('{{failure}}' -eq 'denied') {throw [UnauthorizedAccessException]::new('denied present result')}
+                throw $injected
+            }
+            function Write-NetworkMissingReceipt {$script:receipt++}
+            $caught=$null;try {Invoke-Expression $observationScript} catch {$caught=$_}
+            if (-not $caught -or $script:restores -ne 0 -or $script:receipt -ne 0 -or ($script:logs -join ' ').Contains('evidence sealed')) {throw 'ASSERT: uncertain present evidence attributed or restored due to missing counterpart'}
+            if (($script:logs -join ' ') -notmatch '-Resume') {throw 'ASSERT: uncertain result lost Resume guidance'}
+            """);
+    }
+
+    [Theory]
+    [InlineData("receipt")]
+    [InlineData("seal")]
+    public async Task FailedMissingReceiptOrSealPreservesResumeAndDoesNotRestore(string failure)
+    {
+        await Run(WaitSetup + $$"""
+            function Get-Content($LiteralPath,[switch]$Raw) {throw [Management.Automation.ItemNotFoundException]::new('missing guest result')}
+            
+            $script:receipts=0;$script:seals=0;$injected=[IO.IOException]::new('injected unique {{failure}} failure')
+            function Write-NetworkMissingReceipt {$script:receipts++;if ('{{failure}}' -eq 'receipt') {throw $injected} }
+            function Set-Content($LiteralPath,[Parameter(ValueFromPipeline=$true)]$Value) {if ($LiteralPath -like '*SHA256SUMS.txt') {$script:seals++;if ('{{failure}}' -eq 'seal') {throw $injected} } }
+            $caught=$null;try {Invoke-Expression $observationScript} catch {$caught=$_}
+            if (-not $caught -or $script:restores -ne 0 -or ($script:logs -join ' ') -notmatch '-Resume') {throw 'ASSERT: failed receipt/seal destroyed resumable evidence'}
+            $expectedSeals=if ('{{failure}}' -ceq 'seal') {1} else {0}
+            if ($script:receipts -ne 1 -or $script:seals -ne $expectedSeals -or -not [object]::ReferenceEquals($caught.Exception,$injected)) {throw 'ASSERT: receipt/seal failure oracle did not reach actual intended boundary'}
+            """);
+    }
+
+    [Theory]
+    [InlineData("foreign")]
+    [InlineData("oversized")]
+    [InlineData("sharing")]
+    public async Task AForeignMissingReceiptIsPreservedAndCannotAuthorizeRestoration(string kind)
+    {
+        await Run(WaitSetup + $$"""
+            $work=[IO.Path]::Combine([IO.Path]::GetTempPath(),'winsight-receipt-collision-'+[guid]::NewGuid().ToString('N'))
+            $EvidenceRoot=$work;$runDir=[IO.Path]::Combine($work,$RunName);[void][IO.Directory]::CreateDirectory($runDir)
+            $receiptPath=[IO.Path]::Combine($runDir,'network-missing-results.json');$foreign=if ('{{kind}}' -ceq 'oversized') {'X'*16384} else {'foreign existing receipt preserved'}
+            [IO.File]::WriteAllText($receiptPath,$foreign)
+            $script:actualReceipt=(Get-Command Write-NetworkMissingReceipt -ErrorAction Stop).ScriptBlock;$script:receiptCalls=0
+            function Write-NetworkMissingReceipt($Path,$Receipt) {$script:receiptCalls++;& $script:actualReceipt -Path $Path -Receipt $Receipt}
+            $held=if ('{{kind}}' -ceq 'sharing') {[IO.File]::Open($receiptPath,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)} else {$null}
+            function Get-Content($LiteralPath,[switch]$Raw) {throw [Management.Automation.ItemNotFoundException]::new('missing guest result')}
+            try {
+                $caught=$null;try {Invoke-Expression $observationScript} catch {$caught=$_}
+                if ($held) {$held.Dispose();$held=$null}
+                if (-not $caught -or $script:receiptCalls -ne 1 -or $script:restores -ne 0 -or [IO.File]::ReadAllText($receiptPath) -cne $foreign) {throw 'ASSERT: divergent receipt overwritten or restored'}
+                if (([IO.Directory]::GetFiles($runDir,'*.tmp')).Count -ne 0) {throw 'ASSERT: collision leaked owned staging'}
+            }
+            finally {if ($held) {$held.Dispose()};[IO.Directory]::Delete($work,$true)}
+            """);
+    }
+
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActualTrapPreservesNativeStderrAndRedactsOnlyCredentialFailures(bool secret)
+    {
+        await Run($$"""
+            $script:logs=@();function Write-HostLog($Message) {$script:logs+=$Message}
+            $operationPhase='preflight';$injected=[IO.IOException]::new('trap-original-native-message-or-synthetic-secret')
+            $record=$null
+            if (${{secret.ToString().ToLowerInvariant()}}) {
+                try {Invoke-NetworkCredentialOperation {throw $injected} } catch {$record=$_}
+            }
+            else {try {throw $injected} catch {$record=$_} }
+            if (-not [object]::ReferenceEquals($record.Exception,$injected)) {throw 'ASSERT: boundary changed primary exception'}
+            $trapAst=$ast.Find({param($n) $n -is [Management.Automation.Language.TrapStatementAst]},$true)
+            if (-not $trapAst -or -not ($trapAst.Body.Statements|Where-Object {$_ -is [Management.Automation.Language.ExitStatementAst] -and $_.Extent.Text -match '^exit 1$'})) {throw 'ASSERT: actual trap does not fail closed with exit1'}
+            $text=($trapAst.Body.Statements|Where-Object {$_ -isnot [Management.Automation.Language.ExitStatementAst]}|ForEach-Object {$_.Extent.Text}) -join "`n"
+            $stderr=[IO.StringWriter]::new();$originalError=[Console]::Error
+            try {[Console]::SetError($stderr);$_=$record;. ([scriptblock]::Create($text))}
+            finally {[Console]::SetError($originalError)}
+            $combined=$stderr.ToString()+($script:logs -join ' ')
+            if (${{secret.ToString().ToLowerInvariant()}}) {
+                if ($combined.Contains($injected.Message) -or -not $combined.Contains('HRESULT')) {throw 'ASSERT: actual trap leaked credential payload or erased safe diagnostic'}
+            }
+            elseif (-not $stderr.ToString().Contains($injected.Message) -or -not ($script:logs -join ' ').Contains($injected.Message)) {throw 'ASSERT: actual trap erased native cause from stderr or protected log'}
+            """);
+    }
+
+    [Theory]
+    [InlineData("detaching")]
+    [InlineData("restoring")]
+    public async Task EachVmRecoveryFailureIsLoggedBeforeItsAggregate(string operation)
+    {
+        await Run($$"""
+            $Name='target';$ControlName='control';$Checkpoint='S0';$ControlCheckpoint='C0';$data='target.vhdx';$controlData='control.vhdx'
+            $script:logs=@();$script:calls=@();function Write-HostLog($Message) {$script:logs+=$Message}
+            function Remove-WinSightDataDisk($VMName,$Path) {$script:calls+=$VMName;throw [IO.IOException]::new('native detach '+$VMName)}
+            function Restore-VMCheckpoint($VMName,$Name,$Confirm) {$script:calls+=$VMName;throw [IO.IOException]::new('native checkpoint '+$VMName)}
+            $caught=$null
+            try {if ('{{operation}}' -ceq 'detaching') {Remove-DataDisks} else {Restore-BothVms} } catch {$caught=$_}
+            $prefix=if ('{{operation}}' -ceq 'detaching') {'native detach '} else {'native checkpoint '}
+            if (-not $caught -or ($script:calls -join ',') -cne 'target,control') {throw 'ASSERT: aggregate did not attempt both native recoveries'}
+            foreach ($side in 'target','control') {if (-not ($script:logs -join ' ').Contains($prefix+$side)) {throw 'ASSERT: individual original native cause lost before aggregate'} }
+            """);
+    }
+
+
+    [Theory]
+    [InlineData("missing-status")]
+    [InlineData("null-status")]
+    [InlineData("array-status")]
+    [InlineData("unknown-status")]
+    [InlineData("array-root")]
+    public async Task PresentControlWithExactIdentityStillRequiresARecognizedSchema(string schema)
+    {
+        await Run(WaitSetup + $$"""
+            $script:receipt=0
+            function Get-Content($LiteralPath,[switch]$Raw) {
+                if ($LiteralPath -like '*target\results.json') {throw [Management.Automation.ItemNotFoundException]::new('missing target')}
+                $control=@{qualificationRunId=$runState.runId}
+                if ('{{schema}}' -ceq 'null-status') {$control.status=$null}
+                if ('{{schema}}' -ceq 'array-status') {$control.status=@('PASS')}
+                if ('{{schema}}' -ceq 'unknown-status') {$control.status='UNVERIFIED'}
+                if ('{{schema}}' -ceq 'array-root') {$control.status='PASS';return ('['+($control|ConvertTo-Json)+']')}
+                return ($control|ConvertTo-Json)
+            }
+            function Write-NetworkMissingReceipt {$script:receipt++}
+            $caught=$null;try {Invoke-Expression $observationScript} catch {$caught=$_}
+            if (-not $caught -or $script:restores -ne 0 -or $script:receipt -ne 0 -or ($script:logs -join ' ').Contains('evidence sealed')) {throw 'ASSERT: matching identity authorized an unrecognized control schema'}
+            """);
+    }
+
+    [Fact]
+    public async Task TrapDiagnosticsAreAvailableBeforeTheFirstPreflightOperation()
+    {
+        await Run("""
+            $definition=$ast.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-SafeFailure'},$true)
+            $firstPreflight=$ast.Find({param($n) $n -is [Management.Automation.Language.CommandAst] -and $n.GetCommandName() -eq 'Import-Module'},$true)
+            if (-not $definition -or $definition.Extent.EndOffset -gt $firstPreflight.Extent.StartOffset) {throw 'ASSERT: native trap logger unavailable during actual early preflight'}
+            $trapAst=$ast.Find({param($n) $n -is [Management.Automation.Language.TrapStatementAst]},$true)
+            if ($trapAst.Body.Extent.Text -notmatch 'Write-SafeFailure') {throw 'ASSERT: actual early trap omits native cause'}
+            """);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task PreflightLogUsesOnlyTheVerifiedRootAndRetainsStderrIfLoggingFails(bool trusted, bool logFails)
+    {
+        await Run($$"""
+            $script:logWrites=0;$trustedHostLog=${{trusted.ToString().ToLowerInvariant()}};$hostLog='protected-host-log'
+            function Add-SharedLine($Path,$Line) {$script:logWrites++;if (${{logFails.ToString().ToLowerInvariant()}}) {throw [IO.IOException]::new('logger failed')} }
+            $failure=$null;try {throw [IO.IOException]::new('original native preflight cause')} catch {$failure=$_}
+            $stderr=[IO.StringWriter]::new();$originalError=[Console]::Error
+            try {[Console]::SetError($stderr);Write-SafeFailure 'preflight' $failure}
+            finally {[Console]::SetError($originalError)}
+            if (-not $stderr.ToString().Contains($failure.Exception.Message)) {throw 'ASSERT: original preflight diagnostic lost when protected root/log unavailable'}
+            $expected=if ($trustedHostLog) {1} else {0}
+            if ($script:logWrites -ne $expected) {throw 'ASSERT: log touched before protected root verification or valid root not logged'}
+            """);
+    }
+
+
+    [Theory]
+    [InlineData("FAIL", false, 0, 1)]
+    [InlineData("NOT_RUN", false, 0, 1)]
+    [InlineData("PASS", true, 0, 1)]
+    [InlineData("PASS", false, 1, 1)]
+    [InlineData("PASS", false, 0, 0)]
+    public async Task ActualNetworkDecisionRejectsFailedControl(string status, bool timeout, int refusedCount, int expected)
+    {
+        await Run(WaitSetup + $$"""
+            $runDir=Join-Path $EvidenceRoot $RunName
+            $timedOut=${{timeout.ToString().ToLowerInvariant()}};$refused=@();foreach ($i in 1..{{refusedCount}}) {if ({{refusedCount}} -gt 0) {$refused+='refused'} }
+            $targetResults=[pscustomobject]@{candidate=[pscustomobject]@{commit=$candidate.commit;qualificationRunId=$runState.runId};startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');gates=[pscustomobject]@{'01-identity-and-protected-root'=[pscustomobject]@{status='PASS'};'36-ipc-network-logon'=[pscustomobject]@{status='PASS'};'99-residue'=[pscustomobject]@{status='PASS'} } }
+            $controlResults=[pscustomobject]@{qualificationRunId=$runState.runId;startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');status='{{status}}'}
+            function Test-Path($LiteralPath) {$true}
+            function Get-Content($LiteralPath,[switch]$Raw) {if ($LiteralPath -like '*control-result.json') {return ($controlResults|ConvertTo-Json)};return ($targetResults|ConvertTo-Json -Depth 6)}
+            function Write-Host {}
+            $text=Microsoft.PowerShell.Management\Get-Content -LiteralPath $driver -Raw
+            $start=$text.LastIndexOf('$resultsFile =')
+            if ($start -lt 0) {throw 'ASSERT: actual network decision tail missing'}
+            $tail=$text.Substring($start);$parsed=[Management.Automation.Language.Parser]::ParseInput($tail,[ref]$null,[ref]$null)
+            $exits=@($parsed.FindAll({param($n) $n -is [Management.Automation.Language.ExitStatementAst]},$true)|Sort-Object {$_.Extent.StartOffset} -Descending)
+            if (-not $exits.Count) {throw 'ASSERT: actual decision has no exit statements'}
+            foreach ($exitAst in $exits) {$at=$exitAst.Extent.StartOffset;$tail=$tail.Substring(0,$at)+'return'+$tail.Substring($at+4)}
+            $code=& ([scriptblock]::Create($tail))
+            if ($code -isnot [int] -or $code -ne {{expected}}) {throw 'ASSERT: actual driver decision ignored control, timeout or refused evidence'}
+            """);
+    }
+
+    [Fact]
+    public async Task AStopThatLeavesAVmRunningNeverAuthorizesDestructiveCollection()
+    {
+        await Run(WaitSetup + """
+            $TimeoutMinutes=0;$script:stops=0;$script:receipts=0;$script:seals=0
+            $timeoutPath=[IO.Path]::Combine([IO.Path]::GetTempPath(),'winsight-stop-postcondition-'+[guid]::NewGuid().ToString('N')+'.json')
+            function Get-WinSightVmState($VMName) {'Running'}
+            function Stop-VM($Name,[switch]$TurnOff,[switch]$Force) {$script:stops++}
+            function Write-NetworkMissingReceipt {$script:receipts++}
+            function Set-Content($LiteralPath,[Parameter(ValueFromPipeline=$true)]$Value) {if ($LiteralPath -like '*SHA256SUMS.txt') {$script:seals++} }
+            try {
+                $caught=$null;try {Invoke-Expression $observationScript} catch {$caught=$_}
+                if (-not $caught -or $script:stops -ne 1 -or $script:detaches -ne 0 -or $script:copies -ne 0 -or $script:receipts -ne 0 -or $script:seals -ne 0 -or $script:restores -ne 0 -or ($script:logs -join ' ') -notmatch '-Resume') {throw 'ASSERT: still-running VM authorized destructive recovery or lost Resume'}
+            }
+            finally {[IO.File]::Delete($timeoutPath)}
+            """);
+    }
+
     private const string WaitSetup = """
         $Name='target';$ControlName='control';$data='target.vhdx';$controlData='control.vhdx'
         $Root='mock';$EvidenceRoot='mock';$RunName='regression-run';$HarnessDir='mock';$CandidateDir='mock';$BootstrapReceipt='mock';$Resume=$false;$AutomaticCredential=$false;$TimeoutMinutes=1
@@ -396,12 +734,14 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
         function Assert-ProtectedPath($Path,[switch]$Recurse) {}
         function Get-FileManifest($Path) {}
         function Get-Content($LiteralPath,[switch]$Raw) {
-            if ($LiteralPath -like '*control-result.json') {return (@{qualificationRunId=$runState.runId}|ConvertTo-Json)}
-            return (@{candidate=@{commit=$candidate.commit;qualificationRunId=$runState.runId} }|ConvertTo-Json -Depth 6)
+            if ($LiteralPath -like '*control-result.json') {return (@{qualificationRunId=$runState.runId;startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');status='PASS'}|ConvertTo-Json)}
+            return (@{candidate=@{commit=$candidate.commit;qualificationRunId=$runState.runId};startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o');gates=@{'01-identity-and-protected-root'=@{status='PASS'};'36-ipc-network-logon'=@{status='PASS'};'99-residue'=@{status='PASS'} } }|ConvertTo-Json -Depth 6)
         }
         function Get-ChildItem($LiteralPath,[switch]$Recurse,[switch]$File) {}
         function Copy-Item($LiteralPath,$Destination) {}
         function Set-Content($LiteralPath,[Parameter(ValueFromPipeline=$true)]$Value) {}
+        # Observe the semantic seal boundary through the same existing checksum/failure counters.
+        function Write-WinSightQualificationSeal($RunDir,$SealPath) {Set-Content -LiteralPath ([IO.Path]::Combine($RunDir,'SHA256SUMS.txt'))}
         function Write-HostLog($Message) {$script:logs+=$Message}
         $wait=$ast.Find({param($n) $n -is [Management.Automation.Language.TryStatementAst] -and $n.Body.Extent.Text.Contains('$deadline = $started.AddMinutes')},$true)
         if (-not $wait) {throw 'ASSERT: campaign observation block missing'}
@@ -409,7 +749,7 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
         $observationScript=$wait.Extent.Text+"`n"+$failureReturn.Extent.Text;
         """;
 
-    private async Task Run(string script)
+    private async Task Run(string script, string driverFile = "Invoke-HyperVNetworkLogon.ps1")
     {
         var start = new ProcessStartInfo
         {
@@ -421,18 +761,18 @@ public sealed class NetworkQualificationLifecycleRegressionTests(ITestOutputHelp
         };
         start.Environment["PSModulePath"] = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "WindowsPowerShell", "v1.0", "Modules");
         start.Environment["WINSIGHT_LIFECYCLE_HARNESS"] = Harness;
+        start.Environment["WINSIGHT_LIFECYCLE_DRIVER"] = driverFile;
         var command = PowerShellProcessEvidence.Prelude + """
             $ErrorActionPreference='Stop'
-            $driver=Join-Path $env:WINSIGHT_LIFECYCLE_HARNESS 'Invoke-HyperVNetworkLogon.ps1'
+            $driver=[IO.Path]::Combine($env:WINSIGHT_LIFECYCLE_HARNESS,$env:WINSIGHT_LIFECYCLE_DRIVER)
             $errors=$null
             $ast=[Management.Automation.Language.Parser]::ParseFile($driver,[ref]$null,[ref]$errors)
             if ($errors.Count) {throw 'Driver parse failed'}
-            $moduleAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $env:WINSIGHT_LIFECYCLE_HARNESS 'WinSightHyperV.psm1'),[ref]$null,[ref]$errors)
+            $moduleAst=[Management.Automation.Language.Parser]::ParseFile(([IO.Path]::Combine($env:WINSIGHT_LIFECYCLE_HARNESS,'WinSightHyperV.psm1')),[ref]$null,[ref]$errors)
             if ($errors.Count) {throw 'Module parse failed'}
             Write-TestPhase 'parsed'
-            $heartbeat=$moduleAst.Find({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Write-WinSightDriverHeartbeat'},$true)
-            if ($heartbeat) {Invoke-Expression $heartbeat.Extent.Text}
-            foreach ($definition in $ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)) {Invoke-Expression $definition.Extent.Text}
+            foreach ($definition in $moduleAst.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)) {. ([scriptblock]::Create($definition.Extent.Text))}
+            foreach ($definition in $ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst]},$true)) {. ([scriptblock]::Create($definition.Extent.Text))}
             Write-TestPhase 'definitions-loaded'
             Write-TestPhase 'body-begin'
             """ + "\n" + script + "\nWrite-TestPhase 'body-end'\nexit 0";

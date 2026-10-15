@@ -163,7 +163,42 @@ function Get-Arguments($Request) {
 # Copies requests\candidates\<name> into candidates\<id>: the three artifacts, their .sha256 files,
 # candidate.json, the published installer the upgrade gate starts from, and the repository scripts the
 # gates run - by pattern, one file at a time, never a directory copy.
+function Get-BoundedStagingFiles([string]$SourceRoot) {
+    $rootFull = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
+    $files = New-Object Collections.Generic.List[string]
+    $pending = New-Object Collections.Stack
+    $pending.Push([pscustomobject]@{path=$rootFull;depth=0})
+    $examined = 0
+    while ($pending.Count -gt 0) {
+        $directory = $pending.Pop()
+        $iterator = [IO.Directory]::EnumerateFileSystemEntries($directory.path).GetEnumerator()
+        try {
+            while ($iterator.MoveNext()) {
+                if (++$examined -gt 2000) { throw 'Candidate staging entry limit reached; no further entries examined.' }
+                $entry = $iterator.Current; $relative = $entry.Substring($rootFull.Length+1)
+                $attributes = [IO.File]::GetAttributes($entry)
+                if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Candidate staging reparse point refused.' }
+                if ($attributes -band [IO.FileAttributes]::Directory) {
+                    if ($directory.depth -ge 16) { throw 'Candidate staging depth limit reached.' }
+                    if ($relative -in 'previous','source','source\scripts' -or $relative.StartsWith('previous\',[StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith('source\scripts\',[StringComparison]::OrdinalIgnoreCase)) {
+                        $pending.Push([pscustomobject]@{path=$entry;depth=$directory.depth+1})
+                    }
+                }
+                elseif ($directory.depth -gt 0) {
+                    if ($relative.StartsWith('previous\',[StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith('source\scripts\',[StringComparison]::OrdinalIgnoreCase)) {$files.Add($relative)}
+                }
+                elseif ([IO.Path]::GetFileName($entry) -match '^winsight-v[0-9][0-9A-Za-z.+-]*-win-(x64|arm64)(-setup\.exe|\.zip|\.spdx\.json)(\.sha256)?$' -or [IO.Path]::GetFileName($entry) -ceq 'candidate.json') {$files.Add($relative)}
+                if ($files.Count -gt 400) { throw 'Candidate staging file limit reached; no further entries examined.' }
+            }
+        }
+        finally {$iterator.Dispose()}
+    }
+    return $files.ToArray()
+}
+
 function Invoke-Stage($Request) {
+    $stageLease = Get-WinSightCampaignContext -Root $VmRoot -RequireIdle -Hold
+    try {
     $name = [string](Get-Field $Request 'candidate')
     if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw 'invalid candidate' }
     $candidatesRoot = Join-Path $Requests 'candidates'
@@ -173,24 +208,7 @@ function Invoke-Stage($Request) {
     $destination = Join-Path $Root "candidates\$id"
     New-ProtectedDirectory -Path $destination
     $sourceFull = [IO.Path]::GetFullPath($source).TrimEnd('\')
-    $files = @(Get-ChildItem -LiteralPath $sourceFull -File -Force | Where-Object {
-            $_.Name -match '^winsight-v[0-9][0-9A-Za-z.+-]*-win-(x64|arm64)(-setup\.exe|\.zip|\.spdx\.json)(\.sha256)?$' -or $_.Name -eq 'candidate.json'
-        } | ForEach-Object Name)
-    foreach ($sub in 'previous', 'source\scripts') {
-        $folder = Join-Path $sourceFull $sub
-        if (-not (Test-Path -LiteralPath $folder)) { continue }
-        Assert-NoReparseBetween -Root $Requests -Path $folder
-        $pending = New-Object System.Collections.Generic.Stack[string]
-        $pending.Push($folder)
-        while ($pending.Count -gt 0) {
-            foreach ($entry in [IO.Directory]::EnumerateFileSystemEntries($pending.Pop())) {
-                $attributes = [IO.File]::GetAttributes($entry)
-                if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'reparse point in the candidate' }
-                if ($attributes -band [IO.FileAttributes]::Directory) { $pending.Push($entry) }
-                else { $files += $entry.Substring($sourceFull.Length + 1) }
-            }
-        }
-    }
+    $files = @(Get-BoundedStagingFiles -SourceRoot $sourceFull)
     if ('candidate.json' -notin $files) { throw 'no candidate.json' }
     if ($files.Count -gt 400) { throw 'too many candidate files' }
     foreach ($file in $files) { Copy-ListedFile -SourceRoot $sourceFull -Relative $file -DestinationRoot $destination }
@@ -202,6 +220,8 @@ function Invoke-Stage($Request) {
     $script:candidateManifest = $manifest
     $status.candidate = $id
     return $id
+    }
+    finally { $stageLease.Handle.Dispose() }
 }
 
 function Assert-Candidate {
@@ -233,6 +253,7 @@ while ((Get-Date) -lt $deadline) {
     $id = ([IO.Path]::GetFileNameWithoutExtension($next.Name) -replace '[^A-Za-z0-9-]', '')
     if (-not $id) { $id = 'request' }
     $entry = [ordered]@{ id = $id; action = $null; arguments = $null; exit = $null; startedUtc = [DateTime]::UtcNow.ToString('o'); finishedUtc = $null; log = $null; error = $null; driverPid = $null; driverHeartbeatUtc = $null; driverPhase = $null; driverHeartbeatAgeSeconds = $null; driverHeartbeatUnavailable = $true }
+    $currentHarness = $harness; $currentSealed = $sealed
     try {
         $request = Read-Request $next
         if ($null -eq $request) { throw 'not a well-formed request' }
@@ -245,7 +266,29 @@ while ((Get-Date) -lt $deadline) {
         if ($entry.action -eq 'stage') { Say "staged candidate $(Invoke-Stage $request)"; continue }
         # Checked again before every run, not only at start: the disks are what the evidence comes from.
         Assert-ProtectedPath -Path $VmRoot -Recurse -AllowVirtualMachines
-        if ($entry.action -ne 'control') { $arguments += @('-CandidateDir', (Assert-Candidate), '-BootstrapReceipt', $bootstrapReceiptPath) }
+        if ($entry.action -in 'collect','network-collect') {
+            $active = Get-WinSightCampaignContext -Root $VmRoot
+            $expectedKind = if ($entry.action -ceq 'collect') { 'qualification' } else { 'network' }
+            if ($active.status -cne 'Active' -or $active.contract.kind -cne $expectedKind -or $active.contract.runName -cne [string](Get-Field $request 'runName')) { throw 'Resume must select the original common-root Active campaign.' }
+            $original = $active.contract
+            $arguments = @('-RunName',$original.runName,'-Resume','-CandidateDir',$original.candidateDir,'-BootstrapReceipt',$original.bootstrapReceipt,'-TimeoutMinutes',$original.timeoutMinutes,'-Name',$original.vm,'-Checkpoint',$original.checkpoint)
+            if ($expectedKind -ceq 'network') {
+                $arguments += @('-TargetMemoryBytes',$original.memoryBytes,'-ControlMemoryBytes',$original.controlMemoryBytes,'-ControlName',$original.controlVm,'-ControlCheckpoint',$original.controlCheckpoint,'-Switch',$original.switch)
+                if ($original.automatic) { $arguments += '-AutomaticCredential' }
+            }
+            else { $arguments += @('-MemoryBytes',$original.memoryBytes,'-Gates',($original.gates -join ',')) }
+            # The old candidate remains immutable even if a different runner staged another pointer.
+            Assert-ProtectedPath -Path $original.candidateDir -Recurse
+            Assert-ProtectedPath -Path $original.harnessDir -Recurse
+            Assert-ProtectedPath -Path $original.bootstrapReceipt
+            Assert-ProtectedPath -Path $original.evidenceRoot
+            if ((Get-WinSightTextDigest (@(Get-FileManifest $original.candidateDir) -join "`n")) -cne $original.candidateDigest -or
+                (Get-WinSightTextDigest (@(Get-FileManifest $original.harnessDir) -join "`n")) -cne $original.harnessDigest -or
+                (Get-FileHash -LiteralPath $original.bootstrapReceipt -Algorithm SHA256).Hash -cne $original.bootstrapDigest) { throw 'The original protected Resume inputs changed; campaign preserved.' }
+            $harness = $original.harnessDir
+            $sealed = $original.evidenceRoot
+        }
+        elseif ($entry.action -ne 'control') { $arguments += @('-CandidateDir', (Assert-Candidate), '-BootstrapReceipt', $bootstrapReceiptPath) }
         $arguments += @('-HarnessDir', $harness, '-EvidenceRoot', $sealed, '-Root', $VmRoot)
         $log = Join-Path $runnerDir "logs\$id-$stamp.log"
         $driverHeartbeat = Join-Path $runnerDir "logs\$id-$stamp-heartbeat.json"
@@ -283,6 +326,7 @@ while ((Get-Date) -lt $deadline) {
         Say "request $id refused or failed: $($entry.error)"
     }
     finally {
+        $harness = $currentHarness; $sealed = $currentSealed
         $entry.finishedUtc = [DateTime]::UtcNow.ToString('o')
         $status.current = $null
         $status.history += $entry
