@@ -528,7 +528,7 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests(ITestOu
     {
         await Run(WaitSetup + $$"""
             function Get-Content($LiteralPath,[switch]$Raw) {throw [Management.Automation.ItemNotFoundException]::new('missing guest result')}
-            
+
             $script:receipts=0;$script:seals=0;$injected=[IO.IOException]::new('injected unique {{failure}} failure')
             function Write-NetworkMissingReceipt {$script:receipts++;if ('{{failure}}' -eq 'receipt') {throw $injected} }
             function Set-Content($LiteralPath,[Parameter(ValueFromPipeline=$true)]$Value) {if ($LiteralPath -like '*SHA256SUMS.txt') {$script:seals++;if ('{{failure}}' -eq 'seal') {throw $injected} } }
