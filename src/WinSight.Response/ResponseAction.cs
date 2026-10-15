@@ -95,4 +95,8 @@ public sealed record ResponseResult(
     string? Detail = null)
 {
     public bool Succeeded => Outcome == ResponseOutcome.Succeeded;
+
+    /// <summary>Observed reasons for localized presentation; the technical/wire detail remains separate.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public ResponseDiagnostics? Diagnostics { get; init; }
 }
