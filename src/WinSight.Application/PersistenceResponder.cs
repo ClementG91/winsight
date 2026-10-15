@@ -62,6 +62,7 @@ public interface IPersistenceMutator
 /// </remarks>
 public sealed class PersistenceResponder
 {
+    private static readonly JsonSerializerOptions EnvelopeReadOptions = new() { RespectRequiredConstructorParameters = true };
     private readonly IPersistenceMutator _mutator;
     private readonly Quarantine _quarantine;
     private readonly IActionJournal _journal;
@@ -218,17 +219,21 @@ public sealed class PersistenceResponder
         QuarantineEnvelope? envelope;
         try
         {
-            envelope = JsonSerializer.Deserialize<QuarantineEnvelope>(payload);
+            envelope = JsonSerializer.Deserialize<QuarantineEnvelope>(payload, EnvelopeReadOptions);
         }
         catch (JsonException)
         {
             return (ResponseOutcome.Failed, item.DisplayName);
         }
-        if (envelope is null)
+        if (envelope?.Target is not { } target || envelope.Payload is null || !IsRestorableShape(target))
         {
             return (ResponseOutcome.Failed, item.DisplayName);
         }
-        var restoration = _mutator.RestoreIfFree(envelope.Target, envelope.Payload);
+        if (target.Privilege != ResponsePrivilege.CurrentUser)
+        {
+            return (ResponseOutcome.NotSupported, item.DisplayName);
+        }
+        var restoration = _mutator.RestoreIfFree(target, envelope.Payload);
         if (restoration != PersistenceMutationOutcome.Succeeded)
         {
             return (Map(restoration), item.DisplayName);
@@ -236,6 +241,19 @@ public sealed class PersistenceResponder
         _quarantine.Remove(item.Id);
         return (ResponseOutcome.Succeeded, item.DisplayName);
     }
+
+    // Hash integrity does not establish the structure of an opaque quarantine payload. Reject
+    // incomplete/future targets before dispatch, so Restore can durably record the refusal.
+    private static bool IsRestorableShape(PersistenceActionTarget target) =>
+        Enum.IsDefined(target.Kind) && Enum.IsDefined(target.Privilege)
+        && target.DisplayName is not null && target.RevalidationToken is not null
+        && (target.Kind switch
+        {
+            PersistenceActionKind.RegistryValue => target.Hive is { } hive && Enum.IsDefined(hive)
+                && !string.IsNullOrEmpty(target.SubKey) && target.ValueName is not null,
+            PersistenceActionKind.StartupFile => target.FilePath is { } path && Path.IsPathFullyQualified(path),
+            _ => false,
+        });
 
     private static ResponseOutcome Map(PersistenceMutationOutcome outcome) => outcome switch
     {
