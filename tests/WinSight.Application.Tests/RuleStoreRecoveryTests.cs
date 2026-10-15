@@ -214,6 +214,13 @@ public sealed class RuleStoreRecoveryTests : IDisposable
         Assert.Equal(ResponseOutcome.Failed, result.Outcome);
         Assert.False(result.Reversible);
         Assert.Empty(Store.ActiveRules(RuleScopeKind.Persistence));
+        var diagnostics = Assert.IsType<ResponseDiagnostics>(result.Diagnostics);
+        var rollback = Assert.IsType<AllowRollbackDiagnostic>(diagnostics.AllowRollback);
+        Assert.Equal(AllowRollbackState.ConfirmedAbsent, rollback.State);
+        Assert.Equal(revokedBeforeRollback ? ResponseOutcome.TargetNotFound : ResponseOutcome.Succeeded, rollback.Outcome);
+        Assert.Equal(revokedBeforeRollback ? RuleStoreStatus.TargetNotFound : RuleStoreStatus.Written, rollback.Storage.Status);
+        Assert.Equal(RuleStoreStatus.Written, Assert.IsType<RuleStoreResult>(diagnostics.RuleMutation).Status);
+        Assert.Equal(ActionJournalWriteStatus.Unavailable, Assert.IsType<ActionJournalWriteResult>(diagnostics.AuditCompletion).Status);
         Assert.Single(journal.Entries);
         Assert.Equal(ActionJournalPhase.Prepared, journal.Entries[0].Phase);
     }
@@ -241,6 +248,10 @@ public sealed class RuleStoreRecoveryTests : IDisposable
             Assert.Contains("Unavailable", result.Detail, StringComparison.Ordinal);
             Assert.Contains("active state is unconfirmed", result.Detail, StringComparison.Ordinal);
             Assert.DoesNotContain("rule remains active", result.Detail, StringComparison.Ordinal);
+            var rollback = Assert.IsType<AllowRollbackDiagnostic>(Assert.IsType<ResponseDiagnostics>(result.Diagnostics).AllowRollback);
+            Assert.Equal(AllowRollbackState.Unconfirmed, rollback.State);
+            Assert.Equal(ResponseOutcome.Failed, rollback.Outcome);
+            Assert.Equal(RuleStoreStatus.Unavailable, rollback.Storage.Status);
         }
         finally
         {
@@ -275,6 +286,10 @@ public sealed class RuleStoreRecoveryTests : IDisposable
             Assert.Equal(stored.Id, Assert.Single(Store.ActiveRules(RuleScopeKind.Persistence)).Id);
             Assert.Contains("WriteFailed", result.Detail, StringComparison.Ordinal);
             Assert.Single(journal.Entries);
+            var rollback = Assert.IsType<AllowRollbackDiagnostic>(Assert.IsType<ResponseDiagnostics>(result.Diagnostics).AllowRollback);
+            Assert.Equal(AllowRollbackState.ConfirmedActive, rollback.State);
+            Assert.Equal(ResponseOutcome.Failed, rollback.Outcome);
+            Assert.Equal(RuleStoreStatus.WriteFailed, rollback.Storage.Status);
         }
         finally
         {

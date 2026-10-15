@@ -75,6 +75,13 @@ public sealed class RollbackRuleStoreTests : IDisposable
             Assert.Contains("replacement was preserved", result.Detail, StringComparison.Ordinal);
             Assert.DoesNotContain("rule remains active", result.Detail, StringComparison.Ordinal);
             Assert.DoesNotContain("confirmed absent", result.Detail, StringComparison.Ordinal);
+            var diagnostics = Assert.IsType<ResponseDiagnostics>(result.Diagnostics);
+            var rollback = Assert.IsType<AllowRollbackDiagnostic>(diagnostics.AllowRollback);
+            Assert.Equal(AllowRollbackState.TargetChanged, rollback.State);
+            Assert.Equal(ResponseOutcome.TargetChanged, rollback.Outcome);
+            Assert.Equal(RuleStoreStatus.TargetChanged, rollback.Storage.Status);
+            Assert.Equal(RuleStoreStatus.Written, Assert.IsType<RuleStoreResult>(diagnostics.RuleMutation).Status);
+            Assert.Equal(ActionJournalWriteStatus.Unavailable, Assert.IsType<ActionJournalWriteResult>(diagnostics.AuditCompletion).Status);
             var prepared = Assert.Single(journal.Entries);
             Assert.Equal(originalId, prepared.ActionId);
             Assert.Equal(ActionJournalPhase.Prepared, prepared.Phase);

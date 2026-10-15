@@ -117,7 +117,10 @@ public sealed class GuardianAlertPresenter
         if (!prepared.Durable)
         {
             result = RuleResult(rule.Id, ResponseActionKind.AddRule, ResponseOutcome.Failed, targetDescription,
-                "action was not attempted because its audit intent could not be written; " + prepared.Detail);
+                "action was not attempted because its audit intent could not be written; " + prepared.Detail) with
+            {
+                Diagnostics = new() { AuditIntent = prepared },
+            };
             return null;
         }
         var stored = _rules.Add(rule, out var storage);
@@ -129,7 +132,10 @@ public sealed class GuardianAlertPresenter
             reversible: stored is not null);
         result = RuleResult(rule.Id, ResponseActionKind.AddRule,
             stored is null ? ResponseOutcome.Failed : ResponseOutcome.Succeeded, targetDescription,
-            stored is null || storage.IgnoredEntries > 0 ? storage.Detail : null);
+            stored is null || storage.IgnoredEntries > 0 ? storage.Detail : null) with
+        {
+            Diagnostics = new() { AuditIntent = prepared, RuleMutation = storage, AuditCompletion = completed },
+        };
         if (completed.Durable || stored is null)
         {
             if (!completed.Durable)
@@ -148,6 +154,14 @@ public sealed class GuardianAlertPresenter
         {
             Outcome = rolledBack ? ResponseOutcome.Failed : ResponseOutcome.PartiallyApplied,
             Reversible = activeConfirmed,
+            Diagnostics = result.Diagnostics! with
+            {
+                AllowRollback = new(rollback, rollbackStorage,
+                    rolledBack ? AllowRollbackState.ConfirmedAbsent
+                    : activeConfirmed ? AllowRollbackState.ConfirmedActive
+                    : rollback == ResponseOutcome.TargetChanged ? AllowRollbackState.TargetChanged
+                    : AllowRollbackState.Unconfirmed),
+            },
             Detail = "Allow completion could not be journalled; " + completed.Detail
                 + (rolledBack ? "; the new rule is confirmed absent after rollback"
                     : activeConfirmed ? "; rollback failed and the rule remains active"
@@ -176,14 +190,20 @@ public sealed class GuardianAlertPresenter
         if (!prepared.Durable)
         {
             result = RuleResult(revokeId, ResponseActionKind.RemoveRule, ResponseOutcome.Failed, target,
-                "action was not attempted because its audit intent could not be written; " + prepared.Detail);
+                "action was not attempted because its audit intent could not be written; " + prepared.Detail) with
+            {
+                Diagnostics = new() { AuditIntent = prepared },
+            };
             return ResponseOutcome.Failed;
         }
         var outcome = _rules.RemoveWithOutcome(ruleId, out var storage);
         var completed = Journal(
             ResponseActionKind.RemoveRule, outcome, revokeId, target, reversible: false);
         result = RuleResult(revokeId, ResponseActionKind.RemoveRule, outcome, target,
-            outcome == ResponseOutcome.Failed || storage.IgnoredEntries > 0 ? storage.Detail : null);
+            outcome == ResponseOutcome.Failed || storage.IgnoredEntries > 0 ? storage.Detail : null) with
+        {
+            Diagnostics = new() { AuditIntent = prepared, RuleMutation = storage, AuditCompletion = completed },
+        };
         if (!completed.Durable)
         {
             result = result with
