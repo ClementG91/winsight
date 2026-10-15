@@ -49,13 +49,7 @@ public partial class AlertWindow : Window
     private void AllowButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
     {
         var rule = _presenter.Allow(_entry, out var result);
-        var message = rule is not null && result.Outcome == ResponseOutcome.Succeeded
-            ? Text.Format("AlertAllowed", rule.Id)
-            : result.Outcome == ResponseOutcome.PartiallyApplied
-                ? Text.Format("AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty)
-                : Text["AlertFailed"];
-        return result.Outcome != ResponseOutcome.PartiallyApplied && result.Detail is { Length: > 0 }
-            ? message + " " + UntrustedDisplayText.Neutralize(result.Detail) : message;
+        return ResponseDiagnosticsPresenter.ForAllow(result, rule?.Id);
     });
 
     private void BlockButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
@@ -64,17 +58,7 @@ public partial class AlertWindow : Window
         return MessageFor(result);
     });
 
-    internal static string MessageFor(ResponseResult result) => result.Outcome switch
-    {
-        ResponseOutcome.Succeeded => Text.Format("AlertBlocked", result.ActionId),
-        // Partly applied for a reason the operator can act on: the entry came straight back.
-        ResponseOutcome.PartiallyApplied when result.Detail == PersistenceResponder.ReassertedDetail =>
-            Text.Format("AlertBlockReasserted", result.ActionId),
-        ResponseOutcome.PartiallyApplied => Text.Format(
-            "AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty),
-        _ => Text[MessageKeyFor(result.Outcome)] + (string.IsNullOrEmpty(result.Detail)
-            ? string.Empty : " " + UntrustedDisplayText.Neutralize(result.Detail)),
-    };
+    internal static string MessageFor(ResponseResult result) => ResponseDiagnosticsPresenter.ForBlock(result);
 
     private void LaterButton_Click(object sender, RoutedEventArgs e) => Close();
 

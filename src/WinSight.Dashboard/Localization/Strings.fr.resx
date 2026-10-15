@@ -424,7 +424,7 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>L'élément a changé depuis l'alerte ; rien n'a été supprimé.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight ne peut pas encore annuler cet élément : il s'applique à toute la machine, ou il est d'un type sans suppression réversible.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>L'action n'a pas pu être effectuée.</value></data>
-  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Le système a peut-être été modifié, mais le résultat n'a pas pu être entièrement journalisé. ID d'action : {0}. {1}</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Le système a peut-être été modifié ; certaines étapes ne sont pas confirmées. ID d'action : {0}.</value></data>
   <data name="AlertBlockReasserted" xml:space="preserve"><value>Supprimé et mis en quarantaine, mais l'élément de démarrage est aussitôt réapparu : un programme en cours d'exécution le recrée. Traitez ce programme, puis bloquez à nouveau. ID d'action : {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — signature de fichier</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Qui a signé ce fichier</value></data>
@@ -440,4 +440,53 @@
   <data name="SignatureRevocationNotChecked" xml:space="preserve"><value>La révocation n'a pas été vérifiée : aucune réponse n'était en cache, et WinSight ne se connecte pas pour vérifier. Un certificat volé apparaîtrait encore valide ici.</value></data>
   <data name="SignatureRevoked" xml:space="preserve"><value>Le certificat de signature a été révoqué. Ne faites pas confiance à ce fichier sur la base de sa signature.</value></data>
   <data name="Close" xml:space="preserve"><value>Fermer</value></data>
+  <data name="ResponseActionId" xml:space="preserve"><value>ID d'action : {0}.</value></data>
+  <data name="ResponseProcessRollbackIncomplete" xml:space="preserve"><value>L'annulation de la suspension est incomplète ; certains threads peuvent rester suspendus. Vérifiez le processus avant une nouvelle action.</value></data>
+  <data name="ResponseIntentRefused" xml:space="preserve"><value>L'intention d'audit n'a pas pu être écrite ; l'action n'a pas été tentée.</value></data>
+  <data name="ResponseCompletionGap" xml:space="preserve"><value>La fin de l'action n'a pas pu être journalisée.</value></data>
+  <data name="ResponseRuleMutation" xml:space="preserve"><value>Modification des règles : {0}</value></data>
+  <data name="ResponseRollbackStorage" xml:space="preserve"><value>Stockage lors de l'annulation : {0}</value></data>
+  <data name="ResponseIgnoredCount" xml:space="preserve"><value>entrées ignorées : {0} ;</value></data>
+  <data name="ResponseIgnoredRemoved" xml:space="preserve"><value>les entrées invalides ont été supprimées par cette écriture réussie.</value></data>
+  <data name="ResponseIgnoredRetained" xml:space="preserve"><value>les entrées invalides restent intactes tant qu'une écriture n'a pas réussi.</value></data>
+  <data name="ResponseFutureRulesCount" xml:space="preserve"><value>entrées non prises en charge conservées : {0} ;</value></data>
+  <data name="ResponseFutureRulesInactive" xml:space="preserve"><value>Ces entrées sont conservées sans appliquer leur sémantique inconnue.</value></data>
+  <data name="ResponseRollbackConfirmedAbsent" xml:space="preserve"><value>L'absence de la nouvelle règle est confirmée après annulation.</value></data>
+  <data name="ResponseRollbackConfirmedActive" xml:space="preserve"><value>L'annulation a échoué et la règle initiale est confirmée active ; vérifiez winsight rules.</value></data>
+  <data name="ResponseRollbackTargetChanged" xml:space="preserve"><value>La cible de l'annulation a changé ; son remplacement a été conservé. L'état actif de la règle initiale n'est pas confirmé ; vérifiez winsight rules.</value></data>
+  <data name="ResponseRollbackUnconfirmed" xml:space="preserve"><value>L'annulation n'a pas pu être vérifiée. L'état actif de la règle n'est pas confirmé ; vérifiez winsight rules lorsque le stockage est lisible.</value></data>
+  <data name="ResponseJournalAppended" xml:space="preserve"><value>Le relevé d'audit a été ajouté.</value></data>
+  <data name="ResponseJournalRotated" xml:space="preserve"><value>Le relevé d'audit a été stocké après rotation du journal.</value></data>
+  <data name="ResponseJournalUpdated" xml:space="preserve"><value>L'historique d'audit a été mis à jour.</value></data>
+  <data name="ResponseJournalTargetNotFound" xml:space="preserve"><value>Le relevé d'audit demandé est introuvable. Vérifiez winsight actions.</value></data>
+  <data name="ResponseJournalUnavailable" xml:space="preserve"><value>Le stockage d'audit est indisponible. Vérifiez l'espace disque, les accès locaux et le partage des fichiers.</value></data>
+  <data name="ResponseJournalInvalidRecord" xml:space="preserve"><value>Le relevé d'audit est invalide. Vérifiez les paramètres de l'action.</value></data>
+  <data name="ResponseJournalRotationFailed" xml:space="preserve"><value>Le remplacement atomique du journal a échoué. Fermez les accès concurrents au fichier puis réessayez.</value></data>
+  <data name="ResponseJournalEvidencePreservationFailed" xml:space="preserve"><value>Les preuves de récupération n'ont pas pu être conservées. Vérifiez l'espace disque et les accès avant de réessayer.</value></data>
+  <data name="ResponseJournalRecoveryRequired" xml:space="preserve"><value>Une migration bornée de l'historique est nécessaire. Consultez winsight actions et RECOVERY.md.</value></data>
+  <data name="ResponseJournalRetentionLimit" xml:space="preserve"><value>L'annotation dépasse les limites de conservation et a été refusée ; le journal initial est inchangé.</value></data>
+  <data name="ResponseJournalLockTimeout" xml:space="preserve"><value>Une autre opération détient le verrou d'audit. Réessayez après sa fin ; le délai du verrou est de 30 secondes.</value></data>
+  <data name="ResponseJournalUnsafeLockPath" xml:space="preserve"><value>Le chemin du verrou d'audit est dangereux ou inaccessible. Vérifiez les chemins locaux et RECOVERY.md.</value></data>
+  <data name="ResponseJournalLockUnavailable" xml:space="preserve"><value>Le verrou d'audit n'a pas pu être ouvert. Vérifiez les droits et les initialisations concurrentes ; ne supprimez jamais un verrou actif.</value></data>
+  <data name="ResponseJournalEvidenceRecoveryBlocked" xml:space="preserve"><value>Impossible de résoudre de façon sûre la récupération des preuves ou l'état de leurs métadonnées. Consultez winsight actions et RECOVERY.md avant de réessayer.</value></data>
+  <data name="ResponseJournalPathTooLong" xml:space="preserve"><value>Le nom du journal est trop long pour ses fichiers d'archive et de préparation. Conservez tous les fichiers et choisissez un chemin plus court, sans chevauchement, selon RECOVERY.md.</value></data>
+  <data name="ResponseJournalUnknown" xml:space="preserve"><value>L'état d'audit n'est pas reconnu. Consultez winsight actions et RECOVERY.md.</value></data>
+  <data name="ResponseRuleLoaded" xml:space="preserve"><value>Le stockage des règles a été lu.</value></data>
+  <data name="ResponseRuleMissing" xml:space="preserve"><value>Aucun fichier de règles n'existe.</value></data>
+  <data name="ResponseRuleWritten" xml:space="preserve"><value>La modification des règles a été stockée.</value></data>
+  <data name="ResponseRuleTargetNotFound" xml:space="preserve"><value>La règle est absente du stockage lisible.</value></data>
+  <data name="ResponseRuleInvalidRule" xml:space="preserve"><value>L'identité, la portée, la décision ou la durée de la règle est invalide ; une règle temporaire exige une expiration.</value></data>
+  <data name="ResponseRuleInvalidJson" xml:space="preserve"><value>Le fichier de règles contient un JSON invalide et a été conservé. Consultez winsight rules et RECOVERY.md.</value></data>
+  <data name="ResponseRuleInvalidFormat" xml:space="preserve"><value>Le format du fichier de règles est invalide et le fichier a été conservé. Consultez winsight rules et RECOVERY.md.</value></data>
+  <data name="ResponseRuleUnsupportedVersion" xml:space="preserve"><value>La version du fichier de règles n'est pas prise en charge et a été conservée. Utilisez une version compatible ou une sauvegarde vérifiée.</value></data>
+  <data name="ResponseRuleByteLimit" xml:space="preserve"><value>La limite de 8 Mio du fichier de règles est dépassée ; le fichier existant a été conservé.</value></data>
+  <data name="ResponseRuleRuleLimit" xml:space="preserve"><value>La limite de 8192 règles est dépassée. Révoquez une règle depuis un stockage lisible ou restaurez une sauvegarde vérifiée.</value></data>
+  <data name="ResponseRuleUnavailable" xml:space="preserve"><value>Le stockage des règles est indisponible. Vérifiez les accès locaux, le partage des fichiers et l'espace disque.</value></data>
+  <data name="ResponseRuleWriteFailed" xml:space="preserve"><value>Le remplacement atomique des règles a échoué. Vérifiez l'espace disque, les droits et les accès concurrents aux fichiers.</value></data>
+  <data name="ResponseRuleLockTimeout" xml:space="preserve"><value>Une autre opération détient le verrou des règles. Réessayez après sa fin ; le délai du verrou est de 30 secondes.</value></data>
+  <data name="ResponseRuleUnsafeLockPath" xml:space="preserve"><value>Le chemin du verrou des règles est dangereux ou inaccessible. Vérifiez les chemins locaux et RECOVERY.md.</value></data>
+  <data name="ResponseRuleLockUnavailable" xml:space="preserve"><value>Le verrou des règles n'a pas pu être ouvert. Vérifiez les droits et les initialisations concurrentes ; ne supprimez jamais un verrou actif.</value></data>
+  <data name="ResponseRuleUnsupportedIdentityCollision" xml:space="preserve"><value>Cette identité appartient à une règle conservée dont la sémantique est inconnue. Utilisez une version compatible ou révoquez-la explicitement avant de la remplacer.</value></data>
+  <data name="ResponseRuleTargetChanged" xml:space="preserve"><value>La règle attendue ou ses octets ont changé, ou son identité est ambiguë. Le remplacement a été conservé.</value></data>
+  <data name="ResponseRuleUnknown" xml:space="preserve"><value>L'état du stockage des règles n'est pas reconnu. Consultez winsight rules et RECOVERY.md.</value></data>
 </root>

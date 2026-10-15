@@ -88,7 +88,8 @@ public sealed class AlertWindowTests
         window.AllowButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
         Assert.StartsWith(LocalizationManager.Instance["AlertFailed"], window.StatusText.Text, StringComparison.Ordinal);
-        Assert.Contains("rule storage status: Unavailable", window.StatusText.Text, StringComparison.Ordinal);
+        Assert.Contains("The rule store is unavailable", window.StatusText.Text, StringComparison.Ordinal);
+        Assert.DoesNotContain("rule storage status:", window.StatusText.Text, StringComparison.Ordinal);
         Assert.DoesNotContain("winsight revoke", window.StatusText.Text, StringComparison.Ordinal);
         Assert.Empty(presenter.AllowRules());
         window.Close();
@@ -147,7 +148,10 @@ public sealed class AlertWindowTests
         var id = Guid.NewGuid();
         var message = AlertWindow.MessageFor(new ResponseResult(
             id, ResponseActionKind.QuarantinePersistence, ResponseOutcome.PartiallyApplied, "Updater",
-            DateTimeOffset.UtcNow, Reversible: true, Detail: PersistenceResponder.ReassertedDetail));
+            DateTimeOffset.UtcNow, Reversible: true, Detail: PersistenceResponder.ReassertedDetail)
+        {
+            Diagnostics = new() { PersistenceReasserted = true },
+        });
 
         Assert.Contains("came straight back", message, StringComparison.Ordinal);
         Assert.Contains(id.ToString(), message, StringComparison.Ordinal);
@@ -172,6 +176,56 @@ public sealed class AlertWindowTests
         Assert.Contains(prepared.ActionId.ToString(), window.StatusText.Text, StringComparison.Ordinal);
         Assert.Contains("could not be journalled", window.StatusText.Text, StringComparison.OrdinalIgnoreCase);
         window.Close();
+    });
+
+    [Theory]
+    [InlineData("fr", "Le stockage des règles est indisponible")]
+    [InlineData("es", "El almacén de reglas no está disponible")]
+    public void AnAllowFailureDoesNotLeakEnglishStorageDetails(string language, string expected) => RunSta(state =>
+    {
+        LocalizationManager.Instance.SetCulture(language);
+        var presenter = new GuardianAlertPresenter(
+            new FakeMutator(), rules: new RuleStore("D:\\invalid\0rules.json"), journal: state.Journal);
+        var window = new AlertWindow(RunEntry(), presenter);
+        try
+        {
+            window.AllowButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.DoesNotContain("rule storage status:", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("audit storage status:", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.Contains(expected, window.StatusText.Text, StringComparison.Ordinal);
+            Assert.StartsWith(LocalizationManager.Instance["AlertFailed"], window.StatusText.Text, StringComparison.Ordinal);
+            var action = Assert.Single(state.Journal.Read());
+            Assert.Contains(action.ActionId.ToString(), window.StatusText.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("winsight revoke", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.Empty(presenter.AllowRules());
+            Assert.False(window.AllowButton.IsEnabled);
+            Assert.False(window.BlockButton.IsEnabled);
+        }
+        finally { window.Close(); }
+    });
+
+    [Theory]
+    [InlineData("fr", "La fin de l'action n'a pas pu être journalisée")]
+    [InlineData("es", "No se pudo registrar la finalización de la acción")]
+    public void ABlockCompletionGapIsLocalizedWithItsActualActionId(string language, string expected) => RunSta(state =>
+    {
+        LocalizationManager.Instance.SetCulture(language);
+        var journal = new SequencedJournal(true, false);
+        var presenter = new GuardianAlertPresenter(new FakeMutator(),
+            new Quarantine(Path.Combine(state.Root, "localized-quarantine")),
+            new RuleStore(Path.Combine(state.Root, "localized-rules.json")), journal);
+        var window = new AlertWindow(RunEntry(), presenter);
+        try
+        {
+            window.BlockButton.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
+            Assert.Contains(expected, window.StatusText.Text, StringComparison.Ordinal);
+            Assert.Contains(Assert.Single(journal.Written).ActionId.ToString(), window.StatusText.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("audit storage status:", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.DoesNotContain("the action may have changed", window.StatusText.Text, StringComparison.Ordinal);
+            Assert.False(window.AllowButton.IsEnabled);
+            Assert.False(window.BlockButton.IsEnabled);
+        }
+        finally { window.Close(); }
     });
 
     private static AutostartEntry RunEntry() =>
