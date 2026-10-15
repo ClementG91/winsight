@@ -767,7 +767,17 @@ Invoke-Gate '15-installer-all-users-service' {
 
 Invoke-Gate '16-installer-upgrade' {
     if (-not $Candidate.PSObject.Properties['previous']) { throw 'NOT_RUN: no previous release staged in candidate.json.' }
-    $previous = Join-Path $Artifacts $Candidate.previous.file
+    $previousLeaf = $Candidate.previous.file
+    if ($previousLeaf -isnot [string] -or [string]::IsNullOrWhiteSpace($previousLeaf) -or
+        $previousLeaf.IndexOfAny([IO.Path]::GetInvalidFileNameChars()) -ge 0 -or
+        $previousLeaf -in '.', '..' -or $previousLeaf.TrimEnd('.', ' ') -cne $previousLeaf -or
+        $previousLeaf -match '^(CON|PRN|AUX|NUL|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)') {
+        throw 'Invalid previous installer file: expected an ordinary leaf name.'
+    }
+    # Equal version/basename is valid for replacement qualification; never overwrite the candidate.
+    $previousDirectory = Join-Path $Artifacts 'previous'
+    New-Item -ItemType Directory -Path $previousDirectory -Force | Out-Null
+    $previous = Join-Path $previousDirectory $previousLeaf
     Copy-Item -LiteralPath (Join-Path $Share "previous\$($Candidate.previous.file)") -Destination $previous -Force
     if ((Get-Sha256 $previous) -ne $Candidate.previous.sha256) { throw 'Previous release installer hash mismatch.' }
     $script:Manifest[$previous] = $Candidate.previous.sha256

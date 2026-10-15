@@ -247,3 +247,19 @@ reads and bounds examined entries, directory depth, bytes/files, traversal and r
 Local synthetic/process regressions do not qualify real Hyper-V, ACLs, ARM64, disk-full/UI
 failure, network service availability or seven-day endurance. These remain exact-artifact
 operator gates.
+
+### Installer replacement identity
+
+Gate16 keeps the published previous setup in Artifacts\previous and the current setup at
+the artifact root. Identical setup basenames are valid and never share a destination or
+manifest entry. The previous metadata filename must be an ordinary leaf without Windows
+path/device aliases. Both setup hashes remain bound to the staged candidate manifest.
+
+Test-InstallerUpgrade captures SHA256 for every shipped file from the fresh current
+installation before uninstalling it. After replacement, file names, installed version,
+single uninstall registration and file contents must match that fresh installation;
+the existing unins* exclusion remains unchanged. Final uninstall checks still apply.
+With both versions pinned to0.14.2, this qualifies same-version replacement/reinstallation.
+A version-number upgrade requires running the protocol with distinct published versions.
+Synthetic local tests exercise the real gate and validation flow with installation and
+registry boundaries mocked; actual setup execution remains a disposable-VM qualification.
