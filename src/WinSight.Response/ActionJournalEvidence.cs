@@ -311,6 +311,13 @@ internal static partial class ActionJournalEvidence
             unavailable = !missing;
             return new() { IndexMissing = missing };
         }
+        return ReadAcquiredState(lease, out unavailable, out invalid);
+    }
+
+    private static State ReadAcquiredState(AutomaticFileAccess.LocalPathLease lease, out bool unavailable, out bool invalid)
+    {
+        unavailable = false;
+        invalid = false;
         if (lease.IsDirectory)
         {
             unavailable = true;
