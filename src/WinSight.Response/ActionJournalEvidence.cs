@@ -328,7 +328,8 @@ internal static partial class ActionJournalEvidence
             if (lease.Length <= MaxMetadataBytes)
             {
                 using var input = lease.OpenRead();
-                using var document = JsonDocument.Parse(input);
+                using var bounded = ReadBoundedMetadata(input);
+                using var document = JsonDocument.Parse(bounded);
                 var value = document.RootElement;
                 var required = new[] { "Version", "DiscardedBytes", "DiscardedFiles", "LossReason", "PriorCountersUnknown",
                     "NextSlot", "PendingSlot", "PendingBytes", "PendingSha256" };
@@ -356,6 +357,33 @@ internal static partial class ActionJournalEvidence
         }
         invalid = true;
         return new State(LossReason: "unrecognized-evidence-metadata", PriorCountersUnknown: true);
+    }
+
+    private static MemoryStream ReadBoundedMetadata(FileStream input)
+    {
+        // The attributes lease's length may predate an in-place write. Bound the acquired DATA
+        // itself, including an EOF sentinel, before handing any bytes to the JSON parser.
+        if (input.Length <= MaxMetadataBytes)
+        {
+            var bytes = new byte[MaxMetadataBytes + 1];
+            var count = 0;
+            while (count < bytes.Length)
+            {
+                var read = input.Read(bytes, count, bytes.Length - count);
+                if (read == 0)
+                {
+                    break;
+                }
+                count += read;
+            }
+            if (count <= MaxMetadataBytes)
+            {
+                // Parse(Stream) preserves the existing single-leading-BOM behavior. The BOM
+                // still counts toward the physical byte budget enforced above.
+                return new MemoryStream(bytes, 0, count, writable: false);
+            }
+        }
+        throw new JsonException("Evidence metadata exceeds the physical byte budget.");
     }
 
     private static bool Save(string path, ref State state)
