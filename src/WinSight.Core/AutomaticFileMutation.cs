@@ -304,6 +304,7 @@ public static partial class AutomaticFileAccess
         var addedReference = false;
         var buffer = IntPtr.Zero;
         var namePointer = IntPtr.Zero;
+        SafeFileHandle? handle = null;
         try
         {
             rootHandle.DangerousAddRef(ref addedReference);
@@ -324,7 +325,7 @@ public static partial class AutomaticFileAccess
                 Attributes = ObjCaseInsensitive | ObjDontReparse,
             };
             var status = NtCreateFile(
-                out var handle,
+                out handle,
                 desiredAccess,
                 ref attributes,
                 out _,
@@ -338,25 +339,22 @@ public static partial class AutomaticFileAccess
             if (status < 0 || handle.IsInvalid)
             {
                 error = unchecked((int)RtlNtStatusToDosError(status));
-                handle.Dispose();
                 return null;
             }
             if (!GetFileInformationByHandle(handle, out var information))
             {
                 error = Marshal.GetLastPInvokeError();
-                handle.Dispose();
                 return null;
             }
             if ((information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
             {
                 error = 1920; // ERROR_CANT_ACCESS_FILE: never classify a reparse as ordinary absence.
-                handle.Dispose();
                 return null;
             }
             error = 0;
             var isDirectory = (information.FileAttributes & (uint)FileAttributes.Directory) != 0;
             var length = ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
-            return new LocalPathLease(
+            var lease = new LocalPathLease(
                 fullPath,
                 isDirectory,
                 length,
@@ -369,6 +367,9 @@ public static partial class AutomaticFileAccess
                 desiredAccess,
                 shareAccess,
                 information.FileAttributes);
+            // Transfer only after timestamp conversion and construction have both succeeded.
+            handle = null;
+            return lease;
         }
         catch (Exception ex) when (ex is ArgumentException
                                      or OverflowException
@@ -379,6 +380,7 @@ public static partial class AutomaticFileAccess
         }
         finally
         {
+            handle?.Dispose();
             if (namePointer != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(namePointer);
