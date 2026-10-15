@@ -8,16 +8,10 @@ namespace WinSight.Application.Tests;
 
 public sealed class AdaptersActionHistoryTests : IDisposable
 {
-    private readonly string _journal = Path.Combine(
-        Path.GetTempPath(), $"winsight-actions-{Guid.NewGuid():N}.jsonl");
+    private readonly string _root = Directory.CreateTempSubdirectory("winsight-actions-").FullName;
+    private string _journal => Path.Combine(_root, "history.jsonl");
 
-    public void Dispose()
-    {
-        if (File.Exists(_journal))
-        {
-            File.Delete(_journal);
-        }
-    }
+    public void Dispose() => Directory.Delete(_root, recursive: true);
 
     [Fact]
     public void AnEmptyJournalReportsNoHistoryRatherThanAFinding()
