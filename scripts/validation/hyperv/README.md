@@ -259,7 +259,37 @@ Test-InstallerUpgrade captures SHA256 for every shipped file from the fresh curr
 installation before uninstalling it. After replacement, file names, installed version,
 single uninstall registration and file contents must match that fresh installation;
 the existing unins* exclusion remains unchanged. Final uninstall checks still apply.
-With both versions pinned to0.14.2, this qualifies same-version replacement/reinstallation.
+With both versions pinned to 0.14.2, this qualifies same-version replacement/reinstallation.
 A version-number upgrade requires running the protocol with distinct published versions.
 Synthetic local tests exercise the real gate and validation flow with installation and
 registry boundaries mocked; actual setup execution remains a disposable-VM qualification.
+
+### Acquired source files and candidate inventory
+
+Staging accepts ordinary absolute paths on physical local drive volumes. It resolves the local
+volume mapping before opening the filesystem, then opens each component relative to retained
+directory handles with no-follow native flags. Network/device/subst aliases, reparse points,
+ambiguous Windows components and source files with multiple hardlinks are refused. Source
+roots/relative names are bounded to 2048 UTF16 units and 128 components. Every file lease checks
+its actual opened length before destination creation, retains its subdirectories, and copies
+exactly that captured length with an EOF check. Destination contents are flushed. File leases
+deny conflicting writes/deletes; the context retains the source root through the complete stage.
+This binds acquired object bytes; it is not an atomic snapshot of an arbitrarily changing tree.
+
+The runner captures candidate.json once, at most 1 MiB, using strict UTF8. An optional initial
+BOM is accepted for the PS5 producer, while the original bytes are staged unchanged. Duplicate
+decoded JSON names and excessive JSON depth are refused before PS5 normalization. Its artifact,
+source/scripts and optional previous-installer entries form the only copy inventory: at most
+400 files including metadata, 16 relative path components, 2 GiB per payload and 4 GiB total
+including metadata. Canonical case/slash collisions are refused before copies. Unlisted entries
+and optional .sha256 sidecars are not enumerated or copied; declared SHA256 values are checked
+against the protected copied files before publishing the candidate pointer. Failure preserves
+the previous pointer and any protected partial candidate for inspection.
+
+Inventory hashes establish content consistency, not authority to run a release. The independent
+signed-source/CI/artifact/bootstrap verifier and operator installation remain required. Local
+tests use small owned files and synthetic boundary mocks; the aggregate-byte algorithm is tested
+with a small internal limit and the production 4 GiB default is checked, without allocating 4 GiB.
+The former enumeration-cap fixture now asserts the consumed manifest count/depth limits; its
+failure assertions and 30-second child watchdog remain unchanged. Real Hyper-V/ACL/native ARM
+and final artifact qualification are separate gates.

@@ -179,22 +179,229 @@ function Assert-NoReparseBetween([Parameter(Mandatory)][string]$Root, [Parameter
     }
 }
 
-# Copies one file named in advance from a possibly user-writable tree into a protected one. The source
-# must be an ordinary file of bounded size with no reparse point on its way from $SourceRoot; the
-# destination directory must be protected already.
+# Retain every source ancestor before reading a user-writable candidate. No managed pathname IO
+# precedes the native no-follow walk. Inline C#5 keeps this within the authenticated PS5 bundle.
+function Initialize-WinSightSourceAccess {
+    if ('WinSightHarness.StagingSourceContext' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
+using Microsoft.Win32.SafeHandles;
+
+namespace WinSightHarness {
+    // Synchronous ownership: dispose file leases before their enclosing source context.
+    public sealed class StagingSourceContext : IDisposable {
+        private readonly List<SafeFileHandle> ancestors = new List<SafeFileHandle>();
+        private bool disposed;
+        public string Root { get; private set; }
+
+        public static string NormalizeRelative(string relative) {
+            if (String.IsNullOrEmpty(relative) || relative.Length > 2048 || Path.IsPathRooted(relative))
+                throw new IOException("Invalid relative path: " + relative);
+            string[] parts = relative.Replace('/', '\\').Split('\\');
+            if (parts.Length > 128) throw new IOException("Invalid relative path: excessive components.");
+            foreach (string part in parts) {
+                if (part.Length == 0 || part.Length > 255 || part == "." || part == ".." ||
+                    part.TrimEnd('.', ' ') != part || part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                    Regex.IsMatch(part, @"^(CON|PRN|AUX|NUL|CLOCK\$|CONIN\$|CONOUT\$|COM[1-9\u00b9\u00b2\u00b3]|LPT[1-9\u00b9\u00b2\u00b3])(?:\.|$)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                    throw new IOException("Invalid relative path: " + relative);
+            }
+            return String.Join("\\", parts);
+        }
+
+        public static string NormalizeRoot(string root) {
+            if (String.IsNullOrEmpty(root) || root.Length > 2048 || !Regex.IsMatch(root, @"^[A-Za-z]:[\\/]"))
+                throw new IOException("Source root must be an absolute ordinary local drive path.");
+            string full = root.Replace('/', '\\');
+            if (full.Length > 3) {
+                string tail = full.Substring(3);
+                if (tail.EndsWith("\\", StringComparison.Ordinal)) tail = tail.Substring(0, tail.Length - 1);
+                if (tail.Length == 0) throw new IOException("Source root must be an ordinary local drive path.");
+                full = full.Substring(0, 3) + NormalizeRelative(tail);
+            }
+            return Path.GetFullPath(full);
+        }
+
+        public StagingSourceContext(string root) {
+            Root = NormalizeRoot(root);
+            try {
+                StringBuilder mapping = new StringBuilder(32768);
+                if (QueryDosDeviceW(Root.Substring(0, 2), mapping, mapping.Capacity) == 0)
+                    throw NativeError("Query local source volume", Marshal.GetLastWin32Error());
+                string volume = mapping.ToString();
+                if (!Regex.IsMatch(volume, @"^\\Device\\HarddiskVolume[0-9]+$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant))
+                    throw new IOException("Source root must resolve to a physical local drive volume; aliases and network devices are refused.");
+                SafeFileHandle parent = Open(null, volume + "\\", true);
+                ancestors.Add(parent);
+                if (Root.Length > 3) {
+                    foreach (string part in Root.Substring(3).Split('\\')) {
+                        parent = Open(parent, part, true);
+                        ancestors.Add(parent);
+                    }
+                }
+            }
+            catch { Dispose(); throw; }
+        }
+
+        public StagingSourceLease OpenFile(string relative, long maximumBytes) {
+            if (disposed) throw new ObjectDisposedException("StagingSourceContext");
+            if (maximumBytes < 0 || maximumBytes > 2147483648L) throw new ArgumentOutOfRangeException("maximumBytes");
+            string normalized = NormalizeRelative(relative);
+            string[] parts = normalized.Split('\\');
+            List<SafeFileHandle> parents = new List<SafeFileHandle>();
+            SafeFileHandle file = null;
+            FileStream stream = null;
+            try {
+                SafeFileHandle parent = ancestors[ancestors.Count - 1];
+                for (int i = 0; i < parts.Length - 1; i++) {
+                    parent = Open(parent, parts[i], true);
+                    parents.Add(parent);
+                }
+                file = Open(parent, parts[parts.Length - 1], false);
+                stream = new FileStream(file, FileAccess.Read, 65536, false);
+                file = null; // stream now owns the SafeFileHandle
+                long length = stream.Length;
+                if (length > maximumBytes) throw new IOException("Too large: opened source exceeds its byte limit.");
+                StagingSourceLease lease = new StagingSourceLease(stream, parents, length);
+                stream = null;
+                return lease;
+            }
+            catch {
+                if (stream != null) stream.Dispose();
+                if (file != null) file.Dispose();
+                for (int i = parents.Count - 1; i >= 0; i--) parents[i].Dispose();
+                throw;
+            }
+        }
+
+        public void Dispose() {
+            if (disposed) return;
+            disposed = true;
+            for (int i = ancestors.Count - 1; i >= 0; i--) ancestors[i].Dispose();
+        }
+
+        // NtCreateFile RootDirectory is a retained filesystem directory, not a DOS path.
+        // https://learn.microsoft.com/windows/win32/api/winternl/nf-winternl-ntcreatefile
+        // https://learn.microsoft.com/windows/win32/api/ntdef/ns-ntdef-_object_attributes
+        private static SafeFileHandle Open(SafeFileHandle parent, string name, bool directory) {
+            bool reference = false;
+            IntPtr buffer = IntPtr.Zero, namePointer = IntPtr.Zero;
+            SafeFileHandle handle = null;
+            try {
+                if (parent != null) parent.DangerousAddRef(ref reference);
+                buffer = Marshal.StringToHGlobalUni(name);
+                UnicodeString unicode = new UnicodeString {
+                    Length = checked((ushort)(name.Length * 2)),
+                    MaximumLength = checked((ushort)((name.Length + 1) * 2)), Buffer = buffer
+                };
+                namePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(UnicodeString)));
+                Marshal.StructureToPtr(unicode, namePointer, false);
+                ObjectAttributes attributes = new ObjectAttributes {
+                    Length = Marshal.SizeOf(typeof(ObjectAttributes)),
+                    RootDirectory = parent == null ? IntPtr.Zero : parent.DangerousGetHandle(),
+                    ObjectName = namePointer, Attributes = 0x40 | 0x1000 // CASE_INSENSITIVE | DONT_REPARSE
+                };
+                IoStatusBlock io;
+                int status = NtCreateFile(out handle, directory ? 0x1000A0U : 0x100081U,
+                    ref attributes, out io, IntPtr.Zero, 0, directory ? 3U : 1U, 1,
+                    0x200020U | (directory ? 1U : 0x40U), IntPtr.Zero, 0);
+                if (status < 0 || handle == null || handle.IsInvalid) {
+                    if (unchecked((uint)status) == 0xC000050BU) throw new IOException("Reparse point refused in source path.");
+                    throw NativeError("Open source component", status < 0 ? unchecked((int)RtlNtStatusToDosError(status)) : 6);
+                }
+                ByHandleFileInformation info;
+                if (!GetFileInformationByHandle(handle, out info)) throw NativeError("Inspect acquired source", Marshal.GetLastWin32Error());
+                if ((info.FileAttributes & 0x400) != 0) throw new IOException("Reparse point refused in source path.");
+                if (((info.FileAttributes & 0x10) != 0) != directory) throw new IOException("Source component has an unexpected file type.");
+                if (!directory && info.NumberOfLinks != 1) throw new IOException("Source hardlink refused; expected a single-link ordinary file.");
+                SafeFileHandle result = handle;
+                handle = null;
+                return result;
+            }
+            finally {
+                if (handle != null) handle.Dispose();
+                if (namePointer != IntPtr.Zero) Marshal.FreeHGlobal(namePointer);
+                if (buffer != IntPtr.Zero) Marshal.FreeHGlobal(buffer);
+                if (reference) parent.DangerousRelease();
+            }
+        }
+
+        private static IOException NativeError(string operation, int error) {
+            return new IOException(operation + " failed (Win32 " + error + ").", new Win32Exception(error));
+        }
+        [StructLayout(LayoutKind.Sequential)] private struct UnicodeString { public ushort Length, MaximumLength; public IntPtr Buffer; }
+        [StructLayout(LayoutKind.Sequential)] private struct ObjectAttributes { public int Length; public IntPtr RootDirectory, ObjectName; public uint Attributes; public IntPtr SecurityDescriptor, SecurityQualityOfService; }
+        [StructLayout(LayoutKind.Sequential)] private struct IoStatusBlock { public IntPtr Status; public UIntPtr Information; }
+        [StructLayout(LayoutKind.Sequential)] private struct ByHandleFileInformation {
+            public uint FileAttributes;
+            public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime, LastAccessTime, LastWriteTime;
+            public uint VolumeSerialNumber, FileSizeHigh, FileSizeLow, NumberOfLinks, FileIndexHigh, FileIndexLow;
+        }
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true, SetLastError = true)]
+        private static extern uint QueryDosDeviceW(string device, StringBuilder target, int length);
+        [DllImport("ntdll.dll", ExactSpelling = true)]
+        private static extern int NtCreateFile(out SafeFileHandle file, uint access, ref ObjectAttributes attributes, out IoStatusBlock io,
+            IntPtr allocation, uint fileAttributes, uint sharing, uint disposition, uint options, IntPtr ea, uint eaLength);
+        [DllImport("ntdll.dll", ExactSpelling = true)] private static extern uint RtlNtStatusToDosError(int status);
+        [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+        [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetFileInformationByHandle(SafeFileHandle file, out ByHandleFileInformation info);
+    }
+
+    public sealed class StagingSourceLease : IDisposable {
+        private readonly List<SafeFileHandle> parents;
+        public FileStream Stream { get; private set; }
+        public long Length { get; private set; }
+        internal StagingSourceLease(FileStream stream, List<SafeFileHandle> retainedParents, long length) { Stream = stream; parents = retainedParents; Length = length; }
+        public void CopyExactlyTo(Stream destination) {
+            if (Stream == null) throw new ObjectDisposedException("StagingSourceLease");
+            long remaining = Length;
+            byte[] buffer = new byte[65536];
+            while (remaining > 0) {
+                int read = Stream.Read(buffer, 0, (int)Math.Min(buffer.Length, remaining));
+                if (read == 0) throw new IOException("Acquired source ended before its captured length.");
+                destination.Write(buffer, 0, read);
+                remaining -= read;
+            }
+            if (Stream.ReadByte() != -1) throw new IOException("Acquired source grew beyond its captured length.");
+        }
+        public void Dispose() {
+            if (Stream == null) return;
+            try { Stream.Dispose(); }
+            finally { Stream = null; for (int i = parents.Count - 1; i >= 0; i--) parents[i].Dispose(); }
+        }
+    }
+}
+'@
+}
+
+function New-WinSightSourceContext([Parameter(Mandatory)][string]$SourceRoot) {
+    Initialize-WinSightSourceAccess
+    return [WinSightHarness.StagingSourceContext]::new($SourceRoot)
+}
+
+# Copies acquired bytes only; the caller owns/protects the destination root. A shared context pins
+# the source namespace throughout a complete stage, while each file lease pins its subdirectories.
 function Copy-ListedFile {
     param(
         [Parameter(Mandatory)][string]$SourceRoot,
         [Parameter(Mandatory)][string]$Relative,
         [Parameter(Mandatory)][string]$DestinationRoot,
-        [int64]$MaximumBytes = 2GB
+        [int64]$MaximumBytes = 2GB,
+        $SourceContext
     )
-    if ($Relative -match '(^|[\\/])\.\.([\\/]|$)' -or [IO.Path]::IsPathRooted($Relative)) { throw "Invalid relative path: $Relative" }
-    $source = Join-Path $SourceRoot $Relative
-    Assert-NoReparseBetween -Root $SourceRoot -Path $source
-    $item = Get-Item -LiteralPath $source -Force -ErrorAction Stop
-    if ($item.PSIsContainer) { throw "Expected a file: $source" }
-    if ($item.Length -gt $MaximumBytes) { throw "Too large ($($item.Length) bytes): $source" }
+    Initialize-WinSightSourceAccess
+    $Relative = [WinSightHarness.StagingSourceContext]::NormalizeRelative($Relative)
+    $ownedContext = $null; $lease = $null
+    try {
+    if ($null -eq $SourceContext) { $ownedContext = New-WinSightSourceContext -SourceRoot $SourceRoot; $SourceContext = $ownedContext }
+    if ($SourceContext -isnot [WinSightHarness.StagingSourceContext] -or
+        $SourceContext.Root -ine [WinSightHarness.StagingSourceContext]::NormalizeRoot($SourceRoot)) { throw 'Source context does not match its declared root.' }
+    $lease = $SourceContext.OpenFile($Relative, $MaximumBytes)
     $destination = Join-Path $DestinationRoot $Relative
     $directory = Split-Path -Parent $destination
     $relativeDirectory = Split-Path -Parent $Relative
@@ -207,12 +414,10 @@ function Copy-ListedFile {
     }
     Assert-NoReparseBetween -Root $DestinationRoot -Path $directory
     if (Test-Path -LiteralPath $destination) { throw "Already staged: $destination" }
-    $reader = [IO.File]::Open($source, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-    try {
-        $writer = [IO.File]::Open($destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-        try { $reader.CopyTo($writer) } finally { $writer.Dispose() }
+    $writer = [IO.File]::Open($destination, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $lease.CopyExactlyTo($writer); $writer.Flush($true) } finally { $writer.Dispose() }
     }
-    finally { $reader.Dispose() }
+    finally { try { if ($lease) { $lease.Dispose() } } finally { if ($ownedContext) { $ownedContext.Dispose() } } }
 }
 
 # The git blob id of a file's bytes: what `git rev-parse <commit>:<path>` prints for the same content,
@@ -860,4 +1065,4 @@ Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPa
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
     Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine,
     Invoke-WinSightVmRetry, Write-WinSightDriverHeartbeat, Read-WinSightDriverHeartbeat,
-    Test-WinSightCompletion, Get-WinSightQualificationStatus, Get-WinSightQualificationExitCode, Get-WinSightTextDigest, Write-WinSightAtomicText, Read-WinSightBoundedText, Assert-WinSightJsonMembers, Read-WinSightQualificationResult, Initialize-WinSightCampaignOwnership, Enter-WinSightCampaign, Set-WinSightCampaignStage, Get-WinSightCampaignContext, Close-WinSightCampaign, Write-WinSightQualificationSeal, Write-WinSightDiagnostic, Confirm-WinSightQualificationSeal, Write-WinSightImmutableText
+    Test-WinSightCompletion, Get-WinSightQualificationStatus, Get-WinSightQualificationExitCode, Get-WinSightTextDigest, Write-WinSightAtomicText, Read-WinSightBoundedText, Assert-WinSightJsonMembers, Read-WinSightQualificationResult, Initialize-WinSightCampaignOwnership, Enter-WinSightCampaign, Set-WinSightCampaignStage, Get-WinSightCampaignContext, Close-WinSightCampaign, Write-WinSightQualificationSeal, Write-WinSightDiagnostic, Confirm-WinSightQualificationSeal, Write-WinSightImmutableText, New-WinSightSourceContext

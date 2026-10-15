@@ -98,8 +98,12 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests
             if (-not $method) {throw 'ASSERT: bounded staging walker missing'}
             . ([scriptblock]::Create($method.Extent.Text))
             try {
-                if ($kind -ceq 'entry') {foreach ($n in 1..2002) {[void][IO.Directory]::CreateDirectory([IO.Path]::Combine($from,('ignored-'+$n)))} }
-                else {$path=[IO.Path]::Combine($from,'source','scripts');foreach ($n in 1..18) {$path=[IO.Path]::Combine($path,'d')};[void][IO.Directory]::CreateDirectory($path)}
+                # Manifest-driven staging replaces enumeration: retain the explicit resource-bound
+                # assertion on the inventory actually consumed, rather than unlisted directories.
+                $inventory=[ordered]@{artifacts=[ordered]@{};source=[ordered]@{}}
+                if ($kind -ceq 'entry') {foreach ($n in 1..400) {$inventory.artifacts['winsight-v1.0.'+$n+'-win-x64.zip']=('a'*64)} }
+                else {$inventory.artifacts['winsight-v1.0.0-win-x64.zip']=('a'*64);$inventory.source['scripts\'+('d\'*16)+'probe.ps1']=('a'*64)}
+                [IO.File]::WriteAllText([IO.Path]::Combine($from,'candidate.json'),($inventory|ConvertTo-Json -Depth 5),[Text.UTF8Encoding]::new($false))
                 $caught=$null;try {Get-BoundedStagingFiles -SourceRoot $from|Out-Null} catch {$caught=$_}
                 if (-not $caught -or -not $caught.Exception.Message.Contains($kind+' limit')) {throw 'ASSERT: staging traversal did not stop at its explicit resource bound'}
             }

@@ -160,68 +160,97 @@ function Get-Arguments($Request) {
     return , $arguments
 }
 
-# Copies requests\candidates\<name> into candidates\<id>: the three artifacts, their .sha256 files,
-# candidate.json, the published installer the upgrade gate starts from, and the repository scripts the
-# gates run - by pattern, one file at a time, never a directory copy.
-function Get-BoundedStagingFiles([string]$SourceRoot) {
-    $rootFull = [IO.Path]::GetFullPath($SourceRoot).TrimEnd('\')
-    $files = New-Object Collections.Generic.List[string]
-    $pending = New-Object Collections.Stack
-    $pending.Push([pscustomobject]@{path=$rootFull;depth=0})
-    $examined = 0
-    while ($pending.Count -gt 0) {
-        $directory = $pending.Pop()
-        $iterator = [IO.Directory]::EnumerateFileSystemEntries($directory.path).GetEnumerator()
-        try {
-            while ($iterator.MoveNext()) {
-                if (++$examined -gt 2000) { throw 'Candidate staging entry limit reached; no further entries examined.' }
-                $entry = $iterator.Current; $relative = $entry.Substring($rootFull.Length+1)
-                $attributes = [IO.File]::GetAttributes($entry)
-                if ($attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Candidate staging reparse point refused.' }
-                if ($attributes -band [IO.FileAttributes]::Directory) {
-                    if ($directory.depth -ge 16) { throw 'Candidate staging depth limit reached.' }
-                    if ($relative -in 'previous','source','source\scripts' -or $relative.StartsWith('previous\',[StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith('source\scripts\',[StringComparison]::OrdinalIgnoreCase)) {
-                        $pending.Push([pscustomobject]@{path=$entry;depth=$directory.depth+1})
-                    }
-                }
-                elseif ($directory.depth -gt 0) {
-                    if ($relative.StartsWith('previous\',[StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith('source\scripts\',[StringComparison]::OrdinalIgnoreCase)) {$files.Add($relative)}
-                }
-                elseif ([IO.Path]::GetFileName($entry) -match '^winsight-v[0-9][0-9A-Za-z.+-]*-win-(x64|arm64)(-setup\.exe|\.zip|\.spdx\.json)(\.sha256)?$' -or [IO.Path]::GetFileName($entry) -ceq 'candidate.json') {$files.Add($relative)}
-                if ($files.Count -gt 400) { throw 'Candidate staging file limit reached; no further entries examined.' }
+# Capture the candidate once, then use its inventory rather than enumerate mutable source paths.
+# Sidecar .sha256 and unlisted files are unnecessary: each listed destination is hash-verified.
+function Get-BoundedStagingFiles([string]$SourceRoot, $SourceContext) {
+    $ownedContext = $null; $lease = $null; $memory = $null
+    try {
+        if ($null -eq $SourceContext) { $ownedContext = New-WinSightSourceContext -SourceRoot $SourceRoot; $SourceContext = $ownedContext }
+        $lease = $SourceContext.OpenFile('candidate.json', 1MB)
+        if ($lease.Length -eq 0) { throw 'Empty candidate.json.' }
+        $memory = [IO.MemoryStream]::new()
+        $lease.CopyExactlyTo($memory)
+        [byte[]]$bytes = $memory.ToArray()
+    }
+    finally { if ($memory) { $memory.Dispose() }; if ($lease) { $lease.Dispose() }; if ($ownedContext) { $ownedContext.Dispose() } }
+    $raw = [Text.UTF8Encoding]::new($false, $true).GetString($bytes)
+    if ($raw.Length -gt 0 -and $raw[0] -eq [char]0xFEFF) { $raw = $raw.Substring(1) }
+    Assert-WinSightJsonMembers -Raw $raw
+    $candidate = $raw | ConvertFrom-Json
+    if ($candidate -isnot [Management.Automation.PSCustomObject] -or
+        -not $candidate.PSObject.Properties['artifacts'] -or $candidate.artifacts -isnot [Management.Automation.PSCustomObject] -or
+        -not $candidate.PSObject.Properties['source'] -or $candidate.source -isnot [Management.Automation.PSCustomObject]) { throw 'Invalid candidate inventory objects.' }
+    $files = New-Object Collections.Generic.List[object]
+    $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    [void]$names.Add('candidate.json')
+    $entries = @($candidate.artifacts.PSObject.Properties | ForEach-Object { [pscustomobject]@{kind='artifact';name=$_.Name;hash=$_.Value} })
+    $entries += @($candidate.source.PSObject.Properties | ForEach-Object { [pscustomobject]@{kind='source';name=$_.Name;hash=$_.Value} })
+    if ($candidate.PSObject.Properties['previous']) {
+        if ($candidate.previous -isnot [Management.Automation.PSCustomObject] -or
+            -not $candidate.previous.PSObject.Properties['file'] -or -not $candidate.previous.PSObject.Properties['sha256']) { throw 'Invalid previous installer inventory.' }
+        $entries += [pscustomobject]@{kind='previous';name=$candidate.previous.file;hash=$candidate.previous.sha256}
+    }
+    if ($entries.Count + 1 -gt 400) { throw 'Candidate staging entry limit reached; maximum400 files including metadata.' }
+    foreach ($entry in $entries) {
+        if ($entry.name -isnot [string] -or $entry.hash -isnot [string] -or $entry.hash -notmatch '^[0-9A-Fa-f]{64}$') { throw 'Invalid candidate filename or SHA256.' }
+        $relative = switch ($entry.kind) {
+            'artifact' {
+                if ($entry.name -notmatch '^winsight-v[0-9][0-9A-Za-z.+-]*-win-(x64|arm64)(-setup\.exe|\.zip|\.spdx\.json)$') { throw 'Invalid candidate artifact filename.' }
+                $entry.name
+            }
+            'source' {
+                if ($entry.name -notmatch '^scripts[\\/]') { throw 'Candidate source must be under scripts.' }
+                'source\' + $entry.name
+            }
+            'previous' {
+                if ($entry.name -match '[\\/]') { throw 'Invalid previous installer leaf.' }
+                'previous\' + $entry.name
             }
         }
-        finally {$iterator.Dispose()}
+        if (($relative -split '[\\/]').Count -gt 16) { throw 'Candidate staging depth limit reached.' }
+        $relative = [WinSightHarness.StagingSourceContext]::NormalizeRelative($relative)
+        if (-not $names.Add($relative)) { throw 'Duplicate canonical candidate path collision.' }
+        $files.Add([pscustomobject]@{Relative=$relative;Sha256=$entry.hash.ToUpperInvariant()})
     }
-    return $files.ToArray()
+    if ($files.Count -eq 0) { throw 'Candidate inventory contains no files.' }
+    return [pscustomobject]@{Bytes=$bytes;Candidate=$candidate;Files=$files.ToArray()}
 }
 
-function Invoke-Stage($Request) {
+function Invoke-Stage($Request, [ValidateRange(1,4294967296)][int64]$MaximumTotalBytes = 4GB) {
     $stageLease = Get-WinSightCampaignContext -Root $VmRoot -RequireIdle -Hold
+    $sourceContext = $null
     try {
     $name = [string](Get-Field $Request 'candidate')
     if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$') { throw 'invalid candidate' }
     $candidatesRoot = Join-Path $Requests 'candidates'
     $source = Join-Path $candidatesRoot $name
-    Assert-NoReparseBetween -Root $Requests -Path $source
+    $sourceContext = New-WinSightSourceContext -SourceRoot $source
+    $inventory = Get-BoundedStagingFiles -SourceRoot $source -SourceContext $sourceContext
+    if ($inventory.Bytes.LongLength -gt $MaximumTotalBytes) { throw 'Candidate staging byte limit reached before publication.' }
     $id = "$stamp-$name"
     $destination = Join-Path $Root "candidates\$id"
     New-ProtectedDirectory -Path $destination
-    $sourceFull = [IO.Path]::GetFullPath($source).TrimEnd('\')
-    $files = @(Get-BoundedStagingFiles -SourceRoot $sourceFull)
-    if ('candidate.json' -notin $files) { throw 'no candidate.json' }
-    if ($files.Count -gt 400) { throw 'too many candidate files' }
-    foreach ($file in $files) { Copy-ListedFile -SourceRoot $sourceFull -Relative $file -DestinationRoot $destination }
+    $metadataPath = Join-Path $destination 'candidate.json'
+    $writer = [IO.File]::Open($metadataPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $writer.Write($inventory.Bytes, 0, $inventory.Bytes.Length); $writer.Flush($true) } finally { $writer.Dispose() }
+    [int64]$copiedBytes = $inventory.Bytes.LongLength
+    foreach ($file in $inventory.Files) {
+        $remaining = [Math]::Min([int64]2GB, $MaximumTotalBytes - $copiedBytes)
+        Copy-ListedFile -SourceRoot $source -Relative $file.Relative -DestinationRoot $destination -MaximumBytes $remaining -SourceContext $sourceContext
+        $staged = Join-Path $destination $file.Relative
+        if ((Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -cne $file.Sha256) { throw 'Candidate staged file hash mismatch; previous pointer preserved.' }
+        $copiedBytes += (Get-Item -LiteralPath $staged -Force -ErrorAction Stop).Length
+    }
     Assert-ProtectedPath -Path $destination -Recurse
     $manifest = @(Get-FileManifest $destination)
-    $candidate = Get-Content -LiteralPath (Join-Path $destination 'candidate.json') -Raw | ConvertFrom-Json
-    @("# candidate $id staged $([DateTime]::UtcNow.ToString('o')) from $sourceFull", "# claimed commit: $($candidate.commit)") + $manifest |
+    $candidate = $inventory.Candidate
+    @("# candidate $id staged $([DateTime]::UtcNow.ToString('o')) from $($sourceContext.Root)", "# claimed commit: $($candidate.commit)") + $manifest |
         Set-Content -LiteralPath (Join-Path $sealed "candidate-$id.txt")
     $script:candidateManifest = $manifest
     $status.candidate = $id
     return $id
     }
-    finally { $stageLease.Handle.Dispose() }
+    finally { try { if ($sourceContext) { $sourceContext.Dispose() } } finally { $stageLease.Handle.Dispose() } }
 }
 
 function Assert-Candidate {
