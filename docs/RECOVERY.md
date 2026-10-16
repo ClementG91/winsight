@@ -448,13 +448,58 @@ held that mutex now assert/hold the sidecar, retaining their failure, timeout an
 |---|---|---|
 | ActionJournal / RuleStore Global mutexes | Yes; removed by N1 | Persistent per-user file coordination replaces them. |
 | PersistenceBaseline Local mutex | No | Same-session predictable name; no intersession serialization. |
-| VirusTotal quota Local mutex | No | Constructor outside catch may propagate a restrictive-name failure. |
+| VirusTotal quota Local mutex | Pre-existing; removed by quota correction | Persistent adjacent file gate serializes admissions; see the migration limits below. |
 | CanaryManifest Local mutex | No | Same-session predictable name; no intersession serialization. |
 | CanarySession Local mutex plus GUID | No | Cross-session ownership observation may misclassify another session's live canaries. |
 | Dashboard Local mutex and activation event plus SID | No | Inaccessible-object fallback exists; a permissive pre-created mutex may imply a false secondary instance. |
 | Firewall pipe | No | Explicit DACL, network refusal, first-instance reservation and client SYSTEM-owner verification; prior squatting may deny startup but cannot authenticate a false SYSTEM peer. |
 
-These unchanged observations are residual risks from source review, not reproduced vulnerabilities
+The remaining unchanged observations are residual risks from source review, not reproduced vulnerabilities
 or a claim of qualification. They require separate scoped work; changing all of them inside N1 would
 broaden authority and lifecycle behavior beyond the two PR-introduced response locks. A real
 same-user second-session run and cross-integrity qualification remain NOT_RUN until measured.
+
+### VirusTotal quota accounting and migration
+
+The quota guard uses the persistent `<quota-path>.lock` sidecar across load, validation, rolling-window
+normalization, admission and atomic publication. Only a busy gate is retried, within one two-second
+acquisition wait budget. Synchronous native filesystem calls are not preempted by that budget. The
+gate is closed after the transaction and its file remains on disk, including after a crashed holder.
+No HTTP request runs while it is held. Construction normalizes the path without creating files;
+admission may create ordinary missing parents and the sidecar. Primary and sidecar leaf names must
+fit the filesystem component limit before either is created.
+
+Only a native missing-state result permits initialization. An unreadable, non-local, directory,
+malformed, incomplete or unsupported state refuses admission and preserves existing state bytes.
+The former unreadable-state reset was reproduced in an owned temporary fixture with actual Windows
+access controls: read refusal was not a missing file, replacement remained possible, and counters
+at three were overwritten with one. The regression asserts those native preconditions before
+asserting refusal. It does not use an API key or send a request to VirusTotal.
+
+Recognized legacy JSON has exactly `recentRequests`, `utcDay`, `dayCount`, `utcMonth` and `monthCount`.
+All fields are required, with strict types and spelling; duplicates (including escaped duplicates),
+unknown fields, negative counters and invalid or mismatched calendar periods are refused. At most
+64 recent timestamps are supported, so custom minute limits must be 1–64; daily and monthly limits
+must be positive. Defaults remain 4, 500 and 15,500. The reader checks the acquired DATA length and
+reads at most 65,537 bytes into a fixed buffer before parsing; the accepted physical limit is 65,536
+bytes, including an optional single initial UTF-8 BOM. This bounds parser input, not total heap use
+or operating-system prefetch. Existing valid rolling-minute and UTC day/month rollover behavior
+is retained, including dropping future timestamps during normalization.
+
+The original boolean API and four-field snapshot contract remain available. The additional status
+overload distinguishes `Acquired`, `QuotaExhausted`, `LockTimeout`, `UnsafePath`, `StateUnavailable`,
+`StateInvalidOrUnsupported`, `StateOverBudget` and `WriteFailed` (`Unknown` is the uninitialized enum
+value). On infrastructure refusal, snapshot counts at the configured limits are conservative
+placeholders: they are not measured consumption. Only acquired or exhausted states establish usage.
+A file appearing after confirmed absence is preserved by no-replace initial publication. Failed
+publication is never retried as a whole admission; the next attempt reloads accounting.
+
+Stop every older WinSight quota writer in all relevant Windows sessions before upgrade or downgrade.
+Older named-mutex writers ignore the file protocol, and the new gate does not make mixed versions
+safe. The default location relies on the Windows user's private profile directory. Arbitrary custom
+parents are not made private by this guard; it does not change their ACLs. All cooperating processes
+must use the same canonical path. Physical aliases and use of the same API key from other users or
+machines are outside this local coordination contract. Recognized existing-state replacement is
+protected by that cooperating-writer gate, not a general compare-and-swap against older or malicious
+writers. Two owned local-process writers and killed-holder recovery are local regression oracles;
+they do not replace real cross-session and cross-integrity VM qualification.

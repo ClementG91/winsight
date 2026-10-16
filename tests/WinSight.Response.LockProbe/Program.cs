@@ -1,5 +1,6 @@
 using System.Text.Json;
 
+using WinSight.Core;
 using WinSight.Response;
 
 namespace WinSight.Response.LockProbe;
@@ -14,6 +15,23 @@ public static class Program
             using var gate = new FileStream(args[1], FileMode.OpenOrCreate, FileAccess.Read, FileShare.None);
             Console.WriteLine("ready");
             _ = Console.ReadLine();
+            return 0;
+        }
+        if (args.Length == 2 && args[0] == "quota")
+        {
+            var quota = new VirusTotalQuotaLimiter(args[1],
+                () => new DateTimeOffset(2026, 7, 14, 12, 0, 0, TimeSpan.Zero), new(64, 64, 64));
+            Console.WriteLine("ready");
+            _ = Console.ReadLine();
+            for (var i = 0; i < 20; i++)
+            {
+                if (!quota.TryAcquire(out _))
+                {
+                    Console.Error.WriteLine("A serialized quota admission was refused.");
+                    return 5;
+                }
+            }
+            Console.WriteLine("20");
             return 0;
         }
         if (args.Length != 4 || args[0] != "write")

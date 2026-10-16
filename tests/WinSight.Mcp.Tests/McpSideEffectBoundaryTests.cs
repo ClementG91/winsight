@@ -34,8 +34,8 @@ public sealed class McpSideEffectBoundaryTests
             "starts netstat.exe (read-only) when the native tables fail, and kills only that child on timeout",
         ["WinSight.Core.VirusTotalClient.Lookup"] =
             "HTTPS GET of a hash to VirusTotal; statically reachable, never run from MCP (allowNetworkLookups: false)",
-        ["WinSight.Core.VirusTotalQuotaLimiter.Save"] =
-            "WinSight's own VirusTotal quota file; same gate as the lookup it meters",
+        ["WinSight.Core.VirusTotalQuotaLimiter.TryAcquireAdmission"] =
+            "WinSight's private quota sidecar and accounting publication; same disabled runtime lookup gate as the request it meters",
         ["WinSight.Firewall.FirewallServiceClient.SendAsync"] =
             "connects to the local firewall service's pipe and writes one request; MCP holds only the posture reader, whose requests are status and list commands, and the service refuses any mutation to an unelevated caller",
     };
@@ -252,6 +252,9 @@ public sealed class McpSideEffectBoundaryTests
             && violation.Contains("VirusTotalClient.Lookup", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
             && violation.Contains("VirusTotalQuotaLimiter.Save", StringComparison.Ordinal));
+        Assert.Contains(unexempted, violation => violation.StartsWith("write gateway:", StringComparison.Ordinal)
+            && violation.Contains("AutomaticFileAccess.TryAcquireExclusiveLockFile", StringComparison.Ordinal)
+            && violation.Contains("VirusTotalQuotaLimiter.TryAcquireAdmission", StringComparison.Ordinal));
         Assert.Contains(unexempted, violation => violation.StartsWith("framework write: System.IO.Pipes.NamedPipeClientStream", StringComparison.Ordinal)
             && violation.Contains("FirewallServiceClient", StringComparison.Ordinal));
     }
