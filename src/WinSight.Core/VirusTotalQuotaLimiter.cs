@@ -103,7 +103,8 @@ public sealed class VirusTotalQuotaLimiter
         // Observe the accounting time after the state was acquired, rather than before disk work.
         DateTimeOffset now;
         try { now = _utcNow().ToUniversalTime(); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
+                                     or InvalidDataException or JsonException)
         {
             // Preserve the original conservative contract of the injectable clock as well.
             status = VirusTotalQuotaStatus.StateUnavailable;
