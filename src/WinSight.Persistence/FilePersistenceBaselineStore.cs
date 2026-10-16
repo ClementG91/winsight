@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 
 using WinSight.Core;
@@ -26,7 +26,7 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
 
     public FilePersistenceBaselineStore(string? path = null)
     {
-        _path = path ?? DefaultPath();
+        _path = Path.GetFullPath(path ?? DefaultPath());
     }
 
     /// <summary>The default local-only location: <c>%LocalAppData%\WinSight\guardian-baseline.tsv</c>.</summary>
@@ -211,52 +211,46 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     private static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
     private static string Decode(string value) => Encoding.UTF8.GetString(Convert.FromBase64String(value));
 
-    /// <summary>Stable per-path mutex name, exposed internally for the real concurrency test.</summary>
-    internal static string LockNameFor(string path)
-    {
-        var canonical = Path.GetFullPath(path).ToUpperInvariant();
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32];
-        return $@"Local\WinSight.PersistenceBaseline.{key}";
-    }
-
+    /// <summary>Short transaction shared by cooperating writers in all Windows sessions.</summary>
     private sealed class BaselineLock : IDisposable
     {
-        private readonly Mutex _mutex;
-        private readonly bool _held;
+        private readonly AutomaticFileAccess.LocalFileLock _file;
 
-        private BaselineLock(Mutex mutex, bool held)
-        {
-            _mutex = mutex;
-            _held = held;
-        }
+        private BaselineLock(AutomaticFileAccess.LocalFileLock file) => _file = file;
 
         public static BaselineLock Acquire(string path)
         {
-            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
-            bool held;
+            var leaf = Path.GetFileName(path);
+            if (leaf.Length == 0 || leaf.Length + ".lock".Length > 255)
+            {
+                throw new IOException("The Guardian baseline lock path is not supported.");
+            }
+            var watch = Stopwatch.StartNew();
             try
             {
-                held = mutex.WaitOne(LockWait);
+                while (watch.Elapsed < LockWait)
+                {
+                    var file = AutomaticFileAccess.TryAcquireExclusiveLockFile(path + ".lock", out var status);
+                    if (file is not null) { return new BaselineLock(file); }
+                    if (status != LocalFileLockStatus.Busy)
+                    {
+                        throw new IOException($"The Guardian baseline writer gate is unavailable ({status}).");
+                    }
+                    var remaining = LockWait - watch.Elapsed;
+                    if (remaining > TimeSpan.Zero)
+                    {
+                        Thread.Sleep(remaining < TimeSpan.FromMilliseconds(20)
+                            ? remaining : TimeSpan.FromMilliseconds(20));
+                    }
+                }
             }
-            catch (AbandonedMutexException)
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
-                held = true;
+                throw new IOException("The Guardian baseline writer gate could not be accessed safely.", ex);
             }
-            if (!held)
-            {
-                mutex.Dispose();
-                throw new IOException("Timed out waiting for another Guardian baseline writer.");
-            }
-            return new BaselineLock(mutex, held: true);
+            throw new IOException("Timed out waiting for another Guardian baseline writer.");
         }
 
-        public void Dispose()
-        {
-            if (_held)
-            {
-                _mutex.ReleaseMutex();
-            }
-            _mutex.Dispose();
-        }
+        public void Dispose() => _file.Dispose();
     }
 }

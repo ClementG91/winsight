@@ -40,7 +40,7 @@ public sealed class GuardianCoverageGainDurabilityTests
     [Fact]
     public async Task ALiveOverflowGainRetainsTheDiskBaselineUntilEverySubscriberAcceptsIt()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"wsg-gain-live-{Guid.NewGuid():N}.tsv");
+        var path = Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
         try
         {
             var hidden = HiddenEntries();
@@ -86,14 +86,14 @@ public sealed class GuardianCoverageGainDurabilityTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
     [Fact]
     public void AnUndeliveredOverflowGainSurvivesTheRealFileAndShutdownSave()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"wsg-gain-restart-{Guid.NewGuid():N}.tsv");
+        var path = Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
         try
         {
             var hidden = HiddenEntries();
@@ -139,7 +139,7 @@ public sealed class GuardianCoverageGainDurabilityTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 

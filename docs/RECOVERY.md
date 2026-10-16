@@ -447,7 +447,7 @@ held that mutex now assert/hold the sidecar, retaining their failure, timeout an
 | Object | Introduced by this PR? | Remaining observation |
 |---|---|---|
 | ActionJournal / RuleStore Global mutexes | Yes; removed by N1 | Persistent per-user file coordination replaces them. |
-| PersistenceBaseline Local mutex | No | Same-session predictable name; no intersession serialization. |
+| PersistenceBaseline Local mutex | Pre-existing; removed by baseline correction | Persistent adjacent file gate serializes complete snapshot publication; see migration limits below. |
 | VirusTotal quota Local mutex | Pre-existing; removed by quota correction | Persistent adjacent file gate serializes admissions; see the migration limits below. |
 | CanaryManifest Local mutex | No | Same-session predictable name; no intersession serialization. |
 | CanarySession Local mutex plus GUID | No | Cross-session ownership observation may misclassify another session's live canaries. |
@@ -503,3 +503,33 @@ machines are outside this local coordination contract. Recognized existing-state
 protected by that cooperating-writer gate, not a general compare-and-swap against older or malicious
 writers. Two owned local-process writers and killed-holder recovery are local regression oracles;
 they do not replace real cross-session and cross-integrity VM qualification.
+
+### Guardian baseline coordination and migration
+
+Guardian writes a complete baseline and its associated coverage in one atomic publication while
+holding the persistent `<baseline-path>.lock` file gate. This coordinates cooperating writers using
+the same canonical local path across Windows sessions. It preserves the complete-snapshot contract:
+the last successful publication replaces the previous snapshot; independent snapshots are never
+unioned. Serialization does not reconcile two monitors' independently computed delivery state.
+
+Only sharing contention is retried, within one 30-second acquisition budget. Synchronous native
+filesystem operations are not preempted by that budget. Encoding, coverage and publication run once
+under the acquired gate; an uncertain publication is never retried inside the store. Handles are
+released on success and failure; the sidecar remains on disk. Unsupported, unavailable or timed-out
+coordination throws `IOException`, allowing the monitor to report persistence failure. Existing
+input and encoded-format limits still refuse with `InvalidDataException`.
+
+Construction normalizes the destination without creating files. Reads remain nonmutating and do not
+create parents or sidecars. A writer may create ordinary missing parents and the sidecar, but refuses
+before mutation when the primary leaf plus `.lock` cannot fit a filesystem component. The existing
+native file layer rejects unsupported paths, reparses and network storage. This change does not
+alter the baseline parser or turn unreadable storage into confirmed absence.
+
+Stop older Guardian writers in every relevant Windows session before upgrade or downgrade: their
+named mutex does not participate in this file protocol. All cooperating writers must use the same
+canonical logical path. The default location relies on the private Windows user profile; arbitrary
+custom parents are not made private or given new ACLs. Physical aliases, hostile same-user writers,
+administrators and independent monitor state reconciliation are outside this coordination contract.
+Owned local regressions cover a held sidecar, an incompatible former kernel name, failure release
+and complete snapshot/coverage pairing. Real cross-session and cross-integrity VM qualification
+remains separate and must be measured on the final revision.
