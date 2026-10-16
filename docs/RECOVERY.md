@@ -451,7 +451,7 @@ held that mutex now assert/hold the sidecar, retaining their failure, timeout an
 | VirusTotal quota Local mutex | Pre-existing; removed by quota correction | Persistent adjacent file gate serializes admissions; see the migration limits below. |
 | CanaryManifest Local mutex | No | Same-session predictable name; no intersession serialization. |
 | CanarySession Local mutex plus GUID | No | Cross-session ownership observation may misclassify another session's live canaries. |
-| Dashboard Local mutex and activation event plus SID | No | Inaccessible-object fallback exists; a permissive pre-created mutex may imply a false secondary instance. |
+| Dashboard Local mutex and activation event plus SID | Pre-existing; trust correction added | Exact-handle current-user ownership and private DACL are checked before secondary decision, registration or signaling; see compatibility limits below. |
 | Firewall pipe | No | Explicit DACL, network refusal, first-instance reservation and client SYSTEM-owner verification; prior squatting may deny startup but cannot authenticate a false SYSTEM peer. |
 
 The remaining unchanged observations are residual risks from source review, not reproduced vulnerabilities
@@ -533,3 +533,40 @@ administrators and independent monitor state reconciliation are outside this coo
 Owned local regressions cover a held sidecar, an incompatible former kernel name, failure release
 and complete snapshot/coverage pairing. Real cross-session and cross-integrity VM qualification
 remains separate and must be measured on the final revision.
+
+### Dashboard instance and activation trust
+
+The interactive Dashboard keeps its existing per-user, per-Windows-session `Local` names. New
+mutexes and activation events have an explicit current token-user owner and a protected DACL granting
+full control only to that user and LocalSystem. Every returned handle, including an already-existing
+object, is independently checked before it can suppress a launch, register activation or receive a
+signal. A supplied creation descriptor does not establish an existing object's security.
+
+The security query reads only owner and DACL from the exact `SafeWaitHandle`, with one fixed 4096-byte
+buffer and no growth, retries or SACL privilege request. A failed query, oversized or malformed
+descriptor, wrong owner, missing/null/unprotected DACL, unsupported ACE or unexpected principal/right
+is untrusted. The supported DACL consists of ordinary, explicit, full-control allow ACEs for the user
+and LocalSystem (one ACE when the user is LocalSystem). No other object's owner or ACL is repaired.
+
+An untrusted or inaccessible mutex permits an independent primary without the single-instance
+guarantee. A trusted primary retains its mutex even if activation is unavailable or untrusted.
+A secondary retains the verified mutex through its activation attempt, opens only an existing event
+with read-permission and modify rights, and signals only a separately verified event. Missing or
+untrusted activation can leave a secondary unable to raise a primary that is starting or stopping;
+it never creates a replacement event. Failure to obtain a reliable current token-user SID also
+permits an independent primary; a user name is not an ownership proof.
+
+Stop and restart older Dashboard processes before relying on this guarantee. Their default owner can
+be an eligible group and their DACL can differ from the private template; strict refusal can permit
+a new independent primary while an old Dashboard remains. This deliberately favors monitoring
+availability over trusting an unknown marker. The check is point-in-time ownership/access policy,
+not authentication of a WinSight executable or window. Code running as the same SID, including at a
+different integrity level, and administrators can lie about or change such objects; that threat is
+outside this scoped guarantee. The existing callback shutdown behavior does not establish that all
+already-running callbacks have returned.
+
+Local regressions use owned random names and positively verified ordinary DACLs. The managed parser
+also receives synthetic null, malformed and unsupported descriptor bytes; no native object with a
+null DACL is created. The separate attempted native null-DACL diagnostic was rejected before any
+creation, compilation or execution and remains unestablished. These controls do not qualify actual
+foreign-account, cross-integrity or VM operation on the final revision.
