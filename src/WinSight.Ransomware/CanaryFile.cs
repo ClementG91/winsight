@@ -9,8 +9,9 @@ internal sealed record CanaryFileIdentity(ulong Volume, ulong FileIdLow, ulong F
 
 internal sealed record CanaryFileRecord(string Path, CanaryFileIdentity Identity)
 {
-    /// <summary>The planting session; a record whose session is still alive is not an orphan.</summary>
+    /// <summary>Legacy session metadata; only OwnerProof can authorize cross-session cleanup.</summary>
     public string? Owner { get; init; }
+    public CanaryOwnerProof? OwnerProof { get; init; }
 }
 
 /// <summary>
@@ -20,6 +21,7 @@ internal sealed record CanaryFileRecord(string Path, CanaryFileIdentity Identity
 /// </summary>
 internal static class CanaryFile
 {
+    internal enum Removal { Preserved, Removed, Absent }
     internal static CanaryFileIdentity? Identity(AutomaticFileAccess.LocalPathLease lease) =>
         lease.TryGetExtendedIdentity(out var volume, out var low, out var high, out var created)
             ? new CanaryFileIdentity(volume, low, high, created)
@@ -39,19 +41,23 @@ internal static class CanaryFile
             ((long)info.CreationTimeHigh << 32) | info.CreationTimeLow);
     }
 
-    internal static bool TryRemove(CanaryFileRecord record)
+    internal static bool TryRemove(CanaryFileRecord record) => TryRemoveOrConfirmAbsent(record) == Removal.Removed;
+
+    // Callers must prove owner lifetime before native absence can retire a manifest reference.
+    internal static Removal TryRemoveOrConfirmAbsent(CanaryFileRecord record)
     {
         try
         {
-            using var lease = AutomaticFileAccess.TryAcquireForDelete(record.Path);
+            using var lease = AutomaticFileAccess.TryAcquireForDelete(record.Path, out var missing);
+            if (lease is null && missing) { return Removal.Absent; }
             if (lease is null || Identity(lease) != record.Identity)
             {
-                return false;
+                return Removal.Preserved;
             }
             var expected = CanaryDocument.For(System.IO.Path.GetExtension(record.Path));
             if (lease.Length != expected.Length)
             {
-                return false;
+                return Removal.Preserved;
             }
             var actual = new byte[expected.Length];
             using (var stream = lease.OpenRead())
@@ -60,14 +66,14 @@ internal static class CanaryFile
             }
             if (!actual.AsSpan().SequenceEqual(expected))
             {
-                return false;
+                return Removal.Preserved;
             }
-            return lease.TryDelete();
+            return lease.TryDelete() ? Removal.Removed : Removal.Preserved;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
                                      or System.Security.SecurityException or ArgumentException)
         {
-            return false;
+            return Removal.Preserved;
         }
     }
 

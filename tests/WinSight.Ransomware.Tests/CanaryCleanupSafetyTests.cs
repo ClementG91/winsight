@@ -1,4 +1,5 @@
 using System.Text.Json;
+using WinSight.Core;
 using Xunit;
 
 namespace WinSight.Ransomware.Tests;
@@ -79,7 +80,7 @@ public sealed class CanaryCleanupSafetyTests
                 manager.Remove();
             }
             Assert.False(File.Exists(paths[0]));
-            Assert.False(File.Exists(manifest));
+            CanaryTestDirectory.AssertEmptyManifest(manifest);
         });
     }
 
@@ -88,7 +89,7 @@ public sealed class CanaryCleanupSafetyTests
     {
         WithCanaries((manager, paths, directory, manifest) =>
         {
-            var nextRun = new CanaryManager(new byte[32], manifest);
+            var nextRun = CanaryTestDirectory.TrackForManifest(new CanaryManager(new byte[32], manifest), manifest);
             using (var writer = new FileStream(paths[0], FileMode.Open, FileAccess.Write,
                        FileShare.ReadWrite | FileShare.Delete))
             {
@@ -98,7 +99,7 @@ public sealed class CanaryCleanupSafetyTests
             }
             nextRun.Remove();
             Assert.All(paths, path => Assert.False(File.Exists(path)));
-            Assert.False(File.Exists(manifest));
+            CanaryTestDirectory.AssertEmptyManifest(manifest);
         });
     }
 
@@ -143,14 +144,17 @@ public sealed class CanaryCleanupSafetyTests
     [Fact]
     public void RecordedIdentityCannotAuthoriseADifferentPath()
     {
-        WithCanaries((_, paths, directory, manifest) =>
+        WithCanaries((manager, paths, directory, manifest) =>
         {
             var bytes = File.ReadAllBytes(paths[0]);
+            var saved = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllBytes(manifest))!;
+            var original = saved["Files"]!.AsArray().Single(record => record!["Path"]!.GetValue<string>() == paths[0])!.DeepClone();
+            manager.EndSessionWithoutCleanup();
             var outside = Path.Combine(directory, "real-user-file.xlsx");
             File.Move(paths[0], outside);
-            using var handle = File.OpenHandle(outside);
-            var record = new CanaryFileRecord(outside, CanaryFile.Identity(handle)!);
-            File.WriteAllText(manifest, JsonSerializer.Serialize(new { Version = 2, Files = new[] { record } }));
+            original["Path"] = outside; // Only the path changes; exact identity and dead-owner proof remain valid.
+            saved["Files"] = new System.Text.Json.Nodes.JsonArray(original);
+            File.WriteAllText(manifest, saved.ToJsonString());
             Assert.Equal(0, CanaryManager.RemoveOrphans([directory], manifest, new byte[32]));
             Assert.Equal(bytes, File.ReadAllBytes(outside));
         });
@@ -159,16 +163,17 @@ public sealed class CanaryCleanupSafetyTests
     [Fact]
     public void RecordsForADirectoryOutsideThisSessionAreKeptUntilThatDirectoryIsCleaned()
     {
-        var root = Path.Combine(Path.GetTempPath(), $"winsight-canary-scope-{Guid.NewGuid():N}");
+        using var fixture = new CanaryTestDirectory();
+        var root = fixture.Root;
         var documents = Path.Combine(root, "Documents");
         var downloads = Path.Combine(root, "Downloads");
         Directory.CreateDirectory(documents);
         Directory.CreateDirectory(downloads);
-        var manifest = Path.Combine(root, "manifest.json");
+        var manifest = fixture.Manifest;
         try
         {
             // A session that protected both folders ended without cleanup (crash, reboot).
-            var crashed = new CanaryManager(new byte[32], manifest);
+            var crashed = fixture.Track(new CanaryManager(new byte[32], manifest));
             var plantedByCrashed = crashed.Plant([documents, downloads]);
             crashed.EndSessionWithoutCleanup();
             var leftBehind = plantedByCrashed
@@ -177,18 +182,18 @@ public sealed class CanaryCleanupSafetyTests
 
             // The next sessions manage Documents only (Downloads was unavailable at that moment).
             Assert.Equal(3, CanaryManager.RemoveOrphans([documents], manifest, new byte[32]));
-            var next = new CanaryManager(new byte[32], manifest);
+            var next = fixture.Track(new CanaryManager(new byte[32], manifest));
             next.Plant([documents]);
             next.Remove();
 
             Assert.All(leftBehind, path => Assert.True(File.Exists(path)));
             Assert.Equal(3, CanaryManager.RemoveOrphans([downloads], manifest, new byte[32]));
             Assert.All(leftBehind, path => Assert.False(File.Exists(path)));
-            Assert.False(File.Exists(manifest));
+            CanaryTestDirectory.AssertEmptyManifest(manifest);
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            fixture.WaitForWorkers();
         }
     }
 
@@ -199,37 +204,38 @@ public sealed class CanaryCleanupSafetyTests
         // RemoveOrphans + Plant on the same manifest; two dashboards can also run at once. A sweep
         // that read the manifest before the plant and wrote after it erased the new decoys' records,
         // stranding them after the next crash.
-        var root = Path.Combine(Path.GetTempPath(), $"winsight-canary-race-{Guid.NewGuid():N}");
+        using var fixture = new CanaryTestDirectory();
+        var root = fixture.Root;
         var previous = Path.Combine(root, "previous");
         var current = Path.Combine(root, "current");
         Directory.CreateDirectory(previous);
         Directory.CreateDirectory(current);
-        var manifest = Path.Combine(root, "manifest.json");
+        var manifest = fixture.Manifest;
         var seed = new byte[32];
         try
         {
             for (var iteration = 0; iteration < 60; iteration++)
             {
                 // A crashed session left decoys in "previous".
-                var crashed = new CanaryManager(seed, manifest);
+                var crashed = fixture.Track(new CanaryManager(seed, manifest));
                 crashed.Plant([previous]);
                 crashed.EndSessionWithoutCleanup();
 
-                var session = new CanaryManager(seed, manifest);
-                using var go = new ManualResetEventSlim();
-                var sweep = Task.Run(() =>
+                var session = fixture.Track(new CanaryManager(seed, manifest));
+                var go = fixture.TrackResource(new ManualResetEventSlim());
+                var sweep = fixture.Track(Task.Run(() =>
                 {
-                    go.Wait();
+                    if (!go.Wait(TimeSpan.FromSeconds(5))) { throw new TimeoutException("Race start was not released."); }
                     CanaryManager.RemoveOrphans([previous, current], manifest, seed);
-                });
-                var start = Task.Run(() =>
+                }));
+                var start = fixture.Track(Task.Run(() =>
                 {
-                    go.Wait();
+                    if (!go.Wait(TimeSpan.FromSeconds(5))) { throw new TimeoutException("Race start was not released."); }
                     CanaryManager.RemoveOrphans([current], manifest, seed);
                     session.Plant([current]);
-                });
+                }));
                 go.Set();
-                await Task.WhenAll(sweep, start);
+                await Task.WhenAll(sweep, start).WaitAsync(TimeSpan.FromSeconds(5));
                 // Whatever the order, the live session's decoys were not swept out from under it.
                 Assert.Equal(3, session.Planted.Count);
                 Assert.All(session.Planted, path => Assert.True(File.Exists(path)));
@@ -243,7 +249,7 @@ public sealed class CanaryCleanupSafetyTests
         }
         finally
         {
-            Directory.Delete(root, recursive: true);
+            fixture.WaitForWorkers();
         }
     }
 
@@ -258,7 +264,7 @@ public sealed class CanaryCleanupSafetyTests
             Assert.All(paths, path => Assert.True(File.Exists(path)));
 
             // Nor does a new session adopt them for its own cleanup.
-            var other = new CanaryManager(new byte[32], manifest);
+            var other = CanaryTestDirectory.TrackForManifest(new CanaryManager(new byte[32], manifest), manifest);
             other.Plant([directory]);
             other.Remove();
             Assert.All(paths, path => Assert.True(File.Exists(path)));
@@ -303,48 +309,15 @@ public sealed class CanaryCleanupSafetyTests
     [Fact]
     public void ManifestLockTimeoutPlantsNothingAndDoesNotClaimSessionOwnership()
     {
-        var directory = Directory.CreateTempSubdirectory("winsight-canary-lock-").FullName;
-        var manifest = Path.Combine(directory, "manifest.json");
-        using var lockHeld = new ManualResetEventSlim();
-        using var releaseLock = new ManualResetEventSlim();
-        Exception? holderFailure = null;
-        var holder = new Thread(() =>
-        {
-            try
-            {
-                using var mutex = new Mutex(false, CanaryManager.ManifestLockNameFor(manifest));
-                if (!mutex.WaitOne(TimeSpan.FromSeconds(5)))
-                {
-                    throw new TimeoutException("Test holder could not acquire the canary-manifest mutex.");
-                }
-                lockHeld.Set();
-                releaseLock.Wait(CancellationToken.None);
-                mutex.ReleaseMutex();
-            }
-            catch (Exception ex)
-            {
-                holderFailure = ex;
-                lockHeld.Set();
-            }
-        });
-        holder.Start();
-        var manager = new CanaryManager(new byte[32], manifest, TimeSpan.FromMilliseconds(100));
-        try
-        {
-            Assert.True(lockHeld.Wait(TimeSpan.FromSeconds(5)));
-            Assert.Null(holderFailure);
-
-            Assert.Throws<IOException>(() => manager.Plant([directory]));
-            Assert.Empty(Directory.GetFiles(directory));
-        }
-        finally
-        {
-            manager.EndSessionWithoutCleanup();
-            releaseLock.Set();
-            Assert.True(holder.Join(TimeSpan.FromSeconds(5)));
-            Directory.Delete(directory, recursive: true);
-        }
-        Assert.Null(holderFailure);
+        using var fixture = new CanaryTestDirectory();
+        var directory = fixture.Directory;
+        var manifest = fixture.Manifest;
+        using var held = AutomaticFileAccess.TryAcquireExclusiveLockFile(manifest + ".lock", out var status);
+        Assert.Equal(LocalFileLockStatus.Acquired, status);
+        Assert.NotNull(held);
+        var manager = fixture.Track(new CanaryManager(new byte[32], manifest, TimeSpan.FromMilliseconds(100)));
+        Assert.Throws<IOException>(() => manager.Plant([directory]));
+        Assert.Empty(System.IO.Directory.GetFiles(directory));
     }
 
     private static void Cleanup(CanaryManager manager, string directory, string manifest, bool crossRun)
@@ -362,20 +335,14 @@ public sealed class CanaryCleanupSafetyTests
 
     private static void WithCanaries(Action<CanaryManager, IReadOnlyList<string>, string, string> action)
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"winsight-canary-safety-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        var manifest = Path.Combine(directory, "manifest.json");
-        var manager = new CanaryManager(new byte[32], manifest);
-        try
-        {
-            var paths = manager.Plant([directory]);
-            Assert.Equal(3, paths.Count);
-            action(manager, paths, directory, manifest);
-        }
-        finally
-        {
-            manager.Remove();
-            Directory.Delete(directory, recursive: true);
-        }
+        using var fixture = new CanaryTestDirectory();
+        var directory = fixture.Directory;
+        var manifest = fixture.Manifest;
+        var manager = fixture.Track(new CanaryManager(new byte[32], manifest));
+        var paths = manager.Plant([directory]);
+        Assert.Equal(3, paths.Count);
+        action(manager, paths, directory, manifest);
+        // Intentionally corrupt manifest tests must not invoke new cleanup authority in teardown.
+        // The fixture releases every tracked owner and strictly deletes only its own private root.
     }
 }

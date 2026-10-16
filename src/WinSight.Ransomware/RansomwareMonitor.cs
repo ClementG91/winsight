@@ -87,13 +87,21 @@ public sealed class RansomwareMonitor : IDisposable
             {
                 return;
             }
-            _started = true;
+            try
+            {
+                // Serialize the WHOLE start against disposal: no watcher/owner may appear after a
+                // completed Dispose. Start is terminal on failure; retry requires a new monitor.
+                CanaryManager.RemoveOrphans(_directories, _manifestPath, _seed);
+                _canaries.Plant(_directories);
+                _watcher.Start();
+                _started = true;
+            }
+            catch (Exception ex) when (!RansomwareFileWatcher.IsCatastrophic(ex))
+            {
+                _disposed = true;
+                StopCore(ex);
+            }
         }
-        // Sweep decoys a previous run left behind (crash/kill) before planting fresh ones, so the
-        // user's folders never accumulate hidden files.
-        CanaryManager.RemoveOrphans(_directories, _manifestPath, _seed);
-        _canaries.Plant(_directories);
-        _watcher.Start();
     }
 
     /// <summary>Detections a subscriber of this monitor failed to handle.</summary>
@@ -136,9 +144,25 @@ public sealed class RansomwareMonitor : IDisposable
                 return;
             }
             _disposed = true;
+            StopCore();
         }
+    }
+
+    private void StopCore(Exception? primary = null)
+    {
+        var failures = new List<Exception>();
+        if (primary is not null) { failures.Add(primary); }
         _watcher.Detected -= OnWatcherDetected;
-        _watcher.Dispose();
-        _canaries.Remove();
+        try { _watcher.Dispose(); }
+        catch (Exception ex) when (!RansomwareFileWatcher.IsCatastrophic(ex)) { failures.Add(ex); }
+        try { _canaries.Remove(); }
+        catch (Exception ex) when (!RansomwareFileWatcher.IsCatastrophic(ex)) { failures.Add(ex); }
+        finally { _canaries.EndSessionWithoutCleanup(); }
+        if (failures.Count == 1) { System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw(); }
+        if (failures.Count > 1)
+        {
+            throw new IOException("Ransomware monitor shutdown could not complete every cleanup operation.",
+                new AggregateException(failures));
+        }
     }
 }

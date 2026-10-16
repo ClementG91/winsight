@@ -339,7 +339,14 @@ public partial class MainWindow
         // Stop recording writes to decoys that are about to stop existing, so the correlation index
         // is not held open on paths nothing will ever ask about again.
         _attributionScope.ForgetCanaries();
-        monitor.Dispose(); // removes the decoys
+        try { monitor.Dispose(); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // The watcher has stopped and owner release is independent. Retained files/metadata
+            // are recovery evidence; a refusal must not crash the UI or imply complete cleanup.
+            _ = AlertJournal.TryAppend(new SecurityAlert(DateTimeOffset.Now, "Ransomware", "CleanupIncomplete",
+                "Canary cleanup was incomplete; preserved files and accounting require recovery review."));
+        }
     }
 
     private void OnRansomwareDetected(object? sender, RansomwareDetectedEventArgs e)

@@ -570,3 +570,54 @@ also receives synthetic null, malformed and unsupported descriptor bytes; no nat
 null DACL is created. The separate attempted native null-DACL diagnostic was rejected before any
 creation, compilation or execution and remains unestablished. These controls do not qualify actual
 foreign-account, cross-integrity or VM operation on the final revision.
+## Canary ownership and recovery (manifest v3)
+
+Stop all older WinSight writers and ransomware watchers in **every Windows session** before using
+manifest v3. Older planting code can interpret an unknown v3 manifest as empty and replace it with
+v2; a version number alone does not fence a mixed-version deployment.
+
+The manifest transaction uses its adjacent persistent `.lock` file, with one 30-second acquisition
+budget (only native sharing conflicts are retried). Native synchronous filesystem operations are
+not preempted by that budget. Owner lifetime is a separate exclusive file handle, shared across
+Windows sessions and retaining no ancestor bootstrap handle. An owner is considered dead only
+while the exact recorded marker identity, canonical payload and manifest binding are verified and
+held open through cleanup and publication. Missing, unreadable, replaced or unsupported markers
+prove nothing: preserve their decoys and manifest records. Pristine bytes, the expected configured
+path and full file identity are still all required before handle-based deletion.
+
+The adjacent `.canary-owners-<full SHA256 of normalized logical manifest path>` directory contains
+one 68-byte ASCII `.binding` and at most 128 fixed `o000.owner` through `o127.owner` names. Canonical
+markers are 101 ASCII bytes; reads refuse more than 4096 physical bytes. The root is protected before
+writing binding or marker bytes under an already private local parent whose owner/DACL are checked.
+Provisioning is cooperative under the manifest gate: `EnsureDirectory` is not an atomic-created-new
+result. An observed preexisting unrecognized root is refused unchanged. Physical path aliases and
+hostile same-user/administrator races or ACL changes are outside this cooperative guarantee.
+
+Manifests accept only strict recognized schemas, up to 1 MiB physical input and 1024 entries, without
+duplicate properties, unknown fields or duplicate normalized paths. These are parser input bounds,
+not heap or OS prefetch bounds. Valid legacy v2 records are retained without deletion authority,
+including when their decoy path is absent. Invalid/future/unreadable manifests refuse planting and
+authorize no orphan deletion. Every retained path reserves its name. Planting never implicitly
+cleans or adopts earlier owners. Monitoring advertises only this owner's durably recorded decoys.
+Successful cleanup retains an empty v3 manifest; persistent sidecars/root binding are normal.
+
+Cleanup may retire a natively confirmed absent decoy only after owner proof, counting zero files
+removed. Locked, edited, replaced and unsupported objects remain recorded for later review/retry.
+Each retry obtains fresh authority. Owner markers are deleted only after successful manifest
+publication and when no remaining record references that full proof, including other directories.
+Failed publication reports an I/O failure and preserves recovery metadata; owner release occurs
+independently. A later proved-dead sweep can retire stale records for already deleted files.
+
+Creation/deletion plus manifest publication are not one multi-file transaction. A crash before
+publication, failed rollback or failed marker deletion can leave unrecorded decoys or occupied
+slots. Unknown slots are never automatically evicted or garbage-collected. If 128 slots are occupied,
+planting refuses visibly: stop every writer/watcher, back up the whole state family, then have an
+operator reconcile recorded full identities, original content and actual files before manual
+recovery. Do not delete an unknown marker to force a claim that its owner is dead. Never remove a
+retained document solely because its name resembles a decoy.
+
+Monitor startup and disposal serialize their complete lifecycle. Failed startup is terminal; use a
+new monitor for a later attempt. Shutdown attempts watcher stop and owner cleanup independently,
+and reports incomplete cleanup. Existing bounded watcher joins do not prove arbitrary subscriber
+callbacks have quiesced. Local tests establish these source-level contracts; real cross-session VM,
+supported-platform CI and final-candidate endurance qualification remain separate evidence.

@@ -13,8 +13,7 @@ public sealed class RansomwareSubscriberFailureTests
     [Fact]
     public void ASubscriberFaultDoesNotStopLaterDetections()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"wsg-subfault-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = CanaryTestDirectory.CreateDecoyDirectory();
         var decoyA = Path.Combine(dir, "a-decoy.xlsx");
         var decoyB = Path.Combine(dir, "b-decoy.xlsx");
         File.WriteAllText(decoyA, "a");
@@ -49,16 +48,16 @@ public sealed class RansomwareSubscriberFailureTests
         finally
         {
             watcher.Dispose();
-            Directory.Delete(dir, recursive: true);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
     [Fact]
     public void AMonitorSubscriberFaultStillRearmsTheDetector()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"wsg-rearm-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        var manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.json");
+        var dir = CanaryTestDirectory.CreateDecoyDirectory();
+        using var fixture = new CanaryTestDirectory();
+        var manifest = fixture.Manifest;
         var monitor = new RansomwareMonitor([dir], new RansomwareBurstDetector(cooldown: TimeSpan.Zero),
             new byte[32], manifest);
         var calls = 0;
@@ -85,8 +84,8 @@ public sealed class RansomwareSubscriberFailureTests
         finally
         {
             monitor.Dispose();
-            Directory.Delete(dir, recursive: true);
-            File.Delete(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
+
         }
     }
 }
