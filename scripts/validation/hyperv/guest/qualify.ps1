@@ -1304,6 +1304,8 @@ Invoke-Gate '36-ipc-network-logon' {
     $net = Get-Content -LiteralPath $networkFile -Raw | ConvertFrom-Json
     $user = 'WinSightNetworkProbe'
     $state = @{}
+    $observer = $null
+    $observerHelpers = $null
     try {
         # 1. The service, running from the protected package.
         Remove-ServiceIfPresent
@@ -1382,19 +1384,37 @@ Invoke-Gate '36-ipc-network-logon' {
         Restart-Service WinRM -Force
 
         # 5. Arm the observer before the control is allowed to connect.
-        $ready = Join-Path $Evidence 'network-observer-ready.json'
-        $complete = Join-Path $Evidence 'network-probe-complete.signal'
-        $observed = Join-Path $Evidence 'network-observer-result.json'
-        Remove-Item $ready, $complete, $observed -Force -ErrorAction SilentlyContinue
+        $observationId = [guid]::NewGuid().ToString('N')
+        $ready = Join-Path $Evidence ("network-observer-{0}-ready.json" -f $observationId)
+        $complete = Join-Path $Evidence ("network-observer-{0}-complete.json" -f $observationId)
+        $observed = Join-Path $Evidence ("network-observer-{0}-result.json" -f $observationId)
+        foreach ($receipt in @($ready, $complete, $observed)) {
+            if (Test-Path -LiteralPath $receipt) { throw 'Fresh network observer evidence path is already occupied.' }
+        }
         Assert-CandidateFiles
         # The packaged copy when the ZIP carries it, the commit's otherwise (as gate 01 resolves the others).
         $observerScript = Join-Path $script:PackageRoot 'Test-IpcNetworkObserver.ps1'
         if (-not (Test-Path -LiteralPath $observerScript)) { $observerScript = Join-Path $Source 'scripts\Test-IpcNetworkObserver.ps1' }
-        $observer = Start-Job -ScriptBlock { param($Script, $Service, $Ready, $Complete, $Result) & $Script -ServicePath $Service -ReadyPath $Ready -CompletionSignalPath $Complete -ResultPath $Result -TimeoutSeconds 1800 } `
-            -ArgumentList $observerScript, $script:Service, $ready, $complete, $observed
+        # Isolate script parameter variables as well as preferences from the caller's nonce/state.
+        $observerHelpers = New-Module -Name ("WinSightNetworkObservation.{0}" -f $observationId) -ArgumentList $observerScript -ScriptBlock {
+            param($Path)
+            . $Path -FunctionsOnly
+            Export-ModuleMember -Function Read-NetworkObservation, Write-JsonEvidence
+        }
+        Import-Module $observerHelpers -Scope Local -ErrorAction Stop
+        $observer = Start-Job -ScriptBlock { param($Script, $Service, $Cli, $Ready, $Complete, $Result, $Id) & $Script -ServicePath $Service -CliPath $Cli -ObservationId $Id -ReadyPath $Ready -CompletionSignalPath $Complete -ResultPath $Result -TimeoutSeconds 1800 } `
+            -ArgumentList $observerScript, $script:Service, $script:Cli, $ready, $complete, $observed, $observationId
         $deadline = (Get-Date).AddSeconds(60)
-        while (-not (Test-Path $ready) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 250 }
+        while (-not (Test-Path $ready) -and (Get-Date) -lt $deadline) {
+            if ($observer.State -in @('Failed', 'Stopped', 'Completed')) { throw 'Target observer stopped before readiness.' }
+            Start-Sleep -Milliseconds 250
+        }
         if (-not (Test-Path $ready)) { throw "The network observer did not arm: $($observer | Receive-Job 2>&1 | Out-String)" }
+        $readyEvidence = Read-NetworkObservation -Path $ready -ObservationId $observationId -Stage 'READY'
+        $expectedObserverCommand = '"{0}" run' -f $script:Service
+        if (-not [string]::Equals($readyEvidence.PathName, $expectedObserverCommand, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Network observer readiness is bound to another service executable.'
+        }
 
         # 6. Rendezvous over the private switch: the public certificate and the package path out, the
         #    control's result in. Nothing secret crosses it.
@@ -1424,26 +1444,31 @@ Invoke-Gate '36-ipc-network-logon' {
             $context.Response.OutputStream.Write($body, 0, $body.Length)
             $context.Response.Close()
         }
-        [DateTime]::UtcNow.ToString('O') | Set-Content -LiteralPath $complete
+        Write-JsonEvidence ([ordered]@{SchemaVersion=1;ObservationId=$observationId;Stage='COMPLETE';Utc=[DateTime]::UtcNow.ToString('O')}) $complete
         if ($null -eq $networkText) { throw 'NOT_RUN: the control VM never reported (60 minutes); the observer and cleanup ran.' }
         $networkText | Set-Content (Join-Path $Evidence 'ipc-network-logon.txt')
 
         # 7. Both evidence sets, each attributed to its own token.
         $observer | Wait-Job -Timeout 330 | Out-Null
+        if ($observer.State -ne 'Completed') { throw 'Target observer did not complete successfully.' }
         $observerOutput = $observer | Receive-Job 2>&1 | Out-String
         $observerOutput | Set-Content (Join-Path $Evidence 'network-observer.txt')
         if (-not (Test-Path $observed)) { throw "Target observer produced no result: $observerOutput" }
-        $observerEvidence = Get-Content -LiteralPath $observed -Raw | ConvertFrom-Json
-        if ($observerEvidence.Result -ne 'PASS' -or $observerEvidence.Checks -ne '3/3') { throw "Target observer 3/3 failed: $observerOutput" }
+        $observerEvidence = Read-NetworkObservation -Path $observed -ObservationId $observationId -Stage 'PASS'
+        if ($observerEvidence.BeforeProcessId -ne $readyEvidence.ProcessId -or
+            -not [string]::Equals($observerEvidence.PathName, $readyEvidence.PathName, [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Target observer result is bound to another service instance.'
+        }
         if ($networkText -notmatch [regex]::Escape('Result: 7 checks, 0 failure(s).')) { throw "Network Logon 7/7 failed:`n$networkText" }
         foreach ($required in 'S-1-5-2=true', 'S-1-5-4=false', 'serviceAvailable=false', 'outcome=ServiceUnavailable', 'mutation=none') {
             if ($networkText -notmatch [regex]::Escape($required)) { throw "Network Logon evidence is missing: $required" }
         }
-        'network logon 7/7 from the control VM; target observer 3/3; combined 10/10'
+        'network logon 7/7 from the control VM; target observer 5/5; combined 12/12'
     }
     finally {
         if ($state.Listener2) { try { $state.Listener2.Stop() } catch { } }
         if ($observer) { Stop-Job $observer -ErrorAction SilentlyContinue; Remove-Job $observer -Force -ErrorAction SilentlyContinue }
+        if ($observerHelpers) { Remove-Module $observerHelpers -Force -ErrorAction SilentlyContinue }
         if ($state.Listener) { Remove-WSManInstance -ResourceURI 'winrm/config/Listener' -SelectorSet @{ Address = '*'; Transport = 'HTTPS' } -ErrorAction SilentlyContinue }
         if ($state.ContainsKey('Basic')) { Set-Item 'WSMan:\localhost\Service\Auth\Basic' -Value $state.Basic -Force -ErrorAction SilentlyContinue }
         if ($state.RootSddl) { Set-Item -LiteralPath 'WSMan:\localhost\Service\RootSDDL' -Value $state.RootSddl -Force -ErrorAction SilentlyContinue }

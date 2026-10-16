@@ -1372,26 +1372,45 @@ Restart-Service WinRM -Force
 
 SCM and WMI normally deny their information to the standard Network account. The evidence is
 therefore split without weakening ACLs: the remote probe performs 7 checks against its own token and
-the IPC contract, while the supplied elevated observer performs 3 independent checks against the
-target service. In the target's elevated console, always arm the observer before the remote
+the IPC contract, while the supplied elevated observer performs 5 checks against the
+target service: its running state, selected executable, an authenticated read-only `GetStatus`
+before READY, the same SCM instance afterwards, and another authenticated `GetStatus` afterwards.
+These are two endpoint observations; they do not prove continuous availability or uniquely explain
+the remote denial. The older recorded 3/3 campaigns did not include these two positive probes.
+In the target's elevated console, always arm the observer before the remote
 connection:
 
 ```powershell
-$ObserverReady = Join-Path $ControlEvidenceRoot 'network-observer-ready.json'
-$CompletionSignal = Join-Path $ControlEvidenceRoot 'network-probe-complete.signal'
-$ObserverResult = Join-Path $ControlEvidenceRoot 'network-observer-result.json'
-Remove-Item $ObserverReady,$CompletionSignal,$ObserverResult -Force -ErrorAction SilentlyContinue
+$ObservationId = [guid]::NewGuid().ToString('N')
+$ObserverScript = Join-Path $PackageRoot 'Test-IpcNetworkObserver.ps1'
+# Use only the verified protected candidate. The module isolates script parameter variables;
+# FunctionsOnly returns before preferences, identity, SCM or process work.
+$ObserverHelpers = New-Module -ArgumentList $ObserverScript -ScriptBlock {
+    param($Path)
+    . $Path -FunctionsOnly
+    Export-ModuleMember -Function Read-NetworkObservation, Write-JsonEvidence
+}
+Import-Module $ObserverHelpers -Scope Local -ErrorAction Stop
+$ObserverReady = Join-Path $ControlEvidenceRoot ("network-observer-{0}-ready.json" -f $ObservationId)
+$CompletionSignal = Join-Path $ControlEvidenceRoot ("network-observer-{0}-complete.json" -f $ObservationId)
+$ObserverResult = Join-Path $ControlEvidenceRoot ("network-observer-{0}-result.json" -f $ObservationId)
+foreach ($path in @($ObserverReady,$CompletionSignal,$ObserverResult)) {
+    if (Test-Path -LiteralPath $path) { throw 'Fresh evidence path occupied; preserve it and stop.' }
+}
 $ObserverJob = Start-Job -ScriptBlock {
-    param($Script, $Service, $Ready, $Complete, $Result)
-    & $Script -ServicePath $Service -ReadyPath $Ready `
+    param($Script, $Service, $Cli, $Id, $Ready, $Complete, $Result)
+    & $Script -ServicePath $Service -CliPath $Cli -ObservationId $Id -ReadyPath $Ready `
         -CompletionSignalPath $Complete -ResultPath $Result
-} -ArgumentList (Join-Path $PackageRoot 'Test-IpcNetworkObserver.ps1'), `
-    $Service, $ObserverReady, $CompletionSignal, $ObserverResult
+} -ArgumentList $ObserverScript, $Service, $Cli, $ObservationId, $ObserverReady, $CompletionSignal, $ObserverResult
 $deadline = (Get-Date).AddSeconds(30)
 while (-not (Test-Path $ObserverReady) -and (Get-Date) -lt $deadline) {
+    if ($ObserverJob.State -in @('Failed','Stopped','Completed')) { throw 'Observer stopped before READY.' }
     Start-Sleep -Milliseconds 250
 }
 if (-not (Test-Path $ObserverReady)) { throw 'The network observer did not arm.' }
+$ReadyEvidence = Read-NetworkObservation -Path $ObserverReady -ObservationId $ObservationId -Stage READY
+if ($ReadyEvidence.PathName -ine ('"{0}" run' -f $Service)) { throw 'Unexpected service executable.' }
+Write-Host "ObservationId (public correlation value): $ObservationId"
 ```
 
 On the second machine, open elevated Windows PowerShell with `-NoProfile`. Import only the ephemeral
@@ -1404,18 +1423,31 @@ $GuestAddress = '<exact host-only IPv4 address of target>'
 $GuestPackageRoot = 'C:\Program Files\WinSight-Qualification\payload'
 $ControlEvidenceRoot = '<same evidence storage outside snapshots>'
 $CertificatePath = Join-Path $ControlEvidenceRoot 'winrm-network-probe.cer'
-$CompletionSignal = Join-Path $ControlEvidenceRoot 'network-probe-complete.signal'
+$ObservationId = '<the exact target-generated public ObservationId above>'
+$CompletionSignal = Join-Path $ControlEvidenceRoot ("network-observer-{0}-complete.json" -f $ObservationId)
+# PackageRoot here is this control machine's verified protected copy of the same candidate.
+$ObserverHelpers = New-Module -ArgumentList (Join-Path $PackageRoot 'Test-IpcNetworkObserver.ps1') -ScriptBlock {
+    param($Path)
+    . $Path -FunctionsOnly
+    Export-ModuleMember -Function Write-JsonEvidence
+}
+Import-Module $ObserverHelpers -Scope Local -ErrorAction Stop
 $credential = Get-Credential 'WinSightNetworkProbe'
 Set-Service WinRM -StartupType Manual
 Start-Service WinRM
 Import-Module Microsoft.WSMan.Management
-$importedCertificate = Import-Certificate -FilePath $CertificatePath `
-    -CertStoreLocation 'Cert:\LocalMachine\Root'
 $clientBasicPath = 'WSMan:\localhost\Client\Auth\Basic'
-$previousClientBasic = [bool](Get-Item -LiteralPath $clientBasicPath).Value
+$importedCertificate = $null
+$basicCaptured = $false
+$primaryFailure = $null
+$cleanupFailures = [Collections.Generic.List[Exception]]::new()
 $networkResult = $null
 
 try {
+    $importedCertificate = Import-Certificate -FilePath $CertificatePath `
+        -CertStoreLocation 'Cert:\LocalMachine\Root'
+    $previousClientBasic = [bool](Get-Item -LiteralPath $clientBasicPath -ErrorAction Stop).Value
+    $basicCaptured = $true
     Set-Item -LiteralPath $clientBasicPath -Value $true -Force
     $networkResult = Invoke-Command -ComputerName $GuestAddress -Credential $credential `
         -UseSSL -Authentication Basic -ScriptBlock {
@@ -1431,12 +1463,25 @@ try {
             [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output }
         } -ArgumentList $GuestPackageRoot
 }
+catch { $primaryFailure = $_ }
 finally {
-    [DateTime]::UtcNow.ToString('O') | Set-Content -LiteralPath $CompletionSignal
-    Set-Item -LiteralPath $clientBasicPath -Value $previousClientBasic -Force
-    Remove-Item -LiteralPath ("Cert:\LocalMachine\Root\{0}" -f `
-        $importedCertificate.Thumbprint) -Force
+    # Every restoration is attempted even if receipt publication or another restoration fails.
+    foreach ($cleanup in @(
+        { Write-JsonEvidence ([ordered]@{SchemaVersion=1;ObservationId=$ObservationId;Stage='COMPLETE';Utc=[DateTime]::UtcNow.ToString('O')}) $CompletionSignal },
+        { if ($basicCaptured) { Set-Item -LiteralPath $clientBasicPath -Value $previousClientBasic -Force -ErrorAction Stop } },
+        { if ($null -ne $importedCertificate) { Remove-Item -LiteralPath ("Cert:\LocalMachine\Root\{0}" -f $importedCertificate.Thumbprint) -Force -ErrorAction Stop } }
+    )) {
+        try { & $cleanup } catch { $cleanupFailures.Add($_.Exception) }
+    }
 }
+if ($primaryFailure -and $cleanupFailures.Count) {
+    $all = [Collections.Generic.List[Exception]]::new()
+    $all.Add($primaryFailure.Exception)
+    foreach ($failure in $cleanupFailures) { $all.Add($failure) }
+    throw [AggregateException]::new('Network probe and cleanup failed.', $all)
+}
+if ($primaryFailure) { throw $primaryFailure }
+if ($cleanupFailures.Count) { throw [AggregateException]::new('Network probe cleanup failed.', $cleanupFailures) }
 
 $networkText = @($networkResult.Output) -join [Environment]::NewLine
 $networkText | Set-Content (Join-Path $ControlEvidenceRoot 'ipc-network-logon.txt')
@@ -1452,17 +1497,19 @@ foreach ($required in @('S-1-5-2=true', 'S-1-5-4=false', 'serviceAvailable=false
 }
 ```
 
-Return to the target, wait for the observer, and require its 3/3 result. The combined gate is 10/10,
+Return to the target, wait for the observer, and require its 5/5 result. The combined gate is 12/12,
 but the two evidence sets remain distinct and attributed to their respective tokens:
 
 ```powershell
 $ObserverJob | Wait-Job -Timeout 330 | Receive-Job
 if ($ObserverJob.State -ne 'Completed') { throw 'Network observer not completed.' }
-$ObserverEvidence = Get-Content -LiteralPath $ObserverResult -Raw | ConvertFrom-Json
-if ($ObserverEvidence.Result -ne 'PASS' -or $ObserverEvidence.Checks -ne '3/3') {
-    throw 'Target observer 3/3 failed.'
+$ObserverEvidence = Read-NetworkObservation -Path $ObserverResult -ObservationId $ObservationId -Stage PASS
+if ($ObserverEvidence.BeforeProcessId -ne $ReadyEvidence.ProcessId -or
+    $ObserverEvidence.PathName -ine $ReadyEvidence.PathName) {
+    throw 'Target observer changed service identity.'
 }
-Write-Host 'Result: 3 checks, 0 failure(s).'
+Write-Host 'Result: 5 checks, 0 failure(s).'
+Remove-Module $ObserverHelpers -Force
 ```
 
 After exporting evidence, remove the listener, certificate, rule, and account, and restore the

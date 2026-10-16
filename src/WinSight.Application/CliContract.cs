@@ -157,7 +157,7 @@ public static class CliContract
     /// </summary>
     /// <remarks>
     /// <b>Code 11 is qualified rather than listed plainly.</b> Nothing a documented verb can do
-    /// returns it: the only producer is <c>firewall-ipc-selftest</c>, a diagnostic deliberately
+    /// returns it: the producers are <c>firewall-ipc-selftest</c> and <c>firewall-ipc-readonly</c>, diagnostics deliberately
     /// absent from this catalogue. Listing it beside the codes a scan actually returns told a
     /// reader to handle a case they would never meet, which is the same kind of untrue documentation
     /// this table exists to replace - a help text describing behaviour the binary does not have.
@@ -170,7 +170,7 @@ public static class CliContract
           {UsageError}   usage error: unknown command, argument or option
           {ObservationFailed}  an observation could not be made (live ETW unavailable)
           {ServiceUnavailable}  the firewall service could not be reached
-              (firewall-ipc-selftest only; no scanner returns this)
+              (firewall-ipc-selftest / firewall-ipc-readonly only; no scanner returns this)
           {UnexpectedFailure}  the scan failed unexpectedly
           {ObservationIncomplete}  live observation completed with lost events
 
