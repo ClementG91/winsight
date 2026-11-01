@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,7 +11,9 @@ internal static class PowerShellProcessEvidence
 {
     internal const int OutputLimit = 32768;
     internal const string Marker = "__WINSIGHT_TEST_PHASE__:";
-    internal const string Prelude = "function Write-TestPhase($Phase) { [Console]::Out.WriteLine('__WINSIGHT_TEST_PHASE__:' + $Phase); [Console]::Out.Flush() }; Write-TestPhase 'entered'\n";
+    internal const string ChildClockMarker = "__WINSIGHT_TEST_CHILD_CLOCK__:";
+    internal const string Prelude = "function Write-TestPhase($Phase) { [Console]::Out.WriteLine('__WINSIGHT_TEST_PHASE__:' + $Phase); [Console]::Out.Flush(); "
+        + "[Console]::Out.WriteLine('__WINSIGHT_TEST_CHILD_CLOCK__:' + $Phase + ':' + [DateTime]::UtcNow.Ticks + ':' + [Diagnostics.Stopwatch]::GetTimestamp() + ':' + [Diagnostics.Stopwatch]::Frequency); [Console]::Out.Flush() }; Write-TestPhase 'entered'\n";
     // Capture $? immediately: a successful marker must not erase a final native-command failure.
     internal const string BodyEnd = "\n$__winsightBodySucceeded=$?; if ($__winsightBodySucceeded) { Write-TestPhase 'body-end' } else { exit 1 }";
 
@@ -40,11 +43,16 @@ internal static class PowerShellProcessEvidence
         Action<Process>? kill = null)
     {
         var clock = Stopwatch.StartNew();
+        var launchClock = HostClock(clock);
+        var launchPool = PoolSnapshot();
         using var process = Process.Start(start)!;
         var started = clock.Elapsed.TotalMilliseconds;
         // Keep the existing watchdog origin after Process.Start. Its synchronous OS call remains
         // outside the deadline. Neither a successful cleanup nor an exit code can erase a timeout.
         using var deadline = new CancellationTokenSource(watchdog);
+        // This is an upper observation of arming, not its exact instant. The existing `started`
+        // value is its lower monotonic bound; no new sampling moves the CTS after Process.Start.
+        var armedClock = HostClock(clock);
         using var readers = new CancellationTokenSource();
         var phases = new Phases(clock);
         var stdout = new Capture();
@@ -57,6 +65,9 @@ internal static class PowerShellProcessEvidence
         double? drainAt = null;
         var killed = false;
         string? cleanupError = null;
+        var failureClock = "not-observed";
+        var failurePool = "not-observed";
+        var beforeKill = "not-observed";
         try
         {
             await process.WaitForExitAsync(deadline.Token);
@@ -71,6 +82,11 @@ internal static class PowerShellProcessEvidence
         catch (Exception failure)
         {
             primary = failure;
+            failureClock = HostClock(clock);
+            failurePool = PoolSnapshot();
+            // Retain the same Process object. PID lookups could bind a recycled process, while
+            // a real native exit preceding late observation must remain visible before Kill.
+            beforeKill = NativeProcessSnapshot(process);
             try { (kill ?? (p => p.Kill(entireProcessTree: true)))(process); killed = true; }
             catch (Exception secondary) { cleanupError = secondary.GetType().Name; }
             // Separate, fixed cleanup budget; it never extends or changes the assertion deadline.
@@ -92,7 +108,12 @@ internal static class PowerShellProcessEvidence
             try { await drained.WaitAsync(TimeSpan.FromSeconds(1)); }
             catch (Exception secondary) { cleanupError ??= secondary.GetType().Name; }
         }
-        var summary = $"PS5 host reception ms: started={started:F1}, {phases.Summary()}, exited={exited?.ToString("F1") ?? "unobserved"}, drained={drainAt?.ToString("F1") ?? "unobserved"}, cleanup-ended={clock.Elapsed.TotalMilliseconds:F1}; stdout-eof={stdout.Eof}, stderr-eof={stderr.Eof}, stdout-truncated={stdout.Truncated}, stderr-truncated={stderr.Truncated}, kill-returned={killed}, cleanup-error={cleanupError ?? "none"}";
+        var cleanupEnded = clock.Elapsed.TotalMilliseconds;
+        var finalClock = HostClock(clock);
+        var finalPool = PoolSnapshot();
+        var finalProcess = NativeProcessSnapshot(process);
+        var summary = $"PS5 host reception ms: started={started:F1}, {phases.Summary()}, exited={exited?.ToString("F1") ?? "unobserved"}, drained={drainAt?.ToString("F1") ?? "unobserved"}, cleanup-ended={cleanupEnded:F1}; stdout-eof={stdout.Eof}, stderr-eof={stderr.Eof}, stdout-truncated={stdout.Truncated}, stderr-truncated={stderr.Truncated}, kill-returned={killed}, cleanup-error={cleanupError ?? "none"}"
+            + FormattableString.Invariant($"; watchdogMs={watchdog.TotalMilliseconds}; host-launch=[{launchClock}]; host-armed=[{armedClock}]; host-failure=[{failureClock}]; host-final=[{finalClock}]; pool-launch=[{launchPool}]; pool-failure=[{failurePool}]; pool-final=[{finalPool}]; native-before-kill=[{beforeKill}]; native-process-final=[{finalProcess}]; child-clocks=[{phases.ChildSummary()}]");
         // Report only after cleanup; a diagnostic callback must never mask the original failure.
         try { report(summary); }
         catch when (primary is not null) { }
@@ -143,9 +164,10 @@ internal static class PowerShellProcessEvidence
 
     private sealed class Phases(Stopwatch clock)
     {
-        private static readonly string[] Known = ["entered", "parsed", "definitions-loaded", "module-imported", "body-begin", "body-end"];
+        private static readonly string[] Known = ["entered", "parsed", "definitions-loaded", "module-imported", "body-begin", "body-end", "probe-begin", "probe-first-complete", "probe-repeat-complete"];
         private readonly StringBuilder _line = new();
         private readonly List<(string Name, double At)> _received = [];
+        private readonly List<(string Name, long UtcTicks, long Counter, long Frequency)> _childClocks = [];
         private readonly object _gate = new();
         private bool _overflow;
 
@@ -168,6 +190,18 @@ internal static class PowerShellProcessEvidence
                                     _received.Add((name, clock.Elapsed.TotalMilliseconds));
                                 }
                             }
+                            else if (line.StartsWith(ChildClockMarker, StringComparison.Ordinal))
+                            {
+                                var fields = line[ChildClockMarker.Length..].Split(':');
+                                if (fields.Length == 4 && Known.Contains(fields[0], StringComparer.Ordinal)
+                                    && !_childClocks.Any(p => p.Name == fields[0])
+                                    && CanonicalCounter(fields[1], out var utcTicks) && utcTicks <= DateTime.MaxValue.Ticks
+                                    && CanonicalCounter(fields[2], out var counter)
+                                    && CanonicalCounter(fields[3], out var frequency) && frequency > 0)
+                                {
+                                    _childClocks.Add((fields[0], utcTicks, counter, frequency));
+                                }
+                            }
                         }
                         _line.Clear(); _overflow = false;
                     }
@@ -181,7 +215,45 @@ internal static class PowerShellProcessEvidence
         {
             lock (_gate) { return string.Join(", ", _received.Select(p => $"{p.Name}={p.At:F1}")); }
         }
+
+        internal string ChildSummary()
+        {
+            lock (_gate)
+            {
+                return string.Join(", ", _childClocks.Select(p => FormattableString.Invariant($"{p.Name}:utcTicks={p.UtcTicks}/counter={p.Counter}/frequency={p.Frequency}")));
+            }
+        }
+
+        private static bool CanonicalCounter(string value, out long parsed) =>
+            long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out parsed) && parsed >= 0
+            && string.Equals(value, parsed.ToString(CultureInfo.InvariantCulture), StringComparison.Ordinal);
     }
 
     internal sealed record Result(int ExitCode, string Stdout, string Stderr, string Summary);
+
+    // Best-effort diagnostics never decide the result or replace a primary exception. Values are
+    // closed fields, not exception messages, process arguments or arbitrary child output.
+    private static string Diagnostic(Func<string> capture)
+    {
+        try { return capture(); }
+        catch (Exception failure) { return "unavailable=" + failure.GetType().Name; }
+    }
+
+    private static string HostClock(Stopwatch clock) => Diagnostic(() =>
+        FormattableString.Invariant($"utc={DateTime.UtcNow:O}; elapsedMs={clock.Elapsed.TotalMilliseconds:F1}; counter={Stopwatch.GetTimestamp()}; frequency={Stopwatch.Frequency}"));
+
+    private static string PoolSnapshot() => Diagnostic(() =>
+    {
+        ThreadPool.GetAvailableThreads(out var availableWorker, out var availableIo);
+        ThreadPool.GetMaxThreads(out var maximumWorker, out var maximumIo);
+        return FormattableString.Invariant($"count={ThreadPool.ThreadCount}; pending={ThreadPool.PendingWorkItemCount}; availableWorker={availableWorker}; availableIo={availableIo}; maximumWorker={maximumWorker}; maximumIo={maximumIo}");
+    });
+
+    private static string NativeProcessSnapshot(Process process) => Diagnostic(() =>
+    {
+        var startUtc = process.StartTime.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        return process.HasExited
+            ? FormattableString.Invariant($"startUtc={startUtc}; exited=True; exitUtc={process.ExitTime.ToUniversalTime():O}; exitCode={process.ExitCode}")
+            : $"startUtc={startUtc}; exited=False; exitUtc=not-observed; exitCode=not-observed";
+    });
 }
