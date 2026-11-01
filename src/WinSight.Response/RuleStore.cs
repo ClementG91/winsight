@@ -299,6 +299,28 @@ public sealed class RuleStore
                 result = new(missing ? RuleStoreStatus.Missing : RuleStoreStatus.Unavailable);
                 return missing;
             }
+            return TryReadAcquiredRules(lease, out rules, out result, out identityOccurrences, observedId);
+        }
+        catch (JsonException)
+        {
+            result = new(RuleStoreStatus.InvalidJson);
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            result = new(RuleStoreStatus.Unavailable);
+            return false;
+        }
+    }
+
+    private static bool TryReadAcquiredRules(AutomaticFileAccess.LocalPathLease lease,
+        out StoredEntry[] rules, out RuleStoreResult result, out int identityOccurrences, Guid? observedId)
+    {
+        rules = [];
+        identityOccurrences = 0;
+        result = new(RuleStoreStatus.Unavailable);
+        try
+        {
             if (lease.IsDirectory)
             {
                 return false;
