@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 
 using WinSight.Core;
@@ -43,15 +44,33 @@ public static class Program
         var ids = new List<Guid>();
         Console.WriteLine("ready");
         _ = Console.ReadLine();
+        var started = Stopwatch.GetTimestamp();
+        bool TraceStep(int ordinal, string phase, Func<bool> operation)
+        {
+            Trace(ordinal, phase, "begin");
+            var succeeded = operation();
+            Trace(ordinal, phase, succeeded ? "succeeded" : "refused");
+            return succeeded;
+        }
+        void Trace(int ordinal, string phase, string status)
+        {
+            try
+            {
+                Console.Error.WriteLine(FormattableString.Invariant(
+                    $"WSPROBE:{ordinal}:{phase}:{status}:{Stopwatch.GetTimestamp() - started}:{Stopwatch.Frequency}"));
+            }
+            catch (Exception) { /* Diagnostics must not change the write predicate or exit code. */ }
+        }
         for (var i = 0; i < 24; i++)
         {
             var id = Guid.NewGuid();
             var entry = new ActionJournalEntry(id, ResponseActionKind.AddRule, ResponseOutcome.Succeeded,
                 args[3], DateTimeOffset.UtcNow, true, Phase: ActionJournalPhase.Prepared);
-            if (!journal.TryAppend(entry) || !journal.TryAppend(entry with { Phase = ActionJournalPhase.Completed })
-                || !journal.TryMarkUndone(id, id).Durable
-                || store.Add(new ResponseRule(id, RuleScopeKind.Persistence, RuleDecision.Allow,
-                    RuleDuration.Permanent, DateTimeOffset.UtcNow, Item: $"{args[3]}:{i}")) is null)
+            if (!TraceStep(i, "prepared", () => journal.TryAppend(entry))
+                || !TraceStep(i, "completed", () => journal.TryAppend(entry with { Phase = ActionJournalPhase.Completed }))
+                || !TraceStep(i, "undo", () => journal.TryMarkUndone(id, id).Durable)
+                || !TraceStep(i, "rule", () => store.Add(new ResponseRule(id, RuleScopeKind.Persistence, RuleDecision.Allow,
+                    RuleDuration.Permanent, DateTimeOffset.UtcNow, Item: $"{args[3]}:{i}")) is not null))
             {
                 Console.Error.WriteLine("A serialized update was refused.");
                 return 4;

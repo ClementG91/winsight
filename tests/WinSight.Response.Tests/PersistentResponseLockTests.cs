@@ -246,10 +246,16 @@ public sealed class PersistentResponseLockTests : IDisposable
             .Select(_ => JsonSerializer.Serialize(Entry()) + "\n")) + "{ torn\n");
         using var first = StartProbe("write", Journal, rules, "first");
         using var second = StartProbe("write", Journal, rules, "second");
+        var firstDiagnostic = new WriterDiagnostics(first.StandardError);
+        var secondDiagnostic = new WriterDiagnostics(second.StandardError);
+        long waitStarted = 0;
+        long waitUtcTicks = 0;
         try
         {
             await Task.WhenAll(Ready(first), Ready(second));
             await Task.WhenAll(first.StandardInput.WriteLineAsync("go"), second.StandardInput.WriteLineAsync("go"));
+            waitUtcTicks = DateTime.UtcNow.Ticks;
+            waitStarted = Stopwatch.GetTimestamp();
             var outputs = await Task.WhenAll(first.StandardOutput.ReadToEndAsync(), second.StandardOutput.ReadToEndAsync())
                 .WaitAsync(TimeSpan.FromSeconds(30));
             await Task.WhenAll(first.WaitForExitAsync(), second.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(15));
@@ -269,8 +275,122 @@ public sealed class PersistentResponseLockTests : IDisposable
         }
         finally
         {
-            Kill(first);
-            Kill(second);
+            WriteWriterDiagnostic(first, firstDiagnostic, "first", "before-cleanup", waitStarted, waitUtcTicks);
+            WriteWriterDiagnostic(second, secondDiagnostic, "second", "before-cleanup", waitStarted, waitUtcTicks);
+            try
+            {
+                Kill(first);
+                Kill(second);
+            }
+            finally
+            {
+                WriteWriterDiagnostic(first, firstDiagnostic, "first", "after-cleanup", waitStarted, waitUtcTicks);
+                WriteWriterDiagnostic(second, secondDiagnostic, "second", "after-cleanup", waitStarted, waitUtcTicks);
+            }
+        }
+    }
+
+    private void WriteWriterDiagnostic(Process process, WriterDiagnostics diagnostic, string label, string stage,
+        long waitStarted, long waitUtcTicks)
+    {
+        try
+        {
+            var observedUtc = DateTime.UtcNow.Ticks;
+            var observed = Stopwatch.GetTimestamp();
+            long? nativeStarted = null;
+            long? nativeExited = null;
+            bool? exited = null;
+            int? exitCode = null;
+            try
+            {
+                exited = process.HasExited;
+                nativeStarted = process.StartTime.ToUniversalTime().Ticks;
+                if (exited == true)
+                {
+                    nativeExited = process.ExitTime.ToUniversalTime().Ticks;
+                    exitCode = process.ExitCode;
+                }
+            }
+            catch (Exception) { /* Missing native state stays unknown. */ }
+            _out.WriteLine(FormattableString.Invariant(
+                $"writer={label};stage={stage};waitUtc={waitUtcTicks};waitQpc={waitStarted};observedUtc={observedUtc};observedQpc={observed};frequency={Stopwatch.Frequency};nativeStartUtc={nativeStarted};nativeExitUtc={nativeExited};exited={exited};exitCode={exitCode};{diagnostic.Snapshot()}"));
+        }
+        catch (Exception) { /* Never replace the original assertion, timeout or cleanup failure. */ }
+    }
+
+    private sealed class WriterDiagnostics
+    {
+        private readonly object _gate = new();
+        private string _latest = "none";
+        private int _frames;
+        private bool _malformed;
+        private bool _eof;
+        private bool _drainFailed;
+
+        public WriterDiagnostics(StreamReader error) => _ = DrainAsync(error);
+
+        public string Snapshot()
+        {
+            lock (_gate)
+            {
+                return FormattableString.Invariant(
+                    $"frames={_frames};latest={_latest};malformed={_malformed};stderrEof={_eof};drainFailed={_drainFailed}");
+            }
+        }
+
+        private async Task DrainAsync(StreamReader error)
+        {
+            try
+            {
+                var buffer = new char[512];
+                var line = new char[128];
+                var length = 0;
+                var overflow = false;
+                int count;
+                while ((count = await error.ReadAsync(buffer.AsMemory()).ConfigureAwait(false)) != 0)
+                {
+                    for (var i = 0; i < count; i++)
+                    {
+                        if (buffer[i] == '\n')
+                        {
+                            Record(line.AsSpan(0, length).TrimEnd('\r'), overflow);
+                            length = 0;
+                            overflow = false;
+                        }
+                        else if (length < line.Length) { line[length++] = buffer[i]; }
+                        else { overflow = true; }
+                    }
+                }
+                if (length != 0 || overflow) { Record(line.AsSpan(0, length).TrimEnd('\r'), overflow); }
+                lock (_gate) { _eof = true; }
+            }
+            catch (Exception)
+            {
+                // The fire-and-observe drain owns its faults; never add a wait to the test.
+                lock (_gate) { _drainFailed = true; }
+            }
+        }
+
+        private void Record(ReadOnlySpan<char> line, bool overflow)
+        {
+            var parts = overflow ? [] : line.ToString().Split(':');
+            lock (_gate)
+            {
+                if (parts.Length != 6 || parts[0] != "WSPROBE"
+                    || !int.TryParse(parts[1], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var ordinal)
+                    || ordinal is < 0 or > 23
+                    || parts[2] is not ("prepared" or "completed" or "undo" or "rule")
+                    || parts[3] is not ("begin" or "succeeded" or "refused")
+                    || !long.TryParse(parts[4], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var elapsed)
+                    || !long.TryParse(parts[5], System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var frequency)
+                    || frequency <= 0)
+                {
+                    _malformed = true;
+                    return;
+                }
+                if (_frames < int.MaxValue) { _frames++; }
+                _latest = FormattableString.Invariant($"{ordinal}:{parts[2]}:{parts[3]}:{elapsed}:{frequency}");
+            }
         }
     }
 
