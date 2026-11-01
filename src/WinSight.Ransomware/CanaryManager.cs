@@ -146,14 +146,7 @@ public sealed class CanaryManager
                 return false;
             }
             var expected = CanaryDocument.For(Path.GetExtension(path!));
-            using var stream = lease.OpenRead();
-            if (lease.Length != expected.Length)
-            {
-                return false;
-            }
-            var actual = new byte[expected.Length];
-            stream.ReadExactly(actual);
-            return actual.AsSpan().SequenceEqual(expected) && lease.IsCurrent();
+            return ContentMatchesAcquiredCanary(lease, expected);
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -162,6 +155,18 @@ public sealed class CanaryManager
         {
             return false;
         }
+    }
+
+    private static bool ContentMatchesAcquiredCanary(AutomaticFileAccess.LocalPathLease lease, byte[] expected)
+    {
+        using var stream = lease.OpenRead();
+        if (lease.Length != expected.Length)
+        {
+            return false;
+        }
+        var actual = new byte[expected.Length];
+        stream.ReadExactly(actual);
+        return actual.AsSpan().SequenceEqual(expected) && lease.IsCurrent();
     }
 
     /// <summary>

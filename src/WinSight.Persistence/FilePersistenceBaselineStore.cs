@@ -46,72 +46,7 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         try
         {
             using var lease = AutomaticFileAccess.TryAcquire(_path);
-            if (lease is null || lease.IsDirectory || lease.Length > MaxBaselineBytes)
-            {
-                return null;
-            }
-
-            using var stream = lease.OpenRead(FileOptions.SequentialScan);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            if (reader.ReadLine() != Header)
-            {
-                return null; // unknown/corrupt format: safest to treat as a first run
-            }
-
-            var result = new HashSet<PersistenceIdentity>();
-            Dictionary<string, IReadOnlyList<string>>? coverage = null;
-            string? line;
-            var lines = 0;
-            var identityLines = 0;
-            while ((line = reader.ReadLine()) is not null)
-            {
-                if (++lines > MaxBaselineEntries * 2)
-                {
-                    return null;
-                }
-                if (line == CoverageMarker)
-                {
-                    coverage ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-                    continue;
-                }
-                if (line.StartsWith(CoveredPrefix, StringComparison.Ordinal))
-                {
-                    if (coverage is not null)
-                    {
-                        TryReadCovered(line, coverage);
-                    }
-                    continue;
-                }
-                if (++identityLines > MaxBaselineEntries)
-                {
-                    return null;
-                }
-                var parts = line.Split('\t');
-                if (parts.Length != 6 || !Enum.TryParse<AutostartVector>(parts[0], out var vector)
-                    || !Enum.IsDefined(vector))
-                {
-                    continue; // skip a malformed line rather than discarding the whole baseline
-                }
-                try
-                {
-                    result.Add(new PersistenceIdentity(vector, Decode(parts[1]), Decode(parts[2]),
-                        Decode(parts[3]), Decode(parts[4]), Decode(parts[5])));
-                }
-                catch (FormatException)
-                {
-                    // Corrupt base64 is not an identity.
-                }
-            }
-
-            if (!lease.IsCurrent())
-            {
-                return null;
-            }
-            if (identityLines > 0 && result.Count == 0)
-            {
-                return null; // lines present but none readable: corrupt, reseed
-            }
-            return new PersistedBaseline(result, coverage is null ? null : new PersistenceCoverageMap(coverage));
+            return ReadAcquiredBaseline(lease);
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -119,6 +54,76 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         {
             return null;
         }
+    }
+
+    private static PersistedBaseline? ReadAcquiredBaseline(AutomaticFileAccess.LocalPathLease? lease)
+    {
+        if (lease is null || lease.IsDirectory || lease.Length > MaxBaselineBytes)
+        {
+            return null;
+        }
+
+        using var stream = lease.OpenRead(FileOptions.SequentialScan);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        if (reader.ReadLine() != Header)
+        {
+            return null; // unknown/corrupt format: safest to treat as a first run
+        }
+
+        var result = new HashSet<PersistenceIdentity>();
+        Dictionary<string, IReadOnlyList<string>>? coverage = null;
+        string? line;
+        var lines = 0;
+        var identityLines = 0;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            if (++lines > MaxBaselineEntries * 2)
+            {
+                return null;
+            }
+            if (line == CoverageMarker)
+            {
+                coverage ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                continue;
+            }
+            if (line.StartsWith(CoveredPrefix, StringComparison.Ordinal))
+            {
+                if (coverage is not null)
+                {
+                    TryReadCovered(line, coverage);
+                }
+                continue;
+            }
+            if (++identityLines > MaxBaselineEntries)
+            {
+                return null;
+            }
+            var parts = line.Split('\t');
+            if (parts.Length != 6 || !Enum.TryParse<AutostartVector>(parts[0], out var vector)
+                || !Enum.IsDefined(vector))
+            {
+                continue; // skip a malformed line rather than discarding the whole baseline
+            }
+            try
+            {
+                result.Add(new PersistenceIdentity(vector, Decode(parts[1]), Decode(parts[2]),
+                    Decode(parts[3]), Decode(parts[4]), Decode(parts[5])));
+            }
+            catch (FormatException)
+            {
+                // Corrupt base64 is not an identity.
+            }
+        }
+
+        if (!lease.IsCurrent())
+        {
+            return null;
+        }
+        if (identityLines > 0 && result.Count == 0)
+        {
+            return null; // lines present but none readable: corrupt, reseed
+        }
+        return new PersistedBaseline(result, coverage is null ? null : new PersistenceCoverageMap(coverage));
     }
 
     /// <summary>Writes the baseline atomically (temp file, then replace).</summary>
