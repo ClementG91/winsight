@@ -223,7 +223,8 @@ public sealed class PersistentResponseLockTests : IDisposable
             await Task.WhenAll(holder.WaitForExitAsync(), ruleHolder.WaitForExitAsync()).WaitAsync(TimeSpan.FromSeconds(15));
             Assert.True(File.Exists(LockPath(Journal)));
             Assert.True(File.Exists(LockPath(rules)));
-            Assert.True(journal.TryAppend(Entry()));
+            var appended = journal.TryAppendWithStatus(Entry());
+            Assert.True(appended.Durable, $"Post-kill append (50 ms lock budget): {appended.Detail}");
             Assert.NotNull(store.Add(rule));
         }
         finally
