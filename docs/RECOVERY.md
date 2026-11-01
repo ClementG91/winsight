@@ -522,13 +522,18 @@ filesystem operations are not preempted by that budget. Encoding, coverage and p
 under the acquired gate; an uncertain publication is never retried inside the store. Handles are
 released on success and failure; the sidecar remains on disk. Unsupported, unavailable or timed-out
 coordination throws `IOException`, allowing the monitor to report persistence failure. Existing
-input and encoded-format limits still refuse with `InvalidDataException`.
+input and encoded-format limits in `Save` still refuse with `InvalidDataException`.
 
 Construction normalizes the destination without creating files. Reads remain nonmutating and do not
 create parents or sidecars. A writer may create ordinary missing parents and the sidecar, but refuses
 before mutation when the primary leaf plus `.lock` cannot fit a filesystem component. The existing
 native file layer rejects unsupported paths, reparses and network storage. This change does not
 alter the baseline parser or turn unreadable storage into confirmed absence.
+
+Loading also checks the DATA handle's current length against the existing 16 MiB physical limit
+before constructing the text reader. Metadata captured before a same-object append cannot authorize
+an oversized read. A refusal still returns no usable baseline; character/object allocations can
+exceed the physical byte limit. The read handle excludes ordinary writers through EOF.
 
 Stop older Guardian writers in every relevant Windows session before upgrade or downgrade: their
 named mutex does not participate in this file protocol. All cooperating writers must use the same
@@ -589,6 +594,10 @@ while the exact recorded marker identity, canonical payload and manifest binding
 held open through cleanup and publication. Missing, unreadable, replaced or unsupported markers
 prove nothing: preserve their decoys and manifest records. Pristine bytes, the expected configured
 path and full file identity are still all required before handle-based deletion.
+
+Monitoring accepts an intact canary only when the DATA length is exactly the expected document size,
+all canonical bytes match and the reader reaches EOF. A suffix appended after metadata acquisition
+counts as modification. Existing owner and identity checks continue to govern deletion.
 
 The adjacent `.canary-owners-<full SHA256 of normalized logical manifest path>` directory contains
 one 68-byte ASCII `.binding` and at most 128 fixed `o000.owner` through `o127.owner` names. Canonical

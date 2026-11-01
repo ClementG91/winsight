@@ -160,13 +160,13 @@ public sealed class CanaryManager
     private static bool ContentMatchesAcquiredCanary(AutomaticFileAccess.LocalPathLease lease, byte[] expected)
     {
         using var stream = lease.OpenRead();
-        if (lease.Length != expected.Length)
+        if (stream.Length != expected.Length)
         {
             return false;
         }
         var actual = new byte[expected.Length];
         stream.ReadExactly(actual);
-        return actual.AsSpan().SequenceEqual(expected) && lease.IsCurrent();
+        return actual.AsSpan().SequenceEqual(expected) && stream.ReadByte() == -1 && lease.IsCurrent();
     }
 
     /// <summary>

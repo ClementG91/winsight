@@ -64,6 +64,12 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         }
 
         using var stream = lease.OpenRead(FileOptions.SequentialScan);
+        // Attributes were captured before DATA was opened. Check the actual input before a
+        // StreamReader can allocate a line; this read handle excludes ordinary in-place writers.
+        if (stream.Length > MaxBaselineBytes)
+        {
+            return null;
+        }
         using var reader = new StreamReader(stream, Encoding.UTF8);
         if (reader.ReadLine() != Header)
         {
