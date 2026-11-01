@@ -135,11 +135,17 @@ jobs:
         # P/Invoke boundary excluded because the VM protocol qualifies it instead. Measured whole that
         # assembly reads 54%, which averages policy logic with generated marshalling stubs and means
         # nothing; measured honestly it is at 91%.
-        run: >-
-          ./scripts/Measure-Coverage.ps1
-          -EngineMinimum 80
-          -PrivilegedMinimum 80
-          -TrxLogFilePrefix tests-${{ matrix.architecture }}
+        run: |
+          $coverageArguments = @{
+            EngineMinimum = 80
+            PrivilegedMinimum = 80
+            TrxLogFilePrefix = "tests-${{ matrix.architecture }}"
+          }
+          # A cancelled ARM run may not finalize Application TRX; keep completed test output.
+          if ("${{ matrix.architecture }}" -eq "arm64") {
+            $coverageArguments["ConsoleLoggerVerbosity"] = "detailed"
+          }
+          ./scripts/Measure-Coverage.ps1 @coverageArguments
 
       - name: Upload test results
         if: always()
