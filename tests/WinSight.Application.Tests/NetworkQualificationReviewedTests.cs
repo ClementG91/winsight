@@ -42,9 +42,9 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests
     [InlineData("control", true)]
     public async Task ReviewedActualMountedStagingPreservesPrimaryAcrossDismount(string side, bool secret)
     {
-        await Run("$side='" + side + "';$secret=$" + secret.ToString().ToLowerInvariant() + ";" + """
+        await Run(FixturePaths + "$side='" + side + "';$secret=$" + secret.ToString().ToLowerInvariant() + ";" + """
             $AutomaticCredential=$true;$script:logs=@();$script:fixtures=0;$script:restores=0;$script:dismounts=0;$script:primaryCalls=0
-            $data='target.vhdx';$controlData='control.vhdx';$letter='D';$staged='D:\candidate';$HarnessDir='D:\harness';$envelope='synthetic'
+            $data='target.vhdx';$controlData='control.vhdx';$letter=$fixtureLetter;$staged=[IO.Path]::Combine($fixtureRoot,'candidate');$HarnessDir=[IO.Path]::Combine($fixtureRoot,'harness');$envelope='synthetic'
             $candidate=[pscustomobject]@{commit=('a'*40)};$runState=[pscustomobject]@{runId='run'}
             function Write-HostLog($Message) {$script:logs+=$Message}
             function Remove-StagedNetworkFixtures {$script:fixtures++}
@@ -169,13 +169,13 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests
     [InlineData("utf8-bytes")]
     public async Task NetworkResultReaderRejectsDepthAndByteOverflowBeforeAttribution(string kind)
     {
-        await Run("$kind='" + kind + "';" + """
+        await Run(FixturePaths + "$kind='" + kind + "';" + """
             if (-not (Get-Command Read-NetworkGuestResult -ErrorAction SilentlyContinue)) {throw 'ASSERT: actual result reader missing'}
             $candidate=[pscustomobject]@{commit=('a'*40)};$runState=[pscustomobject]@{runId='bounded-run'}
             $prefix='{"candidate":{"commit":"'+$candidate.commit+'","qualificationRunId":"'+$runState.runId+'"},"gates":{"36-ipc-network-logon":{"status":"PASS"}},"notes":'
             $script:boundedRaw=if ($kind -ceq 'depth') {$prefix+('['*100)+'0'+(']'*100)+'}'} else {$prefix+'"'+([string][char]0x00E9)*(9MB)+'"}'}
             $script:reads=0;function Get-Content($LiteralPath,[switch]$Raw) {$script:reads++;return $script:boundedRaw}
-            $caught=$null;try {Read-NetworkGuestResult -Path 'D:\nonexistent-winsight-bounded-result.json' -Side 'target'|Out-Null} catch {$caught=$_}
+            $caught=$null;try {Read-NetworkGuestResult -Path ([IO.Path]::Combine($fixtureRoot,'nonexistent-winsight-bounded-result.json')) -Side 'target'|Out-Null} catch {$caught=$_}
             if (-not $caught -or $script:reads -ne 1) {throw 'ASSERT: actual reader accepted excessive depth/UTF8 bytes or missed read boundary'}
             """);
     }

@@ -4,16 +4,22 @@ namespace WinSight.Application.Tests;
 
 public sealed partial class NetworkQualificationLifecycleRegressionTests
 {
+    // These paths are mocked; the provider drive must exist on x64 and native ARM64 runners.
+    private const string FixturePaths = """
+        $fixtureRoot=[IO.Path]::Combine([IO.Path]::GetTempPath(),'winsight-qualification-fixture-'+[guid]::NewGuid().ToString('N'))
+        $fixtureLetter=[IO.Path]::GetPathRoot($fixtureRoot).Substring(0,1);
+        """;
+
     [Fact]
     public async Task FullCampaignActualStagingBindsTheRunAndEveryRequestedMandatoryGate()
     {
-        await Run("""
-            $CandidateDir='D:\synthetic-candidate';$HarnessDir='D:\synthetic-harness';$data='D:\synthetic.vhdx';$Name='target';$Checkpoint='S0'
-            $runState=[pscustomobject]@{runId='711bd1cf-3153-4ea5-95d5-3938ae1e3610'};$letter='D'
+        await Run(FixturePaths + """
+            $CandidateDir=[IO.Path]::Combine($fixtureRoot,'candidate');$HarnessDir=[IO.Path]::Combine($fixtureRoot,'harness');$data=[IO.Path]::Combine($fixtureRoot,'synthetic.vhdx');$Name='target';$Checkpoint='S0'
+            $runState=[pscustomobject]@{runId='711bd1cf-3153-4ea5-95d5-3938ae1e3610'};$letter=$fixtureLetter
             $Gates=@('17-cloud-files');$expectedGates=@('01-identity-and-protected-root','17-cloud-files','99-residue');$script:stagedJson=$null
             function Restore-VMCheckpoint {}
             function Remove-DataDisk {}
-            function Mount-WinSightData {'D'}
+            function Mount-WinSightData {$fixtureLetter}
             function Dismount-WinSightData {}
             function Clear-WinSightDataVolume {}
             function New-Item {}
@@ -45,8 +51,8 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests
     [InlineData("timeout", 1)]
     public async Task FullCampaignActualVerdictRejectsIncompleteUnknownForeignAndRefusedResults(string kind, int expected)
     {
-        await Run("$kind='" + kind + "';$expected=" + expected + ";" + """
-            $EvidenceRoot='D:\synthetic-evidence';$RunName='full-probe';$runDir=Join-Path $EvidenceRoot $RunName
+        await Run(FixturePaths + "$kind='" + kind + "';$expected=" + expected + ";" + """
+            $EvidenceRoot=[IO.Path]::Combine($fixtureRoot,'evidence');$RunName='full-probe';$runDir=Join-Path $EvidenceRoot $RunName
             $candidate=[pscustomobject]@{commit=('a'*40)};$runState=[pscustomobject]@{runId='711bd1cf-3153-4ea5-95d5-3938ae1e3610'}
             $Gates=@('17-cloud-files');$expectedGates=@('01-identity-and-protected-root','17-cloud-files','99-residue')
             $timedOut=$false;$refused=@();$DriverHeartbeat=$null;$script:logs=@()
@@ -81,14 +87,14 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests
     [InlineData("resume")]
     public async Task FullCampaignSealingAndRecoveryPreserveThePrimaryAndAnIdenticalPartialResume(string failure)
     {
-        await Run("$failure='" + failure + "';" + """
-            $Root='D:\synthetic-root';$EvidenceRoot='D:\synthetic-evidence';$CandidateDir='D:\synthetic-candidate';$HarnessDir='D:\synthetic-harness';$BootstrapReceipt='D:\synthetic-bootstrap.json'
-            $Name='target';$Checkpoint='S0';$data='D:\synthetic-root\data.vhdx';$RunName='full-recovery';$runDir=Join-Path $EvidenceRoot $RunName
+        await Run(FixturePaths + "$failure='" + failure + "';" + """
+            $Root=[IO.Path]::Combine($fixtureRoot,'root');$EvidenceRoot=[IO.Path]::Combine($fixtureRoot,'evidence');$CandidateDir=[IO.Path]::Combine($fixtureRoot,'candidate');$HarnessDir=[IO.Path]::Combine($fixtureRoot,'harness');$BootstrapReceipt=[IO.Path]::Combine($fixtureRoot,'bootstrap.json')
+            $Name='target';$Checkpoint='S0';$data=[IO.Path]::Combine($Root,'data.vhdx');$RunName='full-recovery';$runDir=Join-Path $EvidenceRoot $RunName
             $Gates=@('17-cloud-files');$expectedGates=@('01-identity-and-protected-root','17-cloud-files','99-residue');$Resume=$true;$DriverHeartbeat=$null;$timedOut=$false;$refused=@();$candidate=[pscustomobject]@{commit=('a'*40)};$runState=[pscustomobject]@{runId='fcfb0447-3ea3-4bf5-a4f6-12a466c2d982'}
             $script:copies=0;$script:restores=0;$script:seals=0;$script:resumeCopy=$false;$script:events=@();$script:logs=@();$primary=[IO.IOException]::new('native '+$failure+' {primary}')
             function Remove-DataDisk {$script:events+='detach'}
             function Get-WinSightVmState($Name) {'Off'}
-            function Mount-WinSightData($Path) {'D'}
+            function Mount-WinSightData($Path) {$fixtureLetter}
             function Dismount-WinSightData($Path) {$script:events+='dismount';if ($failure -ceq 'dismount') {throw $primary} }
             function Copy-GuestResults($From,$To,[switch]$Resume) {$script:copies++;$script:resumeCopy=$Resume.IsPresent;$script:events+='copy';if ($failure -ceq 'copy') {throw $primary} }
             function Test-Path($LiteralPath) {$true}
@@ -99,7 +105,7 @@ public sealed partial class NetworkQualificationLifecycleRegressionTests
             function Get-ChildItem {}
             function Get-Content {return (@{candidate=@{commit=$candidate.commit;qualificationRunId=$runState.runId};gates=@{'01-identity-and-protected-root'=@{status='PASS'};'17-cloud-files'=@{status='PASS'};'99-residue'=@{status='PASS'}};startedUtc=[DateTime]::UtcNow.AddMinutes(-1).ToString('o');finishedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 8)}
             function Set-Content($LiteralPath,[Parameter(ValueFromPipeline=$true)]$Value,$Encoding) {if ($LiteralPath -like '*SHA256SUMS.txt') {$script:seals++;$script:events+='seal';if ($failure -ceq 'seal') {throw $primary} } }
-            $hostLog='D:\synthetic-evidence\host-operations.txt'
+            $hostLog=[IO.Path]::Combine($EvidenceRoot,'host-operations.txt')
             function Add-SharedLine($Path,$Line) {$script:logs+=$Line;if ($failure -ceq 'host-log') {throw $primary} }
             function Write-Host {}
             function Write-WinSightQualificationSeal($RunDir) {$script:seals++;$script:events+='seal';if ($failure -ceq 'seal') {throw $primary} }
