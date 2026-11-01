@@ -318,6 +318,11 @@ honored Allow rules: alerts continue, while new Allow/Revoke writes are refused.
 from access denial on the same file acquisition: only confirmed absence permits interpreting a file
 that could not be opened as an empty store. A readable valid store with no active rules is also healthy.
 
+The reader checks the DATA handle's current length and reads through EOF within an 8 MiB physical
+budget, including trailing whitespace. A valid JSON prefix cannot hide an invalid or oversized
+suffix appended after metadata acquisition. Cooperating WinSight writers use the adjacent lock;
+this validation does not promise a consistent snapshot against an unrelated in-place writer.
+
 | Rule status | Meaning and recovery |
 |---|---|
 | `Loaded`, `Missing` | The store was read, or its absence was confirmed. A missing file can be created on the next successful write. |

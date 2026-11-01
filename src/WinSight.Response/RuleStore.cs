@@ -325,18 +325,42 @@ public sealed class RuleStore
             {
                 return false;
             }
-            if (lease.Length > MaxBytes)
+            using var stream = lease.OpenRead();
+            // Metadata length was captured before DATA was opened. An outside-protocol writer
+            // can change this same object; validate the complete physically bounded input.
+            var dataLength = stream.Length;
+            if (dataLength > MaxBytes)
             {
                 result = new(RuleStoreStatus.ByteLimit);
                 return false;
             }
-            using var stream = lease.OpenRead();
-            var bytes = new byte[(int)lease.Length];
-            stream.ReadExactly(bytes);
+            // Small policies should not allocate an 8 MiB large object on every monitor event.
+            // Leave one byte for EOF detection, growing only up to the physical limit plus one.
+            var buffer = new byte[(int)Math.Min(dataLength + 1, 64 * 1024)];
+            var count = 0;
+            while (true)
+            {
+                if (count == buffer.Length)
+                {
+                    Array.Resize(ref buffer, (int)Math.Min(MaxBytes + 1, buffer.Length * 2L));
+                }
+                var read = stream.Read(buffer, count, buffer.Length - count);
+                if (read == 0)
+                {
+                    break;
+                }
+                count += read;
+                if (count > MaxBytes)
+                {
+                    result = new(RuleStoreStatus.ByteLimit);
+                    return false;
+                }
+            }
             if (!lease.IsCurrent())
             {
                 return false;
             }
+            var bytes = buffer.AsSpan(0, count).ToArray();
             using var document = JsonDocument.Parse(bytes);
             var value = document.RootElement;
             result = new(RuleStoreStatus.InvalidFormat);
