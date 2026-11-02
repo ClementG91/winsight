@@ -146,6 +146,11 @@ public sealed class ProcessInsightAcquirerTests
         internal List<string> Calls { get; } = [];
         internal List<CancellationToken> Tokens { get; } = [];
 
+        // These cases isolate the original stages after a positive target lookup.
+        // The separate targeted-acquisition cases record and verify the new first stage.
+        public AcquisitionSnapshot<ProcessInfo> AcquireTargetProcess(int pid, CancellationToken cancellationToken) =>
+            new([Process(pid, "synthetic-target.exe", 0, Birth)]);
+
         public AcquisitionSnapshot<ProcessInfo> GetProcesses(CancellationToken cancellationToken)
         {
             Enter("processes", cancellationToken);

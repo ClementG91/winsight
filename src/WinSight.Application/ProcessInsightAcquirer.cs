@@ -14,6 +14,22 @@ internal sealed class ProcessInsightAcquirer(IProcessInsightAcquisition acquisit
     internal ToolReport Acquire(int pid, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (pid >= 0)
+        {
+            // Only a completed lookup of this PID can establish its absence independently
+            // of unreadable rows elsewhere. A gap remains unknown, never an absent process.
+            var targetAcquisition = _acquisition.AcquireTargetProcess(pid, cancellationToken);
+            if (!targetAcquisition.Items.Any(process => process.Pid == pid))
+            {
+                return ProcessInsightReport.Render(
+                    pid,
+                    insight: null,
+                    ProcessInsightCoverage.From(targetAcquisition));
+            }
+        }
+
+        // A positive lookup is admission only. Use the later full snapshot for every identity
+        // and lineage decision; a recycled PID must not inherit the initial process metadata.
         var processAcquisition = _acquisition.GetProcesses(cancellationToken);
         var processes = processAcquisition.Items;
 
@@ -42,6 +58,7 @@ internal sealed class ProcessInsightAcquirer(IProcessInsightAcquisition acquisit
 
 internal interface IProcessInsightAcquisition
 {
+    AcquisitionSnapshot<ProcessInfo> AcquireTargetProcess(int pid, CancellationToken cancellationToken);
     AcquisitionSnapshot<ProcessInfo> GetProcesses(CancellationToken cancellationToken);
     AcquisitionSnapshot<LoadedModule> GetModules(int pid, CancellationToken cancellationToken);
     IReadOnlyList<Connection> GetConnections(CancellationToken cancellationToken);
@@ -51,6 +68,9 @@ internal interface IProcessInsightAcquisition
 internal sealed class NativeProcessInsightAcquisition(ISignatureVerifier verifier) : IProcessInsightAcquisition
 {
     private readonly ISignatureVerifier _verifier = verifier ?? throw new ArgumentNullException(nameof(verifier));
+
+    public AcquisitionSnapshot<ProcessInfo> AcquireTargetProcess(int pid, CancellationToken cancellationToken) =>
+        new ProcessLister(_verifier).SnapshotForWithCoverage(pid, cancellationToken);
 
     public AcquisitionSnapshot<ProcessInfo> GetProcesses(CancellationToken cancellationToken) =>
         new ProcessLister(_verifier).SnapshotWithCoverage(cancellationToken);

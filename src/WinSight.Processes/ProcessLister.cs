@@ -34,7 +34,24 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
         SnapshotWithCoverage(cancellationToken).Items;
 
     public AcquisitionSnapshot<ProcessInfo> SnapshotWithCoverage(
+        CancellationToken cancellationToken = default) =>
+        Collect(pid: null, cancellationToken);
+
+    /// <summary>
+    /// Reads one PID with coverage scoped to that query. A completed empty result establishes
+    /// absence or session invisibility; an unreadable source or row remains incomplete.
+    /// </summary>
+    public AcquisitionSnapshot<ProcessInfo> SnapshotForWithCoverage(
+        int pid,
         CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentOutOfRangeException.ThrowIfNegative(pid);
+        return Collect(pid, cancellationToken);
+    }
+
+    // Both entry points retain one enumerator owner, row parser and coverage policy.
+    private AcquisitionSnapshot<ProcessInfo> Collect(int? pid, CancellationToken cancellationToken)
     {
         var raw = new List<(
             int Pid,
@@ -51,7 +68,10 @@ public sealed class ProcessLister(ISignatureVerifier? verifier = null)
             using var searcher = new ManagementObjectSearcher(
                 scope,
                 new ObjectQuery(
-                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine, CreationDate FROM Win32_Process"),
+                    "SELECT ProcessId, Name, ExecutablePath, ParentProcessId, CommandLine, CreationDate FROM Win32_Process"
+                    + (pid is { } targetPid
+                        ? " WHERE ProcessId = " + targetPid.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                        : string.Empty)),
                 QueryOptions());
             // The collection owns an unmanaged enumerator and a COM reference; a bare
             // foreach over searcher.Get() left both to the finaliser.
