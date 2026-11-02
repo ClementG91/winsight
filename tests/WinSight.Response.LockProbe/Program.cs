@@ -26,9 +26,20 @@ public static class Program
             _ = Console.ReadLine();
             for (var i = 0; i < 20; i++)
             {
-                if (!quota.TryAcquire(out _))
+                var begin = QuotaTimestamp();
+                if (!quota.TryAcquire(out _, out var status))
                 {
+                    var end = QuotaTimestamp();
                     Console.Error.WriteLine("A serialized quota admission was refused.");
+                    try
+                    {
+                        if (begin is { } before && end is { } after)
+                        {
+                            var label = Enum.IsDefined(status) ? status.ToString() : nameof(VirusTotalQuotaStatus.Unknown);
+                            Console.Error.WriteLine(FormattableString.Invariant($"WSQUOTA:{i}:{label}:{before}:{after}:{Stopwatch.Frequency}"));
+                        }
+                    }
+                    catch (Exception) { /* Diagnostics must not change the refusal exit code. */ }
                     return 5;
                 }
             }
@@ -79,5 +90,11 @@ public static class Program
         }
         Console.WriteLine(JsonSerializer.Serialize(ids));
         return 0;
+    }
+
+    private static long? QuotaTimestamp()
+    {
+        try { return Stopwatch.GetTimestamp(); }
+        catch (Exception) { return null; }
     }
 }

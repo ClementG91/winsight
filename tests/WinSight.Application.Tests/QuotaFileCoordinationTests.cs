@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 using System.Security.AccessControl;
@@ -10,11 +11,17 @@ using System.Text.Json;
 using WinSight.Core;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
-public sealed class QuotaFileCoordinationTests : IDisposable
+public sealed class QuotaFileCoordinationTests(ITestOutputHelper testOutput) : IDisposable
 {
+    private static readonly string[] QuotaStatusTokens =
+    [
+        "Unknown", "Acquired", "QuotaExhausted", "LockTimeout", "UnsafePath", "StateUnavailable",
+        "StateInvalidOrUnsupported", "StateOverBudget", "WriteFailed",
+    ];
     private const string Legacy = """{"recentRequests":["2026-07-14T11:59:50+00:00"],"utcDay":"2026-07-14","dayCount":3,"utcMonth":"2026-07","monthCount":3}""";
     private static readonly DateTimeOffset Now = new(2026, 7, 14, 12, 0, 0, TimeSpan.Zero);
     private readonly string _root = Directory.CreateTempSubdirectory("winsight-quota-file-").FullName;
@@ -364,7 +371,7 @@ public sealed class QuotaFileCoordinationTests : IDisposable
         return (allowed, Assert.IsType<VirusTotalQuotaSnapshot>(args[0]), Assert.IsType<string>(args[1]?.ToString()));
     }
 
-    private static OwnedChild Start(List<OwnedChild> children, params string[] args)
+    private OwnedChild Start(List<OwnedChild> children, params string[] args)
     {
         var tests = typeof(QuotaFileCoordinationTests).Assembly.Location;
         var start = new ProcessStartInfo("dotnet")
@@ -388,7 +395,7 @@ public sealed class QuotaFileCoordinationTests : IDisposable
 
     private static Task Ready(OwnedChild child) => child.Track(AssertReady(child.Track(child.Process.StandardOutput.ReadLineAsync())));
     private static async Task AssertReady(Task<string?> read) => Assert.Equal("ready", await read);
-    private static async Task ReadError(StreamReader reader)
+    private async Task ReadError(StreamReader reader)
     {
         var buffer = new char[1025];
         var count = 0;
@@ -398,9 +405,41 @@ public sealed class QuotaFileCoordinationTests : IDisposable
             if (read == 0) { break; }
             count += read;
         }
+        if (count > 0) { ReportQuotaRefusal(buffer, count); }
         Assert.InRange(count, 0, 1024);
         Assert.Equal(0, count);
     }
+
+    private void ReportQuotaRefusal(char[] buffer, int count)
+    {
+        // Diagnostics must not mask the existing zero-stderr or retained-output assertions.
+        try
+        {
+            var prefix = new string(buffer, 0, count);
+            var digest = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(prefix)));
+            var frame = ParseQuotaRefusal(prefix);
+            testOutput.WriteLine(FormattableString.Invariant(
+                $"quota-refusal stderr-characters={count};prefix-sha256={digest};recognized={frame is not null};{frame ?? "unobserved"}"));
+        }
+        catch (Exception) { /* A diagnostic callback cannot replace a fixture assertion failure. */ }
+    }
+
+    private static string? ParseQuotaRefusal(string prefix)
+    {
+        var frames = prefix.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r')).Where(line => line.StartsWith("WSQUOTA:", StringComparison.Ordinal)).ToArray();
+        if (frames.Length != 1) { return null; }
+        var fields = frames[0].Split(':');
+        if (fields.Length != 6 || !QuotaStatusTokens.Contains(fields[2], StringComparer.Ordinal)
+            || !QuotaCounter(fields[1], out var ordinal) || ordinal > 19
+            || !QuotaCounter(fields[3], out var begin) || !QuotaCounter(fields[4], out var end) || end < begin
+            || !QuotaCounter(fields[5], out var frequency) || frequency == 0) { return null; }
+        return FormattableString.Invariant($"ordinal={ordinal};status={fields[2]};begin={begin};end={end};frequency={frequency};elapsedMs={1000d * (end - begin) / frequency:F3}");
+    }
+
+    private static bool QuotaCounter(string value, out long parsed) =>
+        long.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out parsed)
+        && parsed >= 0 && parsed.ToString(CultureInfo.InvariantCulture) == value;
 
     private sealed class OwnedChild(Process process)
     {
