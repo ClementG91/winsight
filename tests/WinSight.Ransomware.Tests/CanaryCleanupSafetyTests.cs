@@ -1,10 +1,11 @@
 using System.Text.Json;
 using WinSight.Core;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Ransomware.Tests;
 
-public sealed class CanaryCleanupSafetyTests
+public sealed class CanaryCleanupSafetyTests(ITestOutputHelper output)
 {
     [Theory]
     [InlineData(false, false)]
@@ -223,19 +224,46 @@ public sealed class CanaryCleanupSafetyTests
 
                 var session = fixture.Track(new CanaryManager(seed, manifest));
                 var go = fixture.TrackResource(new ManualResetEventSlim());
-                var sweep = fixture.Track(Task.Run(() =>
+                var sweepStage = "not-entered";
+                var startStage = "not-entered";
+                // Dedicated threads keep these synchronous workers independent of pool admission.
+                // The original release and completion budgets still apply.
+                var sweep = fixture.Track(Task.Factory.StartNew(() =>
                 {
+                    Volatile.Write(ref sweepStage, "waiting-go");
                     if (!go.Wait(TimeSpan.FromSeconds(5))) { throw new TimeoutException("Race start was not released."); }
+                    Volatile.Write(ref sweepStage, "sweeping");
                     CanaryManager.RemoveOrphans([previous, current], manifest, seed);
-                }));
-                var start = fixture.Track(Task.Run(() =>
+                    Volatile.Write(ref sweepStage, "completed");
+                }, CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default));
+                var start = fixture.Track(Task.Factory.StartNew(() =>
                 {
+                    Volatile.Write(ref startStage, "waiting-go");
                     if (!go.Wait(TimeSpan.FromSeconds(5))) { throw new TimeoutException("Race start was not released."); }
+                    Volatile.Write(ref startStage, "sweeping");
                     CanaryManager.RemoveOrphans([current], manifest, seed);
+                    Volatile.Write(ref startStage, "planting");
                     session.Plant([current]);
-                }));
+                    Volatile.Write(ref startStage, "completed");
+                }, CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default));
                 go.Set();
-                await Task.WhenAll(sweep, start).WaitAsync(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await Task.WhenAll(sweep, start).WaitAsync(TimeSpan.FromSeconds(5));
+                }
+                catch (TimeoutException)
+                {
+                    try
+                    {
+                        output.WriteLine(FormattableString.Invariant(
+                            $"canary-orphan-race-timeout iteration={iteration};go-set={go.IsSet};sweep-stage={Volatile.Read(ref sweepStage)};sweep-status={sweep.Status};start-stage={Volatile.Read(ref startStage)};start-status={start.Status}"));
+                    }
+                    catch (Exception)
+                    {
+                        // Diagnostics must not replace the original observed timeout.
+                    }
+                    throw;
+                }
                 // Whatever the order, the live session's decoys were not swept out from under it.
                 Assert.Equal(3, session.Planted.Count);
                 Assert.All(session.Planted, path => Assert.True(File.Exists(path)));
