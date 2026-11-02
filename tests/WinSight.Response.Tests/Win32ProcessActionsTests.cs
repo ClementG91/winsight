@@ -9,8 +9,12 @@ namespace WinSight.Response.Tests;
 /// mechanism - capture, revalidation, suspend/resume, terminate - not a fake, on the current user's own
 /// process without elevation.
 /// </summary>
-public sealed class Win32ProcessActionsTests
+public sealed class Win32ProcessActionsTests : IDisposable
 {
+    private readonly string _root = Directory.CreateTempSubdirectory("winsight-process-actions-").FullName;
+
+    public void Dispose() => Directory.Delete(_root, recursive: true);
+
     private static readonly string PingLoop = OperatingSystem.IsWindows()
         ? Path.Combine(Environment.SystemDirectory, "cmd.exe")
         : "cmd.exe";
@@ -121,7 +125,7 @@ public sealed class Win32ProcessActionsTests
         var inspector = new Win32ProcessInspector();
         var controller = new Win32ProcessController();
         var responder = new ProcessResponder(inspector, controller,
-            new ActionJournal(Path.Combine(Path.GetTempPath(), $"winsight-journal-{Guid.NewGuid():N}.jsonl")));
+            new ActionJournal(Path.Combine(_root, "journal.jsonl")));
         var captured = inspector.Capture(child.Id)!;
         try
         {

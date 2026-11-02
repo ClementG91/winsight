@@ -269,9 +269,10 @@ that completely requires an OS policy that blocks outbound SMB/NTLM, not a user-
 
 ## Residual risk
 
-- **Architecture qualification remains asymmetric.** Historical native-x64 WFP/SCM, TOCTOU, IPC and
-  session behavior has candidate-bound VM evidence; the September corrections require fresh
-  qualification. Arm64 has native CI coverage for build,
+- **Architecture qualification remains asymmetric.** Published v0.14.2 passed the native-x64
+  campaign on 2026-09-28, including protected entry provenance. The October corrections require
+  qualification on their own bytes; disk-full/UI recovery, load/endurance and session trials remain
+  open in the [current matrix](validation/2026-10-03-readiness-remediation.md). Arm64 has native CI coverage for build,
   tests, PE architecture, installer lifecycle and packaging, but its privileged runtime still needs
   an elevated native VM. See [`docs/PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md).
 - **v0.10.5 is historical, unsigned and not production-ready.** SignPath Foundation declined the

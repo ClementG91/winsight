@@ -217,8 +217,11 @@ public delegate bool EnumProc(System.IntPtr hwnd, System.IntPtr lParam);
         $exit = $null
         do {
             foreach ($window in $UIA::RootElement.FindAll($Scope::Children, (New-Condition $UIA::ProcessIdProperty $operated.Id))) {
-                $exit = @($window.FindAll($Scope::Descendants, (New-Condition $UIA::NameProperty 'Exit')) |
-                    Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem }) | Select-Object -First 1
+                foreach ($label in 'Exit', 'Quitter', 'Salir') {
+                    $exit = @($window.FindAll($Scope::Descendants, (New-Condition $UIA::NameProperty $label)) |
+                        Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::MenuItem }) | Select-Object -First 1
+                    if ($exit) { break }
+                }
                 if ($exit) { break }
             }
             if ($exit) { break }
@@ -226,6 +229,7 @@ public delegate bool EnumProc(System.IntPtr hwnd, System.IntPtr lParam);
         } while ((Get-Date) -lt $deadline)
         if (-not $exit) { throw 'The tray context menu did not open.' }
         Invoke-OperatorElement $exit
-        Write-OperatorLog 'tray menu -> Exit'
+        # Invoking Exit can destroy the menu immediately: keep the label selected above.
+        Write-OperatorLog "tray menu -> $label"
     }
 }

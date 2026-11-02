@@ -1,3 +1,5 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
 using WinSight.Application;
 using WinSight.Ransomware;
 using Xunit;
@@ -11,9 +13,47 @@ namespace WinSight.Application.Tests;
 public sealed class RansomwareArmedCoverageTests : IDisposable
 {
     private static readonly byte[] Seed = new byte[32];
-    private readonly string _root = Path.Combine(Path.GetTempPath(), $"wsg-armed-{Guid.NewGuid():N}");
+    private readonly string _root = Directory.CreateTempSubdirectory("wsg-armed-private-").FullName;
 
-    public RansomwareArmedCoverageTests() => Directory.CreateDirectory(_root);
+    public RansomwareArmedCoverageTests()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            var user = identity.User ?? throw new InvalidOperationException("No token SID.");
+            var actualOwner = new DirectoryInfo(_root).GetAccessControl(AccessControlSections.Owner)
+                .GetOwner(typeof(SecurityIdentifier));
+            Assert.Contains(actualOwner, new[] { user,
+                new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) });
+            var security = new DirectorySecurity();
+            security.SetAccessRuleProtection(true, false);
+            foreach (var sid in new[] { user, new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null), new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) }.Distinct())
+            {
+                security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl,
+                    InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+            }
+            new DirectoryInfo(_root).SetAccessControl(security);
+            var applied = new DirectoryInfo(_root).GetAccessControl(AccessControlSections.Access | AccessControlSections.Owner);
+            Assert.True(applied.AreAccessRulesProtected);
+            Assert.Equal(actualOwner, applied.GetOwner(typeof(SecurityIdentifier)));
+            Assert.All(applied.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>(), rule =>
+            {
+                Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+                Assert.Contains(rule.IdentityReference, new[] { user,
+                    new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                    new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null) });
+                Assert.Equal(FileSystemRights.FullControl, rule.FileSystemRights);
+            });
+            Directory.CreateDirectory(Path.Combine(_root, "state"));
+        }
+        catch (Exception primary)
+        {
+            try { Directory.Delete(_root, true); }
+            catch (Exception cleanup) { throw new AggregateException("Private fixture setup and cleanup failed.", primary, cleanup); }
+            throw;
+        }
+    }
 
     [Fact]
     public void PreservedFilesOnEveryDecoyNameAreFailedCoverageNotActive()
@@ -74,7 +114,7 @@ public sealed class RansomwareArmedCoverageTests : IDisposable
     }
 
     private RansomwareMonitor Monitor(params string[] directories) =>
-        new(directories, null, Seed, Path.Combine(_root, $"manifest-{Guid.NewGuid():N}.json"));
+        new(directories, null, Seed, Path.Combine(_root, "state", $"manifest-{Guid.NewGuid():N}.json"));
 
     private string Folder(string name)
     {
@@ -86,27 +126,21 @@ public sealed class RansomwareArmedCoverageTests : IDisposable
     private Dictionary<string, byte[]> OccupyDecoyNames(string directory, int count)
     {
         // A previous session's decoys, which the operator has since edited: cleanup preserves them.
-        var previous = new CanaryManager(Seed, Path.Combine(_root, $"old-{Guid.NewGuid():N}.json"));
-        var planted = previous.Plant([directory]);
-        var kept = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-        foreach (var path in planted.Take(count))
-        {
-            File.AppendAllText(path, "operator notes");
-            kept[path] = File.ReadAllBytes(path);
-        }
-        previous.Remove();
-        return kept;
-    }
-
-    public void Dispose()
-    {
+        var previous = new CanaryManager(Seed, Path.Combine(_root, "state", $"old-{Guid.NewGuid():N}.json"));
         try
         {
-            System.IO.Directory.Delete(_root, recursive: true);
+            var planted = previous.Plant([directory]);
+            var kept = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in planted.Take(count))
+            {
+                File.AppendAllText(path, "operator notes");
+                kept[path] = File.ReadAllBytes(path);
+            }
+            previous.Remove();
+            return kept;
         }
-        catch (IOException)
-        {
-            // A watcher handle can outlive the test by a moment; the temp folder is disposable.
-        }
+        finally { previous.EndSessionWithoutCleanup(); }
     }
+
+    public void Dispose() => Directory.Delete(_root, recursive: true);
 }

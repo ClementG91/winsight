@@ -1,0 +1,412 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+using WinSight.Core;
+
+namespace WinSight.Response;
+
+/// <summary>Four exact bounded archives and a resumable, bounded write-ahead eviction index.</summary>
+internal static partial class ActionJournalEvidence
+{
+    internal const int Slots = 4;
+    internal const int MaxMetadataBytes = 8192;
+    private static readonly JsonSerializerOptions ReadOptions = new() { RespectRequiredConstructorParameters = true };
+
+    internal sealed record State(
+        int Version = 1,
+        long DiscardedBytes = 0,
+        long DiscardedFiles = 0,
+        string LossReason = "",
+        bool PriorCountersUnknown = false,
+        int NextSlot = 0,
+        int PendingSlot = -1,
+        long PendingBytes = 0,
+        string? PendingSha256 = null,
+        long DiscardedMetadataBytes = 0,
+        string? DiscardedMetadataTailSha256 = null,
+        long DiscardedJournalPrefixBytes = 0,
+        long UnverifiedPrefixDiscardBytes = 0,
+        long UnverifiedEvidenceBytes = 0,
+        int PendingTrimSlot = -2,
+        long PendingTrimBytes = 0,
+        long PendingTrimLength = 0,
+        uint PendingTrimVolume = 0,
+        ulong PendingTrimFileIndex = 0,
+        string? PendingTrimTailSha256 = null,
+        string? PendingTrimPublishedSha256 = null)
+    {
+        // Only native confirmed absence sets this observation. It is never accepted from disk,
+        // and changes to false only after our create-new publication succeeds durably.
+        [JsonIgnore]
+        public bool IndexMissing { get; init; }
+    }
+
+    private static readonly HashSet<string> KnownMetadataFields = new(StringComparer.Ordinal)
+    {
+        nameof(State.Version), nameof(State.DiscardedBytes), nameof(State.DiscardedFiles), nameof(State.LossReason),
+        nameof(State.PriorCountersUnknown), nameof(State.NextSlot), nameof(State.PendingSlot),
+        nameof(State.PendingBytes), nameof(State.PendingSha256), nameof(State.DiscardedMetadataBytes),
+        nameof(State.DiscardedMetadataTailSha256), nameof(State.DiscardedJournalPrefixBytes),
+        nameof(State.UnverifiedPrefixDiscardBytes), nameof(State.UnverifiedEvidenceBytes),
+        nameof(State.PendingTrimSlot), nameof(State.PendingTrimBytes), nameof(State.PendingTrimLength),
+        nameof(State.PendingTrimVolume), nameof(State.PendingTrimFileIndex),
+        nameof(State.PendingTrimTailSha256), nameof(State.PendingTrimPublishedSha256),
+    };
+
+    internal static string SlotPath(string path, int slot) => slot == 0
+        ? path + ".corrupt.jsonl" : path + $".corrupt.{slot}.jsonl";
+
+    internal static bool Preserve(string path)
+    {
+        try
+        {
+            return PreserveCore(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
+
+    private static bool PreserveCore(string path)
+    {
+        if (!Maintain(path))
+        {
+            return false;
+        }
+        using var source = AutomaticFileAccess.TryAcquire(path);
+        if (source is null || source.IsDirectory)
+        {
+            return false;
+        }
+        var state = ReadState(path, out var unavailable, out var invalid);
+        if (unavailable || invalid || !ResumeEviction(path, ref state))
+        {
+            return false;
+        }
+        using var input = source.OpenRead();
+        input.Position = Math.Max(0, input.Length - ActionJournalReader.MaxBytes);
+        var digest = Convert.ToHexString(SHA256.HashData(input));
+        var free = -1;
+        var alreadyPreserved = false;
+        for (var i = 0; i < Slots; i++)
+        {
+            using var existing = AutomaticFileAccess.TryAcquire(SlotPath(path, i), out var missing);
+            if (existing is null)
+            {
+                if (!missing)
+                {
+                    return false;
+                }
+                if (free < 0)
+                {
+                    free = i;
+                }
+            }
+            else
+            {
+                if (existing.IsDirectory)
+                {
+                    return false;
+                }
+                using var evidence = existing.OpenRead();
+                if (existing.Length == Math.Min(source.Length, ActionJournalReader.MaxBytes))
+                {
+                    alreadyPreserved |= Convert.ToHexString(SHA256.HashData(evidence)) == digest;
+                }
+                if (!existing.IsCurrent())
+                {
+                    return false;
+                }
+            }
+        }
+        if (alreadyPreserved)
+        {
+            return source.IsCurrent();
+        }
+        if (free < 0)
+        {
+            free = state.NextSlot;
+            using (var victim = AutomaticFileAccess.TryAcquire(SlotPath(path, free)))
+            {
+                if (victim is null || victim.IsDirectory || victim.Length > ActionJournalReader.MaxBytes)
+                {
+                    return false;
+                }
+                using var bytes = victim.OpenRead();
+                state = state with
+                {
+                    PendingSlot = free,
+                    PendingBytes = victim.Length,
+                    PendingSha256 = Convert.ToHexString(SHA256.HashData(bytes)),
+                };
+            }
+            // No slot is deleted or reused before this intent is durable.
+            if (!Save(path, ref state) || !ResumeEviction(path, ref state))
+            {
+                return false;
+            }
+        }
+        return source.IsCurrent()
+            && AutomaticFileAccess.TryCopyTailAtomic(path, SlotPath(path, free), ActionJournalReader.MaxBytes);
+    }
+
+    private static bool ResumeEviction(string path, ref State state)
+    {
+        if (state.PendingSlot < 0)
+        {
+            return true;
+        }
+        using (var victim = AutomaticFileAccess.TryAcquireForDelete(SlotPath(path, state.PendingSlot), out var missing))
+        {
+            if (victim is null)
+            {
+                if (!missing)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (victim.IsDirectory)
+                {
+                    return false;
+                }
+                // A different length already disproves identity with the approved bytes. In
+                // particular, do not hash an unbounded external replacement or prevent its trim.
+                var matches = victim.Length == state.PendingBytes;
+                if (matches)
+                {
+                    using var input = victim.OpenRead();
+                    matches = Convert.ToHexString(SHA256.HashData(input)) == state.PendingSha256;
+                }
+                if (!matches)
+                {
+                    // An external replacement is not the object approved for eviction. Leave it
+                    // intact and persist that the historical accounting can no longer be complete.
+                    state = state with
+                    {
+                        PriorCountersUnknown = true,
+                        LossReason = "evidence-replaced-externally",
+                        PendingSlot = -1,
+                        PendingBytes = 0,
+                        PendingSha256 = null,
+                    };
+                    return Save(path, ref state);
+                }
+                if (!victim.TryDelete())
+                {
+                    return false;
+                }
+            }
+        }
+        // A crash after delete but before this write leaves the old Pending/base counters intact;
+        // the next writer confirms native not-found and applies these increments exactly once.
+        state = state with
+        {
+            PriorCountersUnknown = state.PriorCountersUnknown
+                || WouldOverflow(state.DiscardedBytes, state.PendingBytes) || WouldOverflow(state.DiscardedFiles, 1),
+            DiscardedBytes = SaturatingAdd(state.DiscardedBytes, state.PendingBytes),
+            DiscardedFiles = SaturatingAdd(state.DiscardedFiles, 1),
+            LossReason = "evidence-budget",
+            NextSlot = (state.PendingSlot + 1) % Slots,
+            PendingSlot = -1,
+            PendingBytes = 0,
+            PendingSha256 = null,
+        };
+        return Save(path, ref state);
+    }
+
+    internal static ActionJournalSnapshot Coverage(string path, ActionJournalSnapshot snapshot,
+        bool representablePathsOnly = false)
+    {
+        var uninspected = representablePathsOnly && !HasRepresentableLeaf(path + ".evidence.json");
+        var unavailable = false;
+        var invalid = false;
+        var state = uninspected ? new State() : ReadState(path, out unavailable, out invalid);
+        var preserved = false;
+        var evidenceUnavailable = unavailable;
+        var evidenceOverBudget = false;
+        for (var slot = 0; slot < Slots; slot++)
+        {
+            if (representablePathsOnly && !HasRepresentableLeaf(SlotPath(path, slot)))
+            {
+                // An impossible derived component is not an access failure or evidence loss.
+                // Its uninspected accounting remains unknown, independently of write refusal.
+                uninspected = true;
+                continue;
+            }
+            using var archive = AutomaticFileAccess.TryAcquire(SlotPath(path, slot), out var missing);
+            if (archive is null)
+            {
+                evidenceUnavailable |= !missing;
+                continue;
+            }
+            preserved |= !archive.IsDirectory;
+            evidenceOverBudget |= archive.Length > ActionJournalReader.MaxBytes;
+            if (archive.IsDirectory)
+            {
+                evidenceUnavailable = true;
+                continue;
+            }
+            try
+            {
+                using var input = archive.OpenRead();
+                evidenceUnavailable |= !archive.IsCurrent();
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+            {
+                evidenceUnavailable = true;
+            }
+        }
+        return snapshot with
+        {
+            EvidencePreserved = preserved,
+            DiscardedEvidenceBytes = state.DiscardedBytes,
+            DiscardedEvidenceFiles = state.DiscardedFiles,
+            EvidenceLossReason = state.LossReason,
+            EvidenceCountersUnknown = state.PriorCountersUnknown || evidenceUnavailable || invalid || uninspected,
+            DiscardedMetadataBytes = state.DiscardedMetadataBytes,
+            DiscardedMetadataTailSha256 = state.DiscardedMetadataTailSha256,
+            DiscardedJournalPrefixBytes = state.DiscardedJournalPrefixBytes,
+            UnverifiedPrefixDiscardBytes = state.UnverifiedPrefixDiscardBytes,
+            UnverifiedEvidenceBytes = state.UnverifiedEvidenceBytes,
+            PendingPrefixDiscardBytes = state.PendingTrimSlot == -1 ? state.PendingTrimBytes : 0,
+            PendingEvidencePrefixDiscardBytes = state.PendingTrimSlot >= 0 ? state.PendingTrimBytes : 0,
+            EvidenceUnavailable = evidenceUnavailable,
+            EvidenceMetadataUnrecognized = invalid,
+            EvidenceOverBudget = evidenceOverBudget,
+            RecoveryRequired = snapshot.SourceBytes > ActionJournalReader.MaxBytes || evidenceOverBudget || evidenceUnavailable || invalid,
+            EvidenceRecoveryPending = state.PendingSlot >= 0 || state.PendingTrimSlot >= -1 || evidenceUnavailable || invalid,
+        };
+    }
+
+    private static bool HasRepresentableLeaf(string path) =>
+        Path.GetFileName(Path.GetFullPath(path)).Length <= 255;
+
+    private static State ReadState(string path, out bool unavailable, out bool invalid)
+    {
+        try
+        {
+            return ReadStateCore(path, out unavailable, out invalid);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            // Unreadable intent metadata does not make the separately acquired journal unreadable.
+            // Keep its entries for inspection, but never permit a writer to bypass unknown intents.
+            unavailable = true;
+            invalid = false;
+            return new State(LossReason: "unavailable-evidence-metadata", PriorCountersUnknown: true);
+        }
+    }
+
+    private static State ReadStateCore(string path, out bool unavailable, out bool invalid)
+    {
+        unavailable = false;
+        invalid = false;
+        using var lease = AutomaticFileAccess.TryAcquire(path + ".evidence.json", out var missing);
+        if (lease is null)
+        {
+            unavailable = !missing;
+            return new() { IndexMissing = missing };
+        }
+        return ReadAcquiredState(lease, out unavailable, out invalid);
+    }
+
+    private static State ReadAcquiredState(AutomaticFileAccess.LocalPathLease lease, out bool unavailable, out bool invalid)
+    {
+        unavailable = false;
+        invalid = false;
+        if (lease.IsDirectory)
+        {
+            unavailable = true;
+            return new();
+        }
+        try
+        {
+            if (lease.Length <= MaxMetadataBytes)
+            {
+                using var input = lease.OpenRead();
+                using var bounded = ReadBoundedMetadata(input);
+                using var document = JsonDocument.Parse(bounded);
+                var value = document.RootElement;
+                var required = new[] { "Version", "DiscardedBytes", "DiscardedFiles", "LossReason", "PriorCountersUnknown",
+                    "NextSlot", "PendingSlot", "PendingBytes", "PendingSha256" };
+                var names = new HashSet<string>(StringComparer.Ordinal);
+                var complete = value.ValueKind == JsonValueKind.Object
+                    && value.EnumerateObject().All(property => KnownMetadataFields.Contains(property.Name) && names.Add(property.Name))
+                    && required.All(names.Contains);
+                var state = complete ? value.Deserialize<State>(ReadOptions) : null;
+                if (state is not null && state.Version == 1 && state.DiscardedBytes >= 0 && state.DiscardedFiles >= 0
+                    && state.DiscardedMetadataBytes >= 0 && state.NextSlot is >= 0 and < Slots
+                    && state.PendingSlot is >= -1 and < Slots && state.PendingBytes >= 0
+                    && state.PendingBytes <= ActionJournalReader.MaxBytes && state.LossReason is { Length: <= 128 }
+                    && (state.PendingSlot < 0 ? state.PendingBytes == 0 && state.PendingSha256 is null : IsHash(state.PendingSha256))
+                    && !(state.PendingSlot >= 0 && state.PendingTrimSlot >= -1)
+                    && TrimStateValid(value, state) && lease.IsCurrent())
+                {
+                    return state;
+                }
+            }
+        }
+        catch (JsonException)
+        {
+            // Interrupted, foreign and future bytes do not establish a recognized intent index.
+            // Preserve them and refuse every writer; never invent a discard that did not happen.
+        }
+        invalid = true;
+        return new State(LossReason: "unrecognized-evidence-metadata", PriorCountersUnknown: true);
+    }
+
+    private static MemoryStream ReadBoundedMetadata(FileStream input)
+    {
+        // The attributes lease's length may predate an in-place write. Bound the acquired DATA
+        // itself, including an EOF sentinel, before handing any bytes to the JSON parser.
+        if (input.Length <= MaxMetadataBytes)
+        {
+            var bytes = new byte[MaxMetadataBytes + 1];
+            var count = 0;
+            while (count < bytes.Length)
+            {
+                var read = input.Read(bytes, count, bytes.Length - count);
+                if (read == 0)
+                {
+                    break;
+                }
+                count += read;
+            }
+            if (count <= MaxMetadataBytes)
+            {
+                // Parse(Stream) preserves the existing single-leading-BOM behavior. The BOM
+                // still counts toward the physical byte budget enforced above.
+                return new MemoryStream(bytes, 0, count, writable: false);
+            }
+        }
+        throw new JsonException("Evidence metadata exceeds the physical byte budget.");
+    }
+
+    private static bool Save(string path, ref State state)
+    {
+        if (!state.IndexMissing)
+        {
+            var current = ReadState(path, out var unavailable, out var invalid);
+            if (unavailable || invalid || current.IndexMissing)
+            {
+                return false;
+            }
+        }
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(state);
+        if (bytes.Length > MaxMetadataBytes
+            || !AutomaticFileAccess.TryWriteAtomicBounded(path + ".evidence.json", bytes, replaceExisting: !state.IndexMissing))
+        {
+            return false;
+        }
+        state = state with { IndexMissing = false };
+        return true;
+    }
+
+    private static long SaturatingAdd(long left, long right) => long.MaxValue - left < right ? long.MaxValue : left + right;
+    private static bool WouldOverflow(long left, long right) => long.MaxValue - left < right;
+    private static bool IsHash(string? hash) => hash is { Length: 64 } && hash.All(char.IsAsciiHexDigit);
+}

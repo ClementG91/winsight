@@ -1,3 +1,6 @@
+using System.Security.AccessControl;
+using System.Security.Principal;
+
 using Xunit;
 
 namespace WinSight.Response.Tests;
@@ -97,6 +100,61 @@ public sealed class RuleStoreTests : IDisposable
         Assert.Empty(store.ActiveRules(RuleScopeKind.Persistence));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ASharingLockNeverReportsRemovalAndPreservesAllRules(bool anotherRule)
+    {
+        var store = Store();
+        var rule = store.Add(Rule())!;
+        var other = anotherRule ? store.Add(Rule(item: "run:other")) : null;
+        using (var locked = new FileStream(Path.Combine(_directory, "rules.json"), FileMode.Open,
+                   FileAccess.Read, FileShare.ReadWrite))
+        {
+            Assert.False(store.Remove(rule.Id));
+        }
+        var reloaded = Store().ActiveRules(RuleScopeKind.Persistence);
+        Assert.Contains(reloaded, r => r.Id == rule.Id);
+        Assert.Equal(anotherRule ? 2 : 1, reloaded.Count);
+        Assert.True(store.Remove(rule.Id));
+        Assert.DoesNotContain(Store().ActiveRules(RuleScopeKind.Persistence), r => r.Id == rule.Id);
+        if (other is not null)
+        {
+            Assert.Equal(other.Id, Assert.Single(Store().ActiveRules(RuleScopeKind.Persistence)).Id);
+        }
+    }
+
+    [Fact]
+    public void AccessDeniedCannotReportLastRuleRemoval()
+    {
+        var store = Store();
+        var rule = store.Add(Rule())!;
+        var directory = new DirectoryInfo(_directory);
+        var original = directory.GetAccessControl();
+        var denied = directory.GetAccessControl();
+        denied.AddAccessRule(new FileSystemAccessRule(WindowsIdentity.GetCurrent().User!,
+            FileSystemRights.CreateFiles, AccessControlType.Deny));
+        try
+        {
+            directory.SetAccessControl(denied);
+            Assert.False(store.Remove(rule.Id));
+        }
+        finally
+        {
+            directory.SetAccessControl(original);
+        }
+        Assert.Equal(rule.Id, Assert.Single(Store().ActiveRules(RuleScopeKind.Persistence)).Id);
+    }
+
+    [Fact]
+    public void AddingARuleNeverOverwritesCorruptEvidence()
+    {
+        var path = Path.Combine(_directory, "rules.json");
+        File.WriteAllText(path, "{ not json");
+        Assert.Null(Store().Add(Rule()));
+        Assert.Equal("{ not json", File.ReadAllText(path));
+    }
+
     [Fact]
     public void AMalformedFileYieldsNoRules()
     {
@@ -135,14 +193,10 @@ public sealed class RuleStoreTests : IDisposable
         {
             try
             {
-                using var mutex = new Mutex(false, RuleStore.LockNameFor(path));
-                if (!mutex.WaitOne(TimeSpan.FromSeconds(5)))
-                {
-                    throw new TimeoutException("Test holder could not acquire the rule-store mutex.");
-                }
+                using var gate = new FileStream(Path.GetFullPath(path) + ".lock", FileMode.OpenOrCreate,
+                    FileAccess.Read, FileShare.None);
                 lockHeld.Set();
                 releaseLock.Wait(CancellationToken.None);
-                mutex.ReleaseMutex();
             }
             catch (Exception ex)
             {

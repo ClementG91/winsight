@@ -72,6 +72,27 @@ function Get-RelativeFiles([string]$Directory)
         Where-Object { $_ -notlike 'unins*' } | Sort-Object)
 }
 
+function Get-InstalledContent([string]$Directory)
+{
+    $content = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($relative in (Get-RelativeFiles $Directory))
+    {
+        $content.Add($relative, (Get-FileHash -LiteralPath (Join-Path $Directory $relative) -Algorithm SHA256).Hash)
+    }
+    return ,$content
+}
+
+function Assert-InstalledContent([string]$Directory, $Expected)
+{
+    $actual = Get-InstalledContent $Directory
+    $changed = @($Expected.Keys | Where-Object { -not $actual.ContainsKey($_) -or $actual[$_] -ne $Expected[$_] } | Sort-Object)
+    if ($actual.Count -ne $Expected.Count -or $changed.Count -gt 0)
+    {
+        $sample = @($changed | Select-Object -First 5) -join ', '
+        throw "Installed content does not match the fresh candidate ($($changed.Count) missing/changed files): $sample"
+    }
+}
+
 function Remove-TestDirectory([string]$Directory)
 {
     if (-not (Test-Path -LiteralPath $Directory)) { return }
@@ -92,6 +113,7 @@ try
     Install-WinSight $InstallerPath $fresh
     Assert-Version $fresh $Version
     $expectedFiles = Get-RelativeFiles $fresh
+    $expectedContent = Get-InstalledContent $fresh
     Uninstall-WinSight $fresh
     Remove-TestDirectory $fresh
 
@@ -110,7 +132,8 @@ try
     $missing = @($expectedFiles | Where-Object { $upgradedFiles -notcontains $_ })
     if ($missing.Count -gt 0) { throw "The upgrade is missing files a fresh install has: $($missing -join ', ')" }
     if ($stale.Count -gt 0) { throw "The upgrade left files of $PreviousVersion that $Version does not ship: $($stale -join ', ')" }
-    "upgraded in place to ${Version}: one uninstall entry, $($upgradedFiles.Count) files, none stale"
+    Assert-InstalledContent $upgraded $expectedContent
+    "upgraded in place to ${Version}: one uninstall entry, $($upgradedFiles.Count) files, content matches fresh candidate"
 
     Uninstall-WinSight $upgraded
     # @() around the whole statement: an empty result of an if statement is $null, not an empty array.

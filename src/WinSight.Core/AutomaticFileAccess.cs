@@ -309,16 +309,23 @@ public static partial class AutomaticFileAccess
     /// for missing, remote, device, reparse or inaccessible paths.
     /// </summary>
     public static LocalPathLease? TryAcquire(string? path)
+        => TryAcquire(path, out _);
+
+    /// <summary>Classifies absence from the same native acquisition, never from a second probe.</summary>
+    public static LocalPathLease? TryAcquire(string? path, out bool missing)
     {
+        missing = false;
         if (!TryNormalize(path, out var fullPath))
         {
             return null;
         }
-        return TryAcquireNormalized(
+        var lease = TryAcquireNormalized(
             fullPath,
             FileReadAttributes | Synchronize,
             (uint)FileShare.Read,
-            out _);
+            out var error);
+        missing = lease is null && error is ErrorFileNotFound or ErrorPathNotFound;
+        return lease;
     }
 
     /// <summary>
@@ -361,7 +368,12 @@ public static partial class AutomaticFileAccess
     /// Content validation and deletion can therefore operate on the same object handle.
     /// </summary>
     public static LocalPathLease? TryAcquireForDelete(string? path)
+        => TryAcquireForDelete(path, out _);
+
+    /// <summary>Acquires the exact delete target and distinguishes a genuinely absent entry.</summary>
+    public static LocalPathLease? TryAcquireForDelete(string? path, out bool missing)
     {
+        missing = false;
         if (!TryNormalize(path, out var fullPath))
         {
             return null;
@@ -370,7 +382,8 @@ public static partial class AutomaticFileAccess
             fullPath,
             GenericRead | DeleteAccess | Synchronize,
             (uint)FileShare.Read,
-            out _);
+            out var error);
+        missing = lease is null && error is ErrorFileNotFound or ErrorPathNotFound;
         if (lease is null || !lease.IsDirectory)
         {
             return lease;
@@ -465,6 +478,7 @@ public static partial class AutomaticFileAccess
         var nativePath = @"\??\" + fullPath;
         var buffer = IntPtr.Zero;
         var namePointer = IntPtr.Zero;
+        SafeFileHandle? handle = null;
         try
         {
             buffer = Marshal.StringToHGlobalUni(nativePath);
@@ -483,7 +497,7 @@ public static partial class AutomaticFileAccess
                 Attributes = ObjCaseInsensitive | ObjDontReparse,
             };
             var status = NtCreateFile(
-                out var handle,
+                out handle,
                 desiredAccess,
                 ref attributes,
                 out _,
@@ -496,21 +510,18 @@ public static partial class AutomaticFileAccess
                 0);
             if (status < 0 || handle.IsInvalid)
             {
-                handle.Dispose();
                 error = unchecked((int)RtlNtStatusToDosError(status));
                 return null;
             }
             if (!GetFileInformationByHandle(handle, out var information))
             {
                 error = Marshal.GetLastPInvokeError();
-                handle.Dispose();
                 return null;
             }
             if ((information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
             {
                 // GetFileInformationByHandle succeeded, so LastError is unrelated here. Leaving
                 // error at zero also prevents a stale "not found" value from accepting a reparse.
-                handle.Dispose();
                 return null;
             }
 
@@ -519,7 +530,7 @@ public static partial class AutomaticFileAccess
             var identity = new FileIdentity(
                 information.VolumeSerialNumber,
                 ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow);
-            return new LocalPathLease(
+            var lease = new LocalPathLease(
                 fullPath,
                 isDirectory,
                 length,
@@ -530,6 +541,9 @@ public static partial class AutomaticFileAccess
                 desiredAccess,
                 shareAccess,
                 information.FileAttributes);
+            // Transfer only after timestamp conversion and construction have both succeeded.
+            handle = null;
+            return lease;
         }
         catch (Exception ex) when (ex is ArgumentException
                                      or OverflowException
@@ -539,6 +553,7 @@ public static partial class AutomaticFileAccess
         }
         finally
         {
+            handle?.Dispose();
             if (namePointer != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(namePointer);

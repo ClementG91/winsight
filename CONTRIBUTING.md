@@ -28,8 +28,11 @@ Tools are pure data producers; presentation lives in the `winsight` CLI via
 
 ## Building and testing
 
-The code targets **.NET 10 LTS (`net10.0-windows10.0.19041.0`)** and must be
-built on **Windows 10 22H2 or newer**.
+The code targets **.NET 10 LTS (`net10.0-windows10.0.19041.0`)**. Use a Windows version supported
+by the [current .NET 10 OS matrix](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md);
+the primary client qualification scope is Windows 11 x64. Windows 10 22H2 is absent from that matrix,
+although the unchanged installer accepts build 19045. The API target and installer acceptance do not
+establish OS support or runtime qualification. Windows Server CI supplies additional build/test evidence.
 
 ```powershell
 dotnet restore winsight.sln

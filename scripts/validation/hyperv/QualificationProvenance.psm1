@@ -5,7 +5,8 @@ function Get-QualificationHarnessFiles {
         'Invoke-HyperVQualification.ps1', 'Invoke-HyperVNetworkLogon.ps1',
         'New-WinSightHyperVVm.ps1', 'New-WinSightControlVm.ps1', 'Protect-WinSightVmStorage.ps1',
         'Verify-QualificationProvenance.ps1', 'guest\run-guest-checks.ps1',
-        'guest\control-network-logon.ps1', 'guest\qualify.ps1', 'guest\operator-automation.ps1'
+        'guest\control-network-logon.ps1', 'guest\qualify.ps1', 'guest\operator-automation.ps1',
+        'guest\NetworkProbeCredential.psm1'
     )
 }
 

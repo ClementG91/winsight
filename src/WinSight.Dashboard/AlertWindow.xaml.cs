@@ -47,7 +47,10 @@ public partial class AlertWindow : Window
     // can act on rather than a claim: `winsight restore <id>` for a block, `winsight revoke <id>` for an
     // allow. A rule that could not be stored is a failure, never reported as allowed.
     private void AllowButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
-        _presenter.Allow(_entry) is { } rule ? Text.Format("AlertAllowed", rule.Id) : Text["AlertFailed"]);
+    {
+        var rule = _presenter.Allow(_entry, out var result);
+        return ResponseDiagnosticsPresenter.ForAllow(result, rule?.Id);
+    });
 
     private void BlockButton_Click(object sender, RoutedEventArgs e) => Decide(() =>
     {
@@ -55,16 +58,7 @@ public partial class AlertWindow : Window
         return MessageFor(result);
     });
 
-    internal static string MessageFor(ResponseResult result) => result.Outcome switch
-    {
-        ResponseOutcome.Succeeded => Text.Format("AlertBlocked", result.ActionId),
-        // Partly applied for a reason the operator can act on: the entry came straight back.
-        ResponseOutcome.PartiallyApplied when result.Detail == PersistenceResponder.ReassertedDetail =>
-            Text.Format("AlertBlockReasserted", result.ActionId),
-        ResponseOutcome.PartiallyApplied => Text.Format(
-            "AlertPartiallyApplied", result.ActionId, result.Detail ?? string.Empty),
-        _ => Text[MessageKeyFor(result.Outcome)],
-    };
+    internal static string MessageFor(ResponseResult result) => ResponseDiagnosticsPresenter.ForBlock(result);
 
     private void LaterButton_Click(object sender, RoutedEventArgs e) => Close();
 

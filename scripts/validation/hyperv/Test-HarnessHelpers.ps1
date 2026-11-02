@@ -216,6 +216,13 @@ try {
     }
     catch { $false }
     Report $retried 'a query of a restored VM is retried, then fails with its own error'
+    $heartbeat = Join-Path $work 'child-heartbeat.json'
+    Write-WinSightDriverHeartbeat -Path $heartbeat -Phase 'waiting'
+    $ownHeartbeat = Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId $PID
+    Report ($ownHeartbeat -and $ownHeartbeat.processId -eq $PID -and $ownHeartbeat.phase -eq 'waiting' -and $ownHeartbeat.ageSeconds -ge 0) 'a real child publishes its own PID, phase and UTC heartbeat'
+    Report ($null -eq (Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId ($PID + 1))) 'the runner refuses a heartbeat from a different process'
+    [IO.File]::WriteAllText($heartbeat, '{ corrupt heartbeat')
+    Report ($null -eq (Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId $PID)) 'a corrupt heartbeat reports unavailable rather than runner progress'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

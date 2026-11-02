@@ -79,22 +79,31 @@ public sealed class ProcessResponder
         ArgumentNullException.ThrowIfNull(captured);
         var actionId = Guid.NewGuid();
         var preparedAt = _clock();
-        if (!_journal.TryAppend(new ActionJournalEntry(
+        var prepared = _journal.TryAppendWithStatus(new ActionJournalEntry(
                 actionId, kind, ResponseOutcome.AuditPrepared, target, preparedAt,
-                Reversible: false, Phase: ActionJournalPhase.Prepared)))
+                Reversible: false, Phase: ActionJournalPhase.Prepared));
+        if (!prepared.Durable)
         {
             return new ResponseResult(actionId, kind, ResponseOutcome.Failed, target, preparedAt,
                 Reversible: false,
-                Detail: "action was not attempted because its audit intent could not be written");
+                Detail: "action was not attempted because its audit intent could not be written; " + prepared.Detail)
+            {
+                Diagnostics = new() { AuditIntent = prepared },
+            };
         }
-        var outcome = Evaluate(captured, operation);
+        var (outcome, rollbackIncomplete) = Evaluate(captured, operation);
         var result = new ResponseResult(actionId, kind, outcome, target, _clock(),
             Reversible: reversible && outcome == ResponseOutcome.Succeeded,
             Detail: outcome == ResponseOutcome.PartiallyApplied
                 ? "suspension rollback was incomplete; one or more threads may still be suspended"
-                : null);
-        if (_journal.TryAppend(new ActionJournalEntry(
-                actionId, kind, outcome, target, result.AtUtc, result.Reversible)))
+                : null)
+        {
+            Diagnostics = new() { AuditIntent = prepared, ProcessRollbackIncomplete = rollbackIncomplete },
+        };
+        var completion = _journal.TryAppendWithStatus(new ActionJournalEntry(
+                actionId, kind, outcome, target, result.AtUtc, result.Reversible));
+        result = result with { Diagnostics = result.Diagnostics! with { AuditCompletion = completion } };
+        if (completion.Durable)
         {
             return result;
         }
@@ -105,41 +114,41 @@ public sealed class ProcessResponder
             Detail = AppendDetail(result.Detail,
                 applied
                     ? "the action may have changed the target, but its completion could not be journalled"
-                    : "the refusal/failure completion could not be journalled"),
+                    : "the refusal/failure completion could not be journalled") + "; " + completion.Detail,
         };
     }
 
     private static string AppendDetail(string? existing, string addition) =>
         string.IsNullOrEmpty(existing) ? addition : $"{existing}; {addition}";
 
-    private ResponseOutcome Evaluate(
+    private (ResponseOutcome Outcome, bool RollbackIncomplete) Evaluate(
         ProcessIdentity captured, Func<ProcessIdentity, ProcessControlOutcome> operation)
     {
         if (ProtectedProcesses.IsAlwaysProtected(captured.Pid))
         {
-            return ResponseOutcome.TargetProtected;
+            return (ResponseOutcome.TargetProtected, false);
         }
         var current = _inspector.Capture(captured.Pid, hashImage: captured.ImageSha256 is not null);
         if (current is null)
         {
-            return ResponseOutcome.TargetNotFound;
+            return (ResponseOutcome.TargetNotFound, false);
         }
         if (!captured.Matches(current))
         {
-            return ResponseOutcome.TargetChanged;
+            return (ResponseOutcome.TargetChanged, false);
         }
         if (ProtectedProcesses.IsProtected(current))
         {
-            return ResponseOutcome.TargetProtected;
+            return (ResponseOutcome.TargetProtected, false);
         }
         // The controller re-checks the start time on the one handle it acts through, so a process
         // that exits and hands its pid on after this line is refused there rather than acted on.
         return operation(captured) switch
         {
-            ProcessControlOutcome.Succeeded => ResponseOutcome.Succeeded,
-            ProcessControlOutcome.TargetChanged => ResponseOutcome.TargetChanged,
-            ProcessControlOutcome.RollbackIncomplete => ResponseOutcome.PartiallyApplied,
-            _ => ResponseOutcome.Failed,
+            ProcessControlOutcome.Succeeded => (ResponseOutcome.Succeeded, false),
+            ProcessControlOutcome.TargetChanged => (ResponseOutcome.TargetChanged, false),
+            ProcessControlOutcome.RollbackIncomplete => (ResponseOutcome.PartiallyApplied, true),
+            _ => (ResponseOutcome.Failed, false),
         };
     }
 }

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace WinSight.Core;
@@ -19,7 +20,8 @@ public sealed record VtVerdict(int Malicious, int Suspicious, int Total, string 
 /// </summary>
 public sealed class VirusTotalClient
 {
-    private const int MaximumResponseCharacters = 1024 * 1024;
+    private const int MaximumResponseBytes = 1024 * 1024;
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private static readonly HttpClient Shared = new(new HttpClientHandler
     {
         // A custom x-apikey header is not guaranteed to be stripped on a cross-origin redirect.
@@ -31,17 +33,25 @@ public sealed class VirusTotalClient
     };
     private readonly HttpClient _http;
     private readonly string _apiKey;
+    private readonly TimeSpan _lookupTimeout;
 
     /// <param name="apiKey">The user's own VirusTotal API key.</param>
     /// <param name="http">Optional HttpClient (tests / custom pipeline); defaults to a shared instance.</param>
     public VirusTotalClient(string apiKey, HttpClient? http = null)
+        : this(apiKey, http, TimeSpan.FromSeconds(20))
     {
+    }
+
+    internal VirusTotalClient(string apiKey, HttpClient? http, TimeSpan lookupTimeout)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(lookupTimeout, TimeSpan.Zero);
         if (!VirusTotalConfiguration.IsPlausibleApiKey(apiKey))
         {
             throw new ArgumentException("The VirusTotal API key format is invalid.", nameof(apiKey));
         }
         _apiKey = apiKey;
         _http = http ?? Shared;
+        _lookupTimeout = lookupTimeout;
     }
 
     /// <summary>
@@ -59,23 +69,29 @@ public sealed class VirusTotalClient
         }
         try
         {
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var timeout = _http.Timeout == Timeout.InfiniteTimeSpan
+                ? _lookupTimeout : TimeSpan.FromTicks(Math.Min(_lookupTimeout.Ticks, _http.Timeout.Ticks));
+            deadline.CancelAfter(timeout);
             using var request = new HttpRequestMessage(
                 HttpMethod.Get, $"https://www.virustotal.com/api/v3/files/{sha256}");
             request.Headers.Add("x-apikey", _apiKey);
-            using var response = _http.Send(request, cancellationToken);
+            using var response = _http.Send(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
             if (!response.IsSuccessStatusCode)
             {
                 return null;
             }
-            if (response.Content.Headers.ContentLength is > MaximumResponseCharacters)
+            if (response.Content.Headers.ContentLength is > MaximumResponseBytes)
             {
                 return null;
             }
-            using var reader = new StreamReader(response.Content.ReadAsStream(cancellationToken));
-            return ReadLimited(reader) is { } json ? ParseStats(json, sha256) : null;
+            using var stream = response.Content.ReadAsStreamAsync(deadline.Token).GetAwaiter().GetResult();
+            return ReadLimitedAsync(stream, deadline.Token).GetAwaiter().GetResult() is { } json
+                ? ParseStats(json, sha256) : null;
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or InvalidOperationException ||
-                                     ex is TaskCanceledException && !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException
+                                     or InvalidOperationException or DecoderFallbackException ||
+                                     ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
         {
             return null;
         }
@@ -118,22 +134,25 @@ public sealed class VirusTotalClient
         }
     }
 
-    private static string? ReadLimited(StreamReader reader)
+    private static async Task<string?> ReadLimitedAsync(Stream stream, CancellationToken cancellationToken)
     {
-        var buffer = new char[8192];
-        var result = new System.Text.StringBuilder();
+        var buffer = new byte[8192];
+        using var result = new MemoryStream();
         while (true)
         {
-            var read = reader.Read(buffer, 0, buffer.Length);
+            cancellationToken.ThrowIfCancellationRequested();
+            // Read one extra byte to distinguish an exact-sized body from an oversized one.
+            var allowed = (int)Math.Min(buffer.Length, MaximumResponseBytes - result.Length + 1);
+            var read = await stream.ReadAsync(buffer.AsMemory(0, allowed), cancellationToken).ConfigureAwait(false);
             if (read == 0)
             {
-                return result.ToString();
+                return StrictUtf8.GetString(result.GetBuffer().AsSpan(0, (int)result.Length));
             }
-            if (result.Length + read > MaximumResponseCharacters)
+            if (result.Length + read > MaximumResponseBytes)
             {
                 return null;
             }
-            result.Append(buffer, 0, read);
+            result.Write(buffer, 0, read);
         }
     }
 }

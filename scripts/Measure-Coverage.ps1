@@ -45,7 +45,12 @@ param(
 
     # Matches the configuration CI builds, so this step reuses those binaries instead of compiling
     # the whole solution a second time in Debug.
-    [string]$Configuration = "Release"
+    [string]$Configuration = "Release",
+
+    # Explicit opt-in: retain completed test output when a slow CI run cannot finalize its TRX.
+    # Keep this last so existing positional callers retain their parameter order.
+    [ValidateSet("quiet", "minimal", "normal", "detailed")]
+    [string]$ConsoleLoggerVerbosity
 )
 
 $ErrorActionPreference = "Stop"
@@ -185,6 +190,10 @@ try
     if ($TrxLogFilePrefix)
     {
         $testArguments += @("--logger", "trx;LogFilePrefix=$TrxLogFilePrefix")
+    }
+    if ($PSBoundParameters.ContainsKey("ConsoleLoggerVerbosity"))
+    {
+        $testArguments += @("--logger", "console;verbosity=$ConsoleLoggerVerbosity")
     }
 
     & dotnet @testArguments

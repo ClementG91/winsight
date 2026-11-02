@@ -8,16 +8,10 @@ namespace WinSight.Application.Tests;
 
 public sealed class AdaptersActionHistoryTests : IDisposable
 {
-    private readonly string _journal = Path.Combine(
-        Path.GetTempPath(), $"winsight-actions-{Guid.NewGuid():N}.jsonl");
+    private readonly string _root = Directory.CreateTempSubdirectory("winsight-actions-").FullName;
+    private string _journal => Path.Combine(_root, "history.jsonl");
 
-    public void Dispose()
-    {
-        if (File.Exists(_journal))
-        {
-            File.Delete(_journal);
-        }
-    }
+    public void Dispose() => Directory.Delete(_root, recursive: true);
 
     [Fact]
     public void AnEmptyJournalReportsNoHistoryRatherThanAFinding()
@@ -28,6 +22,26 @@ public sealed class AdaptersActionHistoryTests : IDisposable
         Assert.Empty(report.Items);
         Assert.Equal(0, report.NotableCount);
         Assert.Contains("no response actions", report.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AReadExposesUnreadabilityInsteadOfPretendingTheJournalIsEmpty()
+    {
+        File.WriteAllText(_journal, "history");
+        using var locked = new FileStream(_journal, FileMode.Open, FileAccess.Read, FileShare.None);
+        var report = Adapters.Actions(_journal, 200);
+        Assert.Equal(1, report.NotableCount);
+        Assert.Equal("actionJournalCoverage", Assert.Single(report.Items).Fields["kind"]);
+        Assert.Contains("unavailable", report.Summary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void MalformedHistoryIsReportedAsIncomplete()
+    {
+        File.WriteAllText(_journal, "{ not json\n");
+        var report = Adapters.Actions(_journal, 200);
+        Assert.Equal(1, report.NotableCount);
+        Assert.Contains("incomplete", report.Summary, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
