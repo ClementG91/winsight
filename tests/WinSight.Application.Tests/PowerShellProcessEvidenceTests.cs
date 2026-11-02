@@ -1,5 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -129,46 +131,19 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
         var captures = 0;
         var expectedControls = Environment.GetEnvironmentVariable(FrameworkProfileBaseline) == "unconfigured"
             && Environment.GetEnvironmentVariable("COR_ENABLE_PROFILING") == "1";
-        foreach (var operation in ComparisonOperations)
+        Assert.Equal(2, ComparisonOperations.Length);
+        output.WriteLine("framework-comparison condition=bounded-concurrency-2;timings-not-comparable-to-serial=true");
+        for (var trial = 0; trial < ComparisonOrders.Length; trial++)
         {
-            for (var trial = 0; trial < ComparisonOrders.Length; trial++)
+            foreach (var disableRequested in ComparisonOrders[trial])
             {
-                foreach (var disableRequested in ComparisonOrders[trial])
+                // Each round joins both owned observations before admitting another round.
+                var observers = ComparisonOperations.Select(operation =>
+                    (Func<Action<string>, Task<bool>>)(report =>
+                        ObserveFrameworkComparison(operation, trial, disableRequested, budget, report))).ToArray();
+                var controls = await ObservePair(observers);
+                foreach (var controlApplied in controls)
                 {
-                    // Admission and post-return checks are not a hard bound on synchronous Start/Kill.
-                    Assert.True(TimeSpan.FromSeconds(120) - budget.Elapsed >= TimeSpan.FromSeconds(36),
-                        "The comparison cannot admit another complete 30 s oracle and its existing 6 s cleanup reserve.");
-                    var controlApplied = false;
-                    var expectedFramework = "unobserved";
-                    var expectedCore = "unobserved";
-                    ushort targetMachine = 0;
-                    var result = await ObserveRuntime(operation, start =>
-                    {
-                        var before = ProfileSnapshot(start);
-                        start.Environment.TryGetValue("COR_ENABLE_PROFILING", out var framework);
-                        start.Environment.TryGetValue("CORECLR_ENABLE_PROFILING", out var core);
-                        targetMachine = FrameworkTargetMachine(start);
-                        controlApplied = disableRequested && CanCompareOwnedFrameworkRoute(start, targetMachine);
-                        if (controlApplied) { start.Environment["COR_ENABLE_PROFILING"] = "0"; }
-                        expectedFramework = Flag(controlApplied ? "0" : framework);
-                        expectedCore = Flag(core);
-                        var after = ProfileSnapshot(start);
-                        Assert.True(before.Count == after.Count && before.All(pair =>
-                            after.TryGetValue(pair.Key, out var value)
-                            && value == (controlApplied && pair.Key.Equals("COR_ENABLE_PROFILING", StringComparison.OrdinalIgnoreCase) ? "0" : pair.Value)),
-                            "A profiling value outside the explicit Framework control changed.");
-                    }, observeFramework: true);
-                    Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The comparison exceeded its aggregate observation budget.");
-                    var metadata = Assert.Single(result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(line => line.TrimEnd('\r')), line => line.StartsWith("WSPROFILER:", StringComparison.Ordinal));
-                    var fields = metadata.Split(':');
-                    Assert.Equal(6, fields.Length);
-                    Assert.Equal(expectedFramework, fields[1]);
-                    Assert.Equal(expectedCore, fields[2]);
-                    Assert.Contains(fields[3], BooleanTokens);
-                    Assert.Equal("4", fields[4]);
-                    Assert.Contains(fields[5], BooleanTokens);
-                    output.WriteLine(FormattableString.Invariant($"framework-comparison operation={operation};trial={trial};requested={disableRequested};applied={controlApplied};targetMachine={targetMachine:X4};{metadata}"));
                     captures++;
                     if (controlApplied) { applied++; }
                 }
@@ -180,8 +155,113 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
         Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The comparison exceeded its aggregate observation budget.");
     }
 
+    [Fact]
+    public async Task PairedRuntimeFailuresAreBothObservedAfterExit()
+    {
+        var finished = new bool[2];
+        async Task<bool> ObserveFailure(int index, int expectedExit, Action<string> report)
+        {
+            var start = PowerShellProcessEvidence.StartInfo();
+            PowerShellProcessEvidence.EncodedCommand(start, PowerShellProcessEvidence.Prelude
+                + "exit " + expectedExit.ToString(CultureInfo.InvariantCulture));
+            var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), report);
+            Assert.Equal(expectedExit, result.ExitCode);
+            finished[index] = true;
+            Assert.Equal(0, result.ExitCode);
+            return true;
+        }
+        var failure = await Assert.ThrowsAsync<AggregateException>(async () =>
+        {
+            _ = await ObservePair([
+                report => ObserveFailure(0, 7, report),
+                report => ObserveFailure(1, 8, report),
+            ]);
+        });
+        Assert.Equal(2, failure.InnerExceptions.Count);
+        Assert.All(failure.InnerExceptions, error => Assert.IsType<Xunit.Sdk.EqualException>(error));
+        Assert.All(finished, value => Assert.True(value));
+    }
+
+    private async Task<bool> ObserveFrameworkComparison(string operation, int trial,
+        bool disableRequested, Stopwatch budget, Action<string> report)
+    {
+        var controlApplied = false;
+        var expectedFramework = "unobserved";
+        var expectedCore = "unobserved";
+        ushort targetMachine = 0;
+        var result = await ObserveRuntime(operation, start =>
+        {
+            var before = ProfileSnapshot(start);
+            start.Environment.TryGetValue("COR_ENABLE_PROFILING", out var framework);
+            start.Environment.TryGetValue("CORECLR_ENABLE_PROFILING", out var core);
+            targetMachine = FrameworkTargetMachine(start);
+            controlApplied = disableRequested && CanCompareOwnedFrameworkRoute(start, targetMachine);
+            if (controlApplied) { start.Environment["COR_ENABLE_PROFILING"] = "0"; }
+            expectedFramework = Flag(controlApplied ? "0" : framework);
+            expectedCore = Flag(core);
+            var after = ProfileSnapshot(start);
+            Assert.True(before.Count == after.Count && before.All(pair =>
+                after.TryGetValue(pair.Key, out var value)
+                && value == (controlApplied && pair.Key.Equals("COR_ENABLE_PROFILING", StringComparison.OrdinalIgnoreCase) ? "0" : pair.Value)),
+                "A profiling value outside the explicit Framework control changed.");
+            // Admission and post-return checks are not a hard bound on synchronous Start/Kill.
+            Assert.True(TimeSpan.FromSeconds(120) - budget.Elapsed >= TimeSpan.FromSeconds(36),
+                "The comparison cannot admit another complete 30 s oracle and its existing 6 s cleanup reserve.");
+        }, observeFramework: true, report: report);
+        Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The comparison exceeded its aggregate observation budget.");
+        var metadata = Assert.Single(result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r')), line => line.StartsWith("WSPROFILER:", StringComparison.Ordinal));
+        var fields = metadata.Split(':');
+        Assert.Equal(6, fields.Length);
+        Assert.Equal(expectedFramework, fields[1]);
+        Assert.Equal(expectedCore, fields[2]);
+        Assert.Contains(fields[3], BooleanTokens);
+        Assert.Equal("4", fields[4]);
+        Assert.Contains(fields[5], BooleanTokens);
+        report(FormattableString.Invariant($"framework-comparison operation={operation};trial={trial};requested={disableRequested};applied={controlApplied};targetMachine={targetMachine:X4};{metadata}"));
+        return controlApplied;
+    }
+
+    private async Task<bool[]> ObservePair(Func<Action<string>, Task<bool>>[] observers)
+    {
+        Assert.Equal(2, observers.Length);
+        var reports = new[] { new ConcurrentQueue<string>(), new ConcurrentQueue<string>() };
+        // An async wrapper also captures a synchronous preflight/factory exception as a task.
+        async Task<bool> Observe(int index) => await observers[index](reports[index].Enqueue);
+        var tasks = new[] { Observe(0), Observe(1) };
+        var joined = Task.WhenAll(tasks);
+        bool[]? values = null;
+        var failures = new List<Exception>();
+        try { values = await joined; }
+        catch (Exception)
+        {
+            // WhenAll has joined both. Observe each task as mixed fault/cancellation can
+            // otherwise hide the cancelled child's original exception from Exception.
+            foreach (var task in tasks)
+            {
+                try { _ = await task; }
+                catch (Exception error)
+                {
+                    if (task.Exception is { } faults) { failures.AddRange(faults.InnerExceptions); }
+                    else { failures.Add(error); }
+                }
+            }
+        }
+        foreach (var report in reports)
+        {
+            foreach (var line in report)
+            {
+                try { output.WriteLine(line); }
+                catch (Exception error) { failures.Add(error); }
+            }
+        }
+        if (failures.Count == 1) { ExceptionDispatchInfo.Capture(failures[0]).Throw(); }
+        if (failures.Count > 1) { throw new AggregateException(failures); }
+        return Assert.IsType<bool[]>(values);
+    }
+
     private async Task<PowerShellProcessEvidence.Result> ObserveRuntime(string operation,
-        Action<ProcessStartInfo>? configure = null, bool observeFramework = false)
+        Action<ProcessStartInfo>? configure = null, bool observeFramework = false, Action<string>? report = null)
     {
         // A new process measures its first call, without assuming cold OS/JIT/compiler caches.
         var body = operation switch
@@ -218,7 +298,7 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
             + "$ErrorActionPreference='Stop'; Write-TestPhase 'body-begin'; Write-TestPhase 'probe-begin'\n"
             + body + "\nWrite-TestPhase 'probe-repeat-complete'" + (observeFramework ? FrameworkObservation : "")
             + PowerShellProcessEvidence.BodyEnd + "\nexit 0");
-        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), report ?? output.WriteLine);
         Assert.Equal(0, result.ExitCode);
 
         var native = EvidenceFields(result.Summary, "native-process-final");

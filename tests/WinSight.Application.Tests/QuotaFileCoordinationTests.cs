@@ -15,6 +15,18 @@ using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
+/// <summary>
+/// Reserve the bounded file-coordination fixture from unrelated test collections.
+/// Its two owned workers still compete concurrently for the same quota state; this
+/// does not qualify admission availability under unrelated machine load.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class QuotaFileCoordinationCollection
+{
+    public const string Name = "quota-file-coordination";
+}
+
+[Collection(QuotaFileCoordinationCollection.Name)]
 public sealed class QuotaFileCoordinationTests(ITestOutputHelper testOutput) : IDisposable
 {
     private static readonly string[] QuotaStatusTokens =
