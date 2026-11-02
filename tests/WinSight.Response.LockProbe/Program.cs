@@ -27,7 +27,7 @@ public static class Program
             for (var i = 0; i < 20; i++)
             {
                 var begin = QuotaTimestamp();
-                if (!quota.TryAcquire(out _, out var status))
+                if (!quota.TryAcquire(out _, out var status, out var observation))
                 {
                     var end = QuotaTimestamp();
                     Console.Error.WriteLine("A serialized quota admission was refused.");
@@ -38,6 +38,14 @@ public static class Program
                             var label = Enum.IsDefined(status) ? status.ToString() : nameof(VirusTotalQuotaStatus.Unknown);
                             Console.Error.WriteLine(FormattableString.Invariant($"WSQUOTA:{i}:{label}:{before}:{after}:{Stopwatch.Frequency}"));
                         }
+                        var firstPoint = QuotaBusyPoint(observation.FirstBusyPoint);
+                        var lastPoint = QuotaBusyPoint(observation.LastBusyPoint);
+                        var firstError = observation.FirstNativeError is 32 or 33
+                            ? observation.FirstNativeError.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-";
+                        var lastError = observation.LastNativeError is 32 or 33
+                            ? observation.LastNativeError.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) : "-";
+                        Console.Error.WriteLine(FormattableString.Invariant(
+                            $"WSQGATE:1:{observation.Observed}:{observation.AttemptsStarted}:{observation.AttemptsCompleted}:{observation.BusyCount}:{observation.HasCompletedAttempt}:{firstPoint}:{firstError}:{lastPoint}:{lastError}"));
                     }
                     catch (Exception) { /* Diagnostics must not change the refusal exit code. */ }
                     return 5;
@@ -91,6 +99,9 @@ public static class Program
         Console.WriteLine(JsonSerializer.Serialize(ids));
         return 0;
     }
+
+    private static string QuotaBusyPoint(LocalFileLockBusyPoint point) =>
+        Enum.IsDefined(point) ? point.ToString() : nameof(LocalFileLockBusyPoint.Unobserved);
 
     private static long? QuotaTimestamp()
     {

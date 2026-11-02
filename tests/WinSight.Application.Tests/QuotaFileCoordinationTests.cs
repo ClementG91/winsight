@@ -436,6 +436,258 @@ public sealed class QuotaFileCoordinationTests(ITestOutputHelper testOutput) : I
         catch (Exception) { /* A diagnostic callback cannot replace a fixture assertion failure. */ }
     }
 
+    [Fact]
+    public void GateDiagnosticsSurviveQuotaRefusalProjection()
+    {
+        const string prefix = "A serialized quota admission was refused.\r\n"
+            + "WSQUOTA:0:LockTimeout:10:20:10\r\n"
+            + "WSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen:32\r\n";
+        var projected = Assert.IsType<string>(ParseQuotaRefusal(prefix));
+        Assert.Contains("ordinal=0;status=LockTimeout", projected, StringComparison.Ordinal);
+        Assert.Contains("gate-observed=True;gate-attempts=3;gate-completed=3;gate-busy=3", projected, StringComparison.Ordinal);
+        Assert.Contains("gate-last-attempt=True;gate-no-attempt=False", projected, StringComparison.Ordinal);
+        Assert.Contains("gate-first-busy-point=SidecarOpen;gate-first-native-error=32", projected, StringComparison.Ordinal);
+        Assert.Contains("gate-last-busy-point=SidecarOpen;gate-last-native-error=32", projected, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GateObservationDoesNotChangeTheOldAdmissionOverloads()
+    {
+        var guard = Guard();
+        Assert.True(guard.TryAcquire(out var first));
+        Assert.Equal(new VirusTotalQuotaSnapshot(1, 1, 1, true), first);
+        Assert.True(guard.TryAcquire(out var second, out var secondStatus));
+        Assert.Equal(VirusTotalQuotaStatus.Acquired, secondStatus);
+        Assert.Equal(new VirusTotalQuotaSnapshot(2, 2, 2, true), second);
+        Assert.True(guard.TryAcquire(out var third, out var thirdStatus, out var observation));
+        Assert.Equal(VirusTotalQuotaStatus.Acquired, thirdStatus);
+        Assert.Equal(new VirusTotalQuotaSnapshot(3, 3, 3, true), third);
+        Assert.True(observation.Observed);
+        Assert.True(observation.HasCompletedAttempt);
+        Assert.False(observation.NoAttempt);
+        Assert.InRange(observation.AttemptsCompleted, 1, observation.AttemptsStarted);
+        Assert.InRange(observation.BusyCount, 0, observation.AttemptsCompleted);
+    }
+
+    [Fact]
+    public void DefaultObservationAndAnObservedNoAttemptAreDistinct()
+    {
+        VirusTotalQuotaGateDiagnostics unobserved = default;
+        Assert.False(unobserved.Observed);
+        Assert.False(unobserved.NoAttempt);
+        Assert.False(unobserved.HasCompletedAttempt);
+        Assert.Equal(0, unobserved.AttemptsStarted);
+        Assert.Equal(0, unobserved.AttemptsCompleted);
+        Assert.Equal(0, unobserved.BusyCount);
+        Assert.Equal(LocalFileLockBusyPoint.Unobserved, unobserved.FirstBusyPoint);
+        Assert.Equal(LocalFileLockBusyPoint.Unobserved, unobserved.LastBusyPoint);
+        Assert.Null(unobserved.FirstNativeError);
+        Assert.Null(unobserved.LastNativeError);
+
+        var tooLong = Path.Combine(_root, new string('q', 251) + ".json");
+        var guard = new VirusTotalQuotaLimiter(tooLong);
+        Assert.False(guard.TryAcquire(out var snapshot, out var status, out var observation));
+        Assert.Equal(VirusTotalQuotaStatus.UnsafePath, status);
+        Assert.False(snapshot.RequestAllowed);
+        Assert.True(observation.Observed);
+        Assert.True(observation.NoAttempt);
+        Assert.False(observation.HasCompletedAttempt);
+        Assert.Equal(0, observation.AttemptsStarted);
+        Assert.Equal(0, observation.AttemptsCompleted);
+        Assert.Equal(0, observation.BusyCount);
+        Assert.Equal(LocalFileLockBusyPoint.Unobserved, observation.FirstBusyPoint);
+        Assert.Equal(LocalFileLockBusyPoint.Unobserved, observation.LastBusyPoint);
+        Assert.Null(observation.FirstNativeError);
+        Assert.Null(observation.LastNativeError);
+        Assert.Empty(Directory.GetFileSystemEntries(_root));
+    }
+
+    [Fact]
+    public void ARealHeldSidecarReportsCompletedBusyCalls()
+    {
+        File.WriteAllText(StatePath + ".lock", string.Empty);
+        using var held = new FileStream(StatePath + ".lock", FileMode.Open, FileAccess.Read, FileShare.None);
+        Assert.False(Guard().TryAcquire(out var snapshot, out var status, out var observation));
+        Assert.Equal(VirusTotalQuotaStatus.LockTimeout, status);
+        Assert.Equal(new VirusTotalQuotaSnapshot(64, 64, 64, false), snapshot);
+        Assert.True(observation.Observed);
+        Assert.False(observation.NoAttempt);
+        Assert.True(observation.HasCompletedAttempt);
+        Assert.InRange(observation.AttemptsStarted, 1, int.MaxValue);
+        Assert.Equal(observation.AttemptsStarted, observation.AttemptsCompleted);
+        Assert.Equal(observation.AttemptsCompleted, observation.BusyCount);
+        Assert.Equal(LocalFileLockBusyPoint.SidecarOpen, observation.FirstBusyPoint);
+        Assert.Equal(LocalFileLockBusyPoint.SidecarOpen, observation.LastBusyPoint);
+        Assert.True(observation.FirstNativeError is 32 or 33);
+        Assert.True(observation.LastNativeError is 32 or 33);
+        Assert.False(File.Exists(StatePath));
+        Assert.True(File.Exists(StatePath + ".lock"));
+    }
+
+    [Theory]
+    [InlineData("WSQGATE:1:True:0:0:0:False:Unobserved:-:Unobserved:-", true)]
+    [InlineData("WSQGATE:1:True:1:0:0:False:Unobserved:-:Unobserved:-", false)]
+    public void AClosedGateFrameSeparatesNoAttemptFromAnInterruptedAttempt(string frame, bool noAttempt)
+    {
+        var result = Assert.IsType<string>(ParseQuotaRefusal("WSQUOTA:0:StateUnavailable:10:20:10\n" + frame + "\n"));
+        Assert.Contains("gate-observed=True", result, StringComparison.Ordinal);
+        Assert.Contains("gate-last-attempt=False", result, StringComparison.Ordinal);
+        Assert.Contains($"gate-no-attempt={noAttempt}", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LegacyQuotaFramesNeverInventGateObservation()
+    {
+        var result = Assert.IsType<string>(ParseQuotaRefusal("WSQUOTA:0:LockTimeout:10:20:10\n"));
+        Assert.Contains("ordinal=0;status=LockTimeout", result, StringComparison.Ordinal);
+        Assert.Contains("gate-observed=False;gate-attempts=0;gate-completed=0;gate-busy=0", result, StringComparison.Ordinal);
+        Assert.Contains("gate-last-attempt=False;gate-no-attempt=False", result, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("WSQGATE:2:True:3:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:true:3:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:03:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:-1:0:0:False:Unobserved:-:Unobserved:-")]
+    [InlineData("WSQGATE:1:True:2147483648:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:9223372036854775808:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:1:2:1:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:3:1:1:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:3:3:4:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:False:3:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:3:3:3:False:SidecarOpen:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:0:0:0:True:Unobserved:-:Unobserved:-")]
+    [InlineData("WSQGATE:1:True:3:3:0:True:SidecarOpen:32:Unobserved:-")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:PRIVATE_PAYLOAD:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:2:32:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:SidecarOpen:5:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen:032")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:Unobserved:-:SidecarOpen:32")]
+    [InlineData("WSQGATE:1:True:1:1:1:True:SidecarOpen:32:DirectoryBootstrap:33")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen:32:PRIVATE_PAYLOAD")]
+    [InlineData("WSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen:32\nWSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen:32")]
+    public void MalformedGateFramesRetainOnlyTheClosedLegacyProjection(string frame)
+    {
+        var result = Assert.IsType<string>(ParseQuotaRefusal("PRIVATE_PAYLOAD\nWSQUOTA:0:LockTimeout:10:20:10\n" + frame + "\n"));
+        Assert.Contains("ordinal=0;status=LockTimeout", result, StringComparison.Ordinal);
+        Assert.Contains("gate-observed=False;gate-attempts=0;gate-completed=0;gate-busy=0", result, StringComparison.Ordinal);
+        Assert.Contains("gate-last-attempt=False;gate-no-attempt=False", result, StringComparison.Ordinal);
+        Assert.DoesNotContain("PRIVATE_PAYLOAD", result, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GateMetadataNeverRepairsAMalformedOrDuplicateQuotaFrame()
+    {
+        const string gate = "WSQGATE:1:True:3:3:3:True:SidecarOpen:32:SidecarOpen:32\n";
+        Assert.Null(ParseQuotaRefusal("WSQUOTA:0:PRIVATE_PAYLOAD:10:20:10\n" + gate));
+        Assert.Null(ParseQuotaRefusal("WSQUOTA:0:LockTimeout:10:20:10\nWSQUOTA:0:LockTimeout:10:20:10\n" + gate));
+    }
+
+    [Fact]
+    public async Task DiagnosticCallbackFailureCannotMaskTheZeroStderrAssertion()
+    {
+        using var fixture = new QuotaFileCoordinationTests(new ThrowingQuotaOutput());
+        using var stream = new MemoryStream("PRIVATE_PAYLOAD"u8.ToArray());
+        using var reader = new StreamReader(stream);
+        var failure = await Record.ExceptionAsync(() => fixture.ReadError(reader));
+        Assert.IsType<Xunit.Sdk.EqualException>(failure);
+    }
+
+    [Theory]
+    [InlineData(1024)]
+    [InlineData(1025)]
+    public async Task DiagnosticCallbackFailurePreservesBothStderrBoundaries(int characters)
+    {
+        using var fixture = new QuotaFileCoordinationTests(new ThrowingQuotaOutput());
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(new string('x', characters)));
+        using var reader = new StreamReader(stream);
+        var failure = await Record.ExceptionAsync(() => fixture.ReadError(reader));
+        if (characters == 1024) { Assert.IsType<Xunit.Sdk.EqualException>(failure); }
+        else { Assert.IsType<Xunit.Sdk.InRangeException>(failure); }
+    }
+
+    [Fact]
+    public async Task AnActuallyRefusedWorkerReportsClosedGateEvidenceAndStillFailsTheZeroStderrOracle()
+    {
+        var recorder = new RecordingQuotaOutput();
+        using var fixture = new QuotaFileCoordinationTests(recorder);
+        File.WriteAllText(fixture.StatePath + ".lock", string.Empty);
+        using var held = new FileStream(fixture.StatePath + ".lock", FileMode.Open, FileAccess.Read, FileShare.None);
+        var observedRefusalExit = false;
+        var failure = await Record.ExceptionAsync(() => WithChildren(async children =>
+        {
+            var worker = fixture.Start(children, "quota", fixture.StatePath);
+            var watch = Stopwatch.StartNew();
+            await Ready(worker).WaitAsync(Remaining(watch));
+            await worker.Track(worker.Process.StandardInput.WriteLineAsync("go")).WaitAsync(Remaining(watch));
+            var output = await worker.Track(worker.Process.StandardOutput.ReadToEndAsync()).WaitAsync(Remaining(watch));
+            await worker.Track(worker.Process.WaitForExitAsync()).WaitAsync(Remaining(watch));
+            Assert.Equal(5, worker.Process.ExitCode);
+            Assert.Empty(output);
+            observedRefusalExit = true;
+        }));
+        Assert.True(observedRefusalExit);
+        var aggregate = Assert.IsType<AggregateException>(failure);
+        Assert.IsType<Xunit.Sdk.EqualException>(Assert.Single(aggregate.InnerExceptions));
+        var message = Assert.IsType<string>(recorder.Message);
+        Assert.Contains("recognized=True;ordinal=0;status=LockTimeout", message, StringComparison.Ordinal);
+        Assert.Contains("gate-observed=True", message, StringComparison.Ordinal);
+        Assert.Contains("gate-last-attempt=True;gate-no-attempt=False", message, StringComparison.Ordinal);
+        Assert.Contains("gate-first-busy-point=SidecarOpen", message, StringComparison.Ordinal);
+        Assert.Contains("gate-last-busy-point=SidecarOpen", message, StringComparison.Ordinal);
+        Assert.Matches("gate-first-native-error=3[23]", message);
+        Assert.Matches("gate-last-native-error=3[23]", message);
+        Assert.False(File.Exists(fixture.StatePath));
+    }
+
+    private sealed class RecordingQuotaOutput : ITestOutputHelper
+    {
+        public string? Message { get; private set; }
+        public void WriteLine(string message) => Message = message;
+        public void WriteLine(string format, params object[] args) => WriteLine(string.Format(CultureInfo.InvariantCulture, format, args));
+    }
+
+    private sealed class ThrowingQuotaOutput : ITestOutputHelper
+    {
+        public void WriteLine(string message) => throw new InvalidOperationException("PRIVATE_CALLBACK_PAYLOAD");
+        public void WriteLine(string format, params object[] args) => throw new InvalidOperationException("PRIVATE_CALLBACK_PAYLOAD");
+    }
+
+    private static readonly string[] GateBusyPoints =
+    [
+        "ParentMetadataTraversal", "SidecarOpen", "DirectoryBootstrap", "SidecarRecheck",
+        "SidecarInitialize", "ParentWriteProtectionRoot", "ParentWriteProtectionAncestor",
+    ];
+
+    private static string ParseQuotaGate(string prefix)
+    {
+        const string unobserved = "gate-observed=False;gate-attempts=0;gate-completed=0;gate-busy=0;gate-last-attempt=False;gate-no-attempt=False;gate-first-busy-point=Unobserved;gate-first-native-error=-;gate-last-busy-point=Unobserved;gate-last-native-error=-";
+        var frames = prefix.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => line.TrimEnd('\r')).Where(line => line.StartsWith("WSQGATE:", StringComparison.Ordinal)).ToArray();
+        if (frames.Length != 1) { return unobserved; }
+        var fields = frames[0].Split(':');
+        if (fields.Length != 11 || fields[1] != "1" || fields[2] is not ("True" or "False")
+            || fields[6] is not ("True" or "False")
+            || !QuotaCounter(fields[3], out var started) || started > int.MaxValue
+            || !QuotaCounter(fields[4], out var completed) || completed > started || started - completed > 1
+            || !QuotaCounter(fields[5], out var busy) || busy > completed) { return unobserved; }
+        var observed = fields[2] == "True";
+        // Wire field 6 means a completed call is available, not that the final started call returned.
+        var hasCompleted = fields[6] == "True";
+        if (hasCompleted != (completed > 0) || (!observed && started != 0)) { return unobserved; }
+        if (busy == 0)
+        {
+            if (fields[7] != "Unobserved" || fields[8] != "-"
+                || fields[9] != "Unobserved" || fields[10] != "-") { return unobserved; }
+        }
+        else if (!GateBusyPoints.Contains(fields[7], StringComparer.Ordinal)
+                 || !GateBusyPoints.Contains(fields[9], StringComparer.Ordinal)
+                 || fields[8] is not ("-" or "32" or "33") || fields[10] is not ("-" or "32" or "33")
+                 || (busy == 1 && (fields[7] != fields[9] || fields[8] != fields[10]))) { return unobserved; }
+        return FormattableString.Invariant($"gate-observed={observed};gate-attempts={started};gate-completed={completed};gate-busy={busy};gate-last-attempt={hasCompleted};gate-no-attempt={observed && started == 0};gate-first-busy-point={fields[7]};gate-first-native-error={fields[8]};gate-last-busy-point={fields[9]};gate-last-native-error={fields[10]}");
+    }
+
     private static string? ParseQuotaRefusal(string prefix)
     {
         var frames = prefix.Split('\n', StringSplitOptions.RemoveEmptyEntries)
@@ -446,7 +698,7 @@ public sealed class QuotaFileCoordinationTests(ITestOutputHelper testOutput) : I
             || !QuotaCounter(fields[1], out var ordinal) || ordinal > 19
             || !QuotaCounter(fields[3], out var begin) || !QuotaCounter(fields[4], out var end) || end < begin
             || !QuotaCounter(fields[5], out var frequency) || frequency == 0) { return null; }
-        return FormattableString.Invariant($"ordinal={ordinal};status={fields[2]};begin={begin};end={end};frequency={frequency};elapsedMs={1000d * (end - begin) / frequency:F3}");
+        return FormattableString.Invariant($"ordinal={ordinal};status={fields[2]};begin={begin};end={end};frequency={frequency};elapsedMs={1000d * (end - begin) / frequency:F3};{ParseQuotaGate(prefix)}");
     }
 
     private static bool QuotaCounter(string value, out long parsed) =>

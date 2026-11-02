@@ -10,6 +10,24 @@ public enum LocalFileLockStatus
     Unavailable,
 }
 
+/// <summary>
+/// The call site of a native Busy result, not the identity of a contended object or its holder.
+/// Traversal at a named call site may inspect several path components.
+/// </summary>
+public enum LocalFileLockBusyPoint
+{
+    Unobserved,
+    ParentMetadataTraversal,
+    SidecarOpen,
+    DirectoryBootstrap,
+    SidecarRecheck,
+    SidecarInitialize,
+    ParentWriteProtectionRoot,
+    ParentWriteProtectionAncestor,
+}
+
+internal readonly record struct LocalFileLockAttemptDiagnostics(LocalFileLockBusyPoint BusyPoint, int? NativeError);
+
 public static partial class AutomaticFileAccess
 {
     /// <summary>
@@ -44,8 +62,9 @@ public static partial class AutomaticFileAccess
         // Writer-only. Mutators traverse every ancestor, so protect that entire ordinary path
         // against an unrelated legacy reader's exclusive directory bootstrap. Use the mutator's
         // minimal access mask: directory listing is not required. No waiting with a sidecar held.
-        internal bool TryProtectParentWrites(out LocalFileLockStatus status)
+        internal bool TryProtectParentWrites(out LocalFileLockStatus status, out LocalFileLockAttemptDiagnostics diagnostics)
         {
+            diagnostics = default;
             status = LocalFileLockStatus.Unavailable;
             var root = Path.GetPathRoot(_parent.FullPath);
             if (string.IsNullOrEmpty(root))
@@ -56,6 +75,7 @@ public static partial class AutomaticFileAccess
                 (uint)FileShare.ReadWrite, out var error);
             if (!KeepParent(current, error, out status))
             {
+                diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.ParentWriteProtectionRoot, error);
                 return false;
             }
             foreach (var component in _parent.FullPath[root.Length..].Split(
@@ -69,6 +89,7 @@ public static partial class AutomaticFileAccess
                     out error);
                 if (!KeepParent(next, error, out status))
                 {
+                    diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.ParentWriteProtectionAncestor, error);
                     return false;
                 }
                 current = next;
@@ -100,8 +121,10 @@ public static partial class AutomaticFileAccess
         }
 
         // Called only from the writer gateway. Read callers never reach a create disposition.
-        internal bool TryInitializeSidecar(string fullPath, out LocalFileLockStatus status)
+        internal bool TryInitializeSidecar(string fullPath, out LocalFileLockStatus status,
+            out LocalFileLockAttemptDiagnostics diagnostics)
         {
+            diagnostics = default;
             status = LocalFileLockStatus.Unavailable;
             if (_bootstrap is null)
             {
@@ -113,6 +136,7 @@ public static partial class AutomaticFileAccess
             _bootstrap.Dispose();
             _bootstrap = null;
             status = LockStatus(error);
+            diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.SidecarInitialize, error);
             if (_file is not { IsDirectory: false, DataIsLocal: true })
             {
                 if (_file is not null)
@@ -132,8 +156,13 @@ public static partial class AutomaticFileAccess
     }
 
     /// <summary>Writer-only: creates missing ordinary parents and the persistent lock sidecar.</summary>
-    public static LocalFileLock? TryAcquireExclusiveLockFile(string? path, out LocalFileLockStatus status)
+    public static LocalFileLock? TryAcquireExclusiveLockFile(string? path, out LocalFileLockStatus status) =>
+        TryAcquireExclusiveLockFile(path, out status, out _);
+
+    internal static LocalFileLock? TryAcquireExclusiveLockFile(string? path, out LocalFileLockStatus status,
+        out LocalFileLockAttemptDiagnostics diagnostics)
     {
+        diagnostics = default;
         status = LocalFileLockStatus.UnsafePath;
         if (!TryNormalize(path, out var fullPath) || Path.GetDirectoryName(fullPath) is not { Length: > 0 } parentPath)
         {
@@ -148,13 +177,13 @@ public static partial class AutomaticFileAccess
                 return null;
             }
         }
-        var gate = TryAcquireExistingLockFile(fullPath, out status);
+        var gate = TryAcquireCoordinatedLock(fullPath, out status, out diagnostics);
         if (gate is null)
         {
             return null;
         }
-        if ((status != LocalFileLockStatus.Missing || gate.TryInitializeSidecar(fullPath, out status))
-            && gate.TryProtectParentWrites(out status))
+        if ((status != LocalFileLockStatus.Missing || gate.TryInitializeSidecar(fullPath, out status, out diagnostics))
+            && gate.TryProtectParentWrites(out status, out diagnostics))
         {
             return gate;
         }
@@ -165,11 +194,13 @@ public static partial class AutomaticFileAccess
     /// <summary>Reader-only: opens an existing sidecar; creates no files or directories.</summary>
     public static LocalFileLock? TryAcquireExistingLockFile(string? path, out LocalFileLockStatus status)
     {
-        return TryAcquireCoordinatedLock(path, out status);
+        return TryAcquireCoordinatedLock(path, out status, out _);
     }
 
-    private static LocalFileLock? TryAcquireCoordinatedLock(string? path, out LocalFileLockStatus status)
+    private static LocalFileLock? TryAcquireCoordinatedLock(string? path, out LocalFileLockStatus status,
+        out LocalFileLockAttemptDiagnostics diagnostics)
     {
+        diagnostics = default;
         status = LocalFileLockStatus.UnsafePath;
         if (!TryNormalize(path, out var fullPath))
         {
@@ -188,6 +219,7 @@ public static partial class AutomaticFileAccess
         if (parent is not { IsDirectory: true })
         {
             status = parent is null ? LockStatus(error) : LocalFileLockStatus.UnsafePath;
+            diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.ParentMetadataTraversal, error);
             parent?.Dispose();
             return null;
         }
@@ -196,7 +228,9 @@ public static partial class AutomaticFileAccess
         if (existing is not null || error is not (2 or 3))
         {
             // Established locks need no directory DATA gate; directory watchers must not affect them.
-            return CompleteLock(parent, existing, error, out status);
+            var gate = CompleteLock(parent, existing, error, out status);
+            diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.SidecarOpen, error);
+            return gate;
         }
         // Bootstrap participants take directory -> sidecar in that order. A legacy reader retains the
         // directory gate until its snapshot is complete; a writer therefore waits before creating
@@ -207,6 +241,7 @@ public static partial class AutomaticFileAccess
         {
             parent.Dispose();
             status = LockStatus(error);
+            diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.DirectoryBootstrap, error);
             return null;
         }
         if (!parent.IsCurrent() || bootstrap.Identity != parent.Identity)
@@ -223,7 +258,9 @@ public static partial class AutomaticFileAccess
             return new LocalFileLock(parent, null, bootstrap);
         }
         bootstrap.Dispose();
-        return CompleteLock(parent, file, error, out status);
+        var result = CompleteLock(parent, file, error, out status);
+        diagnostics = ObserveBusy(status, LocalFileLockBusyPoint.SidecarRecheck, error);
+        return result;
     }
 
     /// <summary>
@@ -260,6 +297,10 @@ public static partial class AutomaticFileAccess
         parent.Dispose();
         return null;
     }
+
+    private static LocalFileLockAttemptDiagnostics ObserveBusy(LocalFileLockStatus status,
+        LocalFileLockBusyPoint point, int error) =>
+        status == LocalFileLockStatus.Busy && error is 32 or 33 ? new(point, error) : default;
 
     private static LocalFileLockStatus LockStatus(int error) => error switch
     {

@@ -33,6 +33,42 @@ public enum VirusTotalQuotaStatus
 }
 
 /// <summary>
+/// Per-call gate observation. Default means unobserved; NoAttempt is true only for an observed
+/// call that started no lock API attempt. Attempts count calls to TryAcquireExclusiveLockFile,
+/// not its individual native opens. Counts saturate at Int32.MaxValue. An interrupted attempt
+/// can be started without completing. Busy sites and codes describe returned native refusals,
+/// not continuous contention, object identity, ownership or measured quota usage.
+/// </summary>
+public readonly struct VirusTotalQuotaGateDiagnostics
+{
+    internal VirusTotalQuotaGateDiagnostics(bool observed, int started, int completed, int busy,
+        LocalFileLockBusyPoint firstBusyPoint, int? firstNativeError,
+        LocalFileLockBusyPoint lastBusyPoint, int? lastNativeError)
+    {
+        Observed = observed;
+        AttemptsStarted = started;
+        AttemptsCompleted = completed;
+        BusyCount = busy;
+        FirstBusyPoint = firstBusyPoint;
+        FirstNativeError = firstNativeError;
+        LastBusyPoint = lastBusyPoint;
+        LastNativeError = lastNativeError;
+    }
+
+    public bool Observed { get; }
+    public int AttemptsStarted { get; }
+    public int AttemptsCompleted { get; }
+    public int BusyCount { get; }
+    /// <summary>At least one lock API call returned; the final started call may still have been interrupted.</summary>
+    public bool HasCompletedAttempt => AttemptsCompleted > 0;
+    public bool NoAttempt => Observed && AttemptsStarted == 0;
+    public LocalFileLockBusyPoint FirstBusyPoint { get; }
+    public int? FirstNativeError { get; }
+    public LocalFileLockBusyPoint LastBusyPoint { get; }
+    public int? LastNativeError { get; }
+}
+
+/// <summary>
 /// Coordinates admissions using one local profile's canonical quota path, including across
 /// Windows sessions. Older writers must be stopped before adopting the file-lock protocol.
 /// No request is admitted when accounting cannot be read and persisted safely.
@@ -72,19 +108,27 @@ public sealed class VirusTotalQuotaLimiter
 
     public static VirusTotalQuotaLimiter Default { get; } = new();
 
-    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot) => TryAcquireAdmission(out snapshot, out _);
+    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot) => TryAcquireAdmission(out snapshot, out _, out _);
 
     /// <summary>
     /// On infrastructure refusal, snapshot counts are conservative placeholders at the configured
     /// limits. Only Acquired and QuotaExhausted establish measured usage.
     /// </summary>
     public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status) =>
-        TryAcquireAdmission(out snapshot, out status);
+        TryAcquireAdmission(out snapshot, out status, out _);
 
-    private bool TryAcquireAdmission(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status)
+    /// <summary>
+    /// Returns the same admission and conservative snapshot contract with per-call gate diagnostics.
+    /// Observation never grants admission and is not evidence of a lock holder or a contention cause.
+    /// </summary>
+    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status,
+        out VirusTotalQuotaGateDiagnostics diagnostics) => TryAcquireAdmission(out snapshot, out status, out diagnostics);
+
+    private bool TryAcquireAdmission(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status,
+        out VirusTotalQuotaGateDiagnostics diagnostics)
     {
         snapshot = DeniedSnapshot();
-        using var gate = AcquireGate(out status);
+        using var gate = AcquireGate(out status, out diagnostics);
         if (gate is null) { return false; }
 
         QuotaState? state;
@@ -131,17 +175,31 @@ public sealed class VirusTotalQuotaLimiter
         return true;
     }
 
-    private AutomaticFileAccess.LocalFileLock? AcquireGate(out VirusTotalQuotaStatus status)
+    private AutomaticFileAccess.LocalFileLock? AcquireGate(out VirusTotalQuotaStatus status,
+        out VirusTotalQuotaGateDiagnostics diagnostics)
     {
+        diagnostics = new(true, 0, 0, 0, default, null, default, null);
         status = VirusTotalQuotaStatus.UnsafePath;
         var leaf = Path.GetFileName(_path);
         if (leaf.Length == 0 || leaf.Length + ".lock".Length > 255) { return null; }
+        var started = 0;
+        var completed = 0;
+        var busy = 0;
+        LocalFileLockAttemptDiagnostics firstBusy = default, lastBusy = default;
         var watch = Stopwatch.StartNew();
         try
         {
             while (watch.Elapsed < LockWait)
             {
-                var gate = AutomaticFileAccess.TryAcquireExclusiveLockFile(_path + ".lock", out var attempt);
+                started = IncrementDiagnosticCount(started);
+                var gate = AutomaticFileAccess.TryAcquireExclusiveLockFile(_path + ".lock", out var attempt, out var observation);
+                completed = IncrementDiagnosticCount(completed);
+                if (attempt == LocalFileLockStatus.Busy)
+                {
+                    if (busy == 0) { firstBusy = observation; }
+                    lastBusy = observation;
+                    busy = IncrementDiagnosticCount(busy);
+                }
                 if (gate is not null)
                 {
                     status = VirusTotalQuotaStatus.Acquired;
@@ -165,8 +223,15 @@ public sealed class VirusTotalQuotaLimiter
         {
             status = VirusTotalQuotaStatus.StateUnavailable;
         }
+        finally
+        {
+            diagnostics = new(true, started, completed, busy, firstBusy.BusyPoint, firstBusy.NativeError,
+                lastBusy.BusyPoint, lastBusy.NativeError);
+        }
         return null;
     }
+
+    private static int IncrementDiagnosticCount(int count) => count == int.MaxValue ? count : count + 1;
 
     private QuotaState? Load(out bool missing, out VirusTotalQuotaStatus status)
     {
