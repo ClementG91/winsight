@@ -164,7 +164,7 @@ internal static class PowerShellProcessEvidence
 
     private sealed class Phases(Stopwatch clock)
     {
-        private static readonly string[] Known = ["entered", "parsed", "definitions-loaded", "module-imported", "body-begin", "body-end", "probe-begin", "probe-first-complete", "probe-repeat-complete"];
+        private static readonly string[] Known = ["entered", "parsed", "definitions-loaded", "module-imported", "body-begin", "body-end", "probe-begin", "probe-first-complete", "probe-repeat-complete", "receipt-command-found", "receipt-json-built", "receipt-written", "receipt-read-begin", "receipt-read-returned"];
         private readonly StringBuilder _line = new();
         private readonly List<(string Name, double At)> _received = [];
         private readonly List<(string Name, long UtcTicks, long Counter, long Frequency)> _childClocks = [];

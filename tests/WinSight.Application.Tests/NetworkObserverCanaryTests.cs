@@ -157,8 +157,11 @@ public sealed class NetworkObserverCanaryTests(ITestOutputHelper output) : IDisp
     [InlineData("invalid-utf8")]
     public Task ReceiptReaderRejectsForeignOrMalformedBytes(string scenario) => Run(scenario, """
         $ast=Parse-Script ([IO.Path]::Combine($env:WINSIGHT_OBSERVER_ROOT,'scripts','Test-IpcNetworkObserver.ps1'))
+        Write-TestPhase 'parsed'
         Load-Functions $ast
+        Write-TestPhase 'definitions-loaded'
         if (-not (Get-Command Read-NetworkObservation -ErrorAction SilentlyContinue)) {throw 'SETUP: additive receipt API absent'}
+        Write-TestPhase 'receipt-command-found'
         $id=[guid]::NewGuid().ToString('N')
         $value=[ordered]@{SchemaVersion=1;ObservationId=$id;Stage='COMPLETE';Utc=[DateTime]::UtcNow.ToString('O')}
         switch($env:WINSIGHT_OBSERVER_SCENARIO) {
@@ -168,6 +171,7 @@ public sealed class NetworkObserverCanaryTests(ITestOutputHelper output) : IDisp
             'partial' {$value.Remove('Utc')}
         }
         $raw=$value|ConvertTo-Json -Compress
+        Write-TestPhase 'receipt-json-built'
         switch($env:WINSIGHT_OBSERVER_SCENARIO) {
             'array' {$raw='['+$raw+']'}
             'duplicate' {$raw=$raw.Replace('"SchemaVersion":1','"SchemaVersion":1,"SchemaVersion":1')}
@@ -176,8 +180,11 @@ public sealed class NetworkObserverCanaryTests(ITestOutputHelper output) : IDisp
         $path=[IO.Path]::Combine($env:WINSIGHT_OBSERVER_FOLDER,'receipt.json')
         if ($env:WINSIGHT_OBSERVER_SCENARIO -eq 'invalid-utf8') {[IO.File]::WriteAllBytes($path,[byte[]]@(255,255))}
         else {[IO.File]::WriteAllText($path,$raw,[Text.UTF8Encoding]::new($false))}
+        Write-TestPhase 'receipt-written'
         $failure=$null
+        Write-TestPhase 'receipt-read-begin'
         try {$receipt=Read-NetworkObservation -Path $path -ObservationId $id -Stage 'COMPLETE'} catch {$failure=$_}
+        Write-TestPhase 'receipt-read-returned'
         if ($env:WINSIGHT_OBSERVER_SCENARIO -eq 'valid') {
             if ($failure) {throw $failure}
             if ($receipt.ObservationId -cne $id -or $receipt.Stage -cne 'COMPLETE') {throw 'ASSERT: receipt changed'}
