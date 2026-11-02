@@ -92,6 +92,9 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
         Assert.Equal(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("synthetic-partial-error"))),
             Assert.IsType<string>(exception.Data["PowerShellStderrPrefixSha256"]));
         Assert.True(HasExited(pid), "The child must be observed stopped even when the cleanup callback fails.");
+        var cpu = EvidenceFields(Assert.IsType<string>(exception.Data["PowerShellEvidence"]), "native-cpu-before-kill");
+        Assert.Single(cpu);
+        CanonicalNonnegativeLong(cpu["totalCpuTimeSpanTicks"]);
     }
 
     private static bool HasExited(int pid)

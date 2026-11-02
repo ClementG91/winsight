@@ -68,6 +68,7 @@ internal static class PowerShellProcessEvidence
         var failureClock = "not-observed";
         var failurePool = "not-observed";
         var beforeKill = "not-observed";
+        var beforeKillCpu = "not-observed";
         try
         {
             await process.WaitForExitAsync(deadline.Token);
@@ -87,6 +88,8 @@ internal static class PowerShellProcessEvidence
             // Retain the same Process object. PID lookups could bind a recycled process, while
             // a real native exit preceding late observation must remain visible before Kill.
             beforeKill = NativeProcessSnapshot(process);
+            // Cumulative CPU of this process, sampled after failure; not a phase-local trace.
+            beforeKillCpu = Diagnostic(() => FormattableString.Invariant($"totalCpuTimeSpanTicks={process.TotalProcessorTime.Ticks}"));
             try { (kill ?? (p => p.Kill(entireProcessTree: true)))(process); killed = true; }
             catch (Exception secondary) { cleanupError = secondary.GetType().Name; }
             // Separate, fixed cleanup budget; it never extends or changes the assertion deadline.
@@ -113,7 +116,7 @@ internal static class PowerShellProcessEvidence
         var finalPool = PoolSnapshot();
         var finalProcess = NativeProcessSnapshot(process);
         var summary = $"PS5 host reception ms: started={started:F1}, {phases.Summary()}, exited={exited?.ToString("F1") ?? "unobserved"}, drained={drainAt?.ToString("F1") ?? "unobserved"}, cleanup-ended={cleanupEnded:F1}; stdout-eof={stdout.Eof}, stderr-eof={stderr.Eof}, stdout-truncated={stdout.Truncated}, stderr-truncated={stderr.Truncated}, kill-returned={killed}, cleanup-error={cleanupError ?? "none"}"
-            + FormattableString.Invariant($"; watchdogMs={watchdog.TotalMilliseconds}; host-launch=[{launchClock}]; host-armed=[{armedClock}]; host-failure=[{failureClock}]; host-final=[{finalClock}]; pool-launch=[{launchPool}]; pool-failure=[{failurePool}]; pool-final=[{finalPool}]; native-before-kill=[{beforeKill}]; native-process-final=[{finalProcess}]; child-clocks=[{phases.ChildSummary()}]");
+            + FormattableString.Invariant($"; watchdogMs={watchdog.TotalMilliseconds}; host-launch=[{launchClock}]; host-armed=[{armedClock}]; host-failure=[{failureClock}]; host-final=[{finalClock}]; pool-launch=[{launchPool}]; pool-failure=[{failurePool}]; pool-final=[{finalPool}]; native-before-kill=[{beforeKill}]; native-cpu-before-kill=[{beforeKillCpu}]; native-process-final=[{finalProcess}]; child-clocks=[{phases.ChildSummary()}]");
         // Report only after cleanup; a diagnostic callback must never mask the original failure.
         try { report(summary); }
         catch when (primary is not null) { }
