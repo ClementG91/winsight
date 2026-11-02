@@ -161,10 +161,10 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
         var budget = Stopwatch.StartNew();
         var captures = 0;
         var qualifiedCaptures = 0;
-        output.WriteLine("module-qualified-comparison condition=bounded-concurrency-2;no-preload=true;profiling-unchanged=true");
+        output.WriteLine("module-qualified-comparison condition=bounded-concurrency-2;order=BAAB;no-preload=true;profiling-unchanged=true");
         for (var trial = 0; trial < ComparisonOrders.Length; trial++)
         {
-            foreach (var qualified in ComparisonOrders[trial])
+            foreach (var qualified in ComparisonOrders[trial].Reverse())
             {
                 var observers = ComparisonOperations.Select(operation =>
                     (Func<Action<string>, Task<bool>>)(report => Observe(operation, trial, qualified, report))).ToArray();
