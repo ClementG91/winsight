@@ -53,33 +53,8 @@ public static partial class Adapters
     /// desktop, which is a fine price for "what is loaded anywhere on this machine" and an absurd
     /// one for a view opened on a single pid.
     /// </remarks>
-    public static ToolReport ProcessDrillDown(int pid, CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        var processAcquisition = new ProcessLister(SharedVerifier).SnapshotWithCoverage(cancellationToken);
-        var processes = processAcquisition.Items;
-
-        // Established first, before paying for anything else. A pid that is not running produces
-        // the same "not running" answer whatever the other two scans return, and making someone
-        // wait through a full connection sweep to be told that is simply rude. Measured: the absent
-        // case drops from ~15 s to ~7 s.
-        if (!processes.Any(process => process.Pid == pid))
-        {
-            return ProcessInsightReport.Render(
-                pid,
-                insight: null,
-                ProcessInsightCoverage.From(processAcquisition));
-        }
-
-        var moduleAcquisition = new ModuleLister(SharedVerifier).SnapshotForWithCoverage(pid, cancellationToken);
-        var modules = moduleAcquisition.Items;
-        var connections = new ConnectionMonitor(SharedVerifier).Snapshot(cancellationToken);
-
-        return ProcessInsightReport.Render(
-            pid,
-            ProcessInsightBuilder.Build(pid, processes, modules, connections),
-            ProcessInsightCoverage.From(processAcquisition, moduleAcquisition));
-    }
+    public static ToolReport ProcessDrillDown(int pid, CancellationToken cancellationToken = default) =>
+        new ProcessInsightAcquirer(new NativeProcessInsightAcquisition(SharedVerifier)).Acquire(pid, cancellationToken);
 
     public static ToolReport Modules(bool flaggedOnly, CancellationToken cancellationToken = default)
     {

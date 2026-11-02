@@ -1,3 +1,4 @@
+using System.Security.AccessControl;
 using System.Security.Principal;
 
 namespace WinSight.Dashboard;
@@ -14,11 +15,12 @@ namespace WinSight.Dashboard;
 /// runs, was enough.
 ///
 /// <b>Scope.</b> The names live in the <c>Local\</c> namespace, which is per session, and carry the
-/// user's SID, so a second account in the same session keeps its own instance. Only a mutex this
-/// account can open counts as an existing instance: a name another account created and this one
-/// cannot open is not a WinSight dashboard of this user, and must not be able to stop one from
-/// starting. The Explorer signature window and the smoke test start no monitors and are not subject
-/// to this.
+/// user's SID, so a second account in the same session keeps its own instance. Each exact opened
+/// handle must have this token user's owner SID and the supported private DACL before it can
+/// suppress a launch or carry activation. Untrusted or inaccessible coordination falls back to an
+/// independent primary. This point-in-time check does not authenticate a particular executable or
+/// defend against hostile same-user/admin changes. The Explorer signature window and the smoke
+/// test start no monitors and are not subject to this.
 /// </remarks>
 internal sealed class DashboardSingleInstance : IDisposable
 {
@@ -47,38 +49,60 @@ internal sealed class DashboardSingleInstance : IDisposable
     /// </summary>
     public static DashboardSingleInstance Acquire(string? scope = null)
     {
-        scope ??= CurrentUserScope();
-        Mutex mutex;
-        bool createdNew;
-        try
+        var user = CurrentUser();
+        if (user is null)
         {
-            mutex = new Mutex(initiallyOwned: false, MutexName(scope), out createdNew);
-        }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
-        {
-            // Somebody else's object under this name. Running without the guarantee is better than
-            // letting an object this account cannot even open keep the dashboard from starting.
             return new DashboardSingleInstance(isPrimary: true, mutex: null, activation: null);
         }
-
-        if (createdNew)
+        scope ??= user.Value;
+        Mutex? mutex = null;
+        EventWaitHandle? activation = null;
+        try
         {
+            mutex = MutexAcl.Create(false, MutexName(scope), out var createdNew,
+                DashboardObjectSecurity.MutexDescriptor(user));
+            if (!DashboardObjectSecurity.IsTrusted(mutex.SafeWaitHandle, user, (int)MutexRights.FullControl))
+            {
+                return new DashboardSingleInstance(isPrimary: true, mutex: null, activation: null);
+            }
+            if (!createdNew)
+            {
+                // Keep the verified lifetime handle alive through the existing-event request.
+                RequestActivation(scope, user);
+                return new DashboardSingleInstance(isPrimary: false, mutex: null, activation: null);
+            }
             try
             {
-                var activation = new EventWaitHandle(
-                    initialState: false, EventResetMode.AutoReset, ActivationName(scope));
-                return new DashboardSingleInstance(isPrimary: true, mutex, activation);
+                activation = EventWaitHandleAcl.Create(false, EventResetMode.AutoReset,
+                    ActivationName(scope), out _, DashboardObjectSecurity.EventDescriptor(user));
+                if (!DashboardObjectSecurity.IsTrusted(activation.SafeWaitHandle, user, (int)EventWaitHandleRights.FullControl))
+                {
+                    activation.Dispose();
+                    activation = null;
+                }
             }
-            catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+            catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException
+                                         or System.Security.SecurityException)
             {
-                // The instance is still this one; it simply cannot be raised by a second launch.
-                return new DashboardSingleInstance(isPrimary: true, mutex, activation: null);
+                activation?.Dispose();
+                activation = null;
             }
+            var result = new DashboardSingleInstance(isPrimary: true, mutex, activation);
+            mutex = null;
+            activation = null;
+            return result;
         }
-
-        mutex.Dispose();
-        RequestActivation(scope);
-        return new DashboardSingleInstance(isPrimary: false, mutex: null, activation: null);
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException
+                                     or System.Security.SecurityException)
+        {
+            // An unknown object cannot be allowed to suppress independent monitoring.
+            return new DashboardSingleInstance(isPrimary: true, mutex: null, activation: null);
+        }
+        finally
+        {
+            activation?.Dispose();
+            mutex?.Dispose();
+        }
     }
 
     /// <summary>
@@ -111,29 +135,34 @@ internal sealed class DashboardSingleInstance : IDisposable
         _mutex?.Dispose();
     }
 
-    private static void RequestActivation(string scope)
+    private static void RequestActivation(string scope, SecurityIdentifier user)
     {
         try
         {
-            using var activation = EventWaitHandle.OpenExisting(ActivationName(scope));
-            activation.Set();
+            using var activation = EventWaitHandleAcl.OpenExisting(ActivationName(scope),
+                EventWaitHandleRights.ReadPermissions | EventWaitHandleRights.Modify);
+            if (DashboardObjectSecurity.IsTrusted(activation.SafeWaitHandle, user, (int)EventWaitHandleRights.FullControl))
+            {
+                activation.Set();
+            }
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or WaitHandleCannotBeOpenedException
+                                     or System.Security.SecurityException)
         {
             // The first instance is starting up or shutting down; nothing more can be done from here.
         }
     }
 
-    private static string CurrentUserScope()
+    private static SecurityIdentifier? CurrentUser()
     {
         try
         {
             using var identity = WindowsIdentity.GetCurrent();
-            return identity.User?.Value ?? Environment.UserName;
+            return identity.User;
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
         {
-            return Environment.UserName;
+            return null;
         }
     }
 }

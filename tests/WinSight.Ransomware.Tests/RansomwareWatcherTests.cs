@@ -25,16 +25,15 @@ public sealed class CanaryManagerTests
 {
     private static string TempDir()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"wsg-canary-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = CanaryTestDirectory.CreateDecoyDirectory();
         return dir;
     }
 
     private static CanaryManager Manager(out string manifest)
     {
-        manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt");
+        manifest = CanaryTestDirectory.CreateManifestPath();
         // A fixed seed keeps the assertions deterministic; production derives one per machine.
-        return new CanaryManager(seed: new byte[32], manifestPath: manifest);
+        return CanaryTestDirectory.TrackForManifest(new CanaryManager(seed: new byte[32], manifestPath: manifest), manifest);
     }
 
     /// <summary>
@@ -79,8 +78,9 @@ public sealed class CanaryManagerTests
         }
         finally
         {
-            File.Delete(manifest);
-            Directory.Delete(dir, recursive: true);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -107,8 +107,9 @@ public sealed class CanaryManagerTests
         finally
         {
             manager.Remove();
-            File.Delete(manifest);
-            Directory.Delete(dir, recursive: true);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -190,8 +191,9 @@ public sealed class CanaryManagerTests
         finally
         {
             manager.Remove();
-            File.Delete(manifest);
-            Directory.Delete(dir, recursive: true);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -214,8 +216,9 @@ public sealed class CanaryManagerTests
         finally
         {
             manager.Remove();
-            File.Delete(manifest);
-            Directory.Delete(dir, recursive: true);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -230,7 +233,8 @@ public sealed class CanaryManagerTests
         }
         finally
         {
-            File.Delete(manifest);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
         }
     }
 
@@ -244,7 +248,8 @@ public sealed class CanaryManagerTests
         }
         finally
         {
-            File.Delete(manifest);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
         }
     }
 
@@ -271,12 +276,13 @@ public sealed class CanaryManagerTests
             Assert.Equal(planted.Count, removed);
             Assert.All(planted, path => Assert.False(File.Exists(path)));
             Assert.True(File.Exists(userFile)); // a real user file is never touched
-            Assert.False(File.Exists(manifest));
+            CanaryTestDirectory.AssertEmptyManifest(manifest);
         }
         finally
         {
-            File.Delete(manifest);
-            Directory.Delete(dir, recursive: true);
+            manager.EndSessionWithoutCleanup();
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -284,8 +290,8 @@ public sealed class CanaryManagerTests
     public void RemoveOrphans_RejectsManifestPathsThatWereNotExpectedCanaries()
     {
         var dir = TempDir();
-        var outside = Path.Combine(Path.GetTempPath(), $"wsg-real-{Guid.NewGuid():N}.txt");
-        var manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt");
+        var outside = Path.Combine(Path.GetDirectoryName(dir)!, "real.txt");
+        var manifest = CanaryTestDirectory.CreateManifestPath();
         try
         {
             var inside = Path.Combine(dir, "my-real-spreadsheet.xlsx");
@@ -303,9 +309,9 @@ public sealed class CanaryManagerTests
         }
         finally
         {
-            File.Delete(manifest);
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
             File.Delete(outside);
-            Directory.Delete(dir, recursive: true);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -317,7 +323,7 @@ public sealed class CanaryManagerTests
     public void RemoveOrphans_PreservesLegacyFilesWithoutCreationIdentity()
     {
         var dir = TempDir();
-        var manifest = Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt");
+        var manifest = CanaryTestDirectory.CreateManifestPath();
         try
         {
             var legacy = Path.Combine(dir, $"WinSightGuard_{Guid.NewGuid():N}.xlsx");
@@ -328,7 +334,7 @@ public sealed class CanaryManagerTests
             var userFile = Path.Combine(dir, "my-real-spreadsheet.xlsx");
             File.WriteAllText(userFile, "user data");
 
-            var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest);
+            var removed = CanaryManager.RemoveOrphans(new[] { dir }, manifest, new byte[32]);
 
             Assert.Equal(0, removed);
             Assert.True(File.Exists(legacy));
@@ -337,7 +343,8 @@ public sealed class CanaryManagerTests
         }
         finally
         {
-            Directory.Delete(dir, recursive: true);
+            CanaryTestDirectory.DeleteManifestFamily(manifest);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 }
@@ -346,8 +353,7 @@ public sealed class RansomwareFileWatcherTests
 {
     private static string TempDir()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"wsg-fw-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = CanaryTestDirectory.CreateDecoyDirectory();
         return dir;
     }
 
@@ -357,7 +363,7 @@ public sealed class RansomwareFileWatcherTests
         var dir = TempDir();
         var manager = new CanaryManager(
             seed: new byte[32],
-            manifestPath: Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.txt"));
+            manifestPath: CanaryTestDirectory.ManifestForDirectory(dir));
         var canary = manager.Plant(new[] { dir })[0];
 
         var fired = new ManualResetEventSlim(false);
@@ -376,8 +382,9 @@ public sealed class RansomwareFileWatcherTests
         }
         finally
         {
+            watcher.Dispose();
             manager.Remove();
-            Directory.Delete(dir, recursive: true);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -410,7 +417,8 @@ public sealed class RansomwareFileWatcherTests
         }
         finally
         {
-            Directory.Delete(dir, recursive: true);
+            watcher.Dispose();
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
     /// <summary>
@@ -469,10 +477,7 @@ public sealed class RansomwareFileWatcherTests
         finally
         {
             watcher.Dispose();
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, recursive: true);
-            }
+            CanaryTestDirectory.DeleteDirectoryFamily(directory);
         }
     }
 }
@@ -482,12 +487,11 @@ public sealed class RansomwareMonitorTests
     [Fact]
     public void Monitor_PlantsCanaries_DetectsATouch_ThenPreservesModifiedDataOnDispose()
     {
-        var dir = Path.Combine(Path.GetTempPath(), $"wsg-mon-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = CanaryTestDirectory.CreateDecoyDirectory();
 
         var fired = new ManualResetEventSlim(false);
         var monitor = new RansomwareMonitor(new[] { dir }, null, new byte[32],
-            Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.json"));
+            CanaryTestDirectory.ManifestForDirectory(dir));
         monitor.Detected += (_, _) => fired.Set();
         try
         {
@@ -508,7 +512,7 @@ public sealed class RansomwareMonitorTests
             // The modified decoy may now contain user data and must be preserved. Only the
             // untouched originals can be safely removed during monitor shutdown.
             Assert.Single(Directory.GetFiles(dir));
-            Directory.Delete(dir, recursive: true);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 
@@ -517,8 +521,7 @@ public sealed class RansomwareMonitorTests
     {
         // A security tool that alerts once per session and then goes quiet is worse than one that
         // never alerted: the operator would trust a silence that no longer means "nothing happened".
-        var dir = Path.Combine(Path.GetTempPath(), $"wsg-mon-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
+        var dir = CanaryTestDirectory.CreateDecoyDirectory();
 
         var detections = new System.Collections.Concurrent.ConcurrentQueue<RansomwareDetectedEventArgs>();
         var first = new ManualResetEventSlim(false);
@@ -528,7 +531,7 @@ public sealed class RansomwareMonitorTests
         // cooldown working rather than the latch failing. The cooldown has its own tests.
         var monitor = new RansomwareMonitor(
             new[] { dir }, new RansomwareBurstDetector(cooldown: TimeSpan.Zero),
-            new byte[32], Path.Combine(Path.GetTempPath(), $"wsg-manifest-{Guid.NewGuid():N}.json"));
+            new byte[32], CanaryTestDirectory.ManifestForDirectory(dir));
         monitor.Detected += (_, e) =>
         {
             detections.Enqueue(e);
@@ -558,7 +561,7 @@ public sealed class RansomwareMonitorTests
         finally
         {
             monitor.Dispose();
-            Directory.Delete(dir, recursive: true);
+            CanaryTestDirectory.DeleteDirectoryFamily(dir);
         }
     }
 }

@@ -1,3 +1,7 @@
+using System.Runtime.InteropServices;
+
+using Microsoft.Win32.SafeHandles;
+
 using WinSight.Core;
 using Xunit;
 
@@ -321,6 +325,92 @@ public sealed class AutomaticFileAccessTests
 
         Assert.Equal(SignatureState.Unknown, verdict.State);
         Assert.Equal(0, inner.Calls);
+    }
+
+    [Fact]
+    public void GateDiagnosticsIdentifyARealSidecarSharingRefusal()
+    {
+        var root = Directory.CreateTempSubdirectory("winsight-gate-sidecar-").FullName;
+        var path = Path.Combine(root, "quota.lock");
+        try
+        {
+            File.WriteAllText(path, string.Empty);
+            using (var held = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+            {
+                using var gate = AutomaticFileAccess.TryAcquireExclusiveLockFile(path, out var status, out var observation);
+                Assert.Null(gate);
+                Assert.Equal(LocalFileLockStatus.Busy, status);
+                Assert.Equal(LocalFileLockBusyPoint.SidecarOpen, observation.BusyPoint);
+                Assert.True(observation.NativeError is 32 or 33);
+                Assert.True(File.Exists(path));
+            }
+            using var recovered = AutomaticFileAccess.TryAcquireExclusiveLockFile(path, out var recoveredStatus);
+            Assert.NotNull(recovered);
+            Assert.Equal(LocalFileLockStatus.Acquired, recoveredStatus);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void GateDiagnosticsIdentifyARealDirectoryBootstrapSharingRefusal()
+    {
+        var root = Directory.CreateTempSubdirectory("winsight-gate-bootstrap-").FullName;
+        var path = Path.Combine(root, "quota.lock");
+        try
+        {
+            using (var held = AutomaticFileAccess.TryAcquireStableRead(root, out var missing))
+            {
+                Assert.NotNull(held);
+                Assert.False(missing);
+                Assert.True(held.IsDirectory);
+                using var gate = AutomaticFileAccess.TryAcquireExclusiveLockFile(path, out var status, out var observation);
+                Assert.Null(gate);
+                Assert.Equal(LocalFileLockStatus.Busy, status);
+                Assert.Equal(LocalFileLockBusyPoint.DirectoryBootstrap, observation.BusyPoint);
+                Assert.True(observation.NativeError is 32 or 33);
+                Assert.False(File.Exists(path));
+            }
+            using var recovered = AutomaticFileAccess.TryAcquireExclusiveLockFile(path, out var recoveredStatus);
+            Assert.NotNull(recovered);
+            Assert.Equal(LocalFileLockStatus.Acquired, recoveredStatus);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
+    public void GateDiagnosticsIdentifyARealPrivateAncestorSharingRefusal()
+    {
+        var root = Directory.CreateTempSubdirectory("winsight-gate-ancestor-").FullName;
+        var parent = Directory.CreateDirectory(Path.Combine(root, "parent")).FullName;
+        var path = Path.Combine(parent, "quota.lock");
+        File.WriteAllText(path, string.Empty);
+        try
+        {
+            // Only this fixture's newly created ancestor is held. Never gate a shared volume root.
+            using (var held = GateDiagnosticNative.CreateFileW(root, 0x80000000, 0, IntPtr.Zero, 3,
+                       0x02000000 | 0x00200000, IntPtr.Zero))
+            {
+                Assert.False(held.IsInvalid, $"Private ancestor control failed with native error {Marshal.GetLastPInvokeError()}.");
+                using var gate = AutomaticFileAccess.TryAcquireExclusiveLockFile(path, out var status, out var observation);
+                Assert.Null(gate);
+                Assert.Equal(LocalFileLockStatus.Busy, status);
+                Assert.Equal(LocalFileLockBusyPoint.ParentWriteProtectionAncestor, observation.BusyPoint);
+                Assert.True(observation.NativeError is 32 or 33);
+                Assert.True(File.Exists(path));
+            }
+            using var recovered = AutomaticFileAccess.TryAcquireExclusiveLockFile(path, out var recoveredStatus);
+            Assert.NotNull(recovered);
+            Assert.Equal(LocalFileLockStatus.Acquired, recoveredStatus);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    private static class GateDiagnosticNative
+    {
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+        internal static extern SafeFileHandle CreateFileW(string path, uint access, uint share,
+            IntPtr security, uint creation, uint flags, IntPtr template);
     }
 
     private sealed class CountingVerifier : ISignatureVerifier

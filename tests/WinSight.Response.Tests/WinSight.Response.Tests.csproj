@@ -10,5 +10,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinSight.Response\WinSight.Response.csproj" />
+    <ProjectReference Include="..\WinSight.Response.LockProbe\WinSight.Response.LockProbe.csproj" />
   </ItemGroup>
 </Project>

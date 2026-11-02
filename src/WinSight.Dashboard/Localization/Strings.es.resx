@@ -424,7 +424,7 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>El elemento cambió desde la alerta, por lo que no se eliminó nada.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight aún no puede revertir este elemento: se aplica a todo el equipo o es de un tipo sin eliminación reversible.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>No se pudo completar la acción.</value></data>
-  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Es posible que el sistema haya cambiado, pero el resultado no se pudo auditar por completo. ID de acción: {0}. {1}</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>Es posible que el sistema haya cambiado; algunos pasos siguen sin confirmar. ID de acción: {0}.</value></data>
   <data name="AlertBlockReasserted" xml:space="preserve"><value>Eliminado y puesto en cuarentena, pero el elemento de inicio volvió a aparecer de inmediato: un programa en ejecución lo vuelve a crear. Ocúpese de ese programa y vuelva a bloquearlo. ID de acción: {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — firma de archivo</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Quién firmó este archivo</value></data>
@@ -440,4 +440,53 @@
   <data name="SignatureRevocationNotChecked" xml:space="preserve"><value>No se comprobó la revocación: no había nada en caché para responder y WinSight no se conecta para verificar. Un certificado robado seguiría pareciendo válido aquí.</value></data>
   <data name="SignatureRevoked" xml:space="preserve"><value>El certificado de firma ha sido revocado. No confíe en este archivo por su firma.</value></data>
   <data name="Close" xml:space="preserve"><value>Cerrar</value></data>
+  <data name="ResponseActionId" xml:space="preserve"><value>ID de acción: {0}.</value></data>
+  <data name="ResponseProcessRollbackIncomplete" xml:space="preserve"><value>La reversión de la suspensión quedó incompleta; algunos hilos pueden seguir suspendidos. Revise el proceso antes de volver a actuar.</value></data>
+  <data name="ResponseIntentRefused" xml:space="preserve"><value>No se pudo escribir la intención de auditoría; no se intentó la acción.</value></data>
+  <data name="ResponseCompletionGap" xml:space="preserve"><value>No se pudo registrar la finalización de la acción.</value></data>
+  <data name="ResponseRuleMutation" xml:space="preserve"><value>Cambio de reglas: {0}</value></data>
+  <data name="ResponseRollbackStorage" xml:space="preserve"><value>Almacenamiento durante la reversión: {0}</value></data>
+  <data name="ResponseIgnoredCount" xml:space="preserve"><value>entradas omitidas: {0};</value></data>
+  <data name="ResponseIgnoredRemoved" xml:space="preserve"><value>las entradas no válidas se eliminaron al completar esta escritura.</value></data>
+  <data name="ResponseIgnoredRetained" xml:space="preserve"><value>las entradas no válidas permanecen intactas hasta que una escritura se complete correctamente.</value></data>
+  <data name="ResponseFutureRulesCount" xml:space="preserve"><value>entradas no compatibles conservadas: {0};</value></data>
+  <data name="ResponseFutureRulesInactive" xml:space="preserve"><value>Estas entradas se conservan sin aplicar su semántica desconocida.</value></data>
+  <data name="ResponseRollbackConfirmedAbsent" xml:space="preserve"><value>Se confirmó la ausencia de la nueva regla tras la reversión.</value></data>
+  <data name="ResponseRollbackConfirmedActive" xml:space="preserve"><value>La reversión falló y se confirmó que la regla original sigue activa; revise winsight rules.</value></data>
+  <data name="ResponseRollbackTargetChanged" xml:space="preserve"><value>La regla que se iba a revertir cambió; se conservó su reemplazo. No se confirmó si la regla original sigue activa; revise winsight rules.</value></data>
+  <data name="ResponseRollbackUnconfirmed" xml:space="preserve"><value>No se pudo verificar la reversión. No se confirmó si la regla sigue activa; revise winsight rules cuando el almacenamiento sea legible.</value></data>
+  <data name="ResponseJournalAppended" xml:space="preserve"><value>Se añadió el registro de auditoría.</value></data>
+  <data name="ResponseJournalRotated" xml:space="preserve"><value>El registro de auditoría se guardó tras rotar el diario.</value></data>
+  <data name="ResponseJournalUpdated" xml:space="preserve"><value>Se actualizó el historial de auditoría.</value></data>
+  <data name="ResponseJournalTargetNotFound" xml:space="preserve"><value>No se encontró el registro de auditoría solicitado. Revise winsight actions.</value></data>
+  <data name="ResponseJournalUnavailable" xml:space="preserve"><value>El almacenamiento de auditoría no está disponible. Compruebe el espacio libre, el acceso local y el uso compartido de archivos.</value></data>
+  <data name="ResponseJournalInvalidRecord" xml:space="preserve"><value>El registro de auditoría no es válido. Revise los datos de la acción.</value></data>
+  <data name="ResponseJournalRotationFailed" xml:space="preserve"><value>Falló el reemplazo atómico del diario. Cierre los accesos al archivo que causen conflictos y vuelva a intentarlo.</value></data>
+  <data name="ResponseJournalEvidencePreservationFailed" xml:space="preserve"><value>No se pudieron conservar las pruebas de recuperación. Compruebe el espacio libre y el acceso antes de reintentar.</value></data>
+  <data name="ResponseJournalRecoveryRequired" xml:space="preserve"><value>Se requiere una migración acotada del historial. Consulte winsight actions y RECOVERY.md.</value></data>
+  <data name="ResponseJournalRetentionLimit" xml:space="preserve"><value>La anotación supera los límites de conservación y se rechazó; el diario original no cambió.</value></data>
+  <data name="ResponseJournalLockTimeout" xml:space="preserve"><value>Otra operación mantiene el bloqueo de auditoría. Reintente cuando termine; el límite de espera del bloqueo es de 30 segundos.</value></data>
+  <data name="ResponseJournalUnsafeLockPath" xml:space="preserve"><value>La ruta del bloqueo de auditoría no es segura o es inaccesible. Revise las rutas locales y RECOVERY.md.</value></data>
+  <data name="ResponseJournalLockUnavailable" xml:space="preserve"><value>No se pudo abrir el bloqueo de auditoría. Compruebe los permisos y las inicializaciones simultáneas; nunca elimine un bloqueo activo.</value></data>
+  <data name="ResponseJournalEvidenceRecoveryBlocked" xml:space="preserve"><value>No se pudo resolver de forma segura la recuperación de pruebas o el estado de sus metadatos. Consulte winsight actions y RECOVERY.md antes de reintentar.</value></data>
+  <data name="ResponseJournalPathTooLong" xml:space="preserve"><value>El nombre del diario es demasiado largo para sus archivos auxiliares y de archivo. Conserve todos los archivos y elija una ruta más corta sin solapamientos siguiendo RECOVERY.md.</value></data>
+  <data name="ResponseJournalUnknown" xml:space="preserve"><value>No se reconoce el estado de auditoría. Consulte winsight actions y RECOVERY.md.</value></data>
+  <data name="ResponseRuleLoaded" xml:space="preserve"><value>Se leyó el almacén de reglas.</value></data>
+  <data name="ResponseRuleMissing" xml:space="preserve"><value>No existe ningún archivo de reglas.</value></data>
+  <data name="ResponseRuleWritten" xml:space="preserve"><value>Se guardó el cambio de reglas.</value></data>
+  <data name="ResponseRuleTargetNotFound" xml:space="preserve"><value>La regla no está en el almacén legible.</value></data>
+  <data name="ResponseRuleInvalidRule" xml:space="preserve"><value>La identidad, el ámbito, la decisión o la duración de la regla no son válidos; las reglas temporales requieren una fecha de vencimiento.</value></data>
+  <data name="ResponseRuleInvalidJson" xml:space="preserve"><value>El archivo de reglas contiene JSON no válido y se conservó. Consulte winsight rules y RECOVERY.md.</value></data>
+  <data name="ResponseRuleInvalidFormat" xml:space="preserve"><value>El formato del archivo de reglas no es válido y el archivo se conservó. Consulte winsight rules y RECOVERY.md.</value></data>
+  <data name="ResponseRuleUnsupportedVersion" xml:space="preserve"><value>La versión del archivo de reglas no es compatible y se conservó. Use una versión compatible o una copia de seguridad revisada.</value></data>
+  <data name="ResponseRuleByteLimit" xml:space="preserve"><value>Se superó el límite de 8 MiB del archivo de reglas; se conservó el archivo existente.</value></data>
+  <data name="ResponseRuleRuleLimit" xml:space="preserve"><value>Se superó el límite de 8192 reglas. Revoque una regla desde un almacén legible o recupere una copia de seguridad revisada.</value></data>
+  <data name="ResponseRuleUnavailable" xml:space="preserve"><value>El almacén de reglas no está disponible. Compruebe el acceso local, el uso compartido de archivos y el espacio libre.</value></data>
+  <data name="ResponseRuleWriteFailed" xml:space="preserve"><value>Falló el reemplazo atómico de las reglas. Compruebe el espacio libre, los permisos y los accesos a archivos que causen conflictos.</value></data>
+  <data name="ResponseRuleLockTimeout" xml:space="preserve"><value>Otra operación mantiene el bloqueo de reglas. Reintente cuando termine; el límite de espera del bloqueo es de 30 segundos.</value></data>
+  <data name="ResponseRuleUnsafeLockPath" xml:space="preserve"><value>La ruta del bloqueo de reglas no es segura o es inaccesible. Revise las rutas locales y RECOVERY.md.</value></data>
+  <data name="ResponseRuleLockUnavailable" xml:space="preserve"><value>No se pudo abrir el bloqueo de reglas. Compruebe los permisos y las inicializaciones simultáneas; nunca elimine un bloqueo activo.</value></data>
+  <data name="ResponseRuleUnsupportedIdentityCollision" xml:space="preserve"><value>Esa identidad pertenece a una regla conservada de semántica desconocida. Use una versión compatible o revóquela explícitamente antes de reemplazarla.</value></data>
+  <data name="ResponseRuleTargetChanged" xml:space="preserve"><value>La regla esperada o sus bytes cambiaron, o su identidad es ambigua. Se conservó el reemplazo.</value></data>
+  <data name="ResponseRuleUnknown" xml:space="preserve"><value>No se reconoce el estado del almacenamiento de reglas. Consulte winsight rules y RECOVERY.md.</value></data>
 </root>

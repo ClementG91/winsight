@@ -63,7 +63,7 @@ public sealed class PersistenceMonitorCoreReconciliationTests
 public sealed class FilePersistenceBaselineStoreTests
 {
     private static string TempPath() =>
-        Path.Combine(Path.GetTempPath(), $"wsg-baseline-{Guid.NewGuid():N}.tsv");
+        Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
 
     private static PersistenceIdentity Id(AutostartVector vector, string name, string target) =>
         PersistenceIdentity.FromEntry(Entries.Signed(vector, name, target));
@@ -90,15 +90,23 @@ public sealed class FilePersistenceBaselineStoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
     [Fact]
     public void Load_MissingFile_ReturnsNull()
     {
-        var store = new FilePersistenceBaselineStore(TempPath());
-        Assert.Null(store.Load());
+        var path = TempPath();
+        try
+        {
+            var store = new FilePersistenceBaselineStore(path);
+            Assert.Null(store.Load());
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
     }
 
     [Fact]
@@ -112,7 +120,7 @@ public sealed class FilePersistenceBaselineStoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
@@ -134,7 +142,7 @@ public sealed class FilePersistenceBaselineStoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
@@ -154,65 +162,41 @@ public sealed class FilePersistenceBaselineStoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
     [Fact]
-    public void Save_WaitsForTheCrossProcessWriterLock()
+    public void Save_WaitsForTheCrossProcessWriterLock() => BaselineFileFixture.Run(fixture =>
     {
-        var path = TempPath();
-        using var lockHeld = new ManualResetEventSlim();
-        using var releaseLock = new ManualResetEventSlim();
-        using var saveFinished = new ManualResetEventSlim();
-        Exception? saveFailure = null;
-        var holder = new Thread(() =>
-        {
-            using var mutex = new Mutex(false, FilePersistenceBaselineStore.LockNameFor(path));
-            Assert.True(mutex.WaitOne(TimeSpan.FromSeconds(5)));
-            lockHeld.Set();
-            releaseLock.Wait(CancellationToken.None);
-            mutex.ReleaseMutex();
-        });
-        holder.Start();
+        var gate = WinSight.Core.AutomaticFileAccess.TryAcquireExclusiveLockFile(
+            fixture.Path + ".lock", out var status);
+        Assert.Equal(WinSight.Core.LocalFileLockStatus.Acquired, status);
+        Assert.NotNull(gate);
         try
         {
-            Assert.True(lockHeld.Wait(TimeSpan.FromSeconds(5)));
-            var store = new FilePersistenceBaselineStore(path);
+            var store = new FilePersistenceBaselineStore(fixture.Path);
             var identity = Id(AutostartVector.RunKey, "Serialized", @"C:\serialized.exe");
-            var saver = new Thread(() =>
-            {
-                try
-                {
-                    store.Save([identity]);
-                }
-                catch (Exception ex)
-                {
-                    saveFailure = ex;
-                }
-                finally
-                {
-                    saveFinished.Set();
-                }
-            });
-            saver.Start();
+            var enteredSave = fixture.NewEvent();
+            var baseline = new BaselineCountWitness(identity, enteredSave.Set);
+            var saver = fixture.StartWorker(() => store.Save(baseline));
+            // Count is observed by actual Save before acquiring its writer gate.
+            Assert.True(enteredSave.Wait(TimeSpan.FromSeconds(5)));
 
-            Assert.False(saveFinished.Wait(TimeSpan.FromMilliseconds(200)),
-                "a second writer bypassed the named baseline mutex");
+            Assert.False(saver.Finished.Wait(TimeSpan.FromMilliseconds(200)),
+                "a second writer bypassed the baseline file gate");
 
-            releaseLock.Set();
-            Assert.True(saveFinished.Wait(TimeSpan.FromSeconds(5)));
-            saver.Join();
-            Assert.Null(saveFailure);
+            gate.Dispose();
+            gate = null;
+            Assert.True(saver.Finished.Wait(TimeSpan.FromSeconds(5)));
+            Assert.Null(saver.Failure);
             Assert.Equal(identity, Assert.Single(store.Load()!));
         }
         finally
         {
-            releaseLock.Set();
-            holder.Join(TimeSpan.FromSeconds(5));
-            File.Delete(path);
+            gate?.Dispose();
         }
-    }
+    });
 }
 
 public sealed class PersistenceMonitorStartWithStoreTests
@@ -232,7 +216,7 @@ public sealed class PersistenceMonitorStartWithStoreTests
     }
 
     private static string TempPath() =>
-        Path.Combine(Path.GetTempPath(), $"wsg-baseline-{Guid.NewGuid():N}.tsv");
+        Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
 
     [Fact]
     public void Start_WithPersistedBaseline_FiresDetectedForWhatAppearedWhileOff()
@@ -264,7 +248,7 @@ public sealed class PersistenceMonitorStartWithStoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
@@ -290,7 +274,7 @@ public sealed class PersistenceMonitorStartWithStoreTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 }

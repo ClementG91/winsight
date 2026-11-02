@@ -120,13 +120,15 @@ public static partial class AutomaticFileAccess
     }
 
     /// <summary>
-    /// Replaces a local file atomically with durable bytes. A unique temporary file is created and
+    /// Publishes a local file atomically with durable bytes. A unique temporary file is created and
     /// renamed relative to the same acquired parent handle, so neither operation follows a reparse.
+    /// Set replaceExisting to false after observing absence; a later destination is preserved.
     /// </summary>
     public static bool TryWriteAtomic(
         string? path,
         ReadOnlySpan<byte> bytes,
-        bool createParentDirectories = true)
+        bool createParentDirectories = true,
+        bool replaceExisting = true)
     {
         if (!TryPrepareTarget(path, createParentDirectories, out var fullPath, out var leaf, out var parent))
         {
@@ -149,7 +151,7 @@ public static partial class AutomaticFileAccess
                 temp?.TryDelete();
                 return false;
             }
-            if (TryRenameRelative(temp, parent, leaf, replaceExisting: true))
+            if (TryRenameRelative(temp, parent, leaf, replaceExisting))
             {
                 return true;
             }
@@ -276,7 +278,20 @@ public static partial class AutomaticFileAccess
         uint shareAccess,
         uint createDisposition,
         uint createOptions)
+        => TryOpenRelative(parent, relativeName, fullPath, desiredAccess, shareAccess,
+            createDisposition, createOptions, out _);
+
+    private static LocalPathLease? TryOpenRelative(
+        LocalPathLease parent,
+        string relativeName,
+        string fullPath,
+        uint desiredAccess,
+        uint shareAccess,
+        uint createDisposition,
+        uint createOptions,
+        out int error)
     {
+        error = 5;
         if (!parent.IsDirectory || !IsSafeRelativeName(relativeName))
         {
             return null;
@@ -289,6 +304,7 @@ public static partial class AutomaticFileAccess
         var addedReference = false;
         var buffer = IntPtr.Zero;
         var namePointer = IntPtr.Zero;
+        SafeFileHandle? handle = null;
         try
         {
             rootHandle.DangerousAddRef(ref addedReference);
@@ -309,7 +325,7 @@ public static partial class AutomaticFileAccess
                 Attributes = ObjCaseInsensitive | ObjDontReparse,
             };
             var status = NtCreateFile(
-                out var handle,
+                out handle,
                 desiredAccess,
                 ref attributes,
                 out _,
@@ -322,18 +338,23 @@ public static partial class AutomaticFileAccess
                 0);
             if (status < 0 || handle.IsInvalid)
             {
-                handle.Dispose();
+                error = unchecked((int)RtlNtStatusToDosError(status));
                 return null;
             }
-            if (!GetFileInformationByHandle(handle, out var information)
-                || (information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+            if (!GetFileInformationByHandle(handle, out var information))
             {
-                handle.Dispose();
+                error = Marshal.GetLastPInvokeError();
                 return null;
             }
+            if ((information.FileAttributes & (uint)FileAttributes.ReparsePoint) != 0)
+            {
+                error = 1920; // ERROR_CANT_ACCESS_FILE: never classify a reparse as ordinary absence.
+                return null;
+            }
+            error = 0;
             var isDirectory = (information.FileAttributes & (uint)FileAttributes.Directory) != 0;
             var length = ((long)information.FileSizeHigh << 32) | information.FileSizeLow;
-            return new LocalPathLease(
+            var lease = new LocalPathLease(
                 fullPath,
                 isDirectory,
                 length,
@@ -346,6 +367,9 @@ public static partial class AutomaticFileAccess
                 desiredAccess,
                 shareAccess,
                 information.FileAttributes);
+            // Transfer only after timestamp conversion and construction have both succeeded.
+            handle = null;
+            return lease;
         }
         catch (Exception ex) when (ex is ArgumentException
                                      or OverflowException
@@ -356,6 +380,7 @@ public static partial class AutomaticFileAccess
         }
         finally
         {
+            handle?.Dispose();
             if (namePointer != IntPtr.Zero)
             {
                 Marshal.FreeHGlobal(namePointer);

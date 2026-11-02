@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
@@ -10,7 +11,7 @@ namespace WinSight.Application.Tests;
 /// user can write. These source contracts pin the rules that keep it from being turned against the
 /// host or against its own evidence; <c>Test-HarnessHelpers.ps1</c> exercises the helpers themselves.
 /// </summary>
-public sealed class QualificationHarnessContractTests
+public sealed class QualificationHarnessContractTests(ITestOutputHelper output)
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", "validation", "hyperv"));
@@ -494,20 +495,8 @@ public sealed class QualificationHarnessContractTests
         {
             start.ArgumentList.Add(argument);
         }
-        using var process = System.Diagnostics.Process.Start(start)!;
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        try
-        {
-            await process.WaitForExitAsync(deadline.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            throw;
-        }
-        Assert.True(process.ExitCode == 0, $"{script} exited {process.ExitCode}: {await output}\n{await error}");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromMinutes(2), output.WriteLine);
+        Assert.True(result.ExitCode == 0, $"{script} exited {result.ExitCode}: {result.Stdout}\n{result.Stderr}");
     }
 
     [Fact]

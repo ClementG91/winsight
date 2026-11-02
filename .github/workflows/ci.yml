@@ -80,7 +80,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.303"
+          dotnet-version: "10.0.403"
           # Matrix-driven rather than hardcoded x64: installing an x64 SDK on the Arm64 runner would
           # silently test the emulated target and prove nothing about native Arm64.
           architecture: ${{ matrix.architecture }}
@@ -122,6 +122,33 @@ jobs:
             -CliPath "src/WinSight.Cli/bin/Release/net10.0-windows10.0.19041.0/winsight.exe" `
             -OutputPath "out/cfa-provider/${{ matrix.os }}.json"
 
+      # One diagnostic Fact also runs in fullApp; its extra cost stays inside the 45-minute job.
+      # Keep its coverage outside qualification floors and upload before a later suite cancellation.
+      - name: Observe native ARM64 command discovery
+        if: matrix.architecture == 'arm64'
+        shell: pwsh
+        run: |
+          $diagnosticArguments = @(
+            "test", "tests/WinSight.Application.Tests/WinSight.Application.Tests.csproj"
+            "-c", "Release", "--no-build", "--no-restore"
+            "--filter", "FullyQualifiedName=WinSight.Application.Tests.PowerShellProcessEvidenceTests.ExplicitModuleQualifiedComparisonPreservesOriginalRuntimeOracles"
+            "--collect:Code Coverage;Format=cobertura"
+            "--results-directory", "out/arm64-command-discovery"
+            "--logger", "trx;LogFileName=command-discovery.trx"
+            "--logger", "console;verbosity=detailed"
+            "--nologo"
+          )
+          & dotnet @diagnosticArguments
+          if ($LASTEXITCODE -ne 0) { throw "Native ARM64 command discovery diagnostic failed." }
+
+      - name: Upload native ARM64 command discovery
+        if: always() && matrix.architecture == 'arm64'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: arm64-command-discovery-${{ matrix.os }}
+          path: out/arm64-command-discovery
+          if-no-files-found: error
+
       # Runs the suite once, with coverage, and fails when an engine library drops below the bar the
       # project claims. Previously this was a plain `dotnet test` and Measure-Coverage.ps1 was never
       # invoked by any workflow, so engine coverage could regress to zero without a red build.
@@ -135,11 +162,37 @@ jobs:
         # P/Invoke boundary excluded because the VM protocol qualifies it instead. Measured whole that
         # assembly reads 54%, which averages policy logic with generated marshalling stubs and means
         # nothing; measured honestly it is at 91%.
-        run: >-
-          ./scripts/Measure-Coverage.ps1
-          -EngineMinimum 80
-          -PrivilegedMinimum 80
-          -TrxLogFilePrefix tests-${{ matrix.architecture }}
+        run: |
+          $coverageArguments = @{
+            EngineMinimum = 80
+            PrivilegedMinimum = 80
+            TrxLogFilePrefix = "tests-${{ matrix.architecture }}"
+          }
+          # A cancelled ARM run may not finalize Application TRX; keep completed test output.
+          if ("${{ matrix.architecture }}" -eq "arm64") {
+            $coverageArguments["ConsoleLoggerVerbosity"] = "detailed"
+          }
+          # Only the explicit diagnostic may compare Framework startup profiling. Its marker
+          # attests the pre-collector environment, never exclusivity of an instrumentation client.
+          $frameworkComparisonName = "WINSIGHT_TEST_FRAMEWORK_PROFILE_BASELINE"
+          $frameworkComparisonPrevious = [Environment]::GetEnvironmentVariable($frameworkComparisonName, "Process")
+          $frameworkComparisonAmbient = @([Environment]::GetEnvironmentVariables().Keys | Where-Object {
+            ([string]$_).StartsWith("COR_", [StringComparison]::OrdinalIgnoreCase) -or
+            ([string]$_).StartsWith("MicrosoftInstrumentationEngine_", [StringComparison]::OrdinalIgnoreCase)
+          })
+          try {
+            $frameworkComparisonValue = if ($frameworkComparisonAmbient.Count -eq 0) { "unconfigured" } else { "configured" }
+            [Environment]::SetEnvironmentVariable($frameworkComparisonName, $frameworkComparisonValue, "Process")
+            ./scripts/Measure-Coverage.ps1 @coverageArguments
+          }
+          finally {
+            if ($null -eq $frameworkComparisonPrevious) {
+              [Environment]::SetEnvironmentVariable($frameworkComparisonName, [NullString]::Value, "Process")
+            }
+            else {
+              [Environment]::SetEnvironmentVariable($frameworkComparisonName, $frameworkComparisonPrevious, "Process")
+            }
+          }
 
       - name: Upload test results
         if: always()
@@ -201,7 +254,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
-          dotnet-version: "10.0.303"
+          dotnet-version: "10.0.403"
           architecture: ${{ matrix.architecture }}
           cache: true
           cache-dependency-path: Directory.Packages.props

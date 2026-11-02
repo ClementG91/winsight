@@ -135,7 +135,7 @@ public sealed class GuardianRegressionTests
     [Fact]
     public void BaselinePreservesSourceLocationAndRawMultilineArgumentPayload()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"wsg-v3-{Guid.NewGuid():N}.tsv");
+        var path = Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
         var identity = PersistenceIdentity.FromEntry(Entry() with
         {
             Command = "powershell.exe -Command \"$Name = 'A  B'\r\nWrite-Output\t$Name\" ",
@@ -152,7 +152,7 @@ public sealed class GuardianRegressionTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 

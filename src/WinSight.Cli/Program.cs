@@ -1,5 +1,6 @@
 using System.Reflection;
 using WinSight.Application;
+using WinSight.Firewall;
 using WinSight.Mcp;
 using WinSight.Reporting;
 
@@ -127,6 +128,15 @@ if (command == "remove-decoys")
 if (command == "firewall-ipc-selftest")
 {
     return await Adapters.FirewallIpcSelfTestAsync();
+}
+
+// A distinct diagnostic: unlike the capability self-test, this never sends a mutation.
+if (command == "firewall-ipc-readonly")
+{
+    var available = await FirewallIpcReadOnlyProbe.RunAsync(new FirewallServiceClient());
+    Console.WriteLine("[IPC_READONLY] schema=1 command=GetStatus serviceAvailable={0} mutation=none",
+        available ? "true" : "false");
+    return available ? CliContract.Clean : CliContract.ServiceUnavailable;
 }
 
 // `process` takes an argument, so it cannot go through Adapters.Run like the snapshot scanners.

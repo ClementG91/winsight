@@ -136,6 +136,7 @@ public sealed class McpProtocolIntegrationTests
                 {"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"winsight_process","arguments":{"pid":999999}}}
                 """);
             using var absent = await ReadAsync(process);
+            AssertStructuredProcessReply(absent.RootElement);
             var absentReport = absent.RootElement.GetProperty("result")
                 .GetProperty("structuredContent").GetProperty("reports")[0];
             Assert.Equal("process", absentReport.GetProperty("tool").GetString());
@@ -207,6 +208,59 @@ public sealed class McpProtocolIntegrationTests
             }
         }
     }
+
+    // Diagnose the envelope without logging machine evidence, arbitrary error text or property names.
+    // The original report/not-running assertions still follow this stronger protocol guard.
+    private static void AssertStructuredProcessReply(JsonElement root)
+    {
+        JsonElement protocol = default, id = default, method = default, result = default;
+        JsonElement error = default, errorMessage = default, errorCode = default, isError = default;
+        JsonElement structured = default, reports = default, content = default;
+        var objectRoot = root.ValueKind == JsonValueKind.Object;
+        var hasProtocol = objectRoot && root.TryGetProperty("jsonrpc", out protocol);
+        var protocolMatches = hasProtocol && protocol.ValueKind == JsonValueKind.String && protocol.ValueEquals("2.0");
+        var hasId = objectRoot && root.TryGetProperty("id", out id);
+        var idMatches = hasId && id.ValueKind == JsonValueKind.Number && id.TryGetInt32(out var number) && number == 9;
+        var hasMethod = objectRoot && root.TryGetProperty("method", out method);
+        var ping = hasMethod && method.ValueKind == JsonValueKind.String && method.ValueEquals("ping");
+        var hasResult = objectRoot && root.TryGetProperty("result", out result);
+        var hasError = objectRoot && root.TryGetProperty("error", out error);
+        var resultObject = hasResult && result.ValueKind == JsonValueKind.Object;
+        var hasIsError = resultObject && result.TryGetProperty("isError", out isError);
+        var acceptableErrorFlag = !hasIsError || isError.ValueKind == JsonValueKind.False;
+        var hasStructured = resultObject && result.TryGetProperty("structuredContent", out structured);
+        var structuredObject = hasStructured && structured.ValueKind == JsonValueKind.Object;
+        var hasReports = structuredObject && structured.TryGetProperty("reports", out reports);
+        var nonemptyReports = hasReports && reports.ValueKind == JsonValueKind.Array && reports.GetArrayLength() > 0;
+        int? code = null;
+        var knownScanLimitMessage = false;
+        if (hasError && error.ValueKind == JsonValueKind.Object)
+        {
+            if (error.TryGetProperty("code", out errorCode) && errorCode.ValueKind == JsonValueKind.Number && errorCode.TryGetInt32(out var rpcCode))
+            {
+                code = rpcCode;
+            }
+            if (error.TryGetProperty("message", out errorMessage))
+            {
+                knownScanLimitMessage = IsKnownScanLimitMessage(errorMessage);
+            }
+        }
+        if (hasIsError && isError.ValueKind == JsonValueKind.True && result.TryGetProperty("content", out content) && content.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in content.EnumerateArray().Take(4))
+            {
+                if (item.ValueKind == JsonValueKind.Object && item.TryGetProperty("text", out var text))
+                {
+                    knownScanLimitMessage |= IsKnownScanLimitMessage(text);
+                }
+            }
+        }
+        Assert.True(protocolMatches && idMatches && !hasMethod && !hasError && resultObject && acceptableErrorFlag && structuredObject && nonemptyReports,
+            $"MCP pid9 reply shape: rootKind={root.ValueKind}; jsonrpc2={protocolMatches}; idKind={id.ValueKind}; id9={idMatches}; hasMethod={hasMethod}; ping={ping}; hasResult={hasResult}; resultKind={result.ValueKind}; hasError={hasError}; errorKind={error.ValueKind}; errorCode={code?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "unavailable"}; hasIsError={hasIsError}; isErrorKind={isError.ValueKind}; structuredKind={structured.ValueKind}; reportsKind={reports.ValueKind}; knownScanLimitMessage={knownScanLimitMessage}");
+    }
+
+    private static bool IsKnownScanLimitMessage(JsonElement value) => value.ValueKind == JsonValueKind.String
+        && value.ValueEquals("The local WinSight scan exceeded the 90-second safety limit.");
 
     /// <summary>
     /// True when the server refused a call, by either route the specification allows: a JSON-RPC
