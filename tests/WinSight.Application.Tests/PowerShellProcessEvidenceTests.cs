@@ -11,6 +11,28 @@ namespace WinSight.Application.Tests;
 [Collection(QualificationPowerShellCollection.Name)]
 public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
 {
+    private const string FrameworkProfileBaseline = "WINSIGHT_TEST_FRAMEWORK_PROFILE_BASELINE";
+    private static readonly string[] ComparisonOperations = ["management", "json"];
+    private static readonly bool[][] ComparisonOrders = [[false, true], [true, false]];
+    private static readonly string[] BooleanTokens = ["True", "False"];
+    private const string FrameworkObservation = """
+
+        function Get-WinSightComparisonFlag([string]$Name) {
+            $value=[Environment]::GetEnvironmentVariable($Name)
+            if ($null -eq $value) { return 'absent' }
+            if ($value -ceq '0') { return 'zero' }
+            if ($value -ceq '1') { return 'one' }
+            return 'other'
+        }
+        $knownEngine=$false
+        foreach ($loaded in [Diagnostics.Process]::GetCurrentProcess().Modules) {
+            if ($loaded.ModuleName.IndexOf('InstrumentationEngine',[StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                $loaded.ModuleName.StartsWith('Microsoft.CodeCoverage',[StringComparison]::OrdinalIgnoreCase)) { $knownEngine=$true }
+        }
+        [Console]::WriteLine('WSPROFILER:'+(Get-WinSightComparisonFlag 'COR_ENABLE_PROFILING')+':'+(Get-WinSightComparisonFlag 'CORECLR_ENABLE_PROFILING')+':'+$knownEngine+':'+[Environment]::Version.Major+':'+[Environment]::Is64BitProcess)
+
+        """;
+
     [Fact]
     public async Task ARealFloodIsDrainedWhileRetainedOutputIsBounded()
     {
@@ -96,6 +118,71 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
     [InlineData("compiler")]
     public async Task FirstAndRepeatedRuntimeOperationsRetainNativeAndChildClockEvidence(string operation)
     {
+        _ = await ObserveRuntime(operation);
+    }
+
+    [Fact]
+    public async Task ExplicitFrameworkComparisonPreservesCoreClrAndOriginalRuntimeOracles()
+    {
+        var budget = Stopwatch.StartNew();
+        var applied = 0;
+        var captures = 0;
+        var expectedControls = Environment.GetEnvironmentVariable(FrameworkProfileBaseline) == "unconfigured"
+            && Environment.GetEnvironmentVariable("COR_ENABLE_PROFILING") == "1";
+        foreach (var operation in ComparisonOperations)
+        {
+            for (var trial = 0; trial < ComparisonOrders.Length; trial++)
+            {
+                foreach (var disableRequested in ComparisonOrders[trial])
+                {
+                    // Admission and post-return checks are not a hard bound on synchronous Start/Kill.
+                    Assert.True(TimeSpan.FromSeconds(120) - budget.Elapsed >= TimeSpan.FromSeconds(36),
+                        "The comparison cannot admit another complete 30 s oracle and its existing 6 s cleanup reserve.");
+                    var controlApplied = false;
+                    var expectedFramework = "unobserved";
+                    var expectedCore = "unobserved";
+                    ushort targetMachine = 0;
+                    var result = await ObserveRuntime(operation, start =>
+                    {
+                        var before = ProfileSnapshot(start);
+                        start.Environment.TryGetValue("COR_ENABLE_PROFILING", out var framework);
+                        start.Environment.TryGetValue("CORECLR_ENABLE_PROFILING", out var core);
+                        targetMachine = FrameworkTargetMachine(start);
+                        controlApplied = disableRequested && CanCompareOwnedFrameworkRoute(start, targetMachine);
+                        if (controlApplied) { start.Environment["COR_ENABLE_PROFILING"] = "0"; }
+                        expectedFramework = Flag(controlApplied ? "0" : framework);
+                        expectedCore = Flag(core);
+                        var after = ProfileSnapshot(start);
+                        Assert.True(before.Count == after.Count && before.All(pair =>
+                            after.TryGetValue(pair.Key, out var value)
+                            && value == (controlApplied && pair.Key.Equals("COR_ENABLE_PROFILING", StringComparison.OrdinalIgnoreCase) ? "0" : pair.Value)),
+                            "A profiling value outside the explicit Framework control changed.");
+                    }, observeFramework: true);
+                    Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The comparison exceeded its aggregate observation budget.");
+                    var metadata = Assert.Single(result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(line => line.TrimEnd('\r')), line => line.StartsWith("WSPROFILER:", StringComparison.Ordinal));
+                    var fields = metadata.Split(':');
+                    Assert.Equal(6, fields.Length);
+                    Assert.Equal(expectedFramework, fields[1]);
+                    Assert.Equal(expectedCore, fields[2]);
+                    Assert.Contains(fields[3], BooleanTokens);
+                    Assert.Equal("4", fields[4]);
+                    Assert.Contains(fields[5], BooleanTokens);
+                    output.WriteLine(FormattableString.Invariant($"framework-comparison operation={operation};trial={trial};requested={disableRequested};applied={controlApplied};targetMachine={targetMachine:X4};{metadata}"));
+                    captures++;
+                    if (controlApplied) { applied++; }
+                }
+            }
+        }
+        Assert.Equal(8, captures);
+        output.WriteLine($"framework-comparison captures={captures};applied={applied};environment-contrast-established={applied == 4}");
+        if (expectedControls) { Assert.Equal(4, applied); }
+        Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The comparison exceeded its aggregate observation budget.");
+    }
+
+    private async Task<PowerShellProcessEvidence.Result> ObserveRuntime(string operation,
+        Action<ProcessStartInfo>? configure = null, bool observeFramework = false)
+    {
         // A new process measures its first call, without assuming cold OS/JIT/compiler caches.
         var body = operation switch
         {
@@ -126,9 +213,11 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
             _ => throw new ArgumentOutOfRangeException(nameof(operation)),
         };
         var start = PowerShellProcessEvidence.StartInfo();
+        configure?.Invoke(start);
         PowerShellProcessEvidence.EncodedCommand(start, PowerShellProcessEvidence.Prelude
             + "$ErrorActionPreference='Stop'; Write-TestPhase 'body-begin'; Write-TestPhase 'probe-begin'\n"
-            + body + "\nWrite-TestPhase 'probe-repeat-complete'" + PowerShellProcessEvidence.BodyEnd + "\nexit 0");
+            + body + "\nWrite-TestPhase 'probe-repeat-complete'" + (observeFramework ? FrameworkObservation : "")
+            + PowerShellProcessEvidence.BodyEnd + "\nexit 0");
         var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
         Assert.Equal(0, result.ExitCode);
 
@@ -185,7 +274,118 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
             previousHost = index;
             Assert.Contains(name + ":", result.Summary, StringComparison.Ordinal);
         }
+        return result;
     }
+
+    private static Dictionary<string, string?> ProfileSnapshot(ProcessStartInfo start) => start.Environment
+        .Where(pair => pair.Key.StartsWith("COR_", StringComparison.OrdinalIgnoreCase)
+            || pair.Key.StartsWith("CORECLR_", StringComparison.OrdinalIgnoreCase)
+            || pair.Key.StartsWith("MicrosoftInstrumentationEngine_", StringComparison.OrdinalIgnoreCase))
+        .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+
+    private static bool CanCompareOwnedFrameworkRoute(ProcessStartInfo start, ushort targetMachine)
+    {
+        if (Environment.GetEnvironmentVariable(FrameworkProfileBaseline) != "unconfigured"
+            || !start.Environment.TryGetValue("COR_ENABLE_PROFILING", out var enabled) || enabled != "1"
+            || !start.Environment.TryGetValue("COR_PROFILER", out var profiler)
+            || !Guid.TryParse(profiler, out var id) || id != new Guid("324f817a-7420-4e6d-b3c1-143fbed6d855"))
+        {
+            return false;
+        }
+        // Ambiguous managed x86/hybrid images are not sufficient evidence of CLR architecture.
+        if (targetMachine is not (0x8664 or 0xaa64)) { return false; }
+        string? packageRoot = null;
+        var paths = 0;
+        var applicable = false;
+        foreach (var pair in start.Environment)
+        {
+            if (pair.Key.StartsWith("MicrosoftInstrumentationEngine_RawProfilerHook", StringComparison.OrdinalIgnoreCase)
+                || pair.Key.StartsWith("MicrosoftInstrumentationEngine_Host", StringComparison.OrdinalIgnoreCase)) { return false; }
+            if (!pair.Key.StartsWith("COR_PROFILER_PATH", StringComparison.OrdinalIgnoreCase)) { continue; }
+            var leaf = pair.Key.ToUpperInvariant() switch
+            {
+                "COR_PROFILER_PATH_32" => @"x86\MicrosoftInstrumentationEngine_x86.dll",
+                "COR_PROFILER_PATH_64" => @"x64\MicrosoftInstrumentationEngine_x64.dll",
+                "COR_PROFILER_PATH_ARM64" => @"arm64\MicrosoftInstrumentationEngine_arm64.dll",
+                "COR_PROFILER_PATH" => targetMachine switch
+                {
+                    0x8664 => @"x64\MicrosoftInstrumentationEngine_x64.dll",
+                    0xaa64 => @"arm64\MicrosoftInstrumentationEngine_arm64.dll",
+                    _ => null,
+                },
+                _ => null,
+            };
+            if (leaf is null || !KnownCoveragePath(pair.Value, leaf, ref packageRoot)) { return false; }
+            applicable |= pair.Key.Equals("COR_PROFILER_PATH", StringComparison.OrdinalIgnoreCase)
+                || (targetMachine == 0x8664 && pair.Key.Equals("COR_PROFILER_PATH_64", StringComparison.OrdinalIgnoreCase))
+                || (targetMachine == 0xaa64 && pair.Key.Equals("COR_PROFILER_PATH_ARM64", StringComparison.OrdinalIgnoreCase));
+            paths++;
+        }
+        // This is an explicit comparison of the route introduced by this test launch, not a
+        // default policy or proof that the engine has no additional filesystem-discovered client.
+        return paths > 0 && applicable;
+    }
+
+    private static ushort FrameworkTargetMachine(ProcessStartInfo start)
+    {
+        var path = start.FileName.Replace('/', '\\');
+        if (path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] != '\\') { return 0; }
+        try
+        {
+            using var content = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            Span<byte> dos = stackalloc byte[64];
+            content.ReadExactly(dos);
+            if (dos[0] != 'M' || dos[1] != 'Z') { return 0; }
+            var offset = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(dos[0x3c..]);
+            if (offset is < 64 or > 1024 * 1024 || offset > content.Length - 6) { return 0; }
+            content.Position = offset;
+            Span<byte> pe = stackalloc byte[6];
+            content.ReadExactly(pe);
+            if (pe[0] != 'P' || pe[1] != 'E' || pe[2] != 0 || pe[3] != 0) { return 0; }
+            return System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(pe[4..]);
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            return 0;
+        }
+    }
+
+    private static bool KnownCoveragePath(string? value, string leaf, ref string? packageRoot)
+    {
+        if (string.IsNullOrEmpty(value) || !Path.IsPathFullyQualified(value)) { return false; }
+        string normalized;
+        try { normalized = Path.GetFullPath(value).Replace('/', '\\'); }
+        catch (Exception failure) when (failure is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
+        if (normalized.Length < 3 || !char.IsAsciiLetter(normalized[0]) || normalized[1] != ':' || normalized[2] != '\\') { return false; }
+        if (!normalized.Equals(value.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase)) { return false; }
+        const string package = @"\microsoft.codecoverage\18.9.0\build\netstandard2.0\";
+        if (!normalized.EndsWith(package + leaf, StringComparison.OrdinalIgnoreCase)) { return false; }
+        var root = normalized[..^leaf.Length];
+        if (packageRoot is not null && !packageRoot.Equals(root, StringComparison.OrdinalIgnoreCase)) { return false; }
+        var expectedHash = leaf switch
+        {
+            @"x86\MicrosoftInstrumentationEngine_x86.dll" => "164844e7e460fa93bb5a1ded8dfcd66644a017d426bfab5214389e2591000842",
+            @"x64\MicrosoftInstrumentationEngine_x64.dll" => "d538979eef2ba49bf1a5c84f8c70f4588ffff2671399e46af033ee5238667a07",
+            @"arm64\MicrosoftInstrumentationEngine_arm64.dll" => "eb27e2943934aeaafd551f8ca50fcffd9543d35c9ed9840b78703c822670715a",
+            _ => null,
+        };
+        if (expectedHash is null) { return false; }
+        try
+        {
+            if (new DriveInfo(normalized[..3]).DriveType != DriveType.Fixed) { return false; }
+            using var content = new FileStream(normalized, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (content.Length is < 1 or > 16 * 1024 * 1024
+                || !Convert.ToHexString(SHA256.HashData(content)).Equals(expectedHash, StringComparison.OrdinalIgnoreCase)) { return false; }
+        }
+        catch (Exception failure) when (failure is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Security.SecurityException)
+        {
+            return false;
+        }
+        packageRoot = root;
+        return true;
+    }
+
+    private static string Flag(string? value) => value switch { null => "absent", "0" => "zero", "1" => "one", _ => "other" };
 
     private static Dictionary<string, string> EvidenceFields(string summary, string section)
     {

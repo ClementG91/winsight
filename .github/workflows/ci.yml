@@ -145,7 +145,27 @@ jobs:
           if ("${{ matrix.architecture }}" -eq "arm64") {
             $coverageArguments["ConsoleLoggerVerbosity"] = "detailed"
           }
-          ./scripts/Measure-Coverage.ps1 @coverageArguments
+          # Only the explicit diagnostic may compare Framework startup profiling. Its marker
+          # attests the pre-collector environment, never exclusivity of an instrumentation client.
+          $frameworkComparisonName = "WINSIGHT_TEST_FRAMEWORK_PROFILE_BASELINE"
+          $frameworkComparisonPrevious = [Environment]::GetEnvironmentVariable($frameworkComparisonName, "Process")
+          $frameworkComparisonAmbient = @([Environment]::GetEnvironmentVariables().Keys | Where-Object {
+            ([string]$_).StartsWith("COR_", [StringComparison]::OrdinalIgnoreCase) -or
+            ([string]$_).StartsWith("MicrosoftInstrumentationEngine_", [StringComparison]::OrdinalIgnoreCase)
+          })
+          try {
+            $frameworkComparisonValue = if ($frameworkComparisonAmbient.Count -eq 0) { "unconfigured" } else { "configured" }
+            [Environment]::SetEnvironmentVariable($frameworkComparisonName, $frameworkComparisonValue, "Process")
+            ./scripts/Measure-Coverage.ps1 @coverageArguments
+          }
+          finally {
+            if ($null -eq $frameworkComparisonPrevious) {
+              [Environment]::SetEnvironmentVariable($frameworkComparisonName, [NullString]::Value, "Process")
+            }
+            else {
+              [Environment]::SetEnvironmentVariable($frameworkComparisonName, $frameworkComparisonPrevious, "Process")
+            }
+          }
 
       - name: Upload test results
         if: always()
