@@ -90,18 +90,21 @@ public sealed class CanaryOwnerProtocolTests
         fixture.TrackMonitor(monitor);
         input.Arm(); // The watcher constructor may enumerate; only actual Start is witnessed.
         var entryBudget = Stopwatch.StartNew();
-        var start = fixture.Track(Task.Run(() => Record.Exception(monitor.Start)));
+        // These deliberately blocking workers use dedicated threads independently of pool admission.
+        var start = fixture.Track(Task.Factory.StartNew(() => Record.Exception(monitor.Start),
+            CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default));
         Exception? primary = null;
         try
         {
             Assert.True(WaitForEntry(input.Entered), "Start did not reach its real directory enumeration.");
             var disposeEntered = fixture.TrackResource(new ManualResetEventSlim());
-            var stop = fixture.Track(Task.Run(() =>
+            var stop = fixture.Track(Task.Factory.StartNew(() =>
             {
                 disposeEntered.Set();
                 monitor.Dispose();
-            }));
-            Assert.True(WaitForEntry(disposeEntered));
+            }, CancellationToken.None, TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach, TaskScheduler.Default));
+            Assert.True(WaitForEntry(disposeEntered), FormattableString.Invariant(
+                $"Dispose entry was not established within the shared 4 s budget; elapsedMs={entryBudget.Elapsed.TotalMilliseconds:F1}; startStatus={start.Status}; disposeStatus={stop.Status}; signalAfterWait={disposeEntered.IsSet}."));
             // A bounded negative observation after Start has entered, not a sleep claiming entry.
             Assert.NotSame(stop, await Task.WhenAny(stop, Task.Delay(200)));
             input.Release.Set();
