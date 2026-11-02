@@ -156,6 +156,71 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task ExplicitModuleQualifiedComparisonPreservesOriginalRuntimeOracles()
+    {
+        var budget = Stopwatch.StartNew();
+        var captures = 0;
+        var qualifiedCaptures = 0;
+        output.WriteLine("module-qualified-comparison condition=bounded-concurrency-2;no-preload=true;profiling-unchanged=true");
+        for (var trial = 0; trial < ComparisonOrders.Length; trial++)
+        {
+            foreach (var qualified in ComparisonOrders[trial])
+            {
+                var observers = ComparisonOperations.Select(operation =>
+                    (Func<Action<string>, Task<bool>>)(report => Observe(operation, trial, qualified, report))).ToArray();
+                var observed = await ObservePair(observers);
+                foreach (var value in observed)
+                {
+                    captures++;
+                    if (value) { qualifiedCaptures++; }
+                }
+            }
+        }
+        Assert.Equal(8, captures);
+        Assert.Equal(4, qualifiedCaptures);
+        Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The module comparison exceeded its aggregate observation budget.");
+        output.WriteLine($"module-qualified-comparison captures={captures};qualified={qualifiedCaptures};profiling-unchanged=true");
+
+        async Task<bool> Observe(string operation, int trial, bool qualified, Action<string> report)
+        {
+            var expectedFramework = "unobserved";
+            var expectedCore = "unobserved";
+            ushort targetMachine = 0;
+            Func<bool> profilePreserved = () => false;
+            var result = await ObserveRuntime(qualified ? operation + "-qualified" : operation, start =>
+            {
+                var profile = ProfileSnapshot(start);
+                profilePreserved = () =>
+                {
+                    var after = ProfileSnapshot(start);
+                    return profile.Count == after.Count && profile.All(pair =>
+                        after.TryGetValue(pair.Key, out var value) && value == pair.Value);
+                };
+                start.Environment.TryGetValue("COR_ENABLE_PROFILING", out var framework);
+                start.Environment.TryGetValue("CORECLR_ENABLE_PROFILING", out var core);
+                expectedFramework = Flag(framework);
+                expectedCore = Flag(core);
+                targetMachine = FrameworkTargetMachine(start);
+                Assert.True(TimeSpan.FromSeconds(120) - budget.Elapsed >= TimeSpan.FromSeconds(36),
+                    "The module comparison cannot admit another complete 30 s oracle and its existing 6 s cleanup reserve.");
+            }, observeFramework: true, report: report);
+            Assert.True(profilePreserved(), "A profiling value changed during the module comparison.");
+            Assert.True(budget.Elapsed <= TimeSpan.FromSeconds(120), "The module comparison exceeded its aggregate observation budget.");
+            var metadata = Assert.Single(result.Stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                .Select(line => line.TrimEnd('\r')), line => line.StartsWith("WSPROFILER:", StringComparison.Ordinal));
+            var fields = metadata.Split(':');
+            Assert.Equal(6, fields.Length);
+            Assert.Equal(expectedFramework, fields[1]);
+            Assert.Equal(expectedCore, fields[2]);
+            Assert.Contains(fields[3], BooleanTokens);
+            Assert.Equal("4", fields[4]);
+            Assert.Contains(fields[5], BooleanTokens);
+            report(FormattableString.Invariant($"module-qualified-comparison operation={operation};trial={trial};qualified={qualified};targetMachine={targetMachine:X4};{metadata}"));
+            return qualified;
+        }
+    }
+
+    [Fact]
     public async Task PairedRuntimeFailuresAreBothObservedAfterExit()
     {
         var finished = new bool[2];
@@ -279,6 +344,21 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
                 if ($first.value -ne 7 -or $first.name -cne 'runtime-probe') {throw 'ASSERT: first JSON roundtrip changed'}
                 Write-TestPhase 'probe-first-complete'
                 $again=@{value=8;name='runtime-probe'}|ConvertTo-Json -Compress|ConvertFrom-Json
+                if ($again.value -ne 8 -or $again.name -cne 'runtime-probe') {throw 'ASSERT: repeated JSON roundtrip changed'}
+                """,
+            "management-qualified" => """
+                $expected=[IO.Path]::Combine([IO.Path]::GetTempPath(),'winsight-runtime-probe')
+                $first=Microsoft.PowerShell.Management\Join-Path ([IO.Path]::GetTempPath()) 'winsight-runtime-probe'
+                if (-not [string]::Equals($first,$expected,[StringComparison]::OrdinalIgnoreCase)) {throw 'ASSERT: first path resolution changed'}
+                Write-TestPhase 'probe-first-complete'
+                $again=Microsoft.PowerShell.Management\Join-Path ([IO.Path]::GetTempPath()) 'winsight-runtime-probe'
+                if (-not [string]::Equals($again,$expected,[StringComparison]::OrdinalIgnoreCase)) {throw 'ASSERT: repeated path resolution changed'}
+                """,
+            "json-qualified" => """
+                $first=@{value=7;name='runtime-probe'}|Microsoft.PowerShell.Utility\ConvertTo-Json -Compress|Microsoft.PowerShell.Utility\ConvertFrom-Json
+                if ($first.value -ne 7 -or $first.name -cne 'runtime-probe') {throw 'ASSERT: first JSON roundtrip changed'}
+                Write-TestPhase 'probe-first-complete'
+                $again=@{value=8;name='runtime-probe'}|Microsoft.PowerShell.Utility\ConvertTo-Json -Compress|Microsoft.PowerShell.Utility\ConvertFrom-Json
                 if ($again.value -ne 8 -or $again.name -cne 'runtime-probe') {throw 'ASSERT: repeated JSON roundtrip changed'}
                 """,
             "compiler" => """
