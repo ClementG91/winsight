@@ -36,6 +36,26 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
         """;
 
     [Fact]
+    public async Task ChildRetainsOnlyTheSelectedSystemModuleSearchPath()
+    {
+        var start = PowerShellProcessEvidence.StartInfo();
+        PowerShellProcessEvidence.EncodedCommand(start, PowerShellProcessEvidence.Prelude + """
+            $expected=[IO.Path]::Combine([Environment]::GetFolderPath('System'),'WindowsPowerShell\v1.0\Modules')
+            Write-TestPhase 'body-begin'
+            if (-not [string]::Equals($env:PSModulePath,$expected,[StringComparison]::OrdinalIgnoreCase)) {
+                throw 'ASSERT: child module search path differs from the selected system path'
+            }
+            [Console]::WriteLine('WSSYSTEMMODULES:system-only=True')
+            """ + PowerShellProcessEvidence.BodyEnd + "\nexit 0");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromSeconds(30), output.WriteLine);
+        output.WriteLine("module-path-scope-mismatch=" + result.Stderr.Contains("ASSERT: child module search path differs from the selected system path", StringComparison.Ordinal));
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("WSSYSTEMMODULES:system-only=True", result.Stdout, StringComparison.Ordinal);
+        Assert.Contains("stdout-eof=True", result.Summary, StringComparison.Ordinal);
+        Assert.Contains("stderr-eof=True", result.Summary, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ARealFloodIsDrainedWhileRetainedOutputIsBounded()
     {
         var start = PowerShellProcessEvidence.StartInfo();

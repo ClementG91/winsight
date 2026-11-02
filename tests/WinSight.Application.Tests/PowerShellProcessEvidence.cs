@@ -12,7 +12,10 @@ internal static class PowerShellProcessEvidence
     internal const int OutputLimit = 32768;
     internal const string Marker = "__WINSIGHT_TEST_PHASE__:";
     internal const string ChildClockMarker = "__WINSIGHT_TEST_CHILD_CLOCK__:";
-    internal const string Prelude = "function Write-TestPhase($Phase) { [Console]::Out.WriteLine('__WINSIGHT_TEST_PHASE__:' + $Phase); [Console]::Out.Flush(); "
+    // Windows PowerShell rebuilds the inherited search path at startup.
+    // Bind it again in the child before cmdlet lookup, without preloading a module.
+    internal const string Prelude = "$env:PSModulePath=[IO.Path]::Combine([Environment]::GetFolderPath('System'),'WindowsPowerShell\\v1.0\\Modules');\n"
+        + "function Write-TestPhase($Phase) { [Console]::Out.WriteLine('__WINSIGHT_TEST_PHASE__:' + $Phase); [Console]::Out.Flush(); "
         + "[Console]::Out.WriteLine('__WINSIGHT_TEST_CHILD_CLOCK__:' + $Phase + ':' + [DateTime]::UtcNow.Ticks + ':' + [Diagnostics.Stopwatch]::GetTimestamp() + ':' + [Diagnostics.Stopwatch]::Frequency); [Console]::Out.Flush() }; Write-TestPhase 'entered'\n";
     // Capture $? immediately: a successful marker must not erase a final native-command failure.
     internal const string BodyEnd = "\n$__winsightBodySucceeded=$?; if ($__winsightBodySucceeded) { Write-TestPhase 'body-end' } else { exit 1 }";
