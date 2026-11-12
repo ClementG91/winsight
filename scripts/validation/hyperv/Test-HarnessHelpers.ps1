@@ -69,6 +69,26 @@ try {
     Report ((& $module { $script:VmWorkerProcessCapability }) -eq $worker) 'the module names the vmWorkerProcess capability SID'
     Report ((& $trusts 'S-1-3-0') -eq $true -and (& $trusts 'S-1-3-1' -VirtualMachines) -eq $false) 'CREATOR OWNER is trusted, CREATOR GROUP is not'
 
+    # The campaign lease lives in host-campaign, directly below the VM storage root, and refuses any
+    # parent whose children a non-administrator could delete. The real root DACL, not a stub: the
+    # first staging under a protected storage was refused because the Virtual Machines group held
+    # full control on the root itself. Here the root stays owned by this user, so the walk must stop
+    # at that owner check and never at a Virtual Machines grant.
+    $vmStorage = Join-Path $work 'vm-storage'
+    [void](New-Item -ItemType Directory -Path $vmStorage)
+    try {
+        Set-WinSightVmStorageRootAcl -Path $vmStorage
+        $leaseRefusal = try { Assert-ProtectedAncestors -Path (Join-Path $vmStorage 'host-campaign'); 'accepted' } catch { $_.Exception.Message }
+        Report (($leaseRefusal -notmatch 'S-1-5-83-0') -and ($leaseRefusal -like "Not owned by*$vmStorage")) 'the VM storage root lets the campaign lease below it pass the ancestor walk'
+        $inheritOnly = [System.Security.AccessControl.PropagationFlags]::InheritOnly
+        $children = @((Get-Acl -LiteralPath $vmStorage).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -eq 'S-1-5-83-0' -and $_.AccessControlType -eq 'Allow' -and
+                (($_.PropagationFlags -band $inheritOnly) -eq $inheritOnly) -and
+                (([int64]$_.FileSystemRights -band 0x1F01FFL) -eq 0x1F01FFL) })
+        Report ($children.Count -gt 0) 'the Virtual Machines group keeps full control of everything below the VM storage root'
+    }
+    finally { & (Join-Path $env:SystemRoot 'System32\icacls.exe') $vmStorage /reset /Q | Out-Null }
+
     # Every refusal at once, so one run shows all there is to fix.
     $one = Join-Path $work 'refusal-one.bin'
     $two = Join-Path $work 'refusal-two.bin'

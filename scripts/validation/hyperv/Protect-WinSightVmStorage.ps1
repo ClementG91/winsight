@@ -72,8 +72,7 @@ foreach ($item in $items) {
 }
 
 # Then the DACL of the root, which every item inherits from once the inheritance from the volume is cut.
-& $icacls $VmRoot /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-83-0:(OI)(CI)F' /Q | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "Could not set the DACL of $VmRoot (icacls exit $LASTEXITCODE)." }
+Set-WinSightVmStorageRootAcl -Path $VmRoot
 
 # The folders above it, below the drive root. Whoever can rename one can put another folder, with other
 # disks, at the path the VMs are registered with - between two checks, or for good. Each gets

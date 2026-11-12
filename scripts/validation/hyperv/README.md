@@ -217,7 +217,9 @@ protected VM qualification; local mock tests do not qualify Windows/Hyper-V exec
 
 The host serializes every transport mutation under the same physical VM storage root,
 independently of runner/evidence directories. The host-campaign directory is private to
-Administrators/SYSTEM. Its exclusive file handle prevents a second live driver; its bounded,
+Administrators/SYSTEM. On the storage root itself the Virtual Machines group may only list and
+create; its full control is inherited below the root, so no worker identity can delete or rename
+host-campaign. Storage protected before this rule must be protected again. Its exclusive file handle prevents a second live driver; its bounded,
 atomically published Active state survives process death. Off alone never authorizes a new run
 to format unresolved data. Unknown, corrupt or partially initialized ownership is preserved.
 

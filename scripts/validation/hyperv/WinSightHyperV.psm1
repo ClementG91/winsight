@@ -78,6 +78,20 @@ function New-DirectorySecurity([bool]$UsersRead, [bool]$VirtualMachinesFull = $f
     return $security
 }
 
+# The DACL of the VM storage root, which every item below inherits once the inheritance from the
+# volume is cut. The Virtual Machines group keeps full control of everything below the root, through
+# an inherit-only entry. On the root itself it may list and create, but neither delete nor rename a
+# child, nor re-permission the root: the campaign lease (host-campaign) sits directly below it and
+# refuses a parent whose children a non-administrator can delete or rename (Assert-ProtectedAncestors).
+function Set-WinSightVmStorageRootAcl([Parameter(Mandatory)][string]$Path) {
+    $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    & $icacls $Path /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-83-0:(OI)(CI)(IO)F' /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not set the DACL of $Path (icacls exit $LASTEXITCODE)." }
+    # A separate call: a second entry for the same SID in one /grant:r would replace the first.
+    & $icacls $Path /grant '*S-1-5-83-0:(RX,WD,AD,WEA,WA)' /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not grant the Virtual Machines group on $Path (icacls exit $LASTEXITCODE)." }
+}
+
 # Whether a write grant to $Sid leaves a path protected: SYSTEM, Administrators, the per-VM identity
 # Hyper-V grants on the disks of the VM it runs (S-1-5-83-1-*), and CREATOR OWNER, which grants nothing
 # itself: on each new child it stands for whoever created it, who needed a create right that only a
@@ -1061,7 +1075,7 @@ function Confirm-WinSightQualificationSeal([string]$RunDir) {
     finally { $stream.Dispose() }
 }
 
-Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
+Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Set-WinSightVmStorageRootAcl, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
     Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine,
     Invoke-WinSightVmRetry, Write-WinSightDriverHeartbeat, Read-WinSightDriverHeartbeat,
