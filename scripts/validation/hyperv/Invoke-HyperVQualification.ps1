@@ -98,6 +98,12 @@ $expectedGates = @($knownGates | Where-Object { $_ -cne '36-ipc-network-logon' -
 $candidateManifest = @(Get-FileManifest $CandidateDir)
 $harnessManifest = @(Get-FileManifest $HarnessDir)
 $contract = [ordered]@{version=1;kind='qualification';runName=$RunName;evidenceRoot=[IO.Path]::GetFullPath($EvidenceRoot).TrimEnd('\').ToUpperInvariant();candidateDir=[IO.Path]::GetFullPath($CandidateDir).TrimEnd('\');harnessDir=[IO.Path]::GetFullPath($HarnessDir).TrimEnd('\');bootstrapReceipt=[IO.Path]::GetFullPath($BootstrapReceipt);candidateCommit=$candidate.commit;candidateDigest=(Get-WinSightTextDigest ($candidateManifest -join "`n"));harnessDigest=(Get-WinSightTextDigest ($harnessManifest -join "`n"));bootstrapDigest=(Get-FileHash -LiteralPath $BootstrapReceipt -Algorithm SHA256).Hash;vm=$Name;checkpoint=$Checkpoint;gates=$expectedGates;timeoutMinutes=$TimeoutMinutes;memoryBytes=$MemoryBytes}
+# Refuse a host without the memory before the campaign is taken: a refusal inside it leaves the
+# campaign Active until an explicit collect. The check before Start-VM stays, for memory taken since.
+if (-not $Resume) {
+    $admittedMemory = if ($MemoryBytes -gt 0) { $MemoryBytes } else { [int64](Get-VMMemory -VMName $Name).Startup }
+    Assert-WinSightHostMemory -Bytes ($admittedMemory + 512MB) -Advice 'close applications or select an admitted VM memory budget'
+}
 $campaignLease = Enter-WinSightCampaign -Root $Root -Contract $contract -Resume:$Resume
 $runState = [pscustomobject]@{runId=$campaignLease.RunId}
 $statePath = Join-Path $EvidenceRoot "qualification-state-$RunName.json"

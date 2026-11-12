@@ -207,6 +207,24 @@ public sealed class QualificationHarnessContractTests(ITestOutputHelper output)
     /// (Hyper-V 0x800705AA). The driver stopped there, and the target stayed on, on the private
     /// switch, with its run staged and nobody to collect it.
     /// </remarks>
+    /// <summary>
+    /// A full run refuses a host without the memory its VM needs before it takes the campaign. The
+    /// check inside the campaign stays, for memory taken in between.
+    /// </summary>
+    /// <remarks>
+    /// Found at the first full run under protected storage: with 2 GB free the driver refused the start
+    /// after the campaign was Active, and every later staging was refused until an explicit collect.
+    /// </remarks>
+    [Fact]
+    public void AFullRunAdmitsHostMemoryBeforeItTakesTheCampaign()
+    {
+        var driver = Code(Path.Combine(Harness, "Invoke-HyperVQualification.ps1"));
+        var preflight = driver.IndexOf("Assert-WinSightHostMemory -Bytes ($admittedMemory + 512MB)", StringComparison.Ordinal);
+        var campaign = driver.IndexOf("$campaignLease = Enter-WinSightCampaign", StringComparison.Ordinal);
+        Assert.True(preflight >= 0 && campaign > preflight, "the host memory is not checked before the campaign is taken");
+        Assert.Contains("Assert-WinSightHostMemory -Bytes $needed", driver, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ANetworkRunStartsBothVirtualMachinesOrNeither()
     {
