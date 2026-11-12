@@ -85,11 +85,17 @@ function New-DirectorySecurity([bool]$UsersRead, [bool]$VirtualMachinesFull = $f
 # refuses a parent whose children a non-administrator can delete or rename (Assert-ProtectedAncestors).
 function Set-WinSightVmStorageRootAcl([Parameter(Mandatory)][string]$Path) {
     $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
-    & $icacls $Path /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-83-0:(OI)(CI)(IO)F' /Q | Out-Null
+    & $icacls $Path /inheritance:r /grant:r '*S-1-5-18:(OI)(CI)F' '*S-1-5-32-544:(OI)(CI)F' /Q | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not set the DACL of $Path (icacls exit $LASTEXITCODE)." }
-    # A separate call: a second entry for the same SID in one /grant:r would replace the first.
-    & $icacls $Path /grant '*S-1-5-83-0:(RX,WD,AD,WEA,WA)' /Q | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Could not grant the Virtual Machines group on $Path (icacls exit $LASTEXITCODE)." }
+    # /grant:r replaces only an entry with the same inheritance: storage protected before this rule
+    # keeps an explicit (OI)(CI)F for the group on the root unless every grant to it is removed first.
+    & $icacls $Path /remove:g '*S-1-5-83-0' /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Could not remove the Virtual Machines group from $Path (icacls exit $LASTEXITCODE)." }
+    # One call per entry, so each stays a separate entry with its own inheritance.
+    foreach ($grant in '*S-1-5-83-0:(OI)(CI)(IO)F', '*S-1-5-83-0:(RX,WD,AD,WEA,WA)') {
+        & $icacls $Path /grant $grant /Q | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not grant the Virtual Machines group on $Path (icacls exit $LASTEXITCODE)." }
+    }
 }
 
 # Whether a write grant to $Sid leaves a path protected: SYSTEM, Administrators, the per-VM identity

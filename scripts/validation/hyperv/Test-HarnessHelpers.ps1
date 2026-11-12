@@ -77,6 +77,9 @@ try {
     $vmStorage = Join-Path $work 'vm-storage'
     [void](New-Item -ItemType Directory -Path $vmStorage)
     try {
+        # Storage protected before the fix carries an explicit full-control entry for the group on the
+        # root; icacls /grant:r replaces only an entry with the same inheritance, so it must be removed.
+        & (Join-Path $env:SystemRoot 'System32\icacls.exe') $vmStorage /grant '*S-1-5-83-0:(OI)(CI)F' /Q | Out-Null
         Set-WinSightVmStorageRootAcl -Path $vmStorage
         $leaseRefusal = try { Assert-ProtectedAncestors -Path (Join-Path $vmStorage 'host-campaign'); 'accepted' } catch { $_.Exception.Message }
         Report (($leaseRefusal -notmatch 'S-1-5-83-0') -and ($leaseRefusal -like "Not owned by*$vmStorage")) 'the VM storage root lets the campaign lease below it pass the ancestor walk'
