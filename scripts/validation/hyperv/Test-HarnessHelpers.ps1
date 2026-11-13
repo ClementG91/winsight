@@ -246,6 +246,22 @@ try {
     Report ($null -eq (Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId ($PID + 1))) 'the runner refuses a heartbeat from a different process'
     [IO.File]::WriteAllText($heartbeat, '{ corrupt heartbeat')
     Report ($null -eq (Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId $PID)) 'a corrupt heartbeat reports unavailable rather than runner progress'
+
+    # An expired guest password leaves Windows at its logon screen: the guest's data exchange runs, the
+    # logon task never does. The host must tell that apart from a long run and stop it early.
+    $runId = '9f956300-93b3-46b6-b0f3-e5e030c32948'
+    $kvpItem = { param($ItemName, $ItemValue) "<INSTANCE CLASSNAME=`"Msvm_KvpExchangeDataItem`"><PROPERTY NAME=`"Data`" TYPE=`"string`"><VALUE>$ItemValue</VALUE></PROPERTY><PROPERTY NAME=`"Name`" TYPE=`"string`"><VALUE>$ItemName</VALUE></PROPERTY><PROPERTY NAME=`"Source`" TYPE=`"uint16`"><VALUE>2</VALUE></PROPERTY></INSTANCE>" }
+    $parsedKvp = try { ConvertFrom-WinSightKvpItems -Items @((& $kvpItem 'Other' 'x'), (& $kvpItem 'WinSightQualificationLogon' $runId)) } catch { @{} }
+    Report ($parsedKvp['WinSightQualificationLogon'] -ceq $runId -and $parsedKvp['Other'] -ceq 'x') 'guest key-value exchange items are read by name'
+    $dtdItem = '<!DOCTYPE INSTANCE [<!ENTITY x "y">]><INSTANCE><PROPERTY NAME="Name"><VALUE>&x;</VALUE></PROPERTY><PROPERTY NAME="Data"><VALUE>z</VALUE></PROPERTY></INSTANCE>'
+    $hostile = try { (ConvertFrom-WinSightKvpItems -Items @($dtdItem, 'not xml', ('<INSTANCE>' + ('a' * 70000) + '</INSTANCE>'))).Count -eq 0 } catch { $false }
+    Report $hostile 'a guest item with a DTD, malformed or oversized XML is ignored'
+    $verdict = { param($Booted, $Value, $Minutes) try { Get-WinSightGuestStartVerdict -Probe ([pscustomobject]@{ Booted = $Booted; LogonValue = $Value }) -RunId $runId -ElapsedMinutes $Minutes -LimitMinutes 15 } catch { 'error' } }
+    Report ((& $verdict $true $null 5) -ceq 'waiting') 'a booted guest without its logon signal is given its start budget'
+    Report ((& $verdict $true $null 16) -ceq 'logon-missing') 'a booted guest that never ran its logon task is reported once the budget is spent'
+    Report ((& $verdict $true 'aaaaaaaa-0000-0000-0000-000000000000' 16) -ceq 'logon-missing') 'a logon signal from another run never counts'
+    Report ((& $verdict $true $runId 16) -ceq 'started') 'the logon signal of this run means the guest started'
+    Report ((& $verdict $false $null 16) -ceq 'unknown') 'without any guest data exchange the host cannot decide and keeps the deadline'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

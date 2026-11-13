@@ -677,6 +677,74 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
     (Get-VM -Name $Name -ErrorAction Stop).State.ToString()
 }
 
+# --- Guest start signal -------------------------------------------------------------------------------
+# The host never authenticates to the guest and cannot read the data disk while the VM runs. A guest whose
+# account password expired stays at its logon screen: nothing runs and, without this signal, the host waits
+# for the whole run deadline (hours). run-guest-checks.ps1 publishes the run id of its data disk in the
+# Hyper-V key-value exchange pool (guest HKLM\SOFTWARE\Microsoft\Virtual Machine\Auto) as soon as the
+# logon task runs; the guest's data exchange service publishes its intrinsic items at boot, before any logon.
+$script:GuestLogonKey = 'WinSightQualificationLogon'
+
+# Items are guest-written: bounded, no DTD, malformed ones ignored.
+function ConvertFrom-WinSightKvpItems([AllowNull()][AllowEmptyCollection()][string[]]$Items) {
+    $values = @{}
+    foreach ($item in @($Items)) {
+        if (-not $item -or $item.Length -gt 65536) { continue }
+        try {
+            $settings = New-Object Xml.XmlReaderSettings
+            $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+            $settings.XmlResolver = $null
+            $settings.MaxCharactersInDocument = 65536
+            $reader = [Xml.XmlReader]::Create((New-Object IO.StringReader $item), $settings)
+            try { $document = New-Object Xml.XmlDocument; $document.XmlResolver = $null; $document.Load($reader) } finally { $reader.Dispose() }
+            $name = $document.SelectSingleNode("/INSTANCE/PROPERTY[@NAME='Name']/VALUE")
+            $data = $document.SelectSingleNode("/INSTANCE/PROPERTY[@NAME='Data']/VALUE")
+            if ($name -and $data -and $name.InnerText.Length -le 256 -and $data.InnerText.Length -le 2048) { $values[$name.InnerText] = $data.InnerText }
+        }
+        catch { continue }
+    }
+    $values
+}
+
+function Get-WinSightGuestKvp([Parameter(Mandatory)][string]$Name) {
+    $probe = [pscustomobject]@{ Booted = $false; LogonValue = $null }
+    try {
+        # Filtered here rather than in a WQL string built from the VM name.
+        $vm = @(Get-CimInstance -Namespace 'root\virtualization\v2' -ClassName Msvm_ComputerSystem -ErrorAction Stop | Where-Object { $_.ElementName -ceq $Name })
+        if ($vm.Count -ne 1) { return $probe }
+        $kvp = @(Get-CimAssociatedInstance -InputObject $vm[0] -ResultClassName Msvm_KvpExchangeComponent -ErrorAction Stop)
+        if ($kvp.Count -ne 1) { return $probe }
+        $probe.Booted = @($kvp[0].GuestIntrinsicExchangeItems | Where-Object { $_ }).Count -gt 0
+        $probe.LogonValue = (ConvertFrom-WinSightKvpItems -Items @($kvp[0].GuestExchangeItems))[$script:GuestLogonKey]
+    }
+    catch { Write-WinSightDiagnostic 'Guest key-value exchange unavailable; the run keeps its deadline.' }
+    $probe
+}
+
+# started: this run's logon task ran. waiting: within the start budget. logon-missing: Windows is up but
+# its logon task never ran (expired password, broken auto-logon). unknown: no guest data exchange at all
+# (integration service off, guest not booted) - the host cannot tell, so the run keeps its deadline.
+function Get-WinSightGuestStartVerdict($Probe, [Parameter(Mandatory)][string]$RunId, [double]$ElapsedMinutes, [ValidateRange(1, 1440)][int]$LimitMinutes) {
+    if ($Probe -and $Probe.LogonValue -and $Probe.LogonValue -ceq $RunId) { return 'started' }
+    if ($ElapsedMinutes -lt $LimitMinutes) { return 'waiting' }
+    if ($Probe -and $Probe.Booted) { return 'logon-missing' }
+    'unknown'
+}
+
+# Loud on the runner console and, when the host has it, a message box on every session of this machine.
+function Send-WinSightOperatorAlert([Parameter(Mandatory)][string]$Message) {
+    try { Write-Host $Message -ForegroundColor Red -BackgroundColor Black } catch { }
+    try { [Console]::Beep(880, 400) } catch { }
+    $msg = Join-Path $env:SystemRoot 'System32\msg.exe'
+    if (Test-Path -LiteralPath $msg) {
+        try { & $msg '*' '/TIME:86400' ('WinSight qualification: ' + $Message) 2>$null | Out-Null } catch { }
+    }
+}
+
+function Get-WinSightGuestLogonAlert([string]$VmName, [int]$Minutes) {
+    "ALERT guest-logon-missing: $VmName booted Windows but its auto-logon never started the WinSight logon task within $Minutes minutes. Most likely the guest account password expired or auto-logon is broken. Run stopped early instead of waiting for its deadline. Open 'vmconnect.exe localhost $VmName' after restoring its clean checkpoint to see the logon screen, repair the account and recreate the checkpoint (README, 'Guest account')."
+}
+
 # Detaches the data disk $Path from $VMName once the VM is really off. Returns the state the VM was
 # found in when it had to be turned off first, and nothing otherwise. Hyper-V refused the detach a second
 # after a guest had shut itself down ("the operation cannot be performed while the object is in its
@@ -1083,6 +1151,7 @@ function Confirm-WinSightQualificationSeal([string]$RunDir) {
 
 Export-ModuleMember -Function Set-AdministratorsDefaultOwner, Set-WinSightVmStorageRootAcl, Assert-ProtectedPath, Assert-ProtectedAncestors, New-ProtectedDirectory, Assert-NoReparseBetween, Copy-ListedFile,
     Get-GitBlobId, Get-FileManifest, Get-SharedFileHash, Mount-WinSightData, Dismount-WinSightData, Clear-WinSightDataVolume,
-    Copy-GuestResults, Get-WinSightVmState, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine,
+    Copy-GuestResults, Get-WinSightVmState, ConvertFrom-WinSightKvpItems, Get-WinSightGuestKvp, Get-WinSightGuestStartVerdict,
+    Send-WinSightOperatorAlert, Get-WinSightGuestLogonAlert, Remove-WinSightDataDisk, Assert-WinSightHostMemory, Write-SharedText, Add-SharedLine,
     Invoke-WinSightVmRetry, Write-WinSightDriverHeartbeat, Read-WinSightDriverHeartbeat,
     Test-WinSightCompletion, Get-WinSightQualificationStatus, Get-WinSightQualificationExitCode, Get-WinSightTextDigest, Write-WinSightAtomicText, Read-WinSightBoundedText, Assert-WinSightJsonMembers, Read-WinSightQualificationResult, Initialize-WinSightCampaignOwnership, Enter-WinSightCampaign, Set-WinSightCampaignStage, Get-WinSightCampaignContext, Close-WinSightCampaign, Write-WinSightQualificationSeal, Write-WinSightDiagnostic, Confirm-WinSightQualificationSeal, Write-WinSightImmutableText, New-WinSightSourceContext

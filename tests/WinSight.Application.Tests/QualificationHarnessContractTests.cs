@@ -225,6 +225,40 @@ public sealed class QualificationHarnessContractTests(ITestOutputHelper output)
         Assert.Contains("Assert-WinSightHostMemory -Bytes $needed", driver, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A guest whose account password expired stays at its logon screen and runs nothing: the host must
+    /// stop the run with an alert instead of waiting for its deadline.
+    /// </summary>
+    /// <remarks>
+    /// Seen on PR 167: three full runs each waited their whole deadline (hours) and sealed only a missing
+    /// result, because the guest's auto-logon failed on an expired password.
+    /// </remarks>
+    [Fact]
+    public void ARunStopsWithAnAlertWhenTheGuestNeverLogsOn()
+    {
+        var guest = Code(Path.Combine(Harness, "guest", "run-guest-checks.ps1"));
+        Assert.Contains("'HKLM:\\SOFTWARE\\Microsoft\\Virtual Machine\\Auto'", guest, StringComparison.Ordinal);
+        Assert.Contains("-Name 'WinSightQualificationLogon'", guest, StringComparison.Ordinal);
+        Assert.Contains("(Join-Path $root 'run-id.txt')", guest, StringComparison.Ordinal);
+        var dispatch = guest.IndexOf("{ $_ -in 'qualify', 'control' }", StringComparison.Ordinal);
+        Assert.True(dispatch >= 0 && guest.IndexOf("Publish-GuestLogon\n", dispatch, StringComparison.Ordinal) > dispatch,
+            "the guest does not publish its logon in the qualify and control modes");
+
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("$script:GuestLogonKey = 'WinSightQualificationLogon'", module, StringComparison.Ordinal);
+        Assert.Contains("[Xml.DtdProcessing]::Prohibit", module, StringComparison.Ordinal);
+
+        foreach (var name in new[] { "Invoke-HyperVQualification.ps1", "Invoke-HyperVNetworkLogon.ps1" })
+        {
+            var driver = Code(Path.Combine(Harness, name));
+            Assert.Contains("$runState.runId | Set-Content -LiteralPath \"${letter}:\\run-id.txt\"", driver, StringComparison.Ordinal);
+            Assert.Contains("Get-WinSightGuestStartVerdict -Probe (Get-WinSightGuestKvp", driver, StringComparison.Ordinal);
+            Assert.Contains("$stopReason = 'guest-logon-missing'", driver, StringComparison.Ordinal);
+            Assert.Contains("Send-WinSightOperatorAlert $alert", driver, StringComparison.Ordinal);
+            Assert.Contains("-cnotin @('forced-timeout',", driver, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void ANetworkRunStartsBothVirtualMachinesOrNeither()
     {

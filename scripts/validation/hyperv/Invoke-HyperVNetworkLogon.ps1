@@ -30,6 +30,9 @@ param(
     # (3 GB), so that both VMs fit in the host's memory together.
     [int64]$ControlMemoryBytes = 2GB,
     [int]$TimeoutMinutes = 120,
+    # A VM that booted Windows but never ran its logon task in this time (expired password, broken
+    # auto-logon) stops the run with an alert instead of letting it wait for its whole deadline.
+    [ValidateRange(1,1440)][int]$GuestStartMinutes = 15,
     [switch]$AutomaticCredential,
     [string]$DriverHeartbeat,
     # Collect a run whose driver was closed while both VMs kept going: wait for both to power off,
@@ -350,6 +353,7 @@ try {
     if ($AutomaticCredential) { Invoke-NetworkCredentialOperation { Write-NetworkProbeFixture -Path "${letter}:\network-credential.json" -Envelope $envelope } }
     Copy-Item -LiteralPath (Join-Path $HarnessDir 'guest\run-guest-checks.ps1') -Destination "${letter}:\run-guest-checks.ps1"
     'qualify' | Set-Content -LiteralPath "${letter}:\mode.txt"
+    $runState.runId | Set-Content -LiteralPath "${letter}:\run-id.txt"
     $stagingVolumeCompleted = $true
 }
 finally {
@@ -366,6 +370,7 @@ try {
     $network | ConvertTo-Json | Set-Content -LiteralPath "${letter}:\network.json" -Encoding UTF8
     if ($AutomaticCredential) { Invoke-NetworkCredentialOperation { Write-NetworkProbeFixture -Path "${letter}:\network-credential.json" -Envelope $envelope } }
     'control' | Set-Content -LiteralPath "${letter}:\mode.txt"
+    $runState.runId | Set-Content -LiteralPath "${letter}:\run-id.txt"
     $stagingVolumeCompleted = $true
 }
 finally {
@@ -461,11 +466,30 @@ try {
 $started = Get-Date
 $deadline = $started.AddMinutes($TimeoutMinutes)
 if ($campaignLease) { $deadline = [DateTimeOffset]::Parse($campaignLease.State.deadlineUtc,[Globalization.CultureInfo]::InvariantCulture).LocalDateTime }
+# A Resume cannot know when its VMs started: only a run this driver started watches the guest logons.
+$guestWatch = @{}
+if (-not $Resume) { foreach ($vm in $Name, $ControlName) { $guestWatch[$vm] = $true } }
+$stopReason = 'forced-timeout'
 while ($true) {
     Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'observing'
     $targetState = Invoke-WinSightVmRetry { Get-WinSightVmState $Name }
     $controlState = Invoke-WinSightVmRetry { Get-WinSightVmState $ControlName }
     if (($targetState -eq 'Off' -and $controlState -eq 'Off') -or (Get-Date) -ge $deadline) { break }
+    $stuckGuest = $null
+    foreach ($vm in @($guestWatch.Keys)) {
+        if (-not $guestWatch[$vm]) { continue }
+        $guestStart = Get-WinSightGuestStartVerdict -Probe (Get-WinSightGuestKvp $vm) -RunId $runState.runId -ElapsedMinutes ((Get-Date) - $started).TotalMinutes -LimitMinutes $GuestStartMinutes
+        if ($guestStart -ceq 'started') { Write-HostLog "$vm logged on and started its WinSight logon task"; $guestWatch[$vm] = $false }
+        elseif ($guestStart -ceq 'unknown') { Write-HostLog "$vm publishes no guest data exchange after $GuestStartMinutes minutes: cannot confirm its logon, the run keeps its deadline (watch it with vmconnect)"; $guestWatch[$vm] = $false }
+        elseif ($guestStart -ceq 'logon-missing') { $stuckGuest = $vm }
+    }
+    if ($stuckGuest) {
+        $stopReason = 'guest-logon-missing'
+        $alert = Get-WinSightGuestLogonAlert -VmName $stuckGuest -Minutes $GuestStartMinutes
+        Write-HostLog $alert
+        Send-WinSightOperatorAlert $alert
+        break
+    }
     Start-Sleep -Seconds 30
     Write-Host ("  running {0:N0} min (target {1}, control {2})" -f ((Get-Date) - $started).TotalMinutes, $targetState, $controlState)
 }
@@ -477,7 +501,7 @@ if ($campaignLease) {
 if (Test-Path -LiteralPath $timeoutPath) {
     Assert-ProtectedPath -Path $timeoutPath
     $timeoutReceipt = Get-Content -LiteralPath $timeoutPath -Raw | ConvertFrom-Json
-    if ($timeoutReceipt.version -ne 1 -or $timeoutReceipt.runId -cne $runState.runId -or $timeoutReceipt.reason -cne 'forced-timeout') { throw 'Network timeout receipt mismatch; preserve the campaign for inspection.' }
+    if ($timeoutReceipt.version -ne 1 -or $timeoutReceipt.runId -cne $runState.runId -or $timeoutReceipt.reason -cnotin @('forced-timeout', 'guest-logon-missing')) { throw 'Network timeout receipt mismatch; preserve the campaign for inspection.' }
     $timedOut = $true
 }
 foreach ($vm in $Name, $ControlName) {
@@ -485,14 +509,14 @@ foreach ($vm in $Name, $ControlName) {
         if (-not $timedOut) {
             # Record the intent before forcing shutdown. A failed stop, collection or driver crash
             # must not turn this run into a PASS when a subsequent Resume observes both VMs Off.
-            $timeoutBytes = (New-Object Text.UTF8Encoding $false).GetBytes((@{ version = 1; runId = $runState.runId; reason = 'forced-timeout' } | ConvertTo-Json))
+            $timeoutBytes = (New-Object Text.UTF8Encoding $false).GetBytes((@{ version = 1; runId = $runState.runId; reason = $stopReason } | ConvertTo-Json))
             $timeoutStream = New-Object IO.FileStream($timeoutPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
             try { $timeoutStream.Write($timeoutBytes, 0, $timeoutBytes.Length); $timeoutStream.Flush($true) } finally { $timeoutStream.Dispose() }
             $timedOut = $true
         }
         if ($campaignLease) { Set-WinSightCampaignStage -Lease $campaignLease -Stage collecting -TimedOut }
         Stop-VM -Name $vm -TurnOff -Force
-        Write-HostLog "timeout: $vm turned off"
+        Write-HostLog "${stopReason}: $vm turned off"
     }
     if ((Invoke-WinSightVmRetry { Get-WinSightVmState $vm }) -ne 'Off') { throw 'VM shutdown not confirmed; campaign preserved.' }
 }

@@ -9,6 +9,21 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $modeFile = Join-Path $root 'mode.txt'
 $mode = Get-Content -LiteralPath $modeFile -ErrorAction SilentlyContinue | Select-Object -First 1
+
+# Tells the host, through the Hyper-V key-value exchange, that the auto-logon happened and this task ran
+# for the run whose id the host wrote on this disk. Without it the host cannot tell a guest stuck at its
+# logon screen (expired password) from a long run. Best effort: the run itself never depends on it.
+function Publish-GuestLogon {
+    try {
+        $runId = Get-Content -LiteralPath (Join-Path $root 'run-id.txt') -TotalCount 1 -ErrorAction Stop
+        if ($runId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return }
+        $pool = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Auto'
+        if (-not (Test-Path -LiteralPath $pool)) { New-Item -Path $pool -Force | Out-Null }
+        Set-ItemProperty -LiteralPath $pool -Name 'WinSightQualificationLogon' -Value $runId -Type String
+    }
+    catch { }
+}
+
 switch ($mode) {
     'done' {
         # A VM started again after its run - by anyone - must not run the gates again over results the
@@ -22,6 +37,7 @@ switch ($mode) {
     { $_ -in 'qualify', 'control' } {
         # 'control' is the second machine of gate 36 (WinSight-Control-HV): same one-shot visible task,
         # so the operator sees its console and its credential dialog.
+        Publish-GuestLogon
         $target = if ($mode -eq 'control') { Join-Path $root 'control-network-logon.ps1' } else { Join-Path $root 'candidate\qualify.ps1' }
         $name = 'WinSightQualificationCandidate'
         Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue

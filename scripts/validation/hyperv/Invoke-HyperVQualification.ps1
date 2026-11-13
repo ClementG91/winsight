@@ -25,6 +25,9 @@ param(
     [ValidateRange(1,20160)][int]$TimeoutMinutes = 480,
     # Memory for this run only (0 = the checkpoint's own); the checkpoint restore at the end resets it.
     [int64]$MemoryBytes = 0,
+    # A guest that booted Windows but never ran its logon task in this time (expired password, broken
+    # auto-logon) stops the run with an alert instead of letting it wait for its whole deadline.
+    [ValidateRange(1,1440)][int]$GuestStartMinutes = 15,
     [string]$DriverHeartbeat,
     # Collect a run whose driver was closed while the VM kept going: wait for it to power off, then seal and restore.
     [switch]$Resume
@@ -137,6 +140,7 @@ else {
         $stagedCandidate | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $candidateJson -Encoding UTF8
         Copy-Item -LiteralPath (Join-Path $HarnessDir 'guest\run-guest-checks.ps1') -Destination "${letter}:\run-guest-checks.ps1"
         'qualify' | Set-Content -LiteralPath "${letter}:\mode.txt"
+        $runState.runId | Set-Content -LiteralPath "${letter}:\run-id.txt"
         $stagingCompleted = $true
     }
     finally {
@@ -163,17 +167,32 @@ else {
 }
 $started = Get-Date
 $deadline = [DateTimeOffset]::Parse($campaignLease.State.deadlineUtc,[Globalization.CultureInfo]::InvariantCulture).UtcDateTime
+# A Resume cannot know when its VM started: only a run this driver started watches the guest logon.
+$guestWatch = -not $Resume
+$stopReason = 'forced-timeout'
 while ((Get-WinSightVmState $Name) -ne 'Off' -and [DateTime]::UtcNow -lt $deadline) {
     Write-WinSightDriverHeartbeat -Path $DriverHeartbeat -Phase 'waiting'
+    if ($guestWatch) {
+        $guestStart = Get-WinSightGuestStartVerdict -Probe (Get-WinSightGuestKvp $Name) -RunId $runState.runId -ElapsedMinutes ((Get-Date) - $started).TotalMinutes -LimitMinutes $GuestStartMinutes
+        if ($guestStart -ceq 'started') { Write-HostLog "$Name logged on and started its WinSight logon task"; $guestWatch = $false }
+        elseif ($guestStart -ceq 'unknown') { Write-HostLog "$Name publishes no guest data exchange after $GuestStartMinutes minutes: cannot confirm its logon, the run keeps its deadline (watch it with vmconnect)"; $guestWatch = $false }
+        elseif ($guestStart -ceq 'logon-missing') { $stopReason = 'guest-logon-missing'; break }
+    }
     Start-Sleep -Seconds 60
+}
+if ($stopReason -ceq 'guest-logon-missing') {
+    $alert = Get-WinSightGuestLogonAlert -VmName $Name -Minutes $GuestStartMinutes
+    Write-HostLog $alert
+    Send-WinSightOperatorAlert $alert
 }
 $timedOut = [bool]$campaignLease.State.timedOut -or [bool]$campaignLease.State.observationIncomplete
 if ((Get-WinSightVmState $Name) -ne 'Off') {
     Set-WinSightCampaignStage -Lease $campaignLease -Stage collecting -TimedOut
     if (-not $campaignLease.State.timedOut) { throw 'Timeout intent was not durably persisted.' }
     try { $timeoutReceipt = (Read-WinSightBoundedText $timeoutPath)|ConvertFrom-Json }
-    catch [IO.FileNotFoundException] { Write-WinSightAtomicText -Path $timeoutPath -Text (@{runId=$runState.runId;reason='forced-timeout'}|ConvertTo-Json -Compress); $timeoutReceipt = [pscustomobject]@{runId=$runState.runId;reason='forced-timeout'} }
-    if ($timeoutReceipt.runId -cne $runState.runId -or $timeoutReceipt.reason -cne 'forced-timeout') { throw 'Timeout evidence differs; preserve the active campaign.' }
+    catch [IO.FileNotFoundException] { Write-WinSightAtomicText -Path $timeoutPath -Text (@{runId=$runState.runId;reason=$stopReason}|ConvertTo-Json -Compress); $timeoutReceipt = [pscustomobject]@{runId=$runState.runId;reason=$stopReason} }
+    if ($timeoutReceipt.runId -cne $runState.runId -or $timeoutReceipt.reason -cnotin @('forced-timeout','guest-logon-missing')) { throw 'Timeout evidence differs; preserve the active campaign.' }
+    $stopReason = $timeoutReceipt.reason
     Stop-VM -Name $Name -TurnOff -Force
     $timedOut = $true
 }
@@ -206,7 +225,7 @@ if ($collectionFailure) { throw $collectionFailure }
 if (-not $collectionCompleted) { throw 'Evidence collection did not complete.' }
 $fullResults = Read-WinSightQualificationResult -Path (Join-Path $runDir 'results.json') -Commit $candidate.commit -RunId $runState.runId
 if ($null -eq $fullResults) {
-    Write-WinSightImmutableText -Path (Join-Path $runDir 'missing-results.json') -Text ([ordered]@{version=1;runId=$runState.runId;candidateCommit=$candidate.commit;status='NOT_RUN';reason='result-file-missing'}|ConvertTo-Json -Compress)
+    Write-WinSightImmutableText -Path (Join-Path $runDir 'missing-results.json') -Text ([ordered]@{version=1;runId=$runState.runId;candidateCommit=$candidate.commit;status='NOT_RUN';reason=$(if ($stopReason -ceq 'guest-logon-missing') { 'guest-logon-missing' } else { 'result-file-missing' })}|ConvertTo-Json -Compress)
 }
 @("# harness $HarnessDir") + @(Get-FileManifest $HarnessDir) | Set-Content -LiteralPath (Join-Path $runDir 'provenance-harness.txt')
 Copy-Item -LiteralPath $BootstrapReceipt -Destination (Join-Path $runDir 'provenance-bootstrap.json')

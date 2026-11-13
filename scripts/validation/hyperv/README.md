@@ -133,6 +133,40 @@ Use fresh `-NoProfile` system Windows PowerShell 5.1 processes for the runner, o
 and verifier. Their module search path is restricted to OS modules before any imports; a session
 that already loaded untrusted functions or modules is not a trusted execution environment.
 
+## Guest account
+
+Each VM signs in by auto-logon to the guest account its clean checkpoint holds. When that password
+expires, Windows stays at its logon screen, the logon task never runs and the run produces nothing.
+
+The guest's logon task publishes the run id that the host wrote on its data disk (`run-id.txt`). It
+publishes it in the Hyper-V key-value exchange pool, under the guest's
+`HKLM\SOFTWARE\Microsoft\Virtual Machine\Auto`, with the name `WinSightQualificationLogon`. Only that
+value moves from the guest to the host: no credentials, no share.
+
+Both drivers watch each VM. They stop the run when the VM's Windows publishes its data exchange but
+that run id has not appeared after `-GuestStartMinutes` (15 by default). When that happens:
+- the drivers write a `guest-logon-missing` receipt and seal the run as a failure;
+- the runner console shows an `ALERT guest-logon-missing` line in red;
+- `msg.exe` sends the same alert to every session of the host.
+
+A VM that publishes no data exchange at all keeps the run deadline, and its host log says so.
+
+To repair the account, restore the VM's clean checkpoint with its data disk detached. Then start the
+VM and open `vmconnect.exe localhost <vm>`, with Enhanced session off. Inside the VM:
+1. Change the expired password.
+2. Run `Set-LocalUser -Name <account> -PasswordNeverExpires $true` and
+   `net accounts /maxpwage:unlimited`.
+3. Store the new password for auto-logon with `netplwiz`. On Windows 11, first set
+   `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device\DevicePasswordLessBuildVersion`
+   to `0`. Then tick and untick "Users must enter a user name and password", and type the password.
+4. Remove any `DefaultPassword` value under `Winlogon`.
+5. Restart once to see the VM sign in alone, then shut it down.
+
+Back on the host:
+1. Replace the checkpoint with `Remove-VMCheckpoint`, then `Checkpoint-VM` (`S0-hyperv-autorun` or
+   `C0-control`).
+2. Run `Protect-WinSightVmStorage.ps1` again before the next campaign.
+
 ## Interrupted network campaigns
 
 Transient observation failures preserve a possibly live campaign for the logged `-Resume` command.
