@@ -98,9 +98,9 @@ installed `0793f78` harness. Neither this result nor published v0.14.2 evidence 
 | Required final evidence | Status at this local regression record |
 |---|---|
 | Full local Definition of Done on committed final revision | Pending final execution; exact results belong to the PR evidence |
-| Both x64 CI legs, native ARM64, packages, aggregate and CodeQL | Pending final pushed revision; do not reuse earlier runs |
-| New response gates and full VM campaign | NOT_RUN for final bytes; changed harness requires authenticated owner installation |
-| Automatic Network Logon gate 36 | NOT_RUN for final bytes; owner installation precedes automatic disposable credentials |
+| Both x64 CI legs, native ARM64, packages, aggregate and CodeQL | PASS on `f2d4ef7`, CI run 43609904605 ([2026-11-14 record](2026-11-14-pr167-x64-qualification-f2d4ef7.md)) |
+| New response gates and full VM campaign | PASS on `f2d4ef7`: 31/31 gates, provenance 12/12 unelevated ([2026-11-14 record](2026-11-14-pr167-x64-qualification-f2d4ef7.md)) |
+| Automatic Network Logon gate 36 | PASS on `f2d4ef7`: 7/7 control, 5/5 observer, provenance 12/12 ([2026-11-14 record](2026-11-14-pr167-x64-qualification-f2d4ef7.md)) |
 | Real disk-full, failed UI delivery, adverse bootstrap and physical crash trials | NOT_RUN; native fault-boundary tests are narrower evidence |
 | Cross-session/account/integrity and both 168-hour workload profiles | NOT_RUN; keep frozen budgets in the October 3/4 protocol |
 
