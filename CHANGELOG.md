@@ -34,6 +34,11 @@
 - Microsoft.NET.Test.Sdk 18.9.0 → 18.12.0, with the pinned Microsoft.CodeCoverage 18.12.0
   instrumentation-engine hashes in the framework-comparison test. Test-only.
 
+- .NET 10.0.15 security servicing (16 CVEs, 2026-11-10): SDK 10.0.403 → 10.0.404, so the
+  self-contained builds ship runtime 10.0.15 instead of 10.0.14; System.Management,
+  System.Diagnostics.EventLog, System.Security.Cryptography.Pkcs and Microsoft.Extensions.Hosting(.WindowsServices)
+  → 10.0.15.
+
 These change shipped bytes after the 2026-11-14 qualification of `f2d4ef7`: the next release
 candidate needs its own x64 Hyper-V run.
 
