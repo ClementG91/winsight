@@ -140,7 +140,8 @@ expires, Windows stays at its logon screen, the logon task never runs and the ru
 
 The guest's logon task publishes the run id that the host wrote on its data disk (`run-id.txt`). It
 publishes it in the Hyper-V key-value exchange pool, under the guest's
-`HKLM\SOFTWARE\Microsoft\Virtual Machine\Auto`, with the name `WinSightQualificationLogon`. Only that
+`HKLM\SOFTWARE\Microsoft\Virtual Machine\Guest` (the guest-to-host pool; `Auto` belongs to the
+integration service and never reaches the host), with the name `WinSightQualificationLogon`. Only that
 value moves from the guest to the host: no credentials, no share.
 
 Both drivers watch each VM. They stop the run when the VM's Windows publishes its data exchange but
@@ -162,10 +163,19 @@ VM and open `vmconnect.exe localhost <vm>`, with Enhanced session off. Inside th
 4. Remove any `DefaultPassword` value under `Winlogon`.
 5. Restart once to see the VM sign in alone, then shut it down.
 
-Back on the host:
-1. Replace the checkpoint with `Remove-VMCheckpoint`, then `Checkpoint-VM` (`S0-hyperv-autorun` or
-   `C0-control`).
-2. Run `Protect-WinSightVmStorage.ps1` again before the next campaign.
+Do this on the qualification VM only, then on the host:
+1. Replace its checkpoint with `Remove-VMCheckpoint`, then `Checkpoint-VM` (`S0-hyperv-autorun`).
+2. Rebuild the control VM.
+
+Removing that checkpoint merges the repaired state into `os.vhdx`. `control.vhdx` is a differencing
+disk on `os.vhdx`, so the merge breaks its chain: Hyper-V then reports "the virtual hard disk chain is
+inaccessible". Never repair the control VM in place and never reattach its old disk.
+
+To rebuild it:
+1. Remove the VM (`Remove-VM`) and delete `control.vhdx` and its `control_*.avhdx`.
+2. Queue `{"action":"control"}` ahead of the other requests. The rebuilt VM inherits the repaired
+   account from `os.vhdx`.
+3. Run `Protect-WinSightVmStorage.ps1` again before the next campaign.
 
 ## Interrupted network campaigns
 

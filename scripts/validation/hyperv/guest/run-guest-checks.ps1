@@ -17,7 +17,9 @@ function Publish-GuestLogon {
     try {
         $runId = Get-Content -LiteralPath (Join-Path $root 'run-id.txt') -TotalCount 1 -ErrorAction Stop
         if ($runId -notmatch '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') { return }
-        $pool = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Auto'
+        # 'Guest' is the guest-to-host pool (host: GuestExchangeItems). 'Auto' belongs to the integration
+        # service itself (intrinsic items): a value written there never reaches the host.
+        $pool = 'HKLM:\SOFTWARE\Microsoft\Virtual Machine\Guest'
         if (-not (Test-Path -LiteralPath $pool)) { New-Item -Path $pool -Force | Out-Null }
         Set-ItemProperty -LiteralPath $pool -Name 'WinSightQualificationLogon' -Value $runId -Type String
     }

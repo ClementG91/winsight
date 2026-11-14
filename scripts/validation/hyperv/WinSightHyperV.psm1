@@ -681,7 +681,7 @@ function Get-WinSightVmState([Parameter(Mandatory)][string]$Name) {
 # The host never authenticates to the guest and cannot read the data disk while the VM runs. A guest whose
 # account password expired stays at its logon screen: nothing runs and, without this signal, the host waits
 # for the whole run deadline (hours). run-guest-checks.ps1 publishes the run id of its data disk in the
-# Hyper-V key-value exchange pool (guest HKLM\SOFTWARE\Microsoft\Virtual Machine\Auto) as soon as the
+# Hyper-V key-value exchange pool (guest HKLM\SOFTWARE\Microsoft\Virtual Machine\Guest) as soon as the
 # logon task runs; the guest's data exchange service publishes its intrinsic items at boot, before any logon.
 $script:GuestLogonKey = 'WinSightQualificationLogon'
 

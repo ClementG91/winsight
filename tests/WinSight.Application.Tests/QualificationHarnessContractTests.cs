@@ -237,7 +237,10 @@ public sealed class QualificationHarnessContractTests(ITestOutputHelper output)
     public void ARunStopsWithAnAlertWhenTheGuestNeverLogsOn()
     {
         var guest = Code(Path.Combine(Harness, "guest", "run-guest-checks.ps1"));
-        Assert.Contains("'HKLM:\\SOFTWARE\\Microsoft\\Virtual Machine\\Auto'", guest, StringComparison.Ordinal);
+        // Guest-to-host items live under 'Guest' (host: GuestExchangeItems). 'Auto' is the integration
+        // service's own intrinsic pool: a value written there never reached the host (run 2026-11-14).
+        Assert.Contains("'HKLM:\\SOFTWARE\\Microsoft\\Virtual Machine\\Guest'", guest, StringComparison.Ordinal);
+        Assert.DoesNotContain("Virtual Machine\\Auto", guest, StringComparison.Ordinal);
         Assert.Contains("-Name 'WinSightQualificationLogon'", guest, StringComparison.Ordinal);
         Assert.Contains("(Join-Path $root 'run-id.txt')", guest, StringComparison.Ordinal);
         var dispatch = guest.IndexOf("{ $_ -in 'qualify', 'control' }", StringComparison.Ordinal);
