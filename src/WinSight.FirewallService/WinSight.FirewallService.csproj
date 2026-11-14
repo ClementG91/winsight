@@ -17,6 +17,7 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" />
+    <PackageReference Include="System.Diagnostics.EventLog" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\WinSight.Firewall\WinSight.Firewall.csproj" />
