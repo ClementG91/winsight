@@ -427,7 +427,7 @@
   <data name="AlertRefusedChanged" xml:space="preserve"><value>The item changed since the alert, so nothing was removed.</value></data>
   <data name="AlertRefusedUnavailable" xml:space="preserve"><value>WinSight cannot reverse this item yet: it is machine-wide, or of a kind with no reversible removal.</value></data>
   <data name="AlertFailed" xml:space="preserve"><value>The action could not be completed.</value></data>
-  <data name="AlertPartiallyApplied" xml:space="preserve"><value>The system may have changed, but the result could not be fully audited. Action ID: {0}. {1}</value></data>
+  <data name="AlertPartiallyApplied" xml:space="preserve"><value>The system may have changed; some steps remain unconfirmed. Action ID: {0}.</value></data>
   <data name="AlertBlockReasserted" xml:space="preserve"><value>Removed and quarantined, but the startup item came straight back: a running program is re-creating it. Deal with that program, then block again. Action ID: {0}.</value></data>
   <data name="SignatureWindowTitle" xml:space="preserve"><value>WinSight — file signature</value></data>
   <data name="SignatureHeading" xml:space="preserve"><value>Who signed this file</value></data>
@@ -443,4 +443,53 @@
   <data name="SignatureRevocationNotChecked" xml:space="preserve"><value>Revocation was not checked: nothing was cached to answer from, and WinSight does not go online to verify. A stolen certificate would still read as valid here.</value></data>
   <data name="SignatureRevoked" xml:space="preserve"><value>The signing certificate has been revoked. Do not trust this file on the strength of its signature.</value></data>
   <data name="Close" xml:space="preserve"><value>Close</value></data>
+  <data name="ResponseActionId" xml:space="preserve"><value>Action ID: {0}.</value></data>
+  <data name="ResponseProcessRollbackIncomplete" xml:space="preserve"><value>Suspension rollback was incomplete; one or more threads may still be suspended. Inspect the process before acting again.</value></data>
+  <data name="ResponseIntentRefused" xml:space="preserve"><value>The audit intent could not be written; the action was not attempted.</value></data>
+  <data name="ResponseCompletionGap" xml:space="preserve"><value>The action completion could not be journalled.</value></data>
+  <data name="ResponseRuleMutation" xml:space="preserve"><value>Rule change: {0}</value></data>
+  <data name="ResponseRollbackStorage" xml:space="preserve"><value>Rollback storage: {0}</value></data>
+  <data name="ResponseIgnoredCount" xml:space="preserve"><value>ignored entries: {0};</value></data>
+  <data name="ResponseIgnoredRemoved" xml:space="preserve"><value>invalid entries were removed by this successful write.</value></data>
+  <data name="ResponseIgnoredRetained" xml:space="preserve"><value>invalid entries remain intact until a successful write.</value></data>
+  <data name="ResponseFutureRulesCount" xml:space="preserve"><value>retained unsupported entries: {0};</value></data>
+  <data name="ResponseFutureRulesInactive" xml:space="preserve"><value>These entries are preserved without applying their unknown semantics.</value></data>
+  <data name="ResponseRollbackConfirmedAbsent" xml:space="preserve"><value>The new rule is confirmed absent after rollback.</value></data>
+  <data name="ResponseRollbackConfirmedActive" xml:space="preserve"><value>Rollback failed and the original rule is confirmed active; inspect winsight rules.</value></data>
+  <data name="ResponseRollbackTargetChanged" xml:space="preserve"><value>The rollback target changed; its replacement was preserved. The original rule's active state is unconfirmed; inspect winsight rules.</value></data>
+  <data name="ResponseRollbackUnconfirmed" xml:space="preserve"><value>The rollback could not be verified. The rule's active state is unconfirmed; inspect winsight rules when storage is readable.</value></data>
+  <data name="ResponseJournalAppended" xml:space="preserve"><value>The audit record was appended.</value></data>
+  <data name="ResponseJournalRotated" xml:space="preserve"><value>The audit record was stored after journal rotation.</value></data>
+  <data name="ResponseJournalUpdated" xml:space="preserve"><value>The audit history was updated.</value></data>
+  <data name="ResponseJournalTargetNotFound" xml:space="preserve"><value>The requested audit record was not found. Inspect winsight actions.</value></data>
+  <data name="ResponseJournalUnavailable" xml:space="preserve"><value>Audit storage is unavailable. Check free disk space, local access and file sharing.</value></data>
+  <data name="ResponseJournalInvalidRecord" xml:space="preserve"><value>The audit record is invalid. Check the action input.</value></data>
+  <data name="ResponseJournalRotationFailed" xml:space="preserve"><value>Atomic journal replacement failed. Close conflicting file handles and retry.</value></data>
+  <data name="ResponseJournalEvidencePreservationFailed" xml:space="preserve"><value>Recovery evidence could not be preserved. Check disk space and access before retrying.</value></data>
+  <data name="ResponseJournalRecoveryRequired" xml:space="preserve"><value>Bounded history migration is required. Inspect winsight actions and RECOVERY.md.</value></data>
+  <data name="ResponseJournalRetentionLimit" xml:space="preserve"><value>The history annotation exceeds retention limits and was refused; the original journal is unchanged.</value></data>
+  <data name="ResponseJournalLockTimeout" xml:space="preserve"><value>Another operation holds the audit lock. Retry after it exits; the lock wait budget is 30 seconds.</value></data>
+  <data name="ResponseJournalUnsafeLockPath" xml:space="preserve"><value>The audit lock path is unsafe or inaccessible. Inspect local paths and RECOVERY.md.</value></data>
+  <data name="ResponseJournalLockUnavailable" xml:space="preserve"><value>The audit lock could not be opened. Check permissions and concurrent initialization; never delete a live lock.</value></data>
+  <data name="ResponseJournalEvidenceRecoveryBlocked" xml:space="preserve"><value>Evidence recovery or its metadata state could not be resolved safely. Inspect winsight actions and RECOVERY.md before retrying.</value></data>
+  <data name="ResponseJournalPathTooLong" xml:space="preserve"><value>The journal filename is too long for its archive and staging files. Preserve all files and choose a shorter nonoverlapping path using RECOVERY.md.</value></data>
+  <data name="ResponseJournalUnknown" xml:space="preserve"><value>The audit status is unrecognized. Inspect winsight actions and RECOVERY.md.</value></data>
+  <data name="ResponseRuleLoaded" xml:space="preserve"><value>The rule store was read.</value></data>
+  <data name="ResponseRuleMissing" xml:space="preserve"><value>No rule file exists.</value></data>
+  <data name="ResponseRuleWritten" xml:space="preserve"><value>The rule change was stored.</value></data>
+  <data name="ResponseRuleTargetNotFound" xml:space="preserve"><value>The rule is absent from the readable store.</value></data>
+  <data name="ResponseRuleInvalidRule" xml:space="preserve"><value>The rule identity or supported scope, decision or duration is invalid; timed rules require an expiry.</value></data>
+  <data name="ResponseRuleInvalidJson" xml:space="preserve"><value>The rule file contains invalid JSON and was preserved. Inspect winsight rules and RECOVERY.md.</value></data>
+  <data name="ResponseRuleInvalidFormat" xml:space="preserve"><value>The rule file has an invalid format and was preserved. Inspect winsight rules and RECOVERY.md.</value></data>
+  <data name="ResponseRuleUnsupportedVersion" xml:space="preserve"><value>The rule-file version is unsupported and was preserved. Use a compatible version or a reviewed backup.</value></data>
+  <data name="ResponseRuleByteLimit" xml:space="preserve"><value>The 8 MiB rule-file limit was exceeded; the existing file was preserved.</value></data>
+  <data name="ResponseRuleRuleLimit" xml:space="preserve"><value>The 8192-entry rule limit was exceeded. Revoke a rule from a readable store or recover a reviewed backup.</value></data>
+  <data name="ResponseRuleUnavailable" xml:space="preserve"><value>The rule store is unavailable. Check local access, file sharing and free disk space.</value></data>
+  <data name="ResponseRuleWriteFailed" xml:space="preserve"><value>Atomic rule replacement failed. Check disk space, permissions and conflicting file handles.</value></data>
+  <data name="ResponseRuleLockTimeout" xml:space="preserve"><value>Another operation holds the rule lock. Retry after it exits; the lock wait budget is 30 seconds.</value></data>
+  <data name="ResponseRuleUnsafeLockPath" xml:space="preserve"><value>The rule lock path is unsafe or inaccessible. Inspect local paths and RECOVERY.md.</value></data>
+  <data name="ResponseRuleLockUnavailable" xml:space="preserve"><value>The rule lock could not be opened. Check permissions and concurrent initialization; never delete a live lock.</value></data>
+  <data name="ResponseRuleUnsupportedIdentityCollision" xml:space="preserve"><value>That identity belongs to a retained rule with unknown semantics. Use a compatible version or explicitly revoke it before replacement.</value></data>
+  <data name="ResponseRuleTargetChanged" xml:space="preserve"><value>The expected rule or its byte version changed, or its identity is ambiguous. The replacement was preserved.</value></data>
+  <data name="ResponseRuleUnknown" xml:space="preserve"><value>The rule storage status is unrecognized. Inspect winsight rules and RECOVERY.md.</value></data>
 </root>

@@ -248,20 +248,11 @@ public sealed class ProcessResponderTests
 
 internal sealed class TempFile : IDisposable
 {
-    public string Path { get; } = System.IO.Path.Combine(
-        System.IO.Path.GetTempPath(), $"winsight-response-{Guid.NewGuid():N}");
+    private readonly string _root = Directory.CreateTempSubdirectory("winsight-responder-").FullName;
 
-    public void Dispose()
-    {
-        try
-        {
-            if (File.Exists(Path))
-            {
-                File.Delete(Path);
-            }
-        }
-        catch (IOException)
-        {
-        }
-    }
+    public TempFile() => Path = System.IO.Path.Combine(_root, "journal.jsonl");
+
+    public string Path { get; }
+
+    public void Dispose() => Directory.Delete(_root, recursive: true);
 }

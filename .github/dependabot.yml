@@ -8,6 +8,13 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(deps)"
+    # The app targets .NET 10: packages released with the runtime stay on its 10.0 servicing line.
+    # A move to .NET 11 changes the target framework and SDK together, never one package alone.
+    ignore:
+      - dependency-name: "System.*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "Microsoft.Extensions.*"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions used in workflows.
   - package-ecosystem: github-actions

@@ -1,7 +1,8 @@
+using System.Diagnostics;
+using System.Globalization;
 using System.Security;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace WinSight.Core;
 
@@ -17,17 +18,74 @@ public sealed record VirusTotalQuotaSnapshot(
     int UsedThisMonth,
     bool RequestAllowed);
 
+/// <summary>Admission result; infrastructure refusals do not establish measured quota usage.</summary>
+public enum VirusTotalQuotaStatus
+{
+    Unknown,
+    Acquired,
+    QuotaExhausted,
+    LockTimeout,
+    UnsafePath,
+    StateUnavailable,
+    StateInvalidOrUnsupported,
+    StateOverBudget,
+    WriteFailed,
+}
+
 /// <summary>
-/// Coordinates VirusTotal request accounting across WinSight processes for one
-/// Windows user. The local guard is intentionally stricter than relying on HTTP 429:
-/// no retry is sent and a request is refused when accounting cannot be persisted.
+/// Per-call gate observation. Default means unobserved; NoAttempt is true only for an observed
+/// call that started no lock API attempt. Attempts count calls to TryAcquireExclusiveLockFile,
+/// not its individual native opens. Counts saturate at Int32.MaxValue. An interrupted attempt
+/// can be started without completing. Busy sites and codes describe returned native refusals,
+/// not continuous contention, object identity, ownership or measured quota usage.
+/// </summary>
+public readonly struct VirusTotalQuotaGateDiagnostics
+{
+    internal VirusTotalQuotaGateDiagnostics(bool observed, int started, int completed, int busy,
+        LocalFileLockBusyPoint firstBusyPoint, int? firstNativeError,
+        LocalFileLockBusyPoint lastBusyPoint, int? lastNativeError)
+    {
+        Observed = observed;
+        AttemptsStarted = started;
+        AttemptsCompleted = completed;
+        BusyCount = busy;
+        FirstBusyPoint = firstBusyPoint;
+        FirstNativeError = firstNativeError;
+        LastBusyPoint = lastBusyPoint;
+        LastNativeError = lastNativeError;
+    }
+
+    public bool Observed { get; }
+    public int AttemptsStarted { get; }
+    public int AttemptsCompleted { get; }
+    public int BusyCount { get; }
+    /// <summary>At least one lock API call returned; the final started call may still have been interrupted.</summary>
+    public bool HasCompletedAttempt => AttemptsCompleted > 0;
+    public bool NoAttempt => Observed && AttemptsStarted == 0;
+    public LocalFileLockBusyPoint FirstBusyPoint { get; }
+    public int? FirstNativeError { get; }
+    public LocalFileLockBusyPoint LastBusyPoint { get; }
+    public int? LastNativeError { get; }
+}
+
+/// <summary>
+/// Coordinates admissions using one local profile's canonical quota path, including across
+/// Windows sessions. Older writers must be stopped before adopting the file-lock protocol.
+/// No request is admitted when accounting cannot be read and persisted safely.
 /// </summary>
 public sealed class VirusTotalQuotaLimiter
 {
     private const int MaximumStateBytes = 64 * 1024;
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(2);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = false,
+        NumberHandling = JsonNumberHandling.Strict,
+        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
+        AllowDuplicateProperties = false,
+        MaxDepth = 8,
+    };
     private readonly string _path;
-    private readonly string _mutexName;
     private readonly Func<DateTimeOffset> _utcNow;
     private readonly VirusTotalQuotaLimits _limits;
 
@@ -36,102 +94,195 @@ public sealed class VirusTotalQuotaLimiter
         Func<DateTimeOffset>? utcNow = null,
         VirusTotalQuotaLimits? limits = null)
     {
-        _path = path ?? Path.Combine(
+        _path = Path.GetFullPath(path ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "WinSight",
-            "vt-quota-v1.json");
+            "vt-quota-v1.json"));
         _utcNow = utcNow ?? (() => DateTimeOffset.UtcNow);
         _limits = limits ?? new VirusTotalQuotaLimits();
-        if (_limits.PerMinute <= 0 || _limits.PerDay <= 0 || _limits.PerMonth <= 0)
+        if (_limits.PerMinute is <= 0 or > 64 || _limits.PerDay <= 0 || _limits.PerMonth <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(limits), "Quota limits must be positive.");
+            throw new ArgumentOutOfRangeException(nameof(limits), "Quota limits must be positive; the minute capacity is at most 64.");
         }
-
-        var identity = SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(_path).ToUpperInvariant()));
-        _mutexName = $"Local\\WinSight.VirusTotalQuota.{Convert.ToHexString(identity.AsSpan(0, 8))}";
     }
 
     public static VirusTotalQuotaLimiter Default { get; } = new();
 
-    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot)
+    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot) => TryAcquireAdmission(out snapshot, out _, out _);
+
+    /// <summary>
+    /// On infrastructure refusal, snapshot counts are conservative placeholders at the configured
+    /// limits. Only Acquired and QuotaExhausted establish measured usage.
+    /// </summary>
+    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status) =>
+        TryAcquireAdmission(out snapshot, out status, out _);
+
+    /// <summary>
+    /// Returns the same admission and conservative snapshot contract with per-call gate diagnostics.
+    /// Observation never grants admission and is not evidence of a lock holder or a contention cause.
+    /// </summary>
+    public bool TryAcquire(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status,
+        out VirusTotalQuotaGateDiagnostics diagnostics) => TryAcquireAdmission(out snapshot, out status, out diagnostics);
+
+    private bool TryAcquireAdmission(out VirusTotalQuotaSnapshot snapshot, out VirusTotalQuotaStatus status,
+        out VirusTotalQuotaGateDiagnostics diagnostics)
     {
-        using var mutex = new Mutex(initiallyOwned: false, _mutexName);
-        var acquired = false;
+        snapshot = DeniedSnapshot();
+        using var gate = AcquireGate(out status, out diagnostics);
+        if (gate is null) { return false; }
+
+        QuotaState? state;
+        bool missing;
         try
         {
-            try
-            {
-                acquired = mutex.WaitOne(TimeSpan.FromSeconds(2));
-            }
-            catch (AbandonedMutexException)
-            {
-                acquired = true;
-            }
-
-            if (!acquired)
-            {
-                snapshot = DeniedSnapshot();
-                return false;
-            }
-
-            var now = _utcNow().ToUniversalTime();
-            var state = Normalize(Load(), now);
-            var allowed = state.RecentRequests.Count < _limits.PerMinute &&
-                          state.DayCount < _limits.PerDay &&
-                          state.MonthCount < _limits.PerMonth;
-            if (!allowed)
-            {
-                snapshot = ToSnapshot(state, requestAllowed: false);
-                return false;
-            }
-
-            state.RecentRequests.Add(now);
-            state.DayCount++;
-            state.MonthCount++;
-            Save(state);
-            snapshot = ToSnapshot(state, requestAllowed: true);
-            return true;
+            state = Load(out missing, out status);
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            status = VirusTotalQuotaStatus.StateUnavailable;
+            return false;
+        }
+        if (state is null) { return false; }
+
+        // Observe the accounting time after the state was acquired, rather than before disk work.
+        DateTimeOffset now;
+        try { now = _utcNow().ToUniversalTime(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException
                                      or InvalidDataException or JsonException)
         {
-            snapshot = DeniedSnapshot();
+            // Preserve the original conservative contract of the injectable clock as well.
+            status = VirusTotalQuotaStatus.StateUnavailable;
             return false;
+        }
+        state = Normalize(state, now);
+        if (state.RecentRequests.Count >= _limits.PerMinute || state.DayCount >= _limits.PerDay || state.MonthCount >= _limits.PerMonth)
+        {
+            snapshot = ToSnapshot(state, requestAllowed: false);
+            status = VirusTotalQuotaStatus.QuotaExhausted;
+            return false;
+        }
+        state.RecentRequests.Add(now);
+        state.DayCount++;
+        state.MonthCount++;
+        // Never retry an uncertain publication. The next admission must reload durable accounting.
+        if (!Save(state, replaceExisting: !missing))
+        {
+            status = VirusTotalQuotaStatus.WriteFailed;
+            return false;
+        }
+        snapshot = ToSnapshot(state, requestAllowed: true);
+        status = VirusTotalQuotaStatus.Acquired;
+        return true;
+    }
+
+    private AutomaticFileAccess.LocalFileLock? AcquireGate(out VirusTotalQuotaStatus status,
+        out VirusTotalQuotaGateDiagnostics diagnostics)
+    {
+        diagnostics = new(true, 0, 0, 0, default, null, default, null);
+        status = VirusTotalQuotaStatus.UnsafePath;
+        var leaf = Path.GetFileName(_path);
+        if (leaf.Length == 0 || leaf.Length + ".lock".Length > 255) { return null; }
+        var started = 0;
+        var completed = 0;
+        var busy = 0;
+        LocalFileLockAttemptDiagnostics firstBusy = default, lastBusy = default;
+        var watch = Stopwatch.StartNew();
+        try
+        {
+            while (watch.Elapsed < LockWait)
+            {
+                started = IncrementDiagnosticCount(started);
+                var gate = AutomaticFileAccess.TryAcquireExclusiveLockFile(_path + ".lock", out var attempt, out var observation);
+                completed = IncrementDiagnosticCount(completed);
+                if (attempt == LocalFileLockStatus.Busy)
+                {
+                    if (busy == 0) { firstBusy = observation; }
+                    lastBusy = observation;
+                    busy = IncrementDiagnosticCount(busy);
+                }
+                if (gate is not null)
+                {
+                    status = VirusTotalQuotaStatus.Acquired;
+                    return gate;
+                }
+                if (attempt != LocalFileLockStatus.Busy)
+                {
+                    status = attempt == LocalFileLockStatus.UnsafePath
+                        ? VirusTotalQuotaStatus.UnsafePath : VirusTotalQuotaStatus.StateUnavailable;
+                    return null;
+                }
+                var remaining = LockWait - watch.Elapsed;
+                if (remaining > TimeSpan.Zero)
+                {
+                    Thread.Sleep(TimeSpan.FromMilliseconds(Math.Min(20, remaining.TotalMilliseconds)));
+                }
+            }
+            status = VirusTotalQuotaStatus.LockTimeout;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
+        {
+            status = VirusTotalQuotaStatus.StateUnavailable;
         }
         finally
         {
-            if (acquired)
-            {
-                mutex.ReleaseMutex();
-            }
+            diagnostics = new(true, started, completed, busy, firstBusy.BusyPoint, firstBusy.NativeError,
+                lastBusy.BusyPoint, lastBusy.NativeError);
         }
+        return null;
     }
 
-    private QuotaState Load()
+    private static int IncrementDiagnosticCount(int count) => count == int.MaxValue ? count : count + 1;
+
+    private QuotaState? Load(out bool missing, out VirusTotalQuotaStatus status)
     {
-        using var lease = AutomaticFileAccess.TryAcquire(_path);
+        using var lease = AutomaticFileAccess.TryAcquire(_path, out missing);
+        status = VirusTotalQuotaStatus.StateUnavailable;
         if (lease is null)
         {
+            if (!missing) { return null; }
+            status = VirusTotalQuotaStatus.Acquired;
             return new QuotaState();
         }
+        return ReadAcquiredState(lease, out status);
+    }
 
-        if (lease.IsDirectory || lease.Length > MaximumStateBytes)
-        {
-            throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
-        }
+    private static QuotaState? ReadAcquiredState(AutomaticFileAccess.LocalPathLease lease, out VirusTotalQuotaStatus status)
+    {
+        status = VirusTotalQuotaStatus.StateUnavailable;
+        if (lease.IsDirectory || !lease.DataIsLocal) { return null; }
+        using var input = lease.OpenRead(FileOptions.SequentialScan);
+        status = VirusTotalQuotaStatus.StateOverBudget;
+        if (input.Length > MaximumStateBytes) { return null; }
 
-        using var stream = lease.OpenRead(FileOptions.SequentialScan);
-        var state = JsonSerializer.Deserialize<QuotaState>(stream, JsonOptions)
-                    ?? throw new InvalidDataException("VirusTotal quota state is empty.");
-        if (!lease.IsCurrent())
+        // Length captured by the attributes lease can be stale after an in-place write. Read at
+        // most the physical budget plus one EOF sentinel before passing anything to the parser.
+        var bytes = new byte[MaximumStateBytes + 1];
+        var count = 0;
+        while (count < bytes.Length)
         {
-            throw new InvalidDataException("VirusTotal quota state changed while it was read.");
+            var read = input.Read(bytes, count, bytes.Length - count);
+            if (read == 0) { break; }
+            count += read;
         }
-        if (state.DayCount < 0 || state.MonthCount < 0 ||
-            state.RecentRequests is null || state.RecentRequests.Count > 64)
+        if (count > MaximumStateBytes) { return null; }
+        status = VirusTotalQuotaStatus.StateInvalidOrUnsupported;
+        QuotaState? state;
+        try
         {
-            throw new InvalidDataException("VirusTotal quota state is invalid.");
+            // Stream deserialization accepts one initial BOM; its bytes count against the cap.
+            using var bounded = new MemoryStream(bytes, 0, count, writable: false);
+            state = JsonSerializer.Deserialize<QuotaState>(bounded, JsonOptions);
         }
+        catch (JsonException) { return null; }
+        if (state is null || state.DayCount < 0 || state.MonthCount < 0 || state.RecentRequests is null || state.RecentRequests.Count > 64
+            || !DateOnly.TryParseExact(state.UtcDay, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var day)
+            || !string.Equals(state.UtcMonth, day.ToString("yyyy-MM", CultureInfo.InvariantCulture), StringComparison.Ordinal))
+        {
+            return null;
+        }
+        status = VirusTotalQuotaStatus.StateUnavailable;
+        if (!lease.IsCurrent()) { return null; }
+        status = VirusTotalQuotaStatus.Acquired;
         return state;
     }
 
@@ -158,16 +309,16 @@ public sealed class VirusTotalQuotaLimiter
         return state;
     }
 
-    private void Save(QuotaState state)
+    private bool Save(QuotaState state, bool replaceExisting)
     {
-        var payload = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
-        if (payload.Length > MaximumStateBytes)
+        try
         {
-            throw new InvalidDataException("VirusTotal quota state exceeds the safety limit.");
+            var payload = JsonSerializer.SerializeToUtf8Bytes(state, JsonOptions);
+            return payload.Length <= MaximumStateBytes && AtomicFile.TryWrite(_path, payload, replaceExisting: replaceExisting);
         }
-        if (!AtomicFile.TryWrite(_path, payload))
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or SecurityException)
         {
-            throw new IOException("The VirusTotal quota state could not be written safely.");
+            return false;
         }
     }
 
@@ -185,10 +336,15 @@ public sealed class VirusTotalQuotaLimiter
 
     private sealed class QuotaState
     {
+        [JsonRequired]
         public List<DateTimeOffset> RecentRequests { get; set; } = [];
+        [JsonRequired]
         public string UtcDay { get; set; } = string.Empty;
+        [JsonRequired]
         public int DayCount { get; set; }
+        [JsonRequired]
         public string UtcMonth { get; set; } = string.Empty;
+        [JsonRequired]
         public int MonthCount { get; set; }
     }
 }

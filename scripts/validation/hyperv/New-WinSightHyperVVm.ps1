@@ -38,6 +38,8 @@ $ErrorActionPreference = 'Stop'
 Import-Module Hyper-V
 Import-Module (Join-Path $PSScriptRoot 'WinSightHyperV.psm1') -Force
 Set-AdministratorsDefaultOwner
+if ([IO.Path]::GetFullPath($Root).TrimEnd('\') -ceq [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($Root)).TrimEnd('\')) { throw 'Qualification storage must be a dedicated directory, never a drive root.' }
+Assert-ProtectedPath -Path $Root -Recurse -AllowVirtualMachines
 
 $osVhd = Join-Path $Root 'os.vhd'
 $osVhdx = Join-Path $Root 'os.vhdx'
@@ -50,6 +52,9 @@ if ($vm -and (Get-VMCheckpoint -VMName $Name -Name $Checkpoint -ErrorAction Sile
 }
 if ($vm -and $vm.State -ne 'Off') { throw "VM $Name is $($vm.State); turn it off (Stop-VM -Name $Name -TurnOff) and run this again." }
 
+$maintenanceContract = [ordered]@{version=1;kind='prepare';runName='prepare';vm=$Name;checkpoint=$Checkpoint;memoryBytes=$MemoryBytes;harnessDir=$PSScriptRoot;harnessDigest=(Get-WinSightTextDigest (@(Get-FileManifest $PSScriptRoot) -join "`n"))}
+$maintenanceLease = Enter-WinSightCampaign -Root $Root -Contract $maintenanceContract
+try {
 # --- Disks ------------------------------------------------------------------------------------------
 if (-not (Test-Path -LiteralPath $osVhdx)) {
     if (-not (Test-Path -LiteralPath $osVhd)) { throw "Missing $osVhd (exported from VirtualBox)." }
@@ -94,6 +99,7 @@ if ($freeBytes -lt $MemoryBytes + 512MB) {
     Write-Warning ("Only {0:N1} GB of RAM free for a {1:N1} GB VM. Close memory-heavy applications (browsers, VirtualBox) or run this again with -MemoryBytes 4GB." -f ($freeBytes / 1GB), ($MemoryBytes / 1GB))
 }
 Write-Host "First boot of $Name (Windows settles on the new hardware, then shuts itself down; up to $SettleTimeoutMinutes minutes)..."
+Assert-WinSightHostMemory -Bytes ($MemoryBytes + 512MB) -Advice 'close applications before maintenance first boot'
 Start-VM -Name $Name
 $started = Get-Date
 $deadline = $started.AddMinutes($SettleTimeoutMinutes)
@@ -109,3 +115,10 @@ Get-VMHardDiskDrive -VMName $Name | Where-Object Path -eq $data | Remove-VMHardD
 Checkpoint-VM -Name $Name -SnapshotName $Checkpoint
 Write-Host "Ready: VM $Name, clean checkpoint $Checkpoint, data disk $data (detached)."
 Write-Host "Next: & '$(Join-Path $PSScriptRoot 'Protect-WinSightVmStorage.ps1')', then start WinSightQualRunner.ps1 (README.md)."
+
+if ((Get-WinSightVmState $Name) -cne 'Off' -or -not (Get-VMCheckpoint -VMName $Name -Name $Checkpoint -ErrorAction Stop)) { throw 'Maintenance did not confirm Off and the clean checkpoint.' }
+$maintenanceReceipt = Join-Path $Root ('host-campaign\maintenance-'+$maintenanceLease.RunId+'.json')
+Write-WinSightAtomicText -Path $maintenanceReceipt -Text (@{runId=$maintenanceLease.RunId;vm=$Name;checkpoint=$Checkpoint;status='maintenance-complete';finishedUtc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Compress)
+Close-WinSightCampaign -Lease $maintenanceLease -SealPath $maintenanceReceipt
+}
+finally { if ($maintenanceLease) { $maintenanceLease.Handle.Dispose() } }

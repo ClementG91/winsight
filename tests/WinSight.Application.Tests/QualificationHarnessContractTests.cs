@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 using Xunit;
+using Xunit.Abstractions;
 
 namespace WinSight.Application.Tests;
 
@@ -10,7 +11,7 @@ namespace WinSight.Application.Tests;
 /// user can write. These source contracts pin the rules that keep it from being turned against the
 /// host or against its own evidence; <c>Test-HarnessHelpers.ps1</c> exercises the helpers themselves.
 /// </summary>
-public sealed class QualificationHarnessContractTests
+public sealed class QualificationHarnessContractTests(ITestOutputHelper output)
 {
     private static readonly string Harness = Path.GetFullPath(Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", "validation", "hyperv"));
@@ -206,6 +207,61 @@ public sealed class QualificationHarnessContractTests
     /// (Hyper-V 0x800705AA). The driver stopped there, and the target stayed on, on the private
     /// switch, with its run staged and nobody to collect it.
     /// </remarks>
+    /// <summary>
+    /// A full run refuses a host without the memory its VM needs before it takes the campaign. The
+    /// check inside the campaign stays, for memory taken in between.
+    /// </summary>
+    /// <remarks>
+    /// Found at the first full run under protected storage: with 2 GB free the driver refused the start
+    /// after the campaign was Active, and every later staging was refused until an explicit collect.
+    /// </remarks>
+    [Fact]
+    public void AFullRunAdmitsHostMemoryBeforeItTakesTheCampaign()
+    {
+        var driver = Code(Path.Combine(Harness, "Invoke-HyperVQualification.ps1"));
+        var preflight = driver.IndexOf("Assert-WinSightHostMemory -Bytes ($admittedMemory + 512MB)", StringComparison.Ordinal);
+        var campaign = driver.IndexOf("$campaignLease = Enter-WinSightCampaign", StringComparison.Ordinal);
+        Assert.True(preflight >= 0 && campaign > preflight, "the host memory is not checked before the campaign is taken");
+        Assert.Contains("Assert-WinSightHostMemory -Bytes $needed", driver, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A guest whose account password expired stays at its logon screen and runs nothing: the host must
+    /// stop the run with an alert instead of waiting for its deadline.
+    /// </summary>
+    /// <remarks>
+    /// Seen on PR 167: three full runs each waited their whole deadline (hours) and sealed only a missing
+    /// result, because the guest's auto-logon failed on an expired password.
+    /// </remarks>
+    [Fact]
+    public void ARunStopsWithAnAlertWhenTheGuestNeverLogsOn()
+    {
+        var guest = Code(Path.Combine(Harness, "guest", "run-guest-checks.ps1"));
+        // Guest-to-host items live under 'Guest' (host: GuestExchangeItems). 'Auto' is the integration
+        // service's own intrinsic pool: a value written there never reached the host (run 2026-11-14).
+        Assert.Contains("'HKLM:\\SOFTWARE\\Microsoft\\Virtual Machine\\Guest'", guest, StringComparison.Ordinal);
+        Assert.DoesNotContain("Virtual Machine\\Auto", guest, StringComparison.Ordinal);
+        Assert.Contains("-Name 'WinSightQualificationLogon'", guest, StringComparison.Ordinal);
+        Assert.Contains("(Join-Path $root 'run-id.txt')", guest, StringComparison.Ordinal);
+        var dispatch = guest.IndexOf("{ $_ -in 'qualify', 'control' }", StringComparison.Ordinal);
+        Assert.True(dispatch >= 0 && guest.IndexOf("Publish-GuestLogon\n", dispatch, StringComparison.Ordinal) > dispatch,
+            "the guest does not publish its logon in the qualify and control modes");
+
+        var module = Code(Path.Combine(Harness, "WinSightHyperV.psm1"));
+        Assert.Contains("$script:GuestLogonKey = 'WinSightQualificationLogon'", module, StringComparison.Ordinal);
+        Assert.Contains("[Xml.DtdProcessing]::Prohibit", module, StringComparison.Ordinal);
+
+        foreach (var name in new[] { "Invoke-HyperVQualification.ps1", "Invoke-HyperVNetworkLogon.ps1" })
+        {
+            var driver = Code(Path.Combine(Harness, name));
+            Assert.Contains("$runState.runId | Set-Content -LiteralPath \"${letter}:\\run-id.txt\"", driver, StringComparison.Ordinal);
+            Assert.Contains("Get-WinSightGuestStartVerdict -Probe (Get-WinSightGuestKvp", driver, StringComparison.Ordinal);
+            Assert.Contains("$stopReason = 'guest-logon-missing'", driver, StringComparison.Ordinal);
+            Assert.Contains("Send-WinSightOperatorAlert $alert", driver, StringComparison.Ordinal);
+            Assert.Contains("-cnotin @('forced-timeout',", driver, StringComparison.Ordinal);
+        }
+    }
+
     [Fact]
     public void ANetworkRunStartsBothVirtualMachinesOrNeither()
     {
@@ -494,20 +550,8 @@ public sealed class QualificationHarnessContractTests
         {
             start.ArgumentList.Add(argument);
         }
-        using var process = System.Diagnostics.Process.Start(start)!;
-        var output = process.StandardOutput.ReadToEndAsync();
-        var error = process.StandardError.ReadToEndAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        try
-        {
-            await process.WaitForExitAsync(deadline.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            process.Kill(entireProcessTree: true);
-            throw;
-        }
-        Assert.True(process.ExitCode == 0, $"{script} exited {process.ExitCode}: {await output}\n{await error}");
+        var result = await PowerShellProcessEvidence.Run(start, TimeSpan.FromMinutes(2), output.WriteLine);
+        Assert.True(result.ExitCode == 0, $"{script} exited {result.ExitCode}: {result.Stdout}\n{result.Stderr}");
     }
 
     [Fact]

@@ -11,6 +11,7 @@ Start with [`VM_QUALIFICATION_KIT.md`](VM_QUALIFICATION_KIT.md) to reproduce any
 
 | Scope | Result | Candidate | CI run | Record |
 |---|---|---|---|---|
+| PR #167 readiness remediation: full x64 campaign and automatic Network Logon | PASS: 31/31 gates; gate 36 with 7/7 control and 5/5 observer checks; harness provenance 12/12 for each run, unelevated | `f2d4ef7` (unchanged CI artifact) | `43609904605` + CodeQL PASS on the exact head | [record](2026-11-14-pr167-x64-qualification-f2d4ef7.md) |
 | v0.14.0 product code: full x64 campaign, Cloud Files download attribution, Network Logon | PASS: 32 gates, 0 failures; gate 17 with every download request attributed to its process; gate 36 10/10; harness provenance 11/11 for each run | `fe953fe` / `711ded0` (local, unsigned) | none: local builds; provenance checked by `Verify-QualificationProvenance.ps1` | [record](2026-09-26-x64-qualification-fe953fe.md) |
 | Published v0.12.0 supply chain and x64 installer smoke | PASS: 6/6 checksums, 8/8 provenance/SBOM attestations, x64/Arm64 PE identity, x64 install/MCP/EN-FR-ES smoke/uninstall and zero residue | `b1c46ee` / tag `v0.12.0` | release `33497585184` PASS | [record](2026-09-01-v0.12.0-published-release.md) |
 | v0.12.0 installer, WFP/SCM, trust, local/Network IPC, ETW recovery and final cleanup | PASS: 35/35 WFP, 13/13 trust, 7/7 local IPC, 7/7 Network Logon, 3/3 observer, ETW orphan/SCM/Ctrl+C recovery | `dbaded1` | CI `33416259797` + CodeQL `33416257089` PASS on the exact candidate | [record](2026-09-01-x64-qualification-dbaded1.md) |

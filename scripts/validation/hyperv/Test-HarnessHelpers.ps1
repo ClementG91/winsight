@@ -69,6 +69,29 @@ try {
     Report ((& $module { $script:VmWorkerProcessCapability }) -eq $worker) 'the module names the vmWorkerProcess capability SID'
     Report ((& $trusts 'S-1-3-0') -eq $true -and (& $trusts 'S-1-3-1' -VirtualMachines) -eq $false) 'CREATOR OWNER is trusted, CREATOR GROUP is not'
 
+    # The campaign lease lives in host-campaign, directly below the VM storage root, and refuses any
+    # parent whose children a non-administrator could delete. The real root DACL, not a stub: the
+    # first staging under a protected storage was refused because the Virtual Machines group held
+    # full control on the root itself. Here the root stays owned by this user, so the walk must stop
+    # at that owner check and never at a Virtual Machines grant.
+    $vmStorage = Join-Path $work 'vm-storage'
+    [void](New-Item -ItemType Directory -Path $vmStorage)
+    try {
+        # Storage protected before the fix carries an explicit full-control entry for the group on the
+        # root; icacls /grant:r replaces only an entry with the same inheritance, so it must be removed.
+        & (Join-Path $env:SystemRoot 'System32\icacls.exe') $vmStorage /grant '*S-1-5-83-0:(OI)(CI)F' /Q | Out-Null
+        Set-WinSightVmStorageRootAcl -Path $vmStorage
+        $leaseRefusal = try { Assert-ProtectedAncestors -Path (Join-Path $vmStorage 'host-campaign'); 'accepted' } catch { $_.Exception.Message }
+        Report (($leaseRefusal -notmatch 'S-1-5-83-0') -and ($leaseRefusal -like "Not owned by*$vmStorage")) 'the VM storage root lets the campaign lease below it pass the ancestor walk'
+        $inheritOnly = [System.Security.AccessControl.PropagationFlags]::InheritOnly
+        $children = @((Get-Acl -LiteralPath $vmStorage).GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]) |
+            Where-Object { $_.IdentityReference.Value -eq 'S-1-5-83-0' -and $_.AccessControlType -eq 'Allow' -and
+                (($_.PropagationFlags -band $inheritOnly) -eq $inheritOnly) -and
+                (([int64]$_.FileSystemRights -band 0x1F01FFL) -eq 0x1F01FFL) })
+        Report ($children.Count -gt 0) 'the Virtual Machines group keeps full control of everything below the VM storage root'
+    }
+    finally { & (Join-Path $env:SystemRoot 'System32\icacls.exe') $vmStorage /reset /Q | Out-Null }
+
     # Every refusal at once, so one run shows all there is to fix.
     $one = Join-Path $work 'refusal-one.bin'
     $two = Join-Path $work 'refusal-two.bin'
@@ -216,6 +239,29 @@ try {
     }
     catch { $false }
     Report $retried 'a query of a restored VM is retried, then fails with its own error'
+    $heartbeat = Join-Path $work 'child-heartbeat.json'
+    Write-WinSightDriverHeartbeat -Path $heartbeat -Phase 'waiting'
+    $ownHeartbeat = Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId $PID
+    Report ($ownHeartbeat -and $ownHeartbeat.processId -eq $PID -and $ownHeartbeat.phase -eq 'waiting' -and $ownHeartbeat.ageSeconds -ge 0) 'a real child publishes its own PID, phase and UTC heartbeat'
+    Report ($null -eq (Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId ($PID + 1))) 'the runner refuses a heartbeat from a different process'
+    [IO.File]::WriteAllText($heartbeat, '{ corrupt heartbeat')
+    Report ($null -eq (Read-WinSightDriverHeartbeat -Path $heartbeat -ExpectedProcessId $PID)) 'a corrupt heartbeat reports unavailable rather than runner progress'
+
+    # An expired guest password leaves Windows at its logon screen: the guest's data exchange runs, the
+    # logon task never does. The host must tell that apart from a long run and stop it early.
+    $runId = '9f956300-93b3-46b6-b0f3-e5e030c32948'
+    $kvpItem = { param($ItemName, $ItemValue) "<INSTANCE CLASSNAME=`"Msvm_KvpExchangeDataItem`"><PROPERTY NAME=`"Data`" TYPE=`"string`"><VALUE>$ItemValue</VALUE></PROPERTY><PROPERTY NAME=`"Name`" TYPE=`"string`"><VALUE>$ItemName</VALUE></PROPERTY><PROPERTY NAME=`"Source`" TYPE=`"uint16`"><VALUE>2</VALUE></PROPERTY></INSTANCE>" }
+    $parsedKvp = try { ConvertFrom-WinSightKvpItems -Items @((& $kvpItem 'Other' 'x'), (& $kvpItem 'WinSightQualificationLogon' $runId)) } catch { @{} }
+    Report ($parsedKvp['WinSightQualificationLogon'] -ceq $runId -and $parsedKvp['Other'] -ceq 'x') 'guest key-value exchange items are read by name'
+    $dtdItem = '<!DOCTYPE INSTANCE [<!ENTITY x "y">]><INSTANCE><PROPERTY NAME="Name"><VALUE>&x;</VALUE></PROPERTY><PROPERTY NAME="Data"><VALUE>z</VALUE></PROPERTY></INSTANCE>'
+    $hostile = try { (ConvertFrom-WinSightKvpItems -Items @($dtdItem, 'not xml', ('<INSTANCE>' + ('a' * 70000) + '</INSTANCE>'))).Count -eq 0 } catch { $false }
+    Report $hostile 'a guest item with a DTD, malformed or oversized XML is ignored'
+    $verdict = { param($Booted, $Value, $Minutes) try { Get-WinSightGuestStartVerdict -Probe ([pscustomobject]@{ Booted = $Booted; LogonValue = $Value }) -RunId $runId -ElapsedMinutes $Minutes -LimitMinutes 15 } catch { 'error' } }
+    Report ((& $verdict $true $null 5) -ceq 'waiting') 'a booted guest without its logon signal is given its start budget'
+    Report ((& $verdict $true $null 16) -ceq 'logon-missing') 'a booted guest that never ran its logon task is reported once the budget is spent'
+    Report ((& $verdict $true 'aaaaaaaa-0000-0000-0000-000000000000' 16) -ceq 'logon-missing') 'a logon signal from another run never counts'
+    Report ((& $verdict $true $runId 16) -ceq 'started') 'the logon signal of this run means the guest started'
+    Report ((& $verdict $false $null 16) -ceq 'unknown') 'without any guest data exchange the host cannot decide and keeps the deadline'
 }
 finally {
     # The junction first, by itself: deleting the tree with it in place is how a recursive delete

@@ -1,11 +1,18 @@
 # Production readiness
 
-Status as of 2026-09-28. Evidence is candidate-bound: a successful result for one commit or package
+Current corrections, recovery decisions and final-byte qualification limits are tracked in the
+[October 5 regression record](validation/2026-10-05-readiness-regressions.md), with the original
+[October 3 audit matrix](validation/2026-10-03-readiness-remediation.md) and
+[October 4 operator evidence](validation/2026-10-04-readiness-operator.md). The corrected
+candidate `f2d4ef7` (PR #167) then passed exact-head CI and the full x64 Hyper-V campaign from a
+newly authenticated protected harness installation on 2026-11-14; see the first row below. The
+records below retain their historical scope. Evidence is candidate-bound: a successful result for one commit or package
 does not qualify different executable bytes, and a local rehearsal does not qualify a published
 release.
 
 | Target | Verdict |
 |---|---|
+| **x64, PR #167 `f2d4ef7`** | **The unchanged x64 CI artifact of exact head `f2d4ef7` (CI run 43609904605, all jobs and CodeQL green) passed the x64 Hyper-V campaign on 2026-11-14:** 31/31 non-network gates, including upgrade from published v0.14.2, and the separate two-VM network gate 36 (7/7 control checks, 5/5 target observer) with automatic disposable credentials. Both runs passed 12/12 provenance/protection checks from the protected verifier, unelevated, after the owner authenticated the launcher before elevated installation. See the [candidate-bound record](validation/2026-11-14-pr167-x64-qualification-f2d4ef7.md). Still open: Arm64 privileged runtime, real disk-full/UI-delivery/crash trials, pre-launch substitution trial, session isolation and 168-hour load/soak. Distribution remains unsigned. |
 | **x64, v0.14.2** | **Exact published bytes passed the x64 Hyper-V campaign on 2026-09-28:** 31 non-network gates, the separate two-VM network gate (10/10 checks), and a targeted Cloud Files repeat. All four runs passed 12/12 provenance/protection checks from the protected verifier, unelevated. The operator authenticated the launcher before elevated protected installation. See the [candidate-bound record](validation/2026-09-28-v0.14.2-x64-qualification.md). This is not blanket production certification: a disposable-VM pre-launch substitution trial, Guardian disk-full/UI fault recovery, architecture/session coverage and load/soak remain open. Distribution remains unsigned; no Authenticode acceptance is implied. |
 | **x64, v0.14.0** | **Product code exercised in local x64 VM rehearsals; neither the release binaries nor the elevated harness startup were independently provenance-qualified.** The rebuilt harness (RA-01) ran local unsigned candidates ([record](validation/2026-09-26-x64-qualification-fe953fe.md)): 32 gates without a failure, gate 17 with every download request attributed to its process, gate 36 10/10. Its post-run verifier passed, but RB-01 in `AUDIT.md` §4.4 shows that it does not authenticate the user-writable entry point before elevation. The published binaries are the CI build of that code but for one notice's severity (WS-86), a notice never emitted in those runs. They are attested and, as an accepted distribution limitation, unsigned. Commit hashes cited before 2026-09-24 predate a history rewrite that removed local paths; `docs/AUDIT.md` §17.3 maps them to the published ones. |
 | **x64, v0.13.0 and older** | **Superseded.** They carry defects fixed in v0.14.0 (`docs/AUDIT.md`), among them WS-74: from v0.12.0 the interpreter triage never classified the genuine Windows interpreters. |

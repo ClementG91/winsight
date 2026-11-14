@@ -43,7 +43,7 @@ jobs:
       # workflow run on the default branch, and a restored NuGet global-packages folder is used as
       # is: whoever managed to write one entry would put their package bytes into a signed, attested
       # release. A release restores from nuget.org every time; CI keeps the cache for speed.
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: "10.0.403"
           architecture: ${{ matrix.architecture }}
@@ -152,7 +152,7 @@ jobs:
             -OutputPath "out/release/winsight-$env:RELEASE_TAG-qualification.ps1"
 
       - name: Upload release assets
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: release-${{ matrix.architecture }}
           path: |
@@ -176,7 +176,7 @@ jobs:
     env:
       RELEASE_TAG: ${{ github.ref_name }}
     steps:
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: release-*
           path: release-assets
@@ -248,7 +248,7 @@ jobs:
           sbom-path: release-assets/winsight-${{ env.RELEASE_TAG }}-win-arm64.spdx.json
 
       - name: Create release
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           files: release-assets/*
           generate_release_notes: true

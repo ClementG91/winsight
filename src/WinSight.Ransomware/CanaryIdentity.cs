@@ -25,9 +25,9 @@ namespace WinSight.Ransomware;
 ///
 /// <b>Recognisability had a purpose, so it is replaced rather than removed.</b> The old prefix was
 /// how orphans from a crashed run were swept up. That job moves to an explicit manifest of planted
-/// paths, which is strictly better: it finds decoys whatever they are called, including the ones a
-/// future naming change produces. The legacy glob is still swept so files left by earlier versions
-/// are not stranded in the operator's folders.
+/// paths and verifiable ownership. Cleanup requires that evidence regardless of a decoy's name.
+/// Legacy names or manifest records without ownership proof are preserved for deliberate recovery;
+/// a matching glob alone never authorizes deletion.
 ///
 /// <b>Plausible names on purpose.</b> Ransomware prioritises what looks like a user document.
 /// A decoy named like a real spreadsheet is picked up early; a random hex string may be skipped by
@@ -38,7 +38,7 @@ public static class CanaryIdentity
     /// <summary>Decoys planted per directory. Several, at different points of an alphabetical walk.</summary>
     public const int PerDirectory = 3;
 
-    /// <summary>The pattern earlier versions used. Swept up, never produced.</summary>
+    /// <summary>The pattern earlier versions used, retained for identification, never produced.</summary>
     internal const string LegacyGlob = "WinSightGuard_*.xlsx";
 
     /// <summary>The exact payload written by the legacy implementation.</summary>

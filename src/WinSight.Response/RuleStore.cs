@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 
 using WinSight.Core;
@@ -9,7 +7,7 @@ namespace WinSight.Response;
 /// <summary>
 /// The per-user store of operator decisions (allow/ignore/block) for Guardian, ransomware and
 /// camera/microphone. One versioned JSON file, written atomically and serialized across threads and
-/// processes by a named mutex, exactly like the decoy manifest.
+/// processes and Windows sessions by a persistent per-user exclusive file lock.
 /// </summary>
 /// <remarks>
 /// Network policy is not kept here: machine-wide firewall rules live in the service-owned,
@@ -23,6 +21,7 @@ public sealed class RuleStore
     private const int MaxRules = 8192;
     private const long MaxBytes = 8 * 1024 * 1024;
     private static readonly TimeSpan LockWait = TimeSpan.FromSeconds(30);
+    private static readonly JsonSerializerOptions ReadOptions = new() { RespectRequiredConstructorParameters = true };
 
     private readonly string _path;
     private readonly Func<DateTimeOffset> _clock;
@@ -46,13 +45,18 @@ public sealed class RuleStore
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "WinSight", "response-rules.json");
 
-    private sealed record RuleFile(int Version, IReadOnlyList<ResponseRule> Rules);
+    private sealed record StoredEntry(ResponseRule Rule, ReadOnlyMemory<byte> Raw);
 
     /// <summary>The active rules for a scope, expired and reboot-scoped entries already dropped.</summary>
-    public IReadOnlyList<ResponseRule> ActiveRules(RuleScopeKind scope)
+    public IReadOnlyList<ResponseRule> ActiveRules(RuleScopeKind scope) => ActiveRules(scope, out _);
+
+    /// <summary>Active rules with their read status and the count of ignored invalid entries.</summary>
+    public IReadOnlyList<ResponseRule> ActiveRules(RuleScopeKind scope, out RuleStoreResult result)
     {
         var now = _clock();
-        return Load()
+        return Load(out result)
+            .Where(entry => IsSupported(entry.Rule))
+            .Select(entry => entry.Rule)
             .Where(rule => rule.Scope == scope && rule.IsActive(now))
             .ToArray();
     }
@@ -66,9 +70,10 @@ public sealed class RuleStore
         string? imageSha256 = null, string? publisher = null)
     {
         var now = _clock();
-        foreach (var rule in Load())
+        foreach (var entry in Load(out _))
         {
-            if (rule.IsActive(now) && rule.Matches(scope, item, imagePath, imageSha256, publisher))
+            var rule = entry.Rule;
+            if (IsSupported(rule) && rule.IsActive(now) && rule.Matches(scope, item, imagePath, imageSha256, publisher))
             {
                 return rule;
             }
@@ -86,44 +91,154 @@ public sealed class RuleStore
     /// lifecycle hook (a boot-time prune, a process-exit watch) that this store does not own. Accepting
     /// them would silently turn "until reboot" into "forever", so they are refused instead.
     /// </remarks>
-    public ResponseRule? Add(ResponseRule rule)
+    public ResponseRule? Add(ResponseRule rule) => Add(rule, out _);
+
+    /// <summary>Adds with an explicit durable-write or refusal status.</summary>
+    public ResponseRule? Add(ResponseRule rule, out RuleStoreResult result)
     {
         ArgumentNullException.ThrowIfNull(rule);
-        if (!rule.HasKey || rule.Duration is RuleDuration.Once or RuleDuration.UntilReboot
-                or RuleDuration.UntilProcessExit)
+        result = new(RuleStoreStatus.InvalidRule);
+        if (!IsSupported(rule))
         {
+            return null;
+        }
+        // Bound serialization work before a caller-controlled string can request a huge buffer.
+        if ((long)(rule.Item?.Length ?? 0) + (rule.ImagePath?.Length ?? 0)
+            + (rule.ImageSha256?.Length ?? 0) + (rule.Publisher?.Length ?? 0) > MaxBytes)
+        {
+            result = new(RuleStoreStatus.ByteLimit);
             return null;
         }
         try
         {
-            using var gate = StoreLock.Acquire(_path, _lockWait);
-            var rules = LoadLocked().ToList();
-            if (rules.Count >= MaxRules)
+            using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
+            if (!TryLoadLocked(out var loaded, out result))
             {
                 return null;
             }
-            rules.RemoveAll(existing => existing.Id == rule.Id);
-            rules.Add(rule);
-            return Save(rules) ? rule : null;
+            // Native absence is an observation, not permission to replace a later publication
+            // from another configured store using this path with a different sidecar family.
+            var replaceExisting = result.Status != RuleStoreStatus.Missing;
+            var rules = loaded.ToList();
+            if (rules.Any(existing => existing.Rule.Id == rule.Id && !IsSupported(existing.Rule)))
+            {
+                result = result with { Status = RuleStoreStatus.UnsupportedIdentityCollision };
+                return null;
+            }
+            rules.RemoveAll(existing => existing.Rule.Id == rule.Id);
+            if (rules.Count >= MaxRules)
+            {
+                result = result with { Status = RuleStoreStatus.RuleLimit };
+                return null;
+            }
+            rules.Add(new(rule, default));
+            result = Save(rules, result.IgnoredEntries, result.RetainedUnsupportedEntries, replaceExisting);
+            return result.Durable ? rule : null;
+        }
+        catch (ResponseFileLockException ex)
+        {
+            result = new(LockFailure(ex.Status));
+            return null;
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
+            result = new(RuleStoreStatus.Unavailable);
             return null;
         }
     }
 
     /// <summary>Removes the rule with this id. True when one was removed and the store was written.</summary>
-    public bool Remove(Guid id)
+    public bool Remove(Guid id) => RemoveWithOutcome(id) == ResponseOutcome.Succeeded;
+
+    /// <summary>
+    /// Removes a rule durably, distinguishing an absent id from unreadable or unwritable storage.
+    /// An unavailable store is never evidence that the rule was absent or revoked.
+    /// </summary>
+    public ResponseOutcome RemoveWithOutcome(Guid id) => RemoveWithOutcome(id, out _);
+
+    /// <summary>Durably removes a rule or gives an exact storage refusal/confirmed absence.</summary>
+    public ResponseOutcome RemoveWithOutcome(Guid id, out RuleStoreResult result)
+        => RemoveCore(id, null, out result, out _);
+
+    /// <summary>
+    /// Rolls back only the exact object serialized by Add. A changed value, extension, byte version
+    /// or duplicate identity is preserved. Activity is observed under the same writer lock and is
+    /// confirmed only when publication of an unchanged rule's removal fails with WriteFailed.
+    /// Explicit operator revocation continues to use RemoveWithOutcome instead.
+    /// </summary>
+    public ResponseOutcome RemoveIfUnchanged(ResponseRule expected, out RuleStoreResult result,
+        out bool expectedRuleActive)
     {
+        ArgumentNullException.ThrowIfNull(expected);
+        return RemoveCore(expected.Id, expected, out result, out expectedRuleActive);
+    }
+
+    private ResponseOutcome RemoveCore(Guid id, ResponseRule? expected, out RuleStoreResult result,
+        out bool expectedRuleActive)
+    {
+        expectedRuleActive = false;
+        result = new(RuleStoreStatus.InvalidRule);
+        if (expected is not null)
+        {
+            if (!IsSupported(expected))
+            {
+                return ResponseOutcome.Failed;
+            }
+            if ((long)(expected.Item?.Length ?? 0) + (expected.ImagePath?.Length ?? 0)
+                + (expected.ImageSha256?.Length ?? 0) + (expected.Publisher?.Length ?? 0) > MaxBytes)
+            {
+                result = new(RuleStoreStatus.ByteLimit);
+                return ResponseOutcome.Failed;
+            }
+        }
         try
         {
-            using var gate = StoreLock.Acquire(_path, _lockWait);
-            var rules = LoadLocked().ToList();
-            return rules.RemoveAll(rule => rule.Id == id) > 0 && Save(rules);
+            using var gate = ResponseFileLock.AcquireWriter(_path, _lockWait);
+            if (!TryLoadLocked(out var loaded, out result, out var identityOccurrences, expected is null ? null : id))
+            {
+                return ResponseOutcome.Failed;
+            }
+            var rules = loaded.ToList();
+            if (expected is not null)
+            {
+                var matching = rules.Where(entry => entry.Rule.Id == id).ToArray();
+                if (identityOccurrences == 0 && matching.Length == 0)
+                {
+                    result = result with { Status = RuleStoreStatus.TargetNotFound };
+                    return ResponseOutcome.TargetNotFound;
+                }
+                if (identityOccurrences != 1 || matching.Length != 1 || matching[0].Rule != expected
+                    || !matching[0].Raw.Span.SequenceEqual(SerializedRule(expected)))
+                {
+                    // Do not Save: even cleaning invalid neighbors would mutate another version.
+                    result = result with { Status = RuleStoreStatus.TargetChanged };
+                    return ResponseOutcome.TargetChanged;
+                }
+            }
+            if (rules.RemoveAll(entry => entry.Rule.Id == id) == 0)
+            {
+                result = result with { Status = RuleStoreStatus.TargetNotFound };
+                return ResponseOutcome.TargetNotFound;
+            }
+            result = Save(rules, result.IgnoredEntries, result.RetainedUnsupportedEntries);
+            expectedRuleActive = expected is not null && result.Status == RuleStoreStatus.WriteFailed
+                && IsSupported(expected) && expected.IsActive(_clock());
+            return result.Durable ? ResponseOutcome.Succeeded : ResponseOutcome.Failed;
+        }
+        catch (RuleFileBudgetExceededException)
+        {
+            result = result with { Status = RuleStoreStatus.ByteLimit };
+            return ResponseOutcome.Failed;
+        }
+        catch (ResponseFileLockException ex)
+        {
+            result = new(LockFailure(ex.Status));
+            return ResponseOutcome.Failed;
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
-            return false;
+            result = new(RuleStoreStatus.Unavailable);
+            return ResponseOutcome.Failed;
         }
     }
 
@@ -132,15 +247,27 @@ public sealed class RuleStore
     /// cannot read its rules alerts rather than silently suppressing. This path must never throw,
     /// because monitors consult it on every detection.
     /// </summary>
-    private ResponseRule[] Load()
+    private StoredEntry[] Load(out RuleStoreResult result)
     {
         try
         {
-            using var gate = StoreLock.Acquire(_path, _lockWait);
-            return LoadLocked();
+            using var gate = ResponseFileLock.AcquireReader(_path, _lockWait);
+            var loaded = TryLoadLocked(out var rules, out result);
+            if (!gate.IsCurrent)
+            {
+                result = new(RuleStoreStatus.LockUnavailable);
+                return [];
+            }
+            return loaded ? rules : [];
+        }
+        catch (ResponseFileLockException ex)
+        {
+            result = new(LockFailure(ex.Status));
+            return [];
         }
         catch (Exception ex) when (IsStoreUnavailable(ex))
         {
+            result = new(RuleStoreStatus.Unavailable);
             return [];
         }
     }
@@ -153,91 +280,338 @@ public sealed class RuleStore
         ex is IOException or UnauthorizedAccessException or System.Security.SecurityException
             or ArgumentException or NotSupportedException or WaitHandleCannotBeOpenedException;
 
-    private ResponseRule[] LoadLocked()
+    private bool TryLoadLocked(out StoredEntry[] rules, out RuleStoreResult result)
+        => TryLoadLocked(out rules, out result, out _, null);
+
+    private bool TryLoadLocked(out StoredEntry[] rules, out RuleStoreResult result,
+        out int identityOccurrences, Guid? observedId)
     {
+        rules = [];
+        identityOccurrences = 0;
+        result = new(RuleStoreStatus.Unavailable);
         try
         {
-            using var lease = AutomaticFileAccess.TryAcquire(_path);
-            if (lease is null || lease.IsDirectory)
+            using var lease = AutomaticFileAccess.TryAcquire(_path, out var missing);
+            if (lease is null)
             {
-                return [];
+                // The same failed native open must confirm absence; no second preflight can
+                // turn a sharing or access failure into a healthy empty store.
+                result = new(missing ? RuleStoreStatus.Missing : RuleStoreStatus.Unavailable);
+                return missing;
             }
-            if (lease.Length > MaxBytes)
-            {
-                return [];
-            }
-            using var stream = lease.OpenRead();
-            var bytes = new byte[(int)lease.Length];
-            stream.ReadExactly(bytes);
-            if (!lease.IsCurrent())
-            {
-                return [];
-            }
-            var file = JsonSerializer.Deserialize<RuleFile>(bytes);
-            return file is { Version: CurrentVersion, Rules: not null } && file.Rules.Count <= MaxRules
-                ? file.Rules.Where(rule => rule is { HasKey: true }).ToArray()
-                : [];
+            return TryReadAcquiredRules(lease, out rules, out result, out identityOccurrences, observedId);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
-                                     or System.Security.SecurityException or JsonException)
+        catch (JsonException)
         {
-            return [];
+            result = new(RuleStoreStatus.InvalidJson);
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            result = new(RuleStoreStatus.Unavailable);
+            return false;
         }
     }
 
-    private bool Save(List<ResponseRule> rules)
+    private static bool TryReadAcquiredRules(AutomaticFileAccess.LocalPathLease lease,
+        out StoredEntry[] rules, out RuleStoreResult result, out int identityOccurrences, Guid? observedId)
     {
-        if (rules.Count > MaxRules)
+        rules = [];
+        identityOccurrences = 0;
+        result = new(RuleStoreStatus.Unavailable);
+        try
+        {
+            if (lease.IsDirectory)
+            {
+                return false;
+            }
+            using var stream = lease.OpenRead();
+            // Metadata length was captured before DATA was opened. An outside-protocol writer
+            // can change this same object; validate the complete physically bounded input.
+            var dataLength = stream.Length;
+            if (dataLength > MaxBytes)
+            {
+                result = new(RuleStoreStatus.ByteLimit);
+                return false;
+            }
+            // Small policies should not allocate an 8 MiB large object on every monitor event.
+            // Leave one byte for EOF detection, growing only up to the physical limit plus one.
+            var buffer = new byte[(int)Math.Min(dataLength + 1, 64 * 1024)];
+            var count = 0;
+            while (true)
+            {
+                if (count == buffer.Length)
+                {
+                    Array.Resize(ref buffer, (int)Math.Min(MaxBytes + 1, buffer.Length * 2L));
+                }
+                var read = stream.Read(buffer, count, buffer.Length - count);
+                if (read == 0)
+                {
+                    break;
+                }
+                count += read;
+                if (count > MaxBytes)
+                {
+                    result = new(RuleStoreStatus.ByteLimit);
+                    return false;
+                }
+            }
+            if (!lease.IsCurrent())
+            {
+                return false;
+            }
+            var bytes = buffer.AsSpan(0, count).ToArray();
+            using var document = JsonDocument.Parse(bytes);
+            var value = document.RootElement;
+            result = new(RuleStoreStatus.InvalidFormat);
+            if (value.ValueKind != JsonValueKind.Object
+                || value.EnumerateObject().Count(property => property.NameEquals("Version")) != 1
+                || value.EnumerateObject().Count(property => property.NameEquals("Rules")) != 1
+                || !value.TryGetProperty("Version", out var version) || version.ValueKind != JsonValueKind.Number
+                || !version.TryGetInt32(out var number))
+            {
+                return false;
+            }
+            if (number != CurrentVersion)
+            {
+                result = new(RuleStoreStatus.UnsupportedVersion);
+                return false;
+            }
+            var entries = value.GetProperty("Rules");
+            if (entries.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+            // Bound raw input work as well as stored valid rules; invalid rows consume input budget.
+            if (entries.GetArrayLength() > MaxRules)
+            {
+                result = new(RuleStoreStatus.RuleLimit);
+                return false;
+            }
+            var rawEntries = RawEntries(bytes);
+            var valid = new List<StoredEntry>();
+            var ignored = 0;
+            var index = 0;
+            foreach (var entry in entries.EnumerateArray())
+            {
+                if (observedId is { } identity && identityOccurrences < 2 && entry.ValueKind == JsonValueKind.Object)
+                {
+                    // Count decoded physical identities before structural validation drops entries.
+                    // An invalid replacement or duplicate is not absence of the rollback target.
+                    foreach (var property in entry.EnumerateObject())
+                    {
+                        if (property.NameEquals("Id") && property.Value.ValueKind == JsonValueKind.String
+                            && property.Value.TryGetGuid(out var candidateId) && candidateId == identity)
+                        {
+                            identityOccurrences++;
+                            if (identityOccurrences == 2)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                }
+                var raw = rawEntries[index++];
+                ResponseRule? rule = null;
+                if (HasUniqueSemanticFields(entry))
+                {
+                    try
+                    {
+                        rule = entry.Deserialize<ResponseRule>(ReadOptions);
+                    }
+                    catch (JsonException)
+                    {
+                        // A malformed entry cannot disable structurally valid neighbors.
+                    }
+                }
+                if (rule is null || !CanRetain(rule))
+                {
+                    ignored++;
+                }
+                else
+                {
+                    valid.Add(new(rule, raw));
+                }
+            }
+            rules = valid.ToArray();
+            result = new(RuleStoreStatus.Loaded, ignored, valid.Count(entry => !IsSupported(entry.Rule)));
+            return true;
+        }
+        catch (JsonException)
+        {
+            result = new(RuleStoreStatus.InvalidJson);
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            result = new(RuleStoreStatus.Unavailable);
+            return false;
+        }
+    }
+
+    private static bool IsSupported(ResponseRule rule) => rule.Id != Guid.Empty && rule.HasKey
+        && Enum.IsDefined(rule.Scope) && Enum.IsDefined(rule.Decision)
+        && (rule.Duration == RuleDuration.Permanent
+            || rule.Duration == RuleDuration.Timed && rule.ExpiresUtc is not null);
+
+    private static bool CanRetain(ResponseRule rule) => rule.Id != Guid.Empty && rule.HasKey
+        && (rule.Duration != RuleDuration.Timed || rule.ExpiresUtc is not null)
+        && (IsSupported(rule) || !Enum.IsDefined(rule.Scope) || !Enum.IsDefined(rule.Decision) || !Enum.IsDefined(rule.Duration));
+
+    private static bool HasUniqueSemanticFields(JsonElement entry)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
         {
             return false;
         }
-        if (rules.Count == 0)
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var property in entry.EnumerateObject())
         {
-            AtomicFile.TryDelete(_path);
-            return true;
+            // JsonProperty.Name is decoded, so an escaped spelling cannot bypass this check.
+            if (property.Name is "Id" or "Scope" or "Decision" or "Duration" or "CreatedUtc"
+                or "ExpiresUtc" or "Item" or "ImagePath" or "ImageSha256" or "Publisher"
+                && !seen.Add(property.Name))
+            {
+                return false;
+            }
         }
-        var json = JsonSerializer.SerializeToUtf8Bytes(new RuleFile(CurrentVersion, rules));
-        return json.Length <= MaxBytes && AtomicFile.TryWrite(_path, json);
+        return true;
     }
 
-    /// <summary>Serializes read-modify-write of one rule file across threads and processes.</summary>
-    private sealed class StoreLock : IDisposable
+    private static List<ReadOnlyMemory<byte>> RawEntries(byte[] bytes)
     {
-        private readonly Mutex _mutex;
-
-        private StoreLock(Mutex mutex) => _mutex = mutex;
-
-        public static StoreLock Acquire(string path, TimeSpan wait)
+        var values = new List<ReadOnlyMemory<byte>>();
+        var reader = new Utf8JsonReader(bytes);
+        reader.Read(); // The envelope has already been validated as an object.
+        while (reader.Read() && reader.TokenType != JsonTokenType.EndObject)
         {
-            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
-            bool held;
-            try
+            var isRules = reader.ValueTextEquals("Rules"u8);
+            reader.Read();
+            if (!isRules)
             {
-                held = mutex.WaitOne(wait);
+                reader.Skip();
+                continue;
             }
-            catch (AbandonedMutexException)
+            while (reader.Read() && reader.TokenType != JsonTokenType.EndArray)
             {
-                held = true; // the previous holder died; the atomic write kept the file whole
+                var start = (int)reader.TokenStartIndex;
+                reader.Skip();
+                values.Add(bytes.AsMemory(start, (int)reader.BytesConsumed - start));
             }
-            if (!held)
-            {
-                mutex.Dispose();
-                throw new IOException("Timed out waiting for the response-rule store lock.");
-            }
-            return new StoreLock(mutex);
+            break;
         }
-
-        public void Dispose()
-        {
-            _mutex.ReleaseMutex();
-            _mutex.Dispose();
-        }
+        return values;
     }
 
-    internal static string LockNameFor(string path)
+    private RuleStoreResult Save(List<StoredEntry> rules, int ignored, int retainedBeforeWrite,
+        bool replaceExisting = true)
     {
-        var key = Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(Path.GetFullPath(path).ToUpperInvariant())))[..32];
-        return $@"Local\WinSight.ResponseRules.{key}";
+        var retained = rules.Count(entry => !IsSupported(entry.Rule));
+        if (rules.Count > MaxRules)
+        {
+            return new(RuleStoreStatus.RuleLimit, ignored, retainedBeforeWrite);
+        }
+        try
+        {
+            using var stream = new BoundedRuleStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("Version", CurrentVersion);
+                writer.WriteStartArray("Rules");
+                foreach (var entry in rules)
+                {
+                    if (entry.Raw.IsEmpty)
+                    {
+                        JsonSerializer.Serialize(writer, entry.Rule);
+                    }
+                    else
+                    {
+                        // These exact slices came from a fully parsed and validated JSON envelope.
+                        writer.WriteRawValue(entry.Raw.Span, skipInputValidation: true);
+                    }
+                }
+                writer.WriteEndArray();
+                writer.WriteEndObject();
+                writer.Flush();
+            }
+            // Empty stores also use flushed atomic replacement, never best-effort deletion.
+            var written = AtomicFile.TryWrite(_path, stream.ToArray(), replaceExisting);
+            return new(written ? RuleStoreStatus.Written : RuleStoreStatus.WriteFailed,
+                ignored, written ? retained : retainedBeforeWrite);
+        }
+        catch (RuleFileBudgetExceededException)
+        {
+            return new(RuleStoreStatus.ByteLimit, ignored, retainedBeforeWrite);
+        }
     }
+
+    private static byte[] SerializedRule(ResponseRule rule)
+    {
+        using var stream = new BoundedRuleStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            // The same options and object representation as a newly added entry in Save.
+            JsonSerializer.Serialize(writer, rule);
+            writer.Flush();
+        }
+        return stream.ToArray();
+    }
+
+    private sealed class RuleFileBudgetExceededException : Exception
+    {
+    }
+
+    private sealed class BoundedRuleStream : Stream
+    {
+        private readonly MemoryStream _stream = new();
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => _stream.CanWrite;
+        public override long Length => _stream.Length;
+        public override long Position
+        {
+            get => _stream.Position;
+            set => throw new NotSupportedException();
+        }
+        public byte[] ToArray() => _stream.ToArray();
+        public override void Flush() => _stream.Flush();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            if (Position + buffer.Length > MaxBytes)
+            {
+                throw new RuleFileBudgetExceededException();
+            }
+            _stream.Write(buffer);
+        }
+        public override void Write(byte[] buffer, int offset, int count) => Write(buffer.AsSpan(offset, count));
+        public override void WriteByte(byte value)
+        {
+            if (Position >= MaxBytes)
+            {
+                throw new RuleFileBudgetExceededException();
+            }
+            _stream.WriteByte(value);
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _stream.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+    }
+
+    internal static string LockPathFor(string path) => ResponseFileLock.PathFor(path);
+
+    private static RuleStoreStatus LockFailure(LocalFileLockStatus status) => status switch
+    {
+        LocalFileLockStatus.Busy => RuleStoreStatus.LockTimeout,
+        LocalFileLockStatus.UnsafePath => RuleStoreStatus.UnsafeLockPath,
+        _ => RuleStoreStatus.LockUnavailable,
+    };
 }

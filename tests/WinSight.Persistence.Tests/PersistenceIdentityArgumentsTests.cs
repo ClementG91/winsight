@@ -90,26 +90,26 @@ public sealed class PersistenceIdentityArgumentsTests
     [InlineData("v2")]
     public void ABaselineFromThePreviousShapeIsTreatedAsAFirstRun(string version)
     {
-        var path = Path.Combine(Path.GetTempPath(), $"winsight-baseline-{Guid.NewGuid():N}.tsv");
-        File.WriteAllLines(path,
-        [
-            $"#winsight-guardian-baseline {version}",
-            "RunKey\tUpdater\tc:\\windows\\system32\\rundll32.exe",
-        ]);
+        var path = Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
         try
         {
+            File.WriteAllLines(path,
+            [
+                $"#winsight-guardian-baseline {version}",
+                "RunKey\tUpdater\tc:\\windows\\system32\\rundll32.exe",
+            ]);
             Assert.Null(new FilePersistenceBaselineStore(path).Load());
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 
     [Fact]
     public void ABaselineRoundTripsThroughTheStore()
     {
-        var path = Path.Combine(Path.GetTempPath(), $"winsight-baseline-{Guid.NewGuid():N}.tsv");
+        var path = Path.Combine(Directory.CreateTempSubdirectory("wsg-baseline-").FullName, "baseline.tsv");
         var store = new FilePersistenceBaselineStore(path);
         var identity = PersistenceIdentity.FromEntry(
             Entry(@"rundll32.exe C:\Program Files\Vendor\ok.dll,Entry"));
@@ -124,7 +124,7 @@ public sealed class PersistenceIdentityArgumentsTests
         }
         finally
         {
-            File.Delete(path);
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
 }

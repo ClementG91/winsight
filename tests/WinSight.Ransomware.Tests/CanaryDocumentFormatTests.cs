@@ -143,10 +143,10 @@ public sealed class CanaryDocumentFormatTests
     [Fact]
     public void ADecoyRewrittenWithItsOwnBytesIsIntact()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"winsight-intact-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        var manifest = Path.Combine(directory, "manifest.txt");
-        var manager = new CanaryManager(seed: new byte[32], manifestPath: manifest);
+        using var fixture = new CanaryTestDirectory();
+        var directory = fixture.Directory;
+        var manifest = fixture.Manifest;
+        var manager = fixture.Track(new CanaryManager(seed: new byte[32], manifestPath: manifest));
         try
         {
             var decoy = manager.Plant([directory])[0];
@@ -164,7 +164,7 @@ public sealed class CanaryDocumentFormatTests
         finally
         {
             manager.Remove();
-            Directory.Delete(directory, recursive: true);
+            manager.EndSessionWithoutCleanup();
         }
     }
 
@@ -176,10 +176,10 @@ public sealed class CanaryDocumentFormatTests
     [Fact]
     public void AnUnreadableDecoyIsNotReportedAsIntact()
     {
-        var directory = Path.Combine(Path.GetTempPath(), $"winsight-gone-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(directory);
-        var manifest = Path.Combine(directory, "manifest.txt");
-        var manager = new CanaryManager(seed: new byte[32], manifestPath: manifest);
+        using var fixture = new CanaryTestDirectory();
+        var directory = fixture.Directory;
+        var manifest = fixture.Manifest;
+        var manager = fixture.Track(new CanaryManager(seed: new byte[32], manifestPath: manifest));
         try
         {
             var decoy = manager.Plant([directory])[0];
@@ -190,7 +190,7 @@ public sealed class CanaryDocumentFormatTests
         finally
         {
             manager.Remove();
-            Directory.Delete(directory, recursive: true);
+            manager.EndSessionWithoutCleanup();
         }
     }
 

@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 
 using WinSight.Core;
@@ -26,7 +26,7 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
 
     public FilePersistenceBaselineStore(string? path = null)
     {
-        _path = path ?? DefaultPath();
+        _path = Path.GetFullPath(path ?? DefaultPath());
     }
 
     /// <summary>The default local-only location: <c>%LocalAppData%\WinSight\guardian-baseline.tsv</c>.</summary>
@@ -46,72 +46,7 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         try
         {
             using var lease = AutomaticFileAccess.TryAcquire(_path);
-            if (lease is null || lease.IsDirectory || lease.Length > MaxBaselineBytes)
-            {
-                return null;
-            }
-
-            using var stream = lease.OpenRead(FileOptions.SequentialScan);
-            using var reader = new StreamReader(stream, Encoding.UTF8);
-            if (reader.ReadLine() != Header)
-            {
-                return null; // unknown/corrupt format: safest to treat as a first run
-            }
-
-            var result = new HashSet<PersistenceIdentity>();
-            Dictionary<string, IReadOnlyList<string>>? coverage = null;
-            string? line;
-            var lines = 0;
-            var identityLines = 0;
-            while ((line = reader.ReadLine()) is not null)
-            {
-                if (++lines > MaxBaselineEntries * 2)
-                {
-                    return null;
-                }
-                if (line == CoverageMarker)
-                {
-                    coverage ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
-                    continue;
-                }
-                if (line.StartsWith(CoveredPrefix, StringComparison.Ordinal))
-                {
-                    if (coverage is not null)
-                    {
-                        TryReadCovered(line, coverage);
-                    }
-                    continue;
-                }
-                if (++identityLines > MaxBaselineEntries)
-                {
-                    return null;
-                }
-                var parts = line.Split('\t');
-                if (parts.Length != 6 || !Enum.TryParse<AutostartVector>(parts[0], out var vector)
-                    || !Enum.IsDefined(vector))
-                {
-                    continue; // skip a malformed line rather than discarding the whole baseline
-                }
-                try
-                {
-                    result.Add(new PersistenceIdentity(vector, Decode(parts[1]), Decode(parts[2]),
-                        Decode(parts[3]), Decode(parts[4]), Decode(parts[5])));
-                }
-                catch (FormatException)
-                {
-                    // Corrupt base64 is not an identity.
-                }
-            }
-
-            if (!lease.IsCurrent())
-            {
-                return null;
-            }
-            if (identityLines > 0 && result.Count == 0)
-            {
-                return null; // lines present but none readable: corrupt, reseed
-            }
-            return new PersistedBaseline(result, coverage is null ? null : new PersistenceCoverageMap(coverage));
+            return ReadAcquiredBaseline(lease);
         }
         catch (Exception ex) when (ex is IOException
                                      or UnauthorizedAccessException
@@ -119,6 +54,82 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
         {
             return null;
         }
+    }
+
+    private static PersistedBaseline? ReadAcquiredBaseline(AutomaticFileAccess.LocalPathLease? lease)
+    {
+        if (lease is null || lease.IsDirectory || lease.Length > MaxBaselineBytes)
+        {
+            return null;
+        }
+
+        using var stream = lease.OpenRead(FileOptions.SequentialScan);
+        // Attributes were captured before DATA was opened. Check the actual input before a
+        // StreamReader can allocate a line; this read handle excludes ordinary in-place writers.
+        if (stream.Length > MaxBaselineBytes)
+        {
+            return null;
+        }
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        if (reader.ReadLine() != Header)
+        {
+            return null; // unknown/corrupt format: safest to treat as a first run
+        }
+
+        var result = new HashSet<PersistenceIdentity>();
+        Dictionary<string, IReadOnlyList<string>>? coverage = null;
+        string? line;
+        var lines = 0;
+        var identityLines = 0;
+        while ((line = reader.ReadLine()) is not null)
+        {
+            if (++lines > MaxBaselineEntries * 2)
+            {
+                return null;
+            }
+            if (line == CoverageMarker)
+            {
+                coverage ??= new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+                continue;
+            }
+            if (line.StartsWith(CoveredPrefix, StringComparison.Ordinal))
+            {
+                if (coverage is not null)
+                {
+                    TryReadCovered(line, coverage);
+                }
+                continue;
+            }
+            if (++identityLines > MaxBaselineEntries)
+            {
+                return null;
+            }
+            var parts = line.Split('\t');
+            if (parts.Length != 6 || !Enum.TryParse<AutostartVector>(parts[0], out var vector)
+                || !Enum.IsDefined(vector))
+            {
+                continue; // skip a malformed line rather than discarding the whole baseline
+            }
+            try
+            {
+                result.Add(new PersistenceIdentity(vector, Decode(parts[1]), Decode(parts[2]),
+                    Decode(parts[3]), Decode(parts[4]), Decode(parts[5])));
+            }
+            catch (FormatException)
+            {
+                // Corrupt base64 is not an identity.
+            }
+        }
+
+        if (!lease.IsCurrent())
+        {
+            return null;
+        }
+        if (identityLines > 0 && result.Count == 0)
+        {
+            return null; // lines present but none readable: corrupt, reseed
+        }
+        return new PersistedBaseline(result, coverage is null ? null : new PersistenceCoverageMap(coverage));
     }
 
     /// <summary>Writes the baseline atomically (temp file, then replace).</summary>
@@ -211,52 +222,46 @@ public sealed class FilePersistenceBaselineStore : IPersistenceBaselineStore
     private static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
     private static string Decode(string value) => Encoding.UTF8.GetString(Convert.FromBase64String(value));
 
-    /// <summary>Stable per-path mutex name, exposed internally for the real concurrency test.</summary>
-    internal static string LockNameFor(string path)
-    {
-        var canonical = Path.GetFullPath(path).ToUpperInvariant();
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)))[..32];
-        return $@"Local\WinSight.PersistenceBaseline.{key}";
-    }
-
+    /// <summary>Short transaction shared by cooperating writers in all Windows sessions.</summary>
     private sealed class BaselineLock : IDisposable
     {
-        private readonly Mutex _mutex;
-        private readonly bool _held;
+        private readonly AutomaticFileAccess.LocalFileLock _file;
 
-        private BaselineLock(Mutex mutex, bool held)
-        {
-            _mutex = mutex;
-            _held = held;
-        }
+        private BaselineLock(AutomaticFileAccess.LocalFileLock file) => _file = file;
 
         public static BaselineLock Acquire(string path)
         {
-            var mutex = new Mutex(initiallyOwned: false, LockNameFor(path));
-            bool held;
+            var leaf = Path.GetFileName(path);
+            if (leaf.Length == 0 || leaf.Length + ".lock".Length > 255)
+            {
+                throw new IOException("The Guardian baseline lock path is not supported.");
+            }
+            var watch = Stopwatch.StartNew();
             try
             {
-                held = mutex.WaitOne(LockWait);
+                while (watch.Elapsed < LockWait)
+                {
+                    var file = AutomaticFileAccess.TryAcquireExclusiveLockFile(path + ".lock", out var status);
+                    if (file is not null) { return new BaselineLock(file); }
+                    if (status != LocalFileLockStatus.Busy)
+                    {
+                        throw new IOException($"The Guardian baseline writer gate is unavailable ({status}).");
+                    }
+                    var remaining = LockWait - watch.Elapsed;
+                    if (remaining > TimeSpan.Zero)
+                    {
+                        Thread.Sleep(remaining < TimeSpan.FromMilliseconds(20)
+                            ? remaining : TimeSpan.FromMilliseconds(20));
+                    }
+                }
             }
-            catch (AbandonedMutexException)
+            catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
             {
-                held = true;
+                throw new IOException("The Guardian baseline writer gate could not be accessed safely.", ex);
             }
-            if (!held)
-            {
-                mutex.Dispose();
-                throw new IOException("Timed out waiting for another Guardian baseline writer.");
-            }
-            return new BaselineLock(mutex, held: true);
+            throw new IOException("Timed out waiting for another Guardian baseline writer.");
         }
 
-        public void Dispose()
-        {
-            if (_held)
-            {
-                _mutex.ReleaseMutex();
-            }
-            _mutex.Dispose();
-        }
+        public void Dispose() => _file.Dispose();
     }
 }
