@@ -18,26 +18,40 @@ if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne "winsight $Version")
     throw "Expected winsight $Version, got '$reportedVersion'."
 }
 
-$start = [Diagnostics.ProcessStartInfo]::new()
-$start.FileName = $server
-# .Arguments, not .ArgumentList: the collection form only exists on .NET (Core), so ArgumentList
-# throws under Windows PowerShell 5.1, which runs on .NET Framework. CI uses pwsh and never sees it,
-# but a maintainer building a release in the console Windows opens by default would. One token with
-# no spaces makes the two forms equivalent.
-$start.Arguments = "mcp"
-$start.UseShellExecute = $false
-$start.CreateNoWindow = $true
-$start.RedirectStandardInput = $true
-$start.RedirectStandardOutput = $true
-$start.RedirectStandardError = $true
-$process = [Diagnostics.Process]::new()
-$process.StartInfo = $start
-$null = $process.Start()
+function Start-McpServer
+{
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $server
+    # .Arguments, not .ArgumentList: the collection form only exists on .NET (Core), so ArgumentList
+    # throws under Windows PowerShell 5.1, which runs on .NET Framework. CI uses pwsh and never sees it,
+    # but a maintainer building a release in the console Windows opens by default would. One token with
+    # no spaces makes the two forms equivalent.
+    $start.Arguments = "mcp"
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $started = [Diagnostics.Process]::new()
+    $started.StartInfo = $start
+    $null = $started.Start()
+    return $started
+}
+
+function Stop-McpServer
+{
+    $script:process.StandardInput.Close()
+    if (-not $script:process.WaitForExit(5000))
+    {
+        $script:process.Kill($true)
+    }
+    $script:process.Dispose()
+}
 
 function Send-McpMessage([hashtable]$Message)
 {
-    $process.StandardInput.WriteLine(($Message | ConvertTo-Json -Depth 12 -Compress))
-    $process.StandardInput.Flush()
+    $script:process.StandardInput.WriteLine(($Message | ConvertTo-Json -Depth 12 -Compress))
+    $script:process.StandardInput.Flush()
 }
 
 # The budget is per response, not per script, and it is tight on purpose: a handshake or a listing
@@ -59,14 +73,14 @@ function Receive-McpResponse([int]$ExpectedId, [int]$TimeoutMs = 10000)
         {
             throw "MCP response $ExpectedId timed out after $TimeoutMs ms."
         }
-        $read = $process.StandardOutput.ReadLineAsync()
+        $read = $script:process.StandardOutput.ReadLineAsync()
         if (-not $read.Wait($remaining))
         {
             throw "MCP response $ExpectedId timed out after $TimeoutMs ms."
         }
         if ($null -eq $read.Result)
         {
-            throw "MCP server closed stdout: $($process.StandardError.ReadToEnd())"
+            throw "MCP server closed stdout: $($script:process.StandardError.ReadToEnd())"
         }
         $message = $read.Result | ConvertFrom-Json
         $id = $message.PSObject.Properties['id']
@@ -95,13 +109,18 @@ function Receive-McpResponse([int]$ExpectedId, [int]$TimeoutMs = 10000)
     }
 }
 
+# The server must be reachable both ways, and only exercising one hides a real break. Pinning a
+# single revision into the server options once made it answer every handshake-based client with
+# "Protocol version '2026-07-28' is not available through the initialize handshake", which the
+# handshake leg below catches and a stateless-only contract would not.
+#
+# Each leg runs on its own server process, as a real client would connect. From
+# ModelContextProtocol 2.4.0 a connection that has spoken the stateless 2026-07-28 revision refuses a
+# later `initialize` ("Use 'server/discover' and per-request metadata instead"), so one shared
+# connection would test a mix no client sends rather than either path.
+$script:process = Start-McpServer
 try
 {
-    # The server must be reachable both ways, and only exercising one hides a real break. Pinning a
-    # single revision into the server options once made it answer every handshake-based client with
-    # "Protocol version '2026-07-28' is not available through the initialize handshake", which the
-    # handshake leg below catches and a stateless-only contract would not.
-    #
     # server/discover is a 2026-07-28 method, so it carries the per-request metadata that revision
     # requires: the protocol version, the client capabilities and the client identity all travel in
     # `_meta` because there is no handshake left to carry them.
@@ -143,7 +162,15 @@ try
             throw "Stateless tools/list is missing $expected."
         }
     }
+}
+finally
+{
+    Stop-McpServer
+}
 
+$script:process = Start-McpServer
+try
+{
     Send-McpMessage @{
         jsonrpc = "2.0"
         id = 1
@@ -308,12 +335,7 @@ try
 }
 finally
 {
-    $process.StandardInput.Close()
-    if (-not $process.WaitForExit(5000))
-    {
-        $process.Kill($true)
-    }
-    $process.Dispose()
+    Stop-McpServer
 }
 
 Write-Output "MCP $Version stdio negotiation and read-only tool contract passed."

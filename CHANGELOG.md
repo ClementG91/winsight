@@ -24,6 +24,19 @@
   statements. The unchanged installer accepts build 19045; Windows 10 22H2 is absent from the .NET 10
   support matrix. These changes do not extend published-byte qualification to a new candidate.
 
+### Dependencies
+
+- Microsoft.Diagnostics.Tracing.TraceEvent 3.2.6 → 4.0.0 (bounds validation of kernel thread,
+  EventPipe and serialized string payloads; Windows 10+ only, which WinSight already requires).
+- ModelContextProtocol 2.2.0 → 2.4.0. A connection that has used the stateless 2026-07-28 revision
+  now refuses a later `initialize`, so the package smoke test runs each protocol path on its own
+  server process, as a client connects.
+- Microsoft.NET.Test.Sdk 18.9.0 → 18.12.0, with the pinned Microsoft.CodeCoverage 18.12.0
+  instrumentation-engine hashes in the framework-comparison test. Test-only.
+
+These change shipped bytes after the 2026-11-14 qualification of `f2d4ef7`: the next release
+candidate needs its own x64 Hyper-V run.
+
 See the [October 5 regression and qualification record](docs/validation/2026-10-05-readiness-regressions.md).
 Final-byte CI, protected harness installation and remaining VM/load/platform evidence are required
 before claiming their acceptance. No release or version bump is made here.

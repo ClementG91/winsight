@@ -541,15 +541,17 @@ public sealed class PowerShellProcessEvidenceTests(ITestOutputHelper output)
         catch (Exception failure) when (failure is ArgumentException or NotSupportedException or PathTooLongException) { return false; }
         if (normalized.Length < 3 || !char.IsAsciiLetter(normalized[0]) || normalized[1] != ':' || normalized[2] != '\\') { return false; }
         if (!normalized.Equals(value.Replace('/', '\\'), StringComparison.OrdinalIgnoreCase)) { return false; }
-        const string package = @"\microsoft.codecoverage\18.9.0\build\netstandard2.0\";
+        // Follows Microsoft.NET.Test.Sdk in Directory.Packages.props: bump both together, with the
+        // engine hashes taken from the nuget.org package whose SHA-512 matches its catalog entry.
+        const string package = @"\microsoft.codecoverage\18.12.0\build\netstandard2.0\";
         if (!normalized.EndsWith(package + leaf, StringComparison.OrdinalIgnoreCase)) { return false; }
         var root = normalized[..^leaf.Length];
         if (packageRoot is not null && !packageRoot.Equals(root, StringComparison.OrdinalIgnoreCase)) { return false; }
         var expectedHash = leaf switch
         {
-            @"x86\MicrosoftInstrumentationEngine_x86.dll" => "164844e7e460fa93bb5a1ded8dfcd66644a017d426bfab5214389e2591000842",
-            @"x64\MicrosoftInstrumentationEngine_x64.dll" => "d538979eef2ba49bf1a5c84f8c70f4588ffff2671399e46af033ee5238667a07",
-            @"arm64\MicrosoftInstrumentationEngine_arm64.dll" => "eb27e2943934aeaafd551f8ca50fcffd9543d35c9ed9840b78703c822670715a",
+            @"x86\MicrosoftInstrumentationEngine_x86.dll" => "342e5ae8a758ce956047db2bf831047867873af506e6a4557adfa854fc731c3d",
+            @"x64\MicrosoftInstrumentationEngine_x64.dll" => "f154cfd2d5fa808524bbcbc9db7b0a4ba1f642787de4d8a431bbf0922d53fb6c",
+            @"arm64\MicrosoftInstrumentationEngine_arm64.dll" => "a8d05f3541f5558bb77a09a4c6cdb1dfc4720a9ca30f62e25572473107790dd3",
             _ => null,
         };
         if (expectedHash is null) { return false; }
